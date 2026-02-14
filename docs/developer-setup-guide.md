@@ -29,6 +29,8 @@ export PATH="$HOME/dev/depot_tools:$PATH"
 ```
 
 For reproducibility, document and pin a tested `depot_tools` commit SHA in CI.
+For instructions on downloading Chromium source code, see
+`https://www.chromium.org/developers/how-tos/get-the-code/`.
 
 ## 3. Build Chromium Targets
 
