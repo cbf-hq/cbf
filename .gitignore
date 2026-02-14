@@ -1,0 +1,16 @@
+# Development
+.venv
+.dev
+__pycache__
+/target
+.cargo
+
+# Chromium
+chromium/*
+!chromium/patches/
+!chromium/patches/cbf/
+!chromium/patches/cbf/**
+depot_tools
+
+# OS
+.DS_Store

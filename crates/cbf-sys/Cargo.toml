@@ -1,0 +1,9 @@
+[package]
+name = "cbf-sys"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Low-level Rust FFI boundary for cbf crate"
+repository.workspace = true
+
+[dependencies]

@@ -1,0 +1,8 @@
+# Patch series metadata for CBF Chromium
+#
+# This is the Chromium commit the patch series was originally authored against.
+# Update this when you rebase/refresh patches onto a new Chromium roll.
+base_commit = "278d5a3e94b22f47c84cfeb9a8a9851e8e68fa3d"
+
+# Relative to chromium/src
+out_dir = "out/Default"

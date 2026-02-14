@@ -1,0 +1,19 @@
+[project]
+name = "cbf-tool"
+version = "0.0.0"
+description = "Python project to manage tools for development"
+requires-python = ">=3.14"
+dependencies = []
+
+[project.scripts]
+tool = "tool.cli:main"
+
+[tool.basedpyright]
+reportUnusedCallResult = false
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.36.1",
+    "click>=8.3.1",
+    "ruff>=0.14.9",
+]
