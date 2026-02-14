@@ -412,7 +412,6 @@ struct HostDragSourceIvars {
 define_class!(
     #[unsafe(super(NSObject))]
     #[thread_kind = objc2::MainThreadOnly]
-    #[name = "AtelierHostDragSource"]
     #[ivars = HostDragSourceIvars]
     struct HostDragSource;
 
