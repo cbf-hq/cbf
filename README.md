@@ -80,9 +80,22 @@ Still to expand:
 - Rust side uses stable logical IDs (`WebPageId`), not raw Chromium pointers/IDs.
 - Across async boundaries, avoid passing raw pointers. Use `ID + re-resolve` and weak ownership checks.
 
+## Example: simpleapp
+
+`simpleapp` is a single-window sample app using `winit` + `cbf`.
+
+Run:
+
+```bash
+cargo run -p cbf --example simpleapp --features chromium-backend -- \
+  --chromium-executable /path/to/Chromium.app/Contents/MacOS/Chromium \
+```
+
+You can also set `CBF_CHROMIUM_EXECUTABLE` and omit `--chromium-executable`.
+
 ## Licensing
 
 - CBF authored code: `BSD 3-Clause`
 - Chromium/third-party components: follow each upstream license and notice requirements
 
-See `new-cbf/LICENSE_NOTES.md` for policy details.
+See `docs/licensing.md` for policy details.

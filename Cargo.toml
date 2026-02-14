@@ -17,9 +17,15 @@ async-process = "2.5"
 futures-lite = "2.6"
 oneshot = "0.1"
 tracing = "0.1"
-tracing-subscriber = "0.3.22"
 objc2 = "0.6.3"
-objc2-foundation = "0.3.2"
-objc2-core-foundation = "0.3.2"
-objc2-app-kit = "0.3.2"
-objc2-quartz-core = "0.3.2"
+objc2-foundation = { version = "0.3.2", default-features = false }
+objc2-core-foundation = { version = "0.3.2", default-features = false }
+objc2-app-kit = { version = "0.3.2", default-features = false }
+objc2-quartz-core = { version = "0.3.2", default-features = false }
+
+# Example dependencies
+clap = "4.5"
+tracing-subscriber = "0.3.22"
+winit = "0.30.12"
+raw-window-handle = "0.6"
+dirs = "6"

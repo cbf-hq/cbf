@@ -63,3 +63,15 @@ features = [
   "NSWindow",
   "objc2-quartz-core"
 ]
+
+[dev-dependencies]
+clap = { workspace = true, features = ["derive"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+winit.workspace = true
+raw-window-handle.workspace = true
+dirs.workspace = true
+
+[[example]]
+name = "simpleapp"
+path = "../../examples/simpleapp/main.rs"
+required-features = ["chromium-backend"]

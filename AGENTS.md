@@ -94,7 +94,7 @@ Chromium side (from `chromium/src`):
 
 ## Bridge Runtime and Linking Rules
 
-- `cbf-sys` link path is configured by `CBF_BRIDGE_LIB_DIR` (not `CHROMIUM_OUT`).
+- `cbf-sys` link path is configured by `CBF_BRIDGE_LIB_DIR`.
 - Prefer project-local config in `.cargo/config.toml`:
   - `[env]`
   - `CBF_BRIDGE_LIB_DIR = "/path/to/cbf_bridge/libdir"`
