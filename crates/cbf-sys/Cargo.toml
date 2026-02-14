@@ -5,5 +5,7 @@ edition.workspace = true
 authors.workspace = true
 description = "Low-level Rust FFI boundary for cbf crate"
 repository.workspace = true
+keywords.workspace = true
+license.workspace = true
 
 [dependencies]
