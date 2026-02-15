@@ -1,7 +1,8 @@
 use async_channel::{Receiver, Sender, TrySendError};
 
 use crate::{
-    backend_delegate::BackendDelegate, Error,
+    Error,
+    backend_delegate::BackendDelegate,
     command::BrowserCommand,
     data::{
         drag::{DragDrop, DragUpdate},
