@@ -68,7 +68,41 @@ Additional scopes for non-runtime changes:
 - Update affected docs in the same PR.
 - If Chromium fork behavior changes, mention patch/revision impact clearly.
 
-## 6. Licensing and Notices
+## 6. Issue Label Policy
+
+CBF uses a small, explicit label taxonomy to keep triage consistent.
+
+### Label groups
+
+- `type/*`: what kind of work this is (`type/bug`, `type/feature`, `type/docs`, ...)
+- `area/*`: which layer is affected (`area/cbf`, `area/sys`, `area/bridge`, `area/chrome`, ...)
+- `priority/*`: urgency (`priority/p0` to `priority/p3`)
+- `status/*`: current workflow state (`status/needs-triage`, `status/in-progress`, ...)
+- OSS onboarding labels: `good first issue`, `help wanted`
+
+### Usage rules
+
+- Apply exactly one `type/*` label.
+- Apply exactly one `priority/*` label.
+- Apply exactly one `status/*` label.
+- Apply one or more `area/*` labels as needed.
+- Use `good first issue` only when scope, reproduction, and expected change are clear.
+
+### Sync labels with GitHub
+
+Use this script to create/update the standard label set:
+
+```bash
+scripts/setup-github-labels.sh
+```
+
+You can also pass a repository explicitly:
+
+```bash
+scripts/setup-github-labels.sh owner/repo
+```
+
+## 7. Licensing and Notices
 
 By contributing, you agree your changes are licensed under this repository's license policy.
 If your change affects redistribution or third-party components, update notice artifacts/policy docs as needed.
