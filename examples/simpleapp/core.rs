@@ -9,7 +9,7 @@ use cbf::{
         context_menu::ContextMenu, drag::DragStartRequest, ids::WebPageId, ime::ImeBoundsUpdate,
         surface::SurfaceHandle,
     },
-    event::{BackendStopReason, BrowserEvent, DialogResponse, WebPageEvent},
+    event::{BackendStopReason, BrowserEvent, WebPageEvent},
 };
 use cursor_icon::CursorIcon;
 use tracing::{error, info, warn};
@@ -247,10 +247,10 @@ impl CoreState {
             WebPageEvent::DragStartRequested { request } => {
                 vec![CoreAction::StartPlatformDrag(request)]
             }
-            WebPageEvent::JavaScriptDialogRequested {
-                response_channel, ..
-            } => {
-                _ = response_channel.send(DialogResponse::Cancel);
+            WebPageEvent::JavaScriptDialogRequested { request_id, .. } => {
+                _ = self
+                    .browser_handle()
+                    .confirm_beforeunload(web_page_id, request_id, false);
                 Vec::new()
             }
             WebPageEvent::PermissionRequested {

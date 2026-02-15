@@ -1,7 +1,7 @@
 use async_channel::{Receiver, Sender, TrySendError};
 
 use crate::{
-    Error,
+    backend_delegate::BackendDelegate, Error,
     command::BrowserCommand,
     data::{
         drag::{DragDrop, DragUpdate},
@@ -24,7 +24,10 @@ pub type EventStream = Receiver<BrowserEvent>;
 /// expressed via commands and events, and transport details live behind this.
 pub trait Backend: Send + 'static {
     /// Establish a command/event channel pair for this backend.
-    fn connect(self) -> Result<(CommandSender, EventStream), Error>;
+    fn connect<D: BackendDelegate>(
+        self,
+        delegate: D,
+    ) -> Result<(CommandSender, EventStream), Error>;
 }
 
 /// A clonable handle used to send commands to the browser backend.
@@ -269,7 +272,10 @@ impl BrowserSession {
 ///
 /// This split form is the minimum core API: most applications want to drive
 /// the backend from one place, while consuming events elsewhere.
-pub fn connect<B: Backend>(backend: B) -> Result<(BrowserSession, EventStream), Error> {
-    let (command_tx, events) = backend.connect()?;
+pub fn connect<B: Backend, D: BackendDelegate>(
+    backend: B,
+    delegate: D,
+) -> Result<(BrowserSession, EventStream), Error> {
+    let (command_tx, events) = backend.connect(delegate)?;
     Ok((BrowserSession::new(command_tx), events))
 }

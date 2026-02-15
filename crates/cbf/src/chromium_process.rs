@@ -2,7 +2,9 @@ use async_process::{Child, Command};
 use futures_lite::future::block_on;
 use std::{path::PathBuf, process::ExitStatus};
 
-use crate::{BrowserSession, ChromiumBackend, Error, EventStream, connect};
+use crate::{
+    BrowserSession, ChromiumBackend, Error, EventStream, backend_delegate::BackendDelegate, connect,
+};
 
 /// Options for launching the Chromium process.
 #[derive(Debug, Clone)]
@@ -66,6 +68,7 @@ impl ChromiumProcess {
 /// establishes a CBF connection.
 pub fn start_chromium(
     options: ChromiumOptions,
+    delegate: impl BackendDelegate,
 ) -> Result<(BrowserSession, EventStream, ChromiumProcess), Error> {
     let mut command = Command::new(&options.executable_path);
 
@@ -96,7 +99,7 @@ pub fn start_chromium(
 
     // Connect to the backend
     let backend = ChromiumBackend::new(options.channel_name);
-    let (session, events) = connect(backend)?;
+    let (session, events) = connect(backend, delegate)?;
 
     Ok((session, events, ChromiumProcess { child }))
 }

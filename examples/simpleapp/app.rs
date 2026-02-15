@@ -3,8 +3,13 @@ use std::{
     thread,
 };
 
-use cbf::{BrowserHandle, ChromiumProcess, EventStream, event::BrowserEvent, start_chromium};
-use tracing::{error, warn};
+use cbf::{
+    BrowserHandle, EventStream,
+    chromium_process::{ChromiumProcess, start_chromium},
+    event::BrowserEvent,
+    middleware::{MiddlewareBuilder, lifecycle::LifecycleLayer, logging::LoggingLayerBuilder},
+};
+use tracing::{Level, error, warn};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -113,7 +118,25 @@ pub(crate) fn run_with_platform<P: PlatformApp + 'static>() {
         }
     };
 
-    let (session, events, process) = match start_chromium(options) {
+    let delegate = match MiddlewareBuilder::new()
+        .layer(LifecycleLayer::new())
+        .layer(
+            LoggingLayerBuilder::new("simpleapp")
+                .command_level(Level::DEBUG)
+                .event_level(Level::DEBUG)
+                .teardown_level(Level::INFO)
+                .build(),
+        )
+        .build()
+    {
+        Ok(delegate) => delegate,
+        Err(err) => {
+            error!("failed to build middleware delegate: {err}");
+            return;
+        }
+    };
+
+    let (session, events, process) = match start_chromium(options, delegate) {
         Ok(values) => values,
         Err(err) => {
             error!("failed to start chromium backend: {err}");

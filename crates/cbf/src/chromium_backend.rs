@@ -4,20 +4,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::ffi::{IpcClient, IpcEvent};
 use async_channel::{Receiver, Sender, TryRecvError};
-use tracing::{debug, info, info_span, warn};
 
 use crate::{
     Backend, Error,
+    backend_delegate::{BackendDelegate, DelegateDispatcher},
     command::BrowserCommand,
     data::ids::WebPageId,
-    event::{BackendStopReason, BrowserEvent, DialogResponse, DialogType, WebPageEvent},
+    event::{BackendStopReason, BrowserEvent, DialogType, WebPageEvent},
+    ffi::{IpcClient, IpcEvent},
 };
-use oneshot;
 
-#[derive(Debug, Clone)]
 /// Backend implementation that speaks the Chromium IPC protocol.
+#[derive(Debug, Clone)]
 pub struct ChromiumBackend {
     channel_name: String,
 }
@@ -28,15 +27,16 @@ struct CommunicationState {
 }
 
 impl Backend for ChromiumBackend {
-    fn connect(self) -> Result<(Sender<BrowserCommand>, Receiver<BrowserEvent>), Error> {
+    fn connect<D: BackendDelegate>(
+        self,
+        delegate: D,
+    ) -> Result<(Sender<BrowserCommand>, Receiver<BrowserEvent>), Error> {
         let (command_tx, command_rx) = async_channel::unbounded::<BrowserCommand>();
         let (event_tx, event_rx) = async_channel::unbounded::<BrowserEvent>();
         let channel_name = self.channel_name;
 
-        thread::spawn({
-            let command_tx = command_tx.clone();
-
-            move || Self::run_communication(channel_name, command_rx, event_tx, command_tx)
+        thread::spawn(move || {
+            Self::run_communication(channel_name, command_rx, event_tx, delegate)
         });
 
         Ok((command_tx, event_rx))
@@ -51,82 +51,131 @@ impl ChromiumBackend {
         }
     }
 
-    fn run_communication(
-        channel_name: String,
-        command_rx: Receiver<BrowserCommand>,
-        event_tx: Sender<BrowserEvent>,
-        command_tx: Sender<BrowserCommand>,
-    ) {
-        let timeout = Duration::from_secs(5);
+    fn start_connection(
+        event_tx: &Sender<BrowserEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        channel_name: &str,
+    ) -> Option<IpcClient> {
+        let timeout = Duration::from_secs(60);
         let start_time = Instant::now();
-        let retry_interval = Duration::from_millis(100);
+        const RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
         let mut client = loop {
-            match IpcClient::connect(&channel_name) {
+            match IpcClient::connect(channel_name) {
                 Ok(client) => break client,
                 Err(err) => {
                     if start_time.elapsed() > timeout {
-                        warn!(
-                            result = "err",
-                            error = "ipc_connect_timeout",
-                            err = ?err,
-                            "IPC connect timed out"
-                        );
-                        _ = event_tx.send_blocking(BrowserEvent::BackendStopped {
-                            reason: BackendStopReason::Error {
+                        let mut no_forward = |_| (None, Vec::new());
+                        dispatcher.stop(
+                            event_tx,
+                            BackendStopReason::Error {
                                 message: format!("IPC connect timed out: {err:?}"),
                             },
-                        });
-                        return;
+                            &mut no_forward,
+                        );
+
+                        return None;
                     }
-                    thread::sleep(retry_interval);
+
+                    thread::sleep(RETRY_INTERVAL);
                 }
             }
         };
 
-        info!(channel = %channel_name, "CBF backend ready");
-        _ = event_tx.send_blocking(BrowserEvent::BackendReady {
-            backend_name: "chromium".to_string(),
-        });
+        // Notify that the backend is ready after establishing the connection.
+        if let Some(stop_reason) = dispatcher.dispatch_event(
+            BrowserEvent::BackendReady {
+                backend_name: "chromium".to_string(),
+            },
+            event_tx,
+        ) {
+            let mut forward = |command| {
+                (
+                    Self::execute_command(command, &mut client, event_tx),
+                    Vec::new(),
+                )
+            };
+            dispatcher.stop(event_tx, stop_reason, &mut forward);
+            return None;
+        }
 
+        Some(client)
+    }
+
+    fn poll_event(
+        command_rx: &Receiver<BrowserCommand>,
+        client: &mut IpcClient,
+        event_tx: &Sender<BrowserEvent>,
+        state: &mut CommunicationState,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+    ) -> bool {
+        dispatcher.on_idle();
+
+        macro_rules! make_forward {
+            () => {
+                |command| (Self::execute_command(command, client, event_tx), Vec::new())
+            };
+        }
+
+        let mut forward = make_forward!();
+        if let Some(stop_reason) = dispatcher.flush(event_tx, &mut forward) {
+            dispatcher.stop(event_tx, stop_reason, &mut forward);
+            return false;
+        }
+
+        if let Some(stop_reason) =
+            Self::process_command_queue(command_rx, client, event_tx, state, dispatcher)
+        {
+            let mut forward = make_forward!();
+            dispatcher.stop(event_tx, stop_reason, &mut forward);
+
+            return false;
+        };
+
+        if let Some(stop_reason) = Self::process_event_queue(client, event_tx, state, dispatcher) {
+            let mut forward = make_forward!();
+            dispatcher.stop(event_tx, stop_reason, &mut forward);
+
+            return false;
+        };
+
+        let mut forward = make_forward!();
+        if let Some(stop_reason) = dispatcher.flush(event_tx, &mut forward) {
+            dispatcher.stop(event_tx, stop_reason, &mut forward);
+            return false;
+        }
+
+        true
+    }
+
+    fn run_communication(
+        channel_name: String,
+        command_rx: Receiver<BrowserCommand>,
+        event_tx: Sender<BrowserEvent>,
+        delegate: impl BackendDelegate,
+    ) {
+        let mut dispatcher = DelegateDispatcher::new(delegate);
+
+        // Start the connection and get the IPC client.
+        let Some(mut client) = Self::start_connection(&event_tx, &mut dispatcher, &channel_name)
+        else {
+            return;
+        };
+
+        // Initialize communication state and enter the event loop.
         let mut state = CommunicationState {
             resizes_in_flight: HashSet::new(),
             pending_resizes: HashMap::new(),
         };
-
         const POLL_INTERVAL: Duration = Duration::from_millis(16);
 
-        loop {
-            if let Some(stop_reason) =
-                Self::process_command_queue(&command_rx, &mut client, &event_tx, &mut state)
-            {
-                warn!(
-                    result = "err",
-                    error = "backend_stopped",
-                    reason = ?stop_reason,
-                    "CBF backend stopped"
-                );
-                _ = event_tx.send_blocking(BrowserEvent::BackendStopped {
-                    reason: stop_reason,
-                });
-                return;
-            };
-
-            if let Some(stop_reason) =
-                Self::process_event_queue(&mut client, &event_tx, &command_tx, &mut state)
-            {
-                warn!(
-                    result = "err",
-                    error = "backend_stopped",
-                    reason = ?stop_reason,
-                    "CBF backend stopped"
-                );
-                _ = event_tx.send_blocking(BrowserEvent::BackendStopped {
-                    reason: stop_reason,
-                });
-                return;
-            };
-
+        while Self::poll_event(
+            &command_rx,
+            &mut client,
+            &event_tx,
+            &mut state,
+            &mut dispatcher,
+        ) {
             thread::sleep(POLL_INTERVAL);
         }
     }
@@ -134,19 +183,19 @@ impl ChromiumBackend {
     fn process_event_queue(
         client: &mut IpcClient,
         event_tx: &Sender<BrowserEvent>,
-        command_tx: &Sender<BrowserCommand>,
         state: &mut CommunicationState,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> Option<BackendStopReason> {
         while let Some(event) = client.poll_event() {
             match event {
-                Ok(event) => handle_ipc_event(event, event_tx, command_tx, client, state),
+                Ok(event) => {
+                    if let Some(reason) =
+                        handle_ipc_event(event, event_tx, client, state, dispatcher)
+                    {
+                        return Some(reason);
+                    }
+                }
                 Err(err) => {
-                    warn!(
-                        result = "err",
-                        error = "ipc_event_error",
-                        err = ?err,
-                        "IPC event error"
-                    );
                     return Some(BackendStopReason::Error {
                         message: format!("IPC event error: {err:?}"),
                     });
@@ -162,6 +211,7 @@ impl ChromiumBackend {
         client: &mut IpcClient,
         event_tx: &Sender<BrowserEvent>,
         state: &mut CommunicationState,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> Option<BackendStopReason> {
         let mut pending_command: Option<BrowserCommand> = None;
 
@@ -173,20 +223,6 @@ impl ChromiumBackend {
                     Err(TryRecvError::Empty) => break None,
                     Err(TryRecvError::Closed) => break Some(BackendStopReason::Disconnected),
                 },
-            };
-
-            let mut handle_one = |command| match Self::handle_command(command, client, event_tx) {
-                Ok(Some(reason)) => Some(reason),
-                Ok(None) => None,
-                Err(message) => {
-                    warn!(
-                        result = "err",
-                        error = "command_failed",
-                        message = %message,
-                        "CBF command failed"
-                    );
-                    Some(BackendStopReason::Error { message })
-                }
             };
 
             if let BrowserCommand::ResizeWebPage {
@@ -223,11 +259,17 @@ impl ChromiumBackend {
                     }
 
                     state.resizes_in_flight.insert(web_page_id);
-                    if let Some(reason) = handle_one(BrowserCommand::ResizeWebPage {
-                        web_page_id,
-                        width,
-                        height,
-                    }) {
+                    let mut forward =
+                        |command| (Self::execute_command(command, client, event_tx), Vec::new());
+                    if let Some(reason) = dispatcher.dispatch_command(
+                        BrowserCommand::ResizeWebPage {
+                            web_page_id,
+                            width,
+                            height,
+                        },
+                        event_tx,
+                        &mut forward,
+                    ) {
                         return Some(reason);
                     }
                 }
@@ -235,9 +277,23 @@ impl ChromiumBackend {
                 continue;
             }
 
-            if let Some(reason) = handle_one(command) {
+            let mut forward =
+                |command| (Self::execute_command(command, client, event_tx), Vec::new());
+            if let Some(reason) = dispatcher.dispatch_command(command, event_tx, &mut forward) {
                 return Some(reason);
             }
+        }
+    }
+
+    fn execute_command(
+        command: BrowserCommand,
+        client: &mut IpcClient,
+        event_tx: &Sender<BrowserEvent>,
+    ) -> Option<BackendStopReason> {
+        match Self::handle_command(command, client, event_tx) {
+            Ok(Some(reason)) => Some(reason),
+            Ok(None) => None,
+            Err(message) => Some(BackendStopReason::Error { message }),
         }
     }
 
@@ -246,10 +302,6 @@ impl ChromiumBackend {
         client: &mut IpcClient,
         event_tx: &Sender<BrowserEvent>,
     ) -> Result<Option<BackendStopReason>, String> {
-        let span = info_span!("cbf.command", command = ?command);
-        let _span = span.enter();
-        debug!("Handle CBF command");
-
         match command {
             BrowserCommand::Shutdown { request_id } => client
                 .request_shutdown(request_id)
@@ -405,39 +457,45 @@ impl ChromiumBackend {
 fn handle_ipc_event(
     event: IpcEvent,
     event_tx: &Sender<BrowserEvent>,
-    command_tx: &Sender<BrowserCommand>,
     client: &mut IpcClient,
     state: &mut CommunicationState,
-) {
+    dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+) -> Option<BackendStopReason> {
+    let mut emit = |event| dispatcher.dispatch_event(event, event_tx);
+
     match event {
         IpcEvent::WebPageCreated {
             profile_id,
             web_page_id,
             request_id,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::Created { request_id },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::SurfaceHandleUpdated {
             profile_id,
             web_page_id,
             handle,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::SurfaceHandleUpdated { handle },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::WebPageResizeAcknowledged { web_page_id, .. } => {
             state.resizes_in_flight.remove(&web_page_id);
             if let Some((width, height)) = state.pending_resizes.remove(&web_page_id) {
                 state.resizes_in_flight.insert(web_page_id);
                 if let Err(err) = client.set_web_page_size(web_page_id, width, height) {
-                    warn!(
+                    tracing::warn!(
                         result = "err",
                         error = "resize_failed",
                         err = ?err,
@@ -454,44 +512,52 @@ fn handle_ipc_event(
             request_id,
             html,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::DomHtmlRead { request_id, html },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::DragStartRequested {
             profile_id,
             web_page_id,
             request,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::DragStartRequested { request },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::ImeBoundsUpdated {
             profile_id,
             web_page_id,
             update,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::ImeBoundsUpdated { update },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::ContextMenuRequested {
             profile_id,
             web_page_id,
             menu,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::ContextMenuRequested { menu },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::NewWebPageRequested {
             profile_id,
@@ -499,14 +565,16 @@ fn handle_ipc_event(
             target_url,
             is_popup,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::NewWebPageRequested {
                     target_url,
                     is_popup,
                 },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::NavigationStateChanged {
             profile_id,
@@ -516,7 +584,7 @@ fn handle_ipc_event(
             can_go_forward,
             is_loading,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::NavigationStateChanged {
@@ -525,40 +593,48 @@ fn handle_ipc_event(
                     can_go_forward,
                     is_loading,
                 },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::CursorChanged {
             profile_id,
             web_page_id,
             cursor_type,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::CursorChanged { cursor_type },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::TitleUpdated {
             profile_id,
             web_page_id,
             title,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::TitleUpdated { title },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::FaviconUrlUpdated {
             profile_id,
             web_page_id,
             url,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::FaviconUrlUpdated { url },
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::BeforeUnloadDialogRequested {
             profile_id,
@@ -566,39 +642,19 @@ fn handle_ipc_event(
             request_id,
             reason,
         } => {
-            debug!(
-                ?profile_id,
-                %web_page_id,
-                request_id,
-                ?reason,
-                "BeforeUnloadDialogRequested received"
-            );
-            let (response_tx, response_rx) = oneshot::channel();
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::JavaScriptDialogRequested {
+                    request_id,
                     message: String::new(),
                     default_prompt_text: None,
                     r#type: DialogType::BeforeUnload,
                     beforeunload_reason: Some(reason),
-                    response_channel: response_tx,
                 },
-            });
-
-            let command_tx = command_tx.clone();
-            thread::spawn(move || {
-                if let Ok(response) = response_rx.recv() {
-                    let proceed = matches!(response, DialogResponse::Success { .. });
-                    command_tx
-                        .send_blocking(BrowserCommand::ConfirmBeforeUnload {
-                            web_page_id,
-                            request_id,
-                            proceed,
-                        })
-                        .ok();
-                }
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::WebPageClosed {
             profile_id,
@@ -606,26 +662,36 @@ fn handle_ipc_event(
         } => {
             state.resizes_in_flight.remove(&web_page_id);
             state.pending_resizes.remove(&web_page_id);
-            _ = event_tx.send_blocking(BrowserEvent::WebPage {
+            if let Some(reason) = emit(BrowserEvent::WebPage {
                 profile_id,
                 web_page_id,
                 event: WebPageEvent::Closed,
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::ShutdownBlocked {
             request_id,
             dirty_web_page_ids,
         } => {
-            _ = event_tx.send_blocking(BrowserEvent::ShutdownBlocked {
+            if let Some(reason) = emit(BrowserEvent::ShutdownBlocked {
                 request_id,
                 dirty_web_page_ids,
-            });
+            }) {
+                return Some(reason);
+            }
         }
         IpcEvent::ShutdownProceeding { request_id } => {
-            _ = event_tx.send_blocking(BrowserEvent::ShutdownProceeding { request_id });
+            if let Some(reason) = emit(BrowserEvent::ShutdownProceeding { request_id }) {
+                return Some(reason);
+            }
         }
         IpcEvent::ShutdownCancelled { request_id } => {
-            _ = event_tx.send_blocking(BrowserEvent::ShutdownCancelled { request_id });
+            if let Some(reason) = emit(BrowserEvent::ShutdownCancelled { request_id }) {
+                return Some(reason);
+            }
         }
     }
+
+    None
 }

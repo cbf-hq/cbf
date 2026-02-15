@@ -138,13 +138,13 @@ pub enum WebPageEvent {
     // --- Dialogs & Permissions (Response Required) ---
     /// A JavaScript dialog (alert/confirm/prompt) was requested.
     /// JavaScript ダイアログ (alert, confirm, prompt) の表示要求。
-    /// UI側はダイアログを表示し、ユーザーの応答を `response_channel` で返す必要がある。
+    /// UI側はダイアログを表示し、対応するコマンドで応答する必要がある。
     JavaScriptDialogRequested {
+        request_id: u64,
         message: String,
         default_prompt_text: Option<String>,
         r#type: DialogType,
         beforeunload_reason: Option<BeforeUnloadReason>,
-        response_channel: oneshot::Sender<DialogResponse>,
     },
 
     /// A permission request (camera, microphone, etc.).

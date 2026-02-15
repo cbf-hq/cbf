@@ -1,6 +1,6 @@
 use std::{env, path::PathBuf};
 
-use cbf::ChromiumOptions;
+use cbf::chromium_process::ChromiumOptions;
 use clap::Parser;
 
 #[derive(Debug, Parser)]

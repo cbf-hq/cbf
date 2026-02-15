@@ -1,0 +1,100 @@
+pub mod auto_dialog_responder;
+pub mod lifecycle;
+pub mod logging;
+
+use crate::{
+    Error,
+    backend_delegate::{
+        BackendDelegate, CommandDecision, DelegateContext, EventDecision, NoopDelegate,
+    },
+    event::BackendStopReason,
+};
+
+pub trait DelegateLayer: Send + 'static {
+    fn wrap(self: Box<Self>, inner: Box<dyn BackendDelegate>) -> Box<dyn BackendDelegate>;
+    fn is_lifecycle(&self) -> bool {
+        false
+    }
+}
+
+pub struct MiddlewareBuilder {
+    layers: Vec<Box<dyn DelegateLayer>>,
+    allow_unsafe_no_lifecycle: bool,
+}
+
+impl MiddlewareBuilder {
+    pub fn new() -> Self {
+        Self {
+            layers: Vec::new(),
+            allow_unsafe_no_lifecycle: false,
+        }
+    }
+
+    pub fn layer<L>(mut self, layer: L) -> Self
+    where
+        L: DelegateLayer,
+    {
+        self.layers.push(Box::new(layer));
+        self
+    }
+
+    pub fn allow_unsafe_no_lifecycle(mut self, allow: bool) -> Self {
+        self.allow_unsafe_no_lifecycle = allow;
+        self
+    }
+
+    pub fn build(self) -> Result<MiddlewareDelegate, Error> {
+        // Ensure that a LifecycleLayer is present unless the user has explicitly allowed it to be missing.
+        if !self.allow_unsafe_no_lifecycle && !self.layers.iter().any(|layer| layer.is_lifecycle())
+        {
+            return Err(Error::Backend {
+                message:
+                    "LifecycleLayer is required; call allow_unsafe_no_lifecycle(true) to opt out"
+                        .to_string(),
+            });
+        }
+
+        let mut delegate: Box<dyn BackendDelegate> = Box::new(NoopDelegate);
+        for layer in self.layers {
+            delegate = layer.wrap(delegate);
+        }
+
+        Ok(MiddlewareDelegate { inner: delegate })
+    }
+}
+
+impl Default for MiddlewareBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct MiddlewareDelegate {
+    inner: Box<dyn BackendDelegate>,
+}
+
+impl BackendDelegate for MiddlewareDelegate {
+    fn on_command(
+        &mut self,
+        ctx: &mut DelegateContext,
+        command: crate::command::BrowserCommand,
+    ) -> CommandDecision {
+        self.inner.on_command(ctx, command)
+    }
+
+    fn on_event(
+        &mut self,
+        ctx: &mut DelegateContext,
+        event: crate::event::BrowserEvent,
+    ) -> EventDecision {
+        self.inner.on_event(ctx, event)
+    }
+
+    fn on_idle(&mut self, ctx: &mut DelegateContext) {
+        self.inner.on_idle(ctx)
+    }
+
+    fn on_teardown(&mut self, ctx: &mut DelegateContext, reason: BackendStopReason) {
+        self.inner.on_teardown(ctx, reason)
+    }
+}
