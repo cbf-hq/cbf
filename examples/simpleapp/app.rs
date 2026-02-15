@@ -22,11 +22,18 @@ use crate::{
     core::{CoreAction, CoreState, SharedState},
 };
 
+/// Custom event type for the winit event loop.
+/// This wraps browser events so they can be delivered through the event loop.
 #[derive(Debug)]
 pub(crate) enum UserEvent {
     Browser(BrowserEvent),
 }
 
+/// Spawns a background thread that forwards browser events to the winit event loop.
+///
+/// This thread continuously reads from the CBF event stream and sends events
+/// to the event loop proxy. It terminates when either the event stream closes
+/// or the event loop proxy becomes invalid.
 pub(crate) fn spawn_browser_event_forwarder(events: EventStream, proxy: EventLoopProxy<UserEvent>) {
     thread::spawn(move || {
         loop {
@@ -45,10 +52,25 @@ pub(crate) fn spawn_browser_event_forwarder(events: EventStream, proxy: EventLoo
     });
 }
 
+/// Platform-specific application trait that must be implemented for each OS.
+///
+/// This trait separates platform-agnostic core logic from platform-specific
+/// windowing and view management. Each platform (macOS, Windows, Linux) implements
+/// this trait to provide its own native window and browser view handling.
 pub(crate) trait PlatformApp {
+    /// Creates a new platform application instance.
     fn new(browser_handle: BrowserHandle, shared: Arc<Mutex<SharedState>>) -> Self;
+
+    /// Returns the winit window ID, if a window has been created.
     fn window_id(&self) -> Option<WindowId>;
+
+    /// Ensures that a window and browser view are created and ready.
+    /// Called when the event loop is resumed.
     fn ensure_window_and_view(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String>;
+
+    /// Applies a list of core actions to the platform layer.
+    /// This is where platform-specific implementations execute requested actions
+    /// like updating the window title, resizing views, showing menus, etc.
     fn apply_core_actions(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -57,6 +79,10 @@ pub(crate) trait PlatformApp {
     );
 }
 
+/// Main application runner that ties together core logic, browser process, and platform layer.
+///
+/// This struct implements the winit [`ApplicationHandler`] trait and orchestrates
+/// the flow of events between the windowing system, CBF browser backend, and core logic.
 struct AppRunner<P: PlatformApp> {
     core: CoreState,
     process: ChromiumProcess,
@@ -101,7 +127,10 @@ impl<P: PlatformApp> ApplicationHandler<UserEvent> for AppRunner<P> {
     }
 }
 
+/// Main entry point that initializes and runs the application with a platform-specific implementation.
 pub(crate) fn run_with_platform<P: PlatformApp + 'static>() {
+    // Initialize logging with default level of info for simpleapp and cbf.
+    // Can be overridden with RUST_LOG environment variable.
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -118,6 +147,9 @@ pub(crate) fn run_with_platform<P: PlatformApp + 'static>() {
         }
     };
 
+    // Build the middleware stack for the browser session.
+    // - LifecycleLayer: Manages browser lifecycle and reconnection
+    // - LoggingLayer: Logs commands, events, and teardown for debugging
     let delegate = match MiddlewareBuilder::new()
         .layer(LifecycleLayer::new())
         .layer(
@@ -136,6 +168,8 @@ pub(crate) fn run_with_platform<P: PlatformApp + 'static>() {
         }
     };
 
+    // Start the Chromium browser process and establish IPC connection.
+    // Returns: browser session, event stream, and process handle.
     let (session, events, process) = match start_chromium(options, delegate) {
         Ok(values) => values,
         Err(err) => {
@@ -152,10 +186,12 @@ pub(crate) fn run_with_platform<P: PlatformApp + 'static>() {
         }
     };
 
+    // Create shared state, core logic, and platform implementation.
     let shared = Arc::new(Mutex::new(SharedState::default()));
     let core = CoreState::new(cli, session, Arc::clone(&shared));
     let platform = P::new(core.browser_handle(), shared);
 
+    // Spawn background thread to forward browser events to the event loop.
     let proxy = event_loop.create_proxy();
     spawn_browser_event_forwarder(events, proxy);
 

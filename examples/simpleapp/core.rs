@@ -17,22 +17,30 @@ use winit::event::WindowEvent;
 
 use crate::cli::Cli;
 
+/// Shared state between the core logic and platform-specific code.
+/// This struct is protected by a mutex and can be accessed from multiple parts of the application.
 #[derive(Default)]
 pub(crate) struct SharedState {
+    /// The currently active web page ID, if any.
     pub(crate) web_page_id: Option<WebPageId>,
+    /// Maps drag session IDs to their allowed operations bitmask.
     pub(crate) drag_allowed_operations: HashMap<u64, u32>,
 }
 
+/// Gets the currently active web page ID from shared state.
 pub(crate) fn current_web_page_id(shared: &Arc<Mutex<SharedState>>) -> Option<WebPageId> {
     let guard = shared.lock().expect("shared state lock poisoned");
     guard.web_page_id
 }
 
+/// Sets the currently active web page ID in shared state.
 pub(crate) fn set_web_page_id(shared: &Arc<Mutex<SharedState>>, web_page_id: Option<WebPageId>) {
     let mut guard = shared.lock().expect("shared state lock poisoned");
     guard.web_page_id = web_page_id;
 }
 
+/// Gets the allowed drag operations for a given drag session.
+/// Returns 0 if the session is not found.
 pub(crate) fn drag_allowed_operations(shared: &Arc<Mutex<SharedState>>, session_id: u64) -> u32 {
     let guard = shared.lock().expect("shared state lock poisoned");
     guard
@@ -42,6 +50,7 @@ pub(crate) fn drag_allowed_operations(shared: &Arc<Mutex<SharedState>>, session_
         .unwrap_or(0)
 }
 
+/// Sets the allowed drag operations for a given drag session.
 pub(crate) fn set_drag_allowed_operations(
     shared: &Arc<Mutex<SharedState>>,
     session_id: u64,
@@ -53,19 +62,27 @@ pub(crate) fn set_drag_allowed_operations(
         .insert(session_id, allowed_operations);
 }
 
+/// Removes a drag session from shared state when it completes or is cancelled.
 pub(crate) fn remove_drag_session(shared: &Arc<Mutex<SharedState>>, session_id: u64) {
     let mut guard = shared.lock().expect("shared state lock poisoned");
     guard.drag_allowed_operations.remove(&session_id);
 }
 
+/// Core application state that manages the browser session and handles events.
+/// This is the central piece of business logic that connects the CBF browser backend
+/// to the platform-specific UI layer.
 pub(crate) struct CoreState {
     cli: Cli,
     session: BrowserSession,
     shared: Arc<Mutex<SharedState>>,
+    /// Whether we've already requested web page creation (to avoid duplicates).
     page_create_requested: bool,
+    /// Whether we've initiated shutdown sequence.
     shutdown_requested: bool,
 }
 
+/// Actions that the core state wants the platform layer to execute.
+/// These are returned from event handlers and applied by the platform-specific code.
 pub(crate) enum CoreAction {
     ExitEventLoop,
     SyncViewAndResize,
@@ -134,6 +151,10 @@ impl CoreState {
         }
     }
 
+    /// Handles incoming browser events and returns platform actions to execute.
+    ///
+    /// This is the main event processing loop for browser-originated events like
+    /// page creation, backend readiness, shutdown notifications, etc.
     pub(crate) fn handle_browser_event(&mut self, event: BrowserEvent) -> Vec<CoreAction> {
         match event {
             BrowserEvent::BackendReady { backend_name } => {
@@ -196,6 +217,7 @@ impl CoreState {
         }
     }
 
+    /// Handles incoming window events from the platform layer.
     pub(crate) fn handle_window_event(&mut self, event: &WindowEvent) -> Vec<CoreAction> {
         match event {
             WindowEvent::CloseRequested => {

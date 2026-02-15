@@ -1,7 +1,4 @@
-use std::{
-    ptr::NonNull,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use cbf::{
     BrowserHandle,
@@ -9,8 +6,7 @@ use cbf::{
         drag::{DragDrop, DragUpdate},
         ids::WebPageId,
         ime::{
-            ConfirmCompositionBehavior, ImeCommitText, ImeComposition, ImeTextSpan,
-            ImeTextSpanThickness, ImeTextSpanType, ImeTextSpanUnderlineStyle,
+            ConfirmCompositionBehavior, ImeCommitText, ImeComposition, ImeTextSpan, ImeTextSpanType,
         },
         surface::SurfaceHandle,
     },
@@ -19,7 +15,7 @@ use cbf::{
         BrowserViewMacNativeDragDrop, BrowserViewMacNativeDragUpdate,
     },
 };
-use objc2::MainThreadMarker;
+use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::NSView;
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -39,6 +35,10 @@ use crate::{
     },
 };
 
+/// Delegate for the macOS browser view that handles input events, IME, drag-and-drop, etc.
+///
+/// This implements the [`BrowserViewMacDelegate`] trait from the `cbf` crate,
+/// bridging native macOS events to CBF browser commands.
 struct SimpleBrowserViewDelegate {
     handle: BrowserHandle,
     shared: Arc<Mutex<SharedState>>,
@@ -56,6 +56,8 @@ impl SimpleBrowserViewDelegate {
 }
 
 impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
+    /// Called when a keyboard event occurs in the browser view.
+    /// Forwards the event to the CBF backend along with any associated commands.
     fn on_key_event(
         &self,
         _view: &BrowserViewMac,
@@ -69,6 +71,8 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         });
     }
 
+    /// Called when an IME event occurs, such as composition or text commit.
+    /// This is critical for international text input (e.g., Japanese, Chinese).
     fn on_ime_event(&self, _view: &BrowserViewMac, event: BrowserViewMacImeEvent) {
         self.with_page_id(|web_page_id| match event {
             BrowserViewMacImeEvent::SetComposition {
@@ -90,21 +94,12 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
                     selection_start,
                     selection_end,
                     replacement_range: replacement,
-                    spans: vec![ImeTextSpan {
-                        // Disable default yellow IME decorations.
-                        type_: ImeTextSpanType::Composition,
-                        start_offset: 0,
-                        end_offset: utf16_len as u32,
-                        underline_color: 0,
-                        thickness: ImeTextSpanThickness::Thin,
-                        underline_style: ImeTextSpanUnderlineStyle::Solid,
-                        text_color: 0,
-                        background_color: 0,
-                        suggestion_highlight_color: 0,
-                        remove_on_finish_composing: false,
-                        interim_char_selection: false,
-                        should_hide_suggestion_menu: false,
-                    }],
+                    // Define a text span for the composition without decorations.
+                    spans: vec![ImeTextSpan::no_decoration(
+                        ImeTextSpanType::Composition,
+                        0,
+                        utf16_len as u32,
+                    )],
                 };
 
                 if let Err(err) = self.handle.set_composition(composition) {
@@ -140,6 +135,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         });
     }
 
+    /// Called when a character input event occurs (fallback for text input not handled by IME).
     fn on_char_event(&self, _view: &BrowserViewMac, text: String) {
         self.with_page_id(|web_page_id| {
             let event = cbf::data::key::KeyEvent {
@@ -163,6 +159,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         });
     }
 
+    /// Called when a mouse event occurs.
     fn on_mouse_event(&self, _view: &BrowserViewMac, event: cbf::data::mouse::MouseEvent) {
         self.with_page_id(|web_page_id| {
             if let Err(err) = self.handle.send_mouse_event(web_page_id, event) {
@@ -171,6 +168,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         });
     }
 
+    /// Called when a mouse wheel (scroll) event occurs.
     fn on_mouse_wheel_event(
         &self,
         _view: &BrowserViewMac,
@@ -183,6 +181,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         });
     }
 
+    /// Called when a command from a context menu is selected.
     fn on_context_menu_command(&self, _view: &BrowserViewMac, menu_id: u64, command_id: i32) {
         if let Err(err) = self
             .handle
@@ -192,12 +191,14 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         }
     }
 
+    /// Called when a context menu is dismissed without selecting a command.
     fn on_context_menu_dismissed(&self, _view: &BrowserViewMac, menu_id: u64) {
         if let Err(err) = self.handle.dismiss_context_menu(menu_id) {
             warn!("failed to dismiss context menu: {err}");
         }
     }
 
+    /// Called when the browser view focus state changes.
     fn on_focus_changed(&self, _view: &BrowserViewMac, focused: bool) {
         self.with_page_id(|web_page_id| {
             if let Err(err) = self.handle.set_web_page_focus(web_page_id, focused) {
@@ -206,6 +207,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         });
     }
 
+    /// Called when a native drag operation moves over the browser view.
     fn on_native_drag_update(&self, _view: &BrowserViewMac, event: BrowserViewMacNativeDragUpdate) {
         self.with_page_id(|web_page_id| {
             let update = DragUpdate {
@@ -225,6 +227,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         });
     }
 
+    /// Called when a native drag operation is dropped on the browser view.
     fn on_native_drag_drop(&self, _view: &BrowserViewMac, event: BrowserViewMacNativeDragDrop) {
         self.with_page_id(|web_page_id| {
             let drop = DragDrop {
@@ -245,6 +248,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         });
     }
 
+    /// Called when a native drag operation is cancelled (e.g., ESC key or dragged outside drop zones).
     fn on_native_drag_cancel(&self, _view: &BrowserViewMac, session_id: u64) {
         self.with_page_id(|web_page_id| {
             if let Err(err) = self.handle.send_drag_cancel(session_id, web_page_id) {
@@ -255,49 +259,59 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
     }
 }
 
+/// macOS platform-specific application implementation.
+///
+/// This struct manages the winit window and the native `BrowserViewMac` that displays
+/// the browser content. It implements the [`PlatformApp`] trait to integrate with
+/// the platform-agnostic core logic.
 struct SimpleAppMac {
     browser_handle: BrowserHandle,
     shared: Arc<Mutex<SharedState>>,
     window: Option<Window>,
     window_id: Option<WindowId>,
-    browser_view: Option<objc2::rc::Retained<BrowserViewMac>>,
+    /// The native macOS view that displays browser content.
+    browser_view: Option<Retained<BrowserViewMac>>,
 }
 
 impl SimpleAppMac {
+    /// Creates a new browser view and attaches it to the given window.
+    ///
+    /// This sets up the macOS-specific `BrowserViewMac` with the appropriate frame,
+    /// delegate, and attaches it as a subview of the window's content view.
     fn create_and_attach_browser_view(
         window: &Window,
         handle: BrowserHandle,
         shared: Arc<Mutex<SharedState>>,
-    ) -> Result<objc2::rc::Retained<BrowserViewMac>, String> {
+    ) -> Result<Retained<BrowserViewMac>, String> {
         let frame = view_frame_for_window(window);
 
         let delegate = Box::new(SimpleBrowserViewDelegate { handle, shared });
         let mtm = MainThreadMarker::new()
             .ok_or_else(|| "BrowserViewMac must be created on main thread".to_owned())?;
+        let browser_view = BrowserViewMac::new(mtm, BrowserViewMacConfig { frame, delegate });
 
-        let view = BrowserViewMac::new(mtm, BrowserViewMacConfig { frame, delegate });
-
+        // Get the raw window handle and extract the `NSView` pointer.
         let raw = window
             .window_handle()
             .map_err(|err| format!("window handle acquisition failed: {err}"))?
             .as_raw();
 
-        let window_handle_ptr = match raw {
-            RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr().cast::<NSView>(),
+        let content_view_ptr = match raw {
+            RawWindowHandle::AppKit(handle) => handle.ns_view.cast::<NSView>(),
             _ => return Err("non-AppKit window handle on macOS".to_owned()),
         };
+        let content_view = unsafe { content_view_ptr.as_ref() };
 
-        let content_view =
-            NonNull::new(window_handle_ptr).ok_or_else(|| "content view is null".to_owned())?;
-        let content_view = unsafe { content_view.as_ref() };
+        // Attach the browser view as a subview of the window's content view.
+        content_view.addSubview(&browser_view);
 
-        content_view.addSubview(&view);
-        view.setFrame(frame);
-        view.set_layer_frame(frame);
+        browser_view.setFrame(frame);
+        browser_view.set_layer_frame(frame);
 
-        Ok(view)
+        Ok(browser_view)
     }
 
+    /// Updates the browser view's frame to match the current window size.
     fn update_view_frame(&self, window: &Window) {
         let Some(browser_view) = self.browser_view.as_ref() else {
             return;
@@ -308,6 +322,7 @@ impl SimpleAppMac {
         browser_view.set_layer_frame(frame);
     }
 
+    /// Synchronizes the view frame and notifies the browser backend of the new page size.
     fn sync_view_and_page_size(&self, core: &CoreState) {
         let Some(window) = self.window.as_ref() else {
             return;
@@ -385,6 +400,8 @@ impl PlatformApp for SimpleAppMac {
                     }
                 }
                 CoreAction::ApplySurfaceHandle(handle) => {
+                    // On macOS, the surface handle is a CAContext ID that allows
+                    // the browser view to display the remote-rendered content.
                     if let (Some(browser_view), SurfaceHandle::MacCaContextId(context_id)) =
                         (self.browser_view.as_ref(), handle)
                     {
@@ -402,6 +419,8 @@ impl PlatformApp for SimpleAppMac {
                     }
                 }
                 CoreAction::StartPlatformDrag(request) => {
+                    // Start a native macOS drag-and-drop session.
+                    // Store allowed operations so we can use them in drag update events.
                     if let Some(browser_view) = self.browser_view.as_ref()
                         && browser_view.start_native_drag_session(&request)
                     {
@@ -417,18 +436,20 @@ impl PlatformApp for SimpleAppMac {
     }
 }
 
+/// Entry point for the macOS platform.
+/// Initializes and runs the application with the macOS-specific implementation.
 pub fn run() {
     run_with_platform::<SimpleAppMac>();
 }
 
+/// Calculates the view frame (in logical coordinates) for the given window.
 fn view_frame_for_window(window: &Window) -> CGRect {
     let logical = window.inner_size().to_logical::<f64>(window.scale_factor());
-    CGRect::new(
-        CGPoint::new(0.0, 0.0),
-        CGSize::new(logical.width, logical.height),
-    )
+    CGRect::new(CGPoint::ZERO, CGSize::new(logical.width, logical.height))
 }
 
+/// Calculates the page size (width, height in pixels) for the given window.
+/// This is used to tell the browser backend the size of the web page.
 fn page_size_for_window(window: &Window) -> (u32, u32) {
     let logical = window.inner_size().to_logical::<f64>(window.scale_factor());
     (

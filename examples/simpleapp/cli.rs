@@ -3,6 +3,7 @@ use std::{env, path::PathBuf};
 use cbf::chromium_process::ChromiumOptions;
 use clap::Parser;
 
+/// Command-line interface configuration for simpleapp.
 #[derive(Debug, Parser)]
 #[command(name = "simpleapp", about = "CBF single-window sample app")]
 pub(crate) struct Cli {
@@ -33,10 +34,15 @@ pub(crate) struct Cli {
     pub(crate) log_file: Option<PathBuf>,
 }
 
+/// Parses command-line arguments into a [`Cli`] struct.
 pub(crate) fn parse_cli() -> Cli {
     Cli::parse()
 }
 
+/// Constructs [`ChromiumOptions`] from CLI arguments.
+///
+/// This function resolves the Chromium executable path and user data directory,
+/// either from CLI arguments or from environment variables/defaults.
 pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<ChromiumOptions, String> {
     let chromium_executable = cli
         .chromium_executable
@@ -69,6 +75,8 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<ChromiumOptions, St
     })
 }
 
+/// Returns the default user data directory for the application.
+/// On most platforms, this is located in the local data directory under "CBF SimpleApp".
 fn default_user_data_dir() -> Option<PathBuf> {
     dirs::data_local_dir().map(|base| base.join("CBF SimpleApp"))
 }
