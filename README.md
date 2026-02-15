@@ -14,6 +14,13 @@ It provides a stable, application-agnostic API surface for controlling web pages
 - Licensing Guide: `docs/licensing.md` (BSD-3 and third-party notice policy)
 - Contributing Guide: `CONTRIBUTING.md` (contribution process and commit conventions)
 
+## Platform Support
+
+| Target | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| x86_64 | ✖ | ✔ | ✖ |
+| aarch64 | ✖ | ✔ | ✖ |
+
 ## Vision
 
 - Keep CBF independent from any specific product domain.
