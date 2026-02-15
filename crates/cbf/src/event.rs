@@ -4,6 +4,7 @@ use crate::data::{
     context_menu::ContextMenu, drag::DragStartRequest, ids::WebPageId, ime::ImeBoundsUpdate,
     profile::ProfileInfo, surface::SurfaceHandle,
 };
+use crate::error::BackendErrorInfo;
 
 /// Events emitted by the browser backend as a whole.
 /// ブラウザエンジン全体から発生するイベントを表します。
@@ -58,7 +59,7 @@ pub enum BackendStopReason {
     Crashed,
     /// Stopped due to an internal backend error.
     /// バックエンド内部エラーにより停止した。
-    Error { message: String },
+    Error(BackendErrorInfo),
 }
 
 /// Events emitted from a specific web page (tab).

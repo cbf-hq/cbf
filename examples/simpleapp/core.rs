@@ -182,8 +182,8 @@ impl CoreState {
                     BackendStopReason::Crashed => {
                         error!("backend stopped: crashed");
                     }
-                    BackendStopReason::Error { message } => {
-                        error!("backend stopped with error: {message}");
+                    BackendStopReason::Error(info) => {
+                        error!("backend stopped with error: {info}");
                     }
                 }
                 vec![CoreAction::ExitEventLoop]

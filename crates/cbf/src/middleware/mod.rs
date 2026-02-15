@@ -3,7 +3,7 @@ pub mod lifecycle;
 pub mod logging;
 
 use crate::{
-    Error,
+    Error, InvalidConfiguration,
     backend_delegate::{
         BackendDelegate, CommandDecision, DelegateContext, EventDecision, NoopDelegate,
     },
@@ -47,11 +47,9 @@ impl MiddlewareBuilder {
         // Ensure that a LifecycleLayer is present unless the user has explicitly allowed it to be missing.
         if !self.allow_unsafe_no_lifecycle && !self.layers.iter().any(|layer| layer.is_lifecycle())
         {
-            return Err(Error::Backend {
-                message:
-                    "LifecycleLayer is required; call allow_unsafe_no_lifecycle(true) to opt out"
-                        .to_string(),
-            });
+            return Err(Error::InvalidConfiguration(
+                InvalidConfiguration::MissingLifecycleLayer,
+            ));
         }
 
         let mut delegate: Box<dyn BackendDelegate> = Box::new(NoopDelegate);

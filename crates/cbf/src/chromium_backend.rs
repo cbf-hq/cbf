@@ -7,12 +7,12 @@ use std::{
 use async_channel::{Receiver, Sender, TryRecvError};
 
 use crate::{
-    Backend, Error,
+    ApiErrorKind, Backend, BackendErrorInfo, Error, Operation,
     backend_delegate::{BackendDelegate, DelegateDispatcher},
     command::BrowserCommand,
     data::ids::WebPageId,
     event::{BackendStopReason, BrowserEvent, DialogType, WebPageEvent},
-    ffi::{IpcClient, IpcEvent},
+    ffi::{Error as IpcError, IpcClient, IpcEvent},
 };
 
 /// Backend implementation that speaks the Chromium IPC protocol.
@@ -24,6 +24,52 @@ pub struct ChromiumBackend {
 struct CommunicationState {
     resizes_in_flight: HashSet<WebPageId>,
     pending_resizes: HashMap<WebPageId, (u32, u32)>,
+}
+
+#[derive(Debug)]
+enum CommandExecutionError {
+    IpcCall {
+        operation: Operation,
+        source: IpcError,
+    },
+}
+
+impl CommandExecutionError {
+    fn into_backend_error_info(self) -> BackendErrorInfo {
+        match self {
+            Self::IpcCall { operation, source } => BackendErrorInfo {
+                kind: match source {
+                    IpcError::ConnectionFailed => ApiErrorKind::CommandDispatchFailed,
+                    IpcError::InvalidInput => ApiErrorKind::InvalidInput,
+                    IpcError::InvalidEvent => ApiErrorKind::ProtocolMismatch,
+                },
+                operation: Some(operation),
+                detail: Some(format!("{source:?}")),
+            },
+        }
+    }
+}
+
+fn backend_error_connect_timeout(source: IpcError) -> BackendErrorInfo {
+    BackendErrorInfo {
+        kind: ApiErrorKind::ConnectTimeout,
+        operation: None,
+        detail: Some(format!("{source:?}")),
+    }
+}
+
+fn backend_error_event(source: IpcError) -> BackendErrorInfo {
+    let kind = match source {
+        IpcError::InvalidEvent => ApiErrorKind::ProtocolMismatch,
+        IpcError::InvalidInput => ApiErrorKind::InvalidInput,
+        IpcError::ConnectionFailed => ApiErrorKind::EventProcessingFailed,
+    };
+
+    BackendErrorInfo {
+        kind,
+        operation: None,
+        detail: Some(format!("{source:?}")),
+    }
 }
 
 impl Backend for ChromiumBackend {
@@ -68,9 +114,7 @@ impl ChromiumBackend {
                         let mut no_forward = |_| (None, Vec::new());
                         dispatcher.stop(
                             event_tx,
-                            BackendStopReason::Error {
-                                message: format!("IPC connect timed out: {err:?}"),
-                            },
+                            BackendStopReason::Error(backend_error_connect_timeout(err)),
                             &mut no_forward,
                         );
 
@@ -196,9 +240,7 @@ impl ChromiumBackend {
                     }
                 }
                 Err(err) => {
-                    return Some(BackendStopReason::Error {
-                        message: format!("IPC event error: {err:?}"),
-                    });
+                    return Some(BackendStopReason::Error(backend_error_event(err)));
                 }
             }
         }
@@ -293,7 +335,7 @@ impl ChromiumBackend {
         match Self::handle_command(command, client, event_tx) {
             Ok(Some(reason)) => Some(reason),
             Ok(None) => None,
-            Err(message) => Some(BackendStopReason::Error { message }),
+            Err(err) => Some(BackendStopReason::Error(err.into_backend_error_info())),
         }
     }
 
@@ -301,23 +343,33 @@ impl ChromiumBackend {
         command: BrowserCommand,
         client: &mut IpcClient,
         event_tx: &Sender<BrowserEvent>,
-    ) -> Result<Option<BackendStopReason>, String> {
+    ) -> Result<Option<BackendStopReason>, CommandExecutionError> {
         match command {
             BrowserCommand::Shutdown { request_id } => client
                 .request_shutdown(request_id)
                 .map(|_| None)
-                .map_err(|err| format!("RequestShutdown failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::Shutdown,
+                    source,
+                }),
             BrowserCommand::ConfirmShutdown {
                 request_id,
                 proceed,
             } => client
                 .confirm_shutdown(request_id, proceed)
                 .map(|_| None)
-                .map_err(|err| format!("ConfirmShutdown failed: {err:?}")),
-            BrowserCommand::ForceShutdown => client
-                .force_shutdown()
-                .map(|_| None)
-                .map_err(|err| format!("ForceShutdown failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::ConfirmShutdown,
+                    source,
+                }),
+            BrowserCommand::ForceShutdown => {
+                client.force_shutdown().map(|_| None).map_err(|source| {
+                    CommandExecutionError::IpcCall {
+                        operation: Operation::ForceShutdown,
+                        source,
+                    }
+                })
+            }
             BrowserCommand::ConfirmBeforeUnload {
                 web_page_id,
                 request_id,
@@ -325,7 +377,10 @@ impl ChromiumBackend {
             } => client
                 .confirm_beforeunload(web_page_id, request_id, proceed)
                 .map(|_| None)
-                .map_err(|err| format!("ConfirmBeforeUnload failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::ConfirmBeforeUnload,
+                    source,
+                }),
             BrowserCommand::CreateWebPage {
                 request_id,
                 initial_url,
@@ -337,7 +392,10 @@ impl ChromiumBackend {
                 client
                     .create_web_page(request_id, &url, &profile)
                     .map(|_| None)
-                    .map_err(|err| format!("CreateWebPage failed: {err:?}"))
+                    .map_err(|source| CommandExecutionError::IpcCall {
+                        operation: Operation::CreateWebPage,
+                        source,
+                    })
             }
             BrowserCommand::ResizeWebPage {
                 web_page_id,
@@ -346,14 +404,20 @@ impl ChromiumBackend {
             } => client
                 .set_web_page_size(web_page_id, width, height)
                 .map(|_| None)
-                .map_err(|err| format!("SetWebPageSize failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::ResizeWebPage,
+                    source,
+                }),
             BrowserCommand::ListProfiles => match client.list_profiles() {
                 Ok(profiles) => {
                     _ = event_tx.send_blocking(BrowserEvent::ProfilesListed { profiles });
 
                     Ok(None)
                 }
-                Err(err) => Err(format!("ListProfiles failed: {err:?}")),
+                Err(source) => Err(CommandExecutionError::IpcCall {
+                    operation: Operation::ListProfiles,
+                    source,
+                }),
             },
             BrowserCommand::SendKeyEvent {
                 web_page_id,
@@ -362,45 +426,72 @@ impl ChromiumBackend {
             } => client
                 .send_key_event(web_page_id, &event, &commands)
                 .map(|_| None)
-                .map_err(|err| format!("SendKeyEvent failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::SendKeyEvent,
+                    source,
+                }),
             BrowserCommand::SendMouseEvent { web_page_id, event } => client
                 .send_mouse_event(web_page_id, &event)
                 .map(|_| None)
-                .map_err(|err| format!("SendMouseEvent failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::SendMouseEvent,
+                    source,
+                }),
             BrowserCommand::SendMouseWheelEvent { web_page_id, event } => client
                 .send_mouse_wheel_event(web_page_id, &event)
                 .map(|_| None)
-                .map_err(|err| format!("SendMouseWheelEvent failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::SendMouseWheelEvent,
+                    source,
+                }),
             BrowserCommand::SendDragUpdate { update } => client
                 .send_drag_update(&update)
                 .map(|_| None)
-                .map_err(|err| format!("SendDragUpdate failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::SendDragUpdate,
+                    source,
+                }),
             BrowserCommand::SendDragDrop { drop } => client
                 .send_drag_drop(&drop)
                 .map(|_| None)
-                .map_err(|err| format!("SendDragDrop failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::SendDragDrop,
+                    source,
+                }),
             BrowserCommand::SendDragCancel {
                 session_id,
                 web_page_id,
             } => client
                 .send_drag_cancel(session_id, web_page_id)
                 .map(|_| None)
-                .map_err(|err| format!("SendDragCancel failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::SendDragCancel,
+                    source,
+                }),
             BrowserCommand::SetComposition { composition } => client
                 .set_composition(&composition)
                 .map(|_| None)
-                .map_err(|err| format!("SetComposition failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::SetComposition,
+                    source,
+                }),
             BrowserCommand::CommitText { commit } => client
                 .commit_text(&commit)
                 .map(|_| None)
-                .map_err(|err| format!("CommitText failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::CommitText,
+                    source,
+                }),
             BrowserCommand::FinishComposingText {
                 web_page_id,
                 behavior,
             } => client
                 .finish_composing_text(web_page_id, behavior)
                 .map(|_| None)
-                .map_err(|err| format!("FinishComposingText failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::FinishComposingText,
+                    source,
+                }),
             BrowserCommand::ExecuteContextMenuCommand {
                 menu_id,
                 command_id,
@@ -408,48 +499,75 @@ impl ChromiumBackend {
             } => client
                 .execute_context_menu_command(menu_id, command_id, event_flags)
                 .map(|_| None)
-                .map_err(|err| format!("ExecuteContextMenuCommand failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::ExecuteContextMenuCommand,
+                    source,
+                }),
             BrowserCommand::DismissContextMenu { menu_id } => client
                 .dismiss_context_menu(menu_id)
                 .map(|_| None)
-                .map_err(|err| format!("DismissContextMenu failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::DismissContextMenu,
+                    source,
+                }),
             BrowserCommand::RequestCloseWebPage { web_page_id } => client
                 .request_close_web_page(web_page_id)
                 .map(|_| None)
-                .map_err(|err| format!("RequestCloseWebPage failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::RequestCloseWebPage,
+                    source,
+                }),
             BrowserCommand::Navigate { web_page_id, url } => client
                 .navigate(web_page_id, &url)
                 .map(|_| None)
-                .map_err(|err| format!("Navigate failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::Navigate,
+                    source,
+                }),
             BrowserCommand::GoBack { web_page_id } => client
                 .go_back(web_page_id)
                 .map(|_| None)
-                .map_err(|err| format!("GoBack failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::GoBack,
+                    source,
+                }),
             BrowserCommand::GoForward { web_page_id } => client
                 .go_forward(web_page_id)
                 .map(|_| None)
-                .map_err(|err| format!("GoForward failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::GoForward,
+                    source,
+                }),
             BrowserCommand::Reload {
                 web_page_id,
                 ignore_cache,
             } => client
                 .reload(web_page_id, ignore_cache)
                 .map(|_| None)
-                .map_err(|err| format!("Reload failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::Reload,
+                    source,
+                }),
             BrowserCommand::GetWebPageDomHtml {
                 web_page_id,
                 request_id,
             } => client
                 .get_web_page_dom_html(web_page_id, request_id)
                 .map(|_| None)
-                .map_err(|err| format!("GetWebPageDomHtml failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::GetWebPageDomHtml,
+                    source,
+                }),
             BrowserCommand::SetWebPageFocus {
                 web_page_id,
                 focused,
             } => client
                 .set_web_page_focus(web_page_id, focused)
                 .map(|_| None)
-                .map_err(|err| format!("SetWebPageFocus failed: {err:?}")),
+                .map_err(|source| CommandExecutionError::IpcCall {
+                    operation: Operation::SetWebPageFocus,
+                    source,
+                }),
         }
     }
 }
