@@ -1,4 +1,4 @@
-# CBF (Chromium Backend Framework)
+# CBF (Chromium Browser Framework)
 
 CBF is a Rust-oriented browser backend framework built on Chromium.
 It provides a stable, application-agnostic API surface for controlling web pages and receiving browser events, while isolating Chromium/Mojo implementation details behind an FFI boundary.

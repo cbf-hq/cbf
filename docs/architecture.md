@@ -10,7 +10,7 @@ Related documents:
 
 ## 1. Purpose
 
-CBF (Chromium Backend Framework) is a browser backend framework for Rust applications.
+CBF (Chromium Browser Framework) is a browser backend framework for Rust applications.
 Its role is to expose a stable, browser-generic API while hiding Chromium- and Mojo-specific implementation details behind a low-level boundary.
 
 CBF is designed to be product-agnostic and reusable across multiple applications.

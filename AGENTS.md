@@ -2,7 +2,7 @@
 
 ## Project
 
-CBF (Chromium Backend Framework) is a reusable browser backend framework for Rust.
+CBF (Chromium Browser Framework) is a reusable browser backend framework for Rust.
 This repository is for framework development, not product-specific app development.
 
 ## Language Rules
