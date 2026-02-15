@@ -52,6 +52,26 @@ pub struct ImeTextSpan {
     pub should_hide_suggestion_menu: bool,
 }
 
+impl ImeTextSpan {
+    /// Create a span with no visual decorations to avoid default IME highlights.
+    pub fn no_decoration(type_: ImeTextSpanType, start_offset: u32, end_offset: u32) -> Self {
+        Self {
+            type_,
+            start_offset,
+            end_offset,
+            underline_color: 0,
+            thickness: ImeTextSpanThickness::None,
+            underline_style: ImeTextSpanUnderlineStyle::None,
+            text_color: 0,
+            background_color: 0,
+            suggestion_highlight_color: 0,
+            remove_on_finish_composing: false,
+            interim_char_selection: false,
+            should_hide_suggestion_menu: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Current IME composition state for a web page.
 pub struct ImeComposition {
