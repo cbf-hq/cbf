@@ -7,12 +7,19 @@ use crate::{
 
 use super::{BackendDelegate, CommandDecision, DelegateContext, EventDecision};
 
+/// Drives a [`BackendDelegate`] and applies its decisions to runtime flow.
+///
+/// The dispatcher owns a delegate and a [`DelegateContext`], then coordinates:
+/// - command dispatch and optional forwarding to backend transport
+/// - event dispatch to the application-facing stream
+/// - queued follow-up work emitted by delegate hooks
 pub struct DelegateDispatcher<D: BackendDelegate> {
     delegate: D,
     ctx: DelegateContext,
 }
 
 impl<D: BackendDelegate> DelegateDispatcher<D> {
+    /// Creates a dispatcher for a delegate.
     pub fn new(delegate: D) -> Self {
         Self {
             delegate,
@@ -20,10 +27,15 @@ impl<D: BackendDelegate> DelegateDispatcher<D> {
         }
     }
 
+    /// Runs the delegate idle hook once.
     pub fn on_idle(&mut self) {
         self.delegate.on_idle(&mut self.ctx);
     }
 
+    /// Dispatches one command through the delegate pipeline.
+    ///
+    /// Returns a stop reason when either the delegate requests stop or the
+    /// forward path reports terminal failure.
     pub fn dispatch_command<F>(
         &mut self,
         command: BrowserCommand,
@@ -50,6 +62,7 @@ impl<D: BackendDelegate> DelegateDispatcher<D> {
         self.flush(event_tx, forward)
     }
 
+    /// Dispatches one event through the delegate pipeline.
     pub fn dispatch_event(
         &mut self,
         event: BrowserEvent,
@@ -58,6 +71,7 @@ impl<D: BackendDelegate> DelegateDispatcher<D> {
         self.emit_event(event, event_tx)
     }
 
+    /// Flushes queued commands/events produced via [`DelegateContext`].
     pub fn flush<F>(
         &mut self,
         event_tx: &Sender<BrowserEvent>,
@@ -89,6 +103,7 @@ impl<D: BackendDelegate> DelegateDispatcher<D> {
         None
     }
 
+    /// Stops the dispatcher and emits a final `BackendStopped` event.
     pub fn stop<F>(
         &mut self,
         event_tx: &Sender<BrowserEvent>,
