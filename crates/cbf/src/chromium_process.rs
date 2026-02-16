@@ -25,6 +25,12 @@ pub struct ChromiumOptions {
     /// Path to the log file.
     /// If provided, passed as `--log-file=<path>`.
     pub log_file: Option<String>,
+    /// Chromium VLOG verbosity.
+    /// If provided, passed as `--v=<level>`.
+    pub v: Option<i32>,
+    /// Per-module VLOG verbosity.
+    /// If provided, passed as `--vmodule=<pattern1=N,...>`.
+    pub vmodule: Option<String>,
     /// The name of the IPC channel to use.
     /// Passed as `--cbf-ipc-channel=<name>`.
     pub channel_name: String,
@@ -89,6 +95,14 @@ pub fn start_chromium(
 
     if let Some(log_file) = &options.log_file {
         command.arg(format!("--log-file={}", log_file));
+    }
+
+    if let Some(v) = options.v {
+        command.arg(format!("--v={}", v));
+    }
+
+    if let Some(vmodule) = &options.vmodule {
+        command.arg(format!("--vmodule={}", vmodule));
     }
 
     // Add extra arguments

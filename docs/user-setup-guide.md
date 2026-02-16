@@ -51,6 +51,8 @@ let (session, events, mut process) = start_chromium(ChromiumOptions {
     user_data_dir: Some("./.cbf-user-data".owned()),
     enable_logging: Some("stderr".owned()),
     log_file: Some("/tmp/chromium_debug.log".owned()),
+    v: None,
+    vmodule: None,
     channel_name: "exampleapp".owned(),
     extra_args: vec![],
 })?;
