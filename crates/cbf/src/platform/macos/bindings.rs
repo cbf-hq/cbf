@@ -12,8 +12,8 @@ use objc2_quartz_core::CALayer;
 pub type ContextId = std::ffi::c_uint;
 
 extern_class!(
-    #[unsafe(super(CALayer))]
     /// ObjC wrapper for CALayerHost used to host the Chromium surface.
+    #[unsafe(super(CALayer))]
     pub struct CALayerHost;
 );
 
@@ -27,12 +27,12 @@ impl CALayerHost {
 
 impl CALayerHost {
     extern_methods!(
-        #[unsafe(method(contextId))]
         /// Get the current CALayerHost context id.
+        #[unsafe(method(contextId))]
         pub fn contextId(&self) -> ContextId;
 
-        #[unsafe(method(setContextId:))]
         /// Set the CALayerHost context id.
+        #[unsafe(method(setContextId:))]
         pub unsafe fn setContextId(&self, contextId: ContextId);
     );
 }
