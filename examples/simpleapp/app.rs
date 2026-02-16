@@ -7,7 +7,10 @@ use cbf::{
     BrowserHandle, EventStream,
     chromium_process::{ChromiumProcess, start_chromium},
     event::BrowserEvent,
-    middleware::{MiddlewareBuilder, lifecycle::LifecycleLayer, logging::LoggingLayerBuilder},
+    middleware::{
+        MiddlewareBuilder, error_guard::ErrorGuardLayer, lifecycle::LifecycleLayer,
+        logging::LoggingLayerBuilder,
+    },
 };
 use tracing::{Level, error, warn};
 use winit::{
@@ -149,9 +152,11 @@ pub(crate) fn run_with_platform<P: PlatformApp + 'static>() {
 
     // Build the middleware stack for the browser session.
     // - LifecycleLayer: Manages browser lifecycle and reconnection
+    // - ErrorGuardLayer: Stops backend on severe/repeated backend errors
     // - LoggingLayer: Logs commands, events, and teardown for debugging
     let delegate = match MiddlewareBuilder::new()
         .layer(LifecycleLayer::new())
+        .layer(ErrorGuardLayer::new())
         .layer(
             LoggingLayerBuilder::new("simpleapp")
                 .command_level(Level::DEBUG)

@@ -1,4 +1,5 @@
 pub mod auto_dialog_responder;
+pub mod error_guard;
 pub mod lifecycle;
 pub mod logging;
 

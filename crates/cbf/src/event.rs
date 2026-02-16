@@ -18,6 +18,13 @@ pub enum BrowserEvent {
     /// バックエンドが停止した（終了、切断、クラッシュ等）。
     BackendStopped { reason: BackendStopReason },
 
+    /// A backend error was observed and surfaced as an event.
+    /// バックエンドエラーが観測され、イベントとして通知された。
+    BackendError {
+        info: BackendErrorInfo,
+        terminal_hint: bool,
+    },
+
     /// An event scoped to a specific web page (tab).
     /// 特定のウェブページ（タブ）に関連するイベント
     WebPage {

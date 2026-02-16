@@ -72,6 +72,13 @@ fn backend_error_event(source: IpcError) -> BackendErrorInfo {
     }
 }
 
+fn backend_error_terminal_hint(kind: ApiErrorKind) -> bool {
+    matches!(
+        kind,
+        ApiErrorKind::ConnectTimeout | ApiErrorKind::ProtocolMismatch
+    )
+}
+
 impl Backend for ChromiumBackend {
     fn connect<D: BackendDelegate>(
         self,
@@ -111,12 +118,18 @@ impl ChromiumBackend {
                 Ok(client) => break client,
                 Err(err) => {
                     if start_time.elapsed() > timeout {
+                        let info = backend_error_connect_timeout(err);
+                        let stop_reason = dispatcher
+                            .dispatch_event(
+                                BrowserEvent::BackendError {
+                                    terminal_hint: true,
+                                    info: info.clone(),
+                                },
+                                event_tx,
+                            )
+                            .unwrap_or(BackendStopReason::Error(info));
                         let mut no_forward = |_| (None, Vec::new());
-                        dispatcher.stop(
-                            event_tx,
-                            BackendStopReason::Error(backend_error_connect_timeout(err)),
-                            &mut no_forward,
-                        );
+                        dispatcher.stop(event_tx, stop_reason, &mut no_forward);
 
                         return None;
                     }
@@ -133,12 +146,7 @@ impl ChromiumBackend {
             },
             event_tx,
         ) {
-            let mut forward = |command| {
-                (
-                    Self::execute_command(command, &mut client, event_tx),
-                    Vec::new(),
-                )
-            };
+            let mut forward = |command| Self::execute_command(command, &mut client, event_tx);
             dispatcher.stop(event_tx, stop_reason, &mut forward);
             return None;
         }
@@ -157,7 +165,7 @@ impl ChromiumBackend {
 
         macro_rules! make_forward {
             () => {
-                |command| (Self::execute_command(command, client, event_tx), Vec::new())
+                |command| Self::execute_command(command, client, event_tx)
             };
         }
 
@@ -240,7 +248,17 @@ impl ChromiumBackend {
                     }
                 }
                 Err(err) => {
-                    return Some(BackendStopReason::Error(backend_error_event(err)));
+                    let info = backend_error_event(err);
+                    let terminal_hint = backend_error_terminal_hint(info.kind);
+                    if let Some(reason) = dispatcher.dispatch_event(
+                        BrowserEvent::BackendError {
+                            info,
+                            terminal_hint,
+                        },
+                        event_tx,
+                    ) {
+                        return Some(reason);
+                    }
                 }
             }
         }
@@ -301,8 +319,7 @@ impl ChromiumBackend {
                     }
 
                     state.resizes_in_flight.insert(web_page_id);
-                    let mut forward =
-                        |command| (Self::execute_command(command, client, event_tx), Vec::new());
+                    let mut forward = |command| Self::execute_command(command, client, event_tx);
                     if let Some(reason) = dispatcher.dispatch_command(
                         BrowserCommand::ResizeWebPage {
                             web_page_id,
@@ -319,8 +336,7 @@ impl ChromiumBackend {
                 continue;
             }
 
-            let mut forward =
-                |command| (Self::execute_command(command, client, event_tx), Vec::new());
+            let mut forward = |command| Self::execute_command(command, client, event_tx);
             if let Some(reason) = dispatcher.dispatch_command(command, event_tx, &mut forward) {
                 return Some(reason);
             }
@@ -331,11 +347,21 @@ impl ChromiumBackend {
         command: BrowserCommand,
         client: &mut IpcClient,
         event_tx: &Sender<BrowserEvent>,
-    ) -> Option<BackendStopReason> {
+    ) -> (Option<BackendStopReason>, Vec<BrowserEvent>) {
         match Self::handle_command(command, client, event_tx) {
-            Ok(Some(reason)) => Some(reason),
-            Ok(None) => None,
-            Err(err) => Some(BackendStopReason::Error(err.into_backend_error_info())),
+            Ok(Some(reason)) => (Some(reason), Vec::new()),
+            Ok(None) => (None, Vec::new()),
+            Err(err) => {
+                let info = err.into_backend_error_info();
+                let terminal_hint = backend_error_terminal_hint(info.kind);
+                (
+                    None,
+                    vec![BrowserEvent::BackendError {
+                        info,
+                        terminal_hint,
+                    }],
+                )
+            }
         }
     }
 

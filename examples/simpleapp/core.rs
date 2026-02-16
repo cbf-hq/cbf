@@ -188,6 +188,16 @@ impl CoreState {
                 }
                 vec![CoreAction::ExitEventLoop]
             }
+            BrowserEvent::BackendError {
+                info,
+                terminal_hint,
+            } => {
+                warn!(
+                    "backend error event: {}, terminal_hint={terminal_hint}",
+                    info
+                );
+                Vec::new()
+            }
             BrowserEvent::WebPage {
                 web_page_id, event, ..
             } => self.handle_web_page_event(web_page_id, event),
