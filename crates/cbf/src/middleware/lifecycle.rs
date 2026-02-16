@@ -1,3 +1,9 @@
+//! Lifecycle coordination middleware.
+//!
+//! This module provides the safety baseline for dialog-related lifecycle edges.
+//! It is intended to be present in standard stacks and acts as the anchor layer
+//! that keeps teardown/page-close flows consistent before optional policies are applied.
+
 use std::collections::HashSet;
 
 use crate::{
@@ -9,10 +15,20 @@ use crate::{
 
 use super::DelegateLayer;
 
+/// Lifecycle safety layer for dialog-related cleanup.
+///
+/// This layer tracks pending `beforeunload` dialogs and ensures they are
+/// resolved with `proceed: false` when:
+/// - the related page is closed, or
+/// - the backend is tearing down.
+///
+/// Include this layer in normal middleware stacks. `MiddlewareBuilder` requires
+/// it by default unless unsafe mode is explicitly enabled.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LifecycleLayer;
 
 impl LifecycleLayer {
+    /// Creates a lifecycle layer.
     pub fn new() -> Self {
         Self
     }

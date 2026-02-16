@@ -1,3 +1,9 @@
+//! Timeout policy middleware for unresolved unload dialogs.
+//!
+//! This module is an optional resilience layer that complements lifecycle cleanup.
+//! It converts prolonged user-code silence into deterministic command responses,
+//! which helps avoid indefinitely pending unload flows in long-running sessions.
+
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -12,6 +18,13 @@ use crate::{
 
 use super::DelegateLayer;
 
+/// Timeout-based responder for `beforeunload` dialogs.
+///
+/// This layer watches `beforeunload` dialog requests and auto-enqueues
+/// `ConfirmBeforeUnload` when the configured timeout expires.
+///
+/// Use this as a safeguard when application logic may delay or miss
+/// manual dialog responses.
 #[derive(Debug, Clone)]
 pub struct AutoDialogResponderLayer {
     timeout: Option<Duration>,
@@ -19,6 +32,11 @@ pub struct AutoDialogResponderLayer {
 }
 
 impl AutoDialogResponderLayer {
+    /// Creates a layer with no timeout behavior.
+    ///
+    /// Defaults:
+    /// - `timeout`: disabled (`None`)
+    /// - `proceed_on_timeout`: `false` (cancel dialog)
     pub fn new() -> Self {
         Self {
             timeout: None,
@@ -26,11 +44,13 @@ impl AutoDialogResponderLayer {
         }
     }
 
+    /// Enables timeout handling for pending `beforeunload` dialogs.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
+    /// Sets whether auto-response should proceed (`true`) or cancel (`false`).
     pub fn proceed_on_timeout(mut self, proceed: bool) -> Self {
         self.proceed = proceed;
         self

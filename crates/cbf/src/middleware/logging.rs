@@ -1,3 +1,9 @@
+//! Tracing integration middleware for delegate pipelines.
+//!
+//! This module provides operational visibility for middleware stacks and is
+//! typically composed with lifecycle and safety-oriented layers. Use it to
+//! diagnose command/event flow and policy outcomes without changing business logic.
+
 use tracing::{Level, debug, error, info, trace, warn};
 
 use crate::{
@@ -8,6 +14,10 @@ use crate::{
 
 use super::DelegateLayer;
 
+/// Observability layer that emits tracing logs for delegate activity.
+///
+/// This layer logs incoming commands/events, corresponding decisions, and
+/// teardown reasons through the `tracing` crate.
 #[derive(Debug, Clone, Copy)]
 pub struct LoggingLayer {
     command_level: Level,
@@ -17,11 +27,16 @@ pub struct LoggingLayer {
 }
 
 impl LoggingLayer {
-    /// Create a logging middleware.
+    /// Creates a logging layer with default log levels.
     ///
     /// Note: `tracing` requires callsite targets to be compile-time constants,
     /// so `target` is recorded as a structured field (`log_target`) rather than
     /// used as the tracing callsite target itself.
+    ///
+    /// Defaults:
+    /// - `command_level`: `DEBUG`
+    /// - `event_level`: `DEBUG`
+    /// - `teardown_level`: `INFO`
     pub fn new(target: &'static str) -> Self {
         Self {
             command_level: Level::DEBUG,
@@ -31,16 +46,19 @@ impl LoggingLayer {
         }
     }
 
+    /// Sets the log level used for command reception and command decisions.
     pub fn command_level(mut self, level: Level) -> Self {
         self.command_level = level;
         self
     }
 
+    /// Sets the log level used for event reception and event decisions.
     pub fn event_level(mut self, level: Level) -> Self {
         self.event_level = level;
         self
     }
 
+    /// Sets the log level used for delegate teardown logging.
     pub fn teardown_level(mut self, level: Level) -> Self {
         self.teardown_level = level;
         self
