@@ -9,7 +9,7 @@ use cbf::{
     event::BrowserEvent,
     middleware::{
         MiddlewareBuilder, error_guard::ErrorGuardLayer, lifecycle::LifecycleLayer,
-        logging::LoggingLayerBuilder,
+        logging::LoggingLayer,
     },
 };
 use tracing::{Level, error, warn};
@@ -158,11 +158,10 @@ pub(crate) fn run_with_platform<P: PlatformApp + 'static>() {
         .layer(LifecycleLayer::new())
         .layer(ErrorGuardLayer::new())
         .layer(
-            LoggingLayerBuilder::new("simpleapp")
+            LoggingLayer::new("simpleapp")
                 .command_level(Level::DEBUG)
                 .event_level(Level::DEBUG)
-                .teardown_level(Level::INFO)
-                .build(),
+                .teardown_level(Level::INFO),
         )
         .build()
     {

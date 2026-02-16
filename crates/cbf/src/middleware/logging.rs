@@ -22,37 +22,6 @@ impl LoggingLayer {
     /// Note: `tracing` requires callsite targets to be compile-time constants,
     /// so `target` is recorded as a structured field (`log_target`) rather than
     /// used as the tracing callsite target itself.
-    pub fn new(level: Level, target: &'static str) -> Self {
-        Self {
-            command_level: level,
-            event_level: level,
-            teardown_level: level,
-            target,
-        }
-    }
-}
-
-impl DelegateLayer for LoggingLayer {
-    fn wrap(self: Box<Self>, inner: Box<dyn BackendDelegate>) -> Box<dyn BackendDelegate> {
-        Box::new(Logging {
-            inner,
-            command_level: self.command_level,
-            event_level: self.event_level,
-            teardown_level: self.teardown_level,
-            target: self.target,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct LoggingLayerBuilder {
-    command_level: Level,
-    event_level: Level,
-    teardown_level: Level,
-    target: &'static str,
-}
-
-impl LoggingLayerBuilder {
     pub fn new(target: &'static str) -> Self {
         Self {
             command_level: Level::DEBUG,
@@ -76,14 +45,17 @@ impl LoggingLayerBuilder {
         self.teardown_level = level;
         self
     }
+}
 
-    pub fn build(self) -> LoggingLayer {
-        LoggingLayer {
+impl DelegateLayer for LoggingLayer {
+    fn wrap(self: Box<Self>, inner: Box<dyn BackendDelegate>) -> Box<dyn BackendDelegate> {
+        Box::new(Logging {
+            inner,
             command_level: self.command_level,
             event_level: self.event_level,
             teardown_level: self.teardown_level,
             target: self.target,
-        }
+        })
     }
 }
 
