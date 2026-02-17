@@ -633,12 +633,6 @@ pub fn convert_nsevent_to_mouse_wheel_event(
         );
     }
 
-    let phase = synthesize_mouse_wheel_phase(
-        nsview.as_ptr() as usize,
-        ffi_event.phase,
-        ffi_event.momentum_phase,
-    );
-
     MouseWheelEvent {
         modifiers: ffi_event.modifiers,
         position_in_widget_x: ffi_event.position_in_widget_x,
@@ -652,79 +646,8 @@ pub fn convert_nsevent_to_mouse_wheel_event(
         delta_y: ffi_event.delta_y,
         wheel_ticks_x: ffi_event.wheel_ticks_x,
         wheel_ticks_y: ffi_event.wheel_ticks_y,
-        phase,
+        phase: ffi_event.phase,
         momentum_phase: ffi_event.momentum_phase,
         delta_units: scroll_granularity_from_ffi(ffi_event.delta_units),
     }
-}
-
-#[cfg(target_os = "macos")]
-const PHASE_NONE: u32 = 0;
-#[cfg(target_os = "macos")]
-const PHASE_BEGAN: u32 = 1;
-#[cfg(target_os = "macos")]
-const PHASE_CHANGED: u32 = 2;
-#[cfg(target_os = "macos")]
-const PHASE_ENDED: u32 = 3;
-#[cfg(target_os = "macos")]
-const PHASE_CANCELLED: u32 = 4;
-
-#[cfg(target_os = "macos")]
-// Mouse wheels don't provide phase; treat a pause as a new gesture boundary.
-const SYNTHETIC_GESTURE_GAP_MS: u64 = 200;
-
-#[cfg(target_os = "macos")]
-#[derive(Debug, Clone, Copy)]
-struct MouseWheelPhaseState {
-    in_gesture: bool,
-    last_event_at: std::time::Instant,
-}
-
-#[cfg(target_os = "macos")]
-fn mouse_wheel_phase_states()
--> &'static std::sync::Mutex<std::collections::HashMap<usize, MouseWheelPhaseState>> {
-    use std::sync::OnceLock;
-
-    static STATES: OnceLock<
-        std::sync::Mutex<std::collections::HashMap<usize, MouseWheelPhaseState>>,
-    > = OnceLock::new();
-    STATES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
-#[cfg(target_os = "macos")]
-fn synthesize_mouse_wheel_phase(view_key: usize, phase: u32, momentum_phase: u32) -> u32 {
-    if phase != PHASE_NONE || momentum_phase != PHASE_NONE {
-        if let Ok(mut map) = mouse_wheel_phase_states().lock() {
-            let now = std::time::Instant::now();
-            let entry = map.entry(view_key).or_insert_with(|| MouseWheelPhaseState {
-                in_gesture: false,
-                last_event_at: now,
-            });
-            entry.last_event_at = now;
-            match phase {
-                PHASE_BEGAN | PHASE_CHANGED => entry.in_gesture = true,
-                PHASE_ENDED | PHASE_CANCELLED => entry.in_gesture = false,
-                _ => {}
-            }
-        }
-        return phase;
-    }
-
-    let now = std::time::Instant::now();
-    let mut began = true;
-
-    if let Ok(mut map) = mouse_wheel_phase_states().lock() {
-        let entry = map.entry(view_key).or_insert_with(|| MouseWheelPhaseState {
-            in_gesture: false,
-            last_event_at: now,
-        });
-        let gap = now.duration_since(entry.last_event_at);
-        let is_new_gesture =
-            !entry.in_gesture || gap > std::time::Duration::from_millis(SYNTHETIC_GESTURE_GAP_MS);
-        began = is_new_gesture;
-        entry.in_gesture = true;
-        entry.last_event_at = now;
-    }
-
-    if began { PHASE_BEGAN } else { PHASE_CHANGED }
 }

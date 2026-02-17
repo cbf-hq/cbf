@@ -1,4 +1,4 @@
-From 5410448f5b5c242b0266cb188578863ebecc09fa Mon Sep 17 00:00:00 2001
+From 0f57455e101675a6bfe6b32d16f3509b11d7a183 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 5 Feb 2026 11:28:25 +0900
 Subject: [PATCH] CBF bridge series
@@ -10,13 +10,13 @@ Subject: [PATCH] CBF bridge series
  chrome/browser/cbf/bridge/cbf_bridge.h        |  112 ++
  .../browser/cbf/bridge/cbf_bridge_client.cc   |  116 ++
  chrome/browser/cbf/bridge/cbf_bridge_client.h |   63 +
- .../cbf/bridge/cbf_bridge_client_impl.cc      |  301 ++++
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |  301 +++
  .../cbf/bridge/cbf_bridge_client_impl.h       |  159 ++
  .../cbf/bridge/cbf_bridge_context_menu.cc     |  103 ++
  .../cbf/bridge/cbf_bridge_converters.cc       |  179 ++
  .../cbf/bridge/cbf_bridge_converters.h        |   27 +
  .../browser/cbf/bridge/cbf_bridge_events.cc   |  387 ++++
- chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  499 ++++++
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  499 +++++
  chrome/browser/cbf/bridge/cbf_bridge_input.cc |  659 +++++++
  .../browser/cbf/bridge/cbf_bridge_internal.h  |   26 +
  chrome/browser/cbf/bridge/cbf_bridge_mac.mm   |  224 +++
@@ -25,7 +25,7 @@ Subject: [PATCH] CBF bridge series
  .../browser/cbf/bridge/cbf_bridge_support.cc  |   54 +
  .../browser/cbf/bridge/cbf_bridge_support.h   |   21 +
  .../browser/cbf/bridge/cbf_bridge_web_page.cc |  451 +++++
- chrome/browser/cbf/cbf_browser_service.cc     |  300 ++++
+ chrome/browser/cbf/cbf_browser_service.cc     |  300 +++
  chrome/browser/cbf/cbf_browser_service.h      |   74 +
  .../browser/cbf/cbf_ca_context_id_observer.cc |  139 ++
  .../browser/cbf/cbf_ca_context_id_observer.h  |   65 +
@@ -35,8 +35,8 @@ Subject: [PATCH] CBF bridge series
  chrome/browser/cbf/cbf_features.h             |   12 +
  .../cbf/cbf_java_script_dialog_manager.cc     |   91 +
  .../cbf/cbf_java_script_dialog_manager.h      |   51 +
- chrome/browser/cbf/cbf_profile_service.cc     | 1552 +++++++++++++++++
- chrome/browser/cbf/cbf_profile_service.h      |  201 +++
+ chrome/browser/cbf/cbf_profile_service.cc     | 1626 +++++++++++++++++
+ chrome/browser/cbf/cbf_profile_service.h      |  214 +++
  chrome/browser/cbf/cbf_service.cc             |   79 +
  chrome/browser/cbf/cbf_service.h              |   36 +
  chrome/browser/cbf/cbf_surface_provider_mac.h |   33 +
@@ -66,7 +66,7 @@ Subject: [PATCH] CBF bridge series
  .../public/browser/web_contents_delegate.cc   |   13 +
  .../public/browser/web_contents_delegate.h    |   21 +
  ui/compositor/compositor.h                    |    1 +
- 62 files changed, 7618 insertions(+), 1 deletion(-)
+ 62 files changed, 7705 insertions(+), 1 deletion(-)
  create mode 100644 chrome/browser/cbf/BUILD.gn
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge.cc
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge.h
@@ -4846,10 +4846,10 @@ index 0000000000000..8087933b94555
 +#endif  // CHROME_BROWSER_CBF_CBF_JAVA_SCRIPT_DIALOG_MANAGER_H_
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
 new file mode 100644
-index 0000000000000..e1cd339db6e10
+index 0000000000000..f05bd1f0145d6
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
-@@ -0,0 +1,1552 @@
+@@ -0,0 +1,1626 @@
 +#include "chrome/browser/cbf/cbf_profile_service.h"
 +
 +#include <algorithm>
@@ -4940,6 +4940,8 @@ index 0000000000000..e1cd339db6e10
 +}  // namespace cbf
 +
 +namespace {
++
++constexpr base::TimeDelta kSyntheticWheelPhaseGap = base::Milliseconds(120);
 +
 +cbf::mojom::CbfMenuItemType ToCbfMenuItemType(ui::MenuModel::ItemType type) {
 +  switch (type) {
@@ -5253,6 +5255,11 @@ index 0000000000000..e1cd339db6e10
 +  return ui::ScrollGranularity::kScrollByPixel;
 +}
 +
++bool HasWheelPhase(const blink::WebMouseWheelEvent& event) {
++  return event.phase != blink::WebMouseWheelEvent::kPhaseNone ||
++         event.momentum_phase != blink::WebMouseWheelEvent::kPhaseNone;
++}
++
 +void FillText(std::array<char16_t, blink::WebKeyboardEvent::kTextLengthCap>& out,
 +              const std::string& text_utf8) {
 +  if (text_utf8.empty()) {
@@ -5402,6 +5409,8 @@ index 0000000000000..e1cd339db6e10
 +CbfProfileService::DragSessionState& CbfProfileService::DragSessionState::
 +operator=(DragSessionState&&) = default;
 +CbfProfileService::DragSessionState::~DragSessionState() = default;
++CbfProfileService::WheelPhaseState::WheelPhaseState() = default;
++CbfProfileService::WheelPhaseState::~WheelPhaseState() = default;
 +
 +CbfProfileService::~CbfProfileService() {
 +  text_input_observations_.RemoveAllObservations();
@@ -5662,9 +5671,73 @@ index 0000000000000..e1cd339db6e10
 +  wheel_event.momentum_phase = static_cast<blink::WebMouseWheelEvent::Phase>(
 +      event->momentum_phase);
 +  wheel_event.delta_units = ToScrollGranularity(event->delta_units);
++  if (!HasWheelPhase(wheel_event)) {
++    auto& phase_state_ptr = wheel_phase_states_[event->web_page_id];
++    if (!phase_state_ptr) {
++      phase_state_ptr = std::make_unique<WheelPhaseState>();
++    }
++    WheelPhaseState& phase_state = *phase_state_ptr;
++
++    if (!phase_state.in_progress) {
++      wheel_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
++      phase_state.in_progress = true;
++    } else {
++      wheel_event.phase = blink::WebMouseWheelEvent::kPhaseChanged;
++    }
++    wheel_event.momentum_phase = blink::WebMouseWheelEvent::kPhaseNone;
++    phase_state.last_event = wheel_event;
++    phase_state.end_timer.Start(
++        FROM_HERE, kSyntheticWheelPhaseGap,
++        base::BindOnce(&CbfProfileService::SendSyntheticWheelEndedEvent,
++                       weak_factory_.GetWeakPtr(), event->web_page_id));
++  } else {
++    wheel_phase_states_.erase(event->web_page_id);
++  }
 +
 +  widget_impl->ForwardWheelEventWithLatencyInfo(wheel_event,
 +                                                ui::LatencyInfo());
++}
++
++void CbfProfileService::SendSyntheticWheelEndedEvent(WebPageId web_page_id) {
++  const auto state_it = wheel_phase_states_.find(web_page_id);
++  if (state_it == wheel_phase_states_.end()) {
++    return;
++  }
++
++  WheelPhaseState& phase_state = *state_it->second;
++  if (!phase_state.in_progress || !phase_state.last_event.has_value()) {
++    wheel_phase_states_.erase(state_it);
++    return;
++  }
++
++  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++  if (!web_contents) {
++    wheel_phase_states_.erase(state_it);
++    return;
++  }
++  content::RenderWidgetHost* widget_host =
++      ResolveInputRenderWidgetHost(web_contents);
++  if (!widget_host) {
++    wheel_phase_states_.erase(state_it);
++    return;
++  }
++  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++  if (!widget_impl) {
++    wheel_phase_states_.erase(state_it);
++    return;
++  }
++
++  blink::WebMouseWheelEvent ended_event = *phase_state.last_event;
++  ended_event.SetTimeStamp(base::TimeTicks::Now());
++  ended_event.delta_x = 0;
++  ended_event.delta_y = 0;
++  ended_event.wheel_ticks_x = 0;
++  ended_event.wheel_ticks_y = 0;
++  ended_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
++  ended_event.momentum_phase = blink::WebMouseWheelEvent::kPhaseNone;
++
++  widget_impl->ForwardWheelEventWithLatencyInfo(ended_event, ui::LatencyInfo());
++  wheel_phase_states_.erase(state_it);
 +}
 +
 +void CbfProfileService::SendDragUpdate(mojom::CbfDragUpdatePtr update) {
@@ -6130,6 +6203,7 @@ index 0000000000000..e1cd339db6e10
 +}
 +
 +void CbfProfileService::NotifyWebPageClosed(WebPageId web_page_id) {
++  wheel_phase_states_.erase(web_page_id);
 +  if (!observer_ || web_page_id == kInvalidWebPageId) {
 +    return;
 +  }
@@ -6404,10 +6478,10 @@ index 0000000000000..e1cd339db6e10
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
 new file mode 100644
-index 0000000000000..b853eee442849
+index 0000000000000..56967234332b1
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_profile_service.h
-@@ -0,0 +1,201 @@
+@@ -0,0 +1,214 @@
 +#ifndef CHROME_BROWSER_CBF_CBF_PROFILE_SERVICE_H_
 +#define CHROME_BROWSER_CBF_CBF_PROFILE_SERVICE_H_
 +
@@ -6422,6 +6496,7 @@ index 0000000000000..b853eee442849
 +#include "base/memory/raw_ptr.h"
 +#include "base/memory/weak_ptr.h"
 +#include "base/scoped_multi_source_observation.h"
++#include "base/timer/timer.h"
 +#include "chrome/browser/cbf/cbf_java_script_dialog_manager.h"
 +#include "chrome/browser/cbf/cbf_tab_manager.h"
 +#include "chrome/browser/cbf/cbf_web_contents_delegate.h"
@@ -6433,6 +6508,7 @@ index 0000000000000..b853eee442849
 +#include "mojo/public/cpp/bindings/receiver_set.h"
 +#include "mojo/public/cpp/bindings/remote.h"
 +#include "third_party/blink/public/common/page/drag_operation.h"
++#include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
 +#include "third_party/blink/public/mojom/drag/drag.mojom-forward.h"
 +#include "third_party/skia/include/core/SkBitmap.h"
 +#include "ui/gfx/geometry/rect.h"
@@ -6573,11 +6649,21 @@ index 0000000000000..b853eee442849
 +    ui::mojom::DragOperation last_operation = ui::mojom::DragOperation::kNone;
 +  };
 +
++  struct WheelPhaseState {
++    WheelPhaseState();
++    ~WheelPhaseState();
++
++    base::OneShotTimer end_timer;
++    std::optional<blink::WebMouseWheelEvent> last_event;
++    bool in_progress = false;
++  };
++
 +  void RegisterTextInputManager(content::WebContents* web_contents,
 +                                WebPageId web_page_id);
 +  void NotifyImeBoundsUpdated(content::TextInputManager* text_input_manager,
 +                              bool include_composition,
 +                              bool include_selection);
++  void SendSyntheticWheelEndedEvent(WebPageId web_page_id);
 +
 +  void OnSelectionBoundsChanged(content::TextInputManager* text_input_manager,
 +                                content::RenderWidgetHostViewBase* updated_view) override;
@@ -6602,6 +6688,7 @@ index 0000000000000..b853eee442849
 +      beforeunload_reasons_;
 +  uint64_t next_drag_session_id_ = 1;
 +  base::flat_map<uint64_t, DragSessionState> drag_sessions_;
++  base::flat_map<WebPageId, std::unique_ptr<WheelPhaseState>> wheel_phase_states_;
 +
 +  base::WeakPtrFactory<CbfProfileService> weak_factory_{this};
 +};
