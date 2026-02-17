@@ -71,6 +71,8 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<ChromiumOptions, St
             .as_ref()
             .map(|path| path.to_string_lossy().to_string()),
         channel_name: cli.channel_name.clone(),
+        v: None,
+        vmodule: None,
         extra_args: Vec::new(),
     })
 }
