@@ -1,6 +1,9 @@
 use std::{env, path::PathBuf};
 
-use cbf::chromium_process::ChromiumOptions;
+use cbf::{
+    chromium_backend::ChromiumBackendOptions,
+    chromium_process::{ChromiumProcessOptions, StartChromiumOptions},
+};
 use clap::Parser;
 
 /// Command-line interface configuration for simpleapp.
@@ -39,11 +42,11 @@ pub(crate) fn parse_cli() -> Cli {
     Cli::parse()
 }
 
-/// Constructs [`ChromiumOptions`] from CLI arguments.
+/// Constructs [`StartChromiumOptions`] from CLI arguments.
 ///
 /// This function resolves the Chromium executable path and user data directory,
 /// either from CLI arguments or from environment variables/defaults.
-pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<ChromiumOptions, String> {
+pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOptions, String> {
     let chromium_executable = cli
         .chromium_executable
         .clone()
@@ -62,18 +65,21 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<ChromiumOptions, St
                 .to_owned()
         })?;
 
-    Ok(ChromiumOptions {
-        executable_path: chromium_executable,
-        user_data_dir: Some(user_data_dir.to_string_lossy().to_string()),
-        enable_logging: cli.enable_logging_stderr.then_some("stderr".to_owned()),
-        log_file: cli
-            .log_file
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string()),
-        channel_name: cli.channel_name.clone(),
-        v: None,
-        vmodule: None,
-        extra_args: Vec::new(),
+    Ok(StartChromiumOptions {
+        process: ChromiumProcessOptions {
+            executable_path: chromium_executable,
+            user_data_dir: Some(user_data_dir.to_string_lossy().to_string()),
+            enable_logging: cli.enable_logging_stderr.then_some("stderr".to_owned()),
+            log_file: cli
+                .log_file
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            channel_name: cli.channel_name.clone(),
+            v: None,
+            vmodule: None,
+            extra_args: Vec::new(),
+        },
+        backend: ChromiumBackendOptions::new(cli.channel_name.clone()),
     })
 }
 

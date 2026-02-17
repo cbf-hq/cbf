@@ -19,7 +19,32 @@ use crate::{
 /// Backend implementation that speaks the Chromium IPC protocol.
 #[derive(Debug, Clone)]
 pub struct ChromiumBackend {
-    channel_name: String,
+    options: ChromiumBackendOptions,
+}
+
+/// Options for establishing an IPC connection to Chromium.
+#[derive(Debug, Clone)]
+pub struct ChromiumBackendOptions {
+    /// The name of the IPC channel to connect to.
+    pub channel_name: String,
+    /// Timeout for establishing the initial IPC connection.
+    ///
+    /// `Some(duration)` fails startup if the timeout is exceeded.
+    /// `None` waits indefinitely until a connection is established.
+    pub connect_timeout: Option<Duration>,
+    /// Retry interval between IPC connect attempts.
+    pub retry_interval: Duration,
+}
+
+impl ChromiumBackendOptions {
+    /// Create options with default connect behavior for the given channel.
+    pub fn new(channel_name: impl Into<String>) -> Self {
+        Self {
+            channel_name: channel_name.into(),
+            connect_timeout: Some(Duration::from_secs(60)),
+            retry_interval: Duration::from_millis(100),
+        }
+    }
 }
 
 struct CommunicationState {
@@ -87,10 +112,10 @@ impl Backend for ChromiumBackend {
     ) -> Result<(Sender<BrowserCommand>, Receiver<BrowserEvent>), Error> {
         let (command_tx, command_rx) = async_channel::unbounded::<BrowserCommand>();
         let (event_tx, event_rx) = async_channel::unbounded::<BrowserEvent>();
-        let channel_name = self.channel_name;
+        let options = self.options;
 
         thread::spawn(move || {
-            Self::run_communication(channel_name, command_rx, event_tx, delegate)
+            Self::run_communication(options, command_rx, event_tx, delegate)
         });
 
         Ok((command_tx, event_rx))
@@ -98,27 +123,26 @@ impl Backend for ChromiumBackend {
 }
 
 impl ChromiumBackend {
-    /// Create a backend that connects to the given IPC channel name.
-    pub fn new(channel_name: impl Into<String>) -> Self {
-        Self {
-            channel_name: channel_name.into(),
-        }
+    /// Create a backend from Chromium IPC connection options.
+    pub fn new(options: ChromiumBackendOptions) -> Self {
+        Self { options }
     }
 
     fn start_connection(
         event_tx: &Sender<BrowserEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
-        channel_name: &str,
+        options: &ChromiumBackendOptions,
     ) -> Option<IpcClient> {
-        let timeout = Duration::from_secs(60);
         let start_time = Instant::now();
-        const RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
         let mut client = loop {
-            match IpcClient::connect(channel_name) {
+            match IpcClient::connect(&options.channel_name) {
                 Ok(client) => break client,
                 Err(err) => {
-                    if start_time.elapsed() > timeout {
+                    if options
+                        .connect_timeout
+                        .is_some_and(|timeout| start_time.elapsed() > timeout)
+                    {
                         let info = backend_error_connect_timeout(err);
                         let stop_reason = dispatcher
                             .dispatch_event(
@@ -135,7 +159,7 @@ impl ChromiumBackend {
                         return None;
                     }
 
-                    thread::sleep(RETRY_INTERVAL);
+                    thread::sleep(options.retry_interval);
                 }
             }
         };
@@ -202,7 +226,7 @@ impl ChromiumBackend {
     }
 
     fn run_communication(
-        channel_name: String,
+        options: ChromiumBackendOptions,
         command_rx: Receiver<BrowserCommand>,
         event_tx: Sender<BrowserEvent>,
         delegate: impl BackendDelegate,
@@ -210,7 +234,7 @@ impl ChromiumBackend {
         let mut dispatcher = DelegateDispatcher::new(delegate);
 
         // Start the connection and get the IPC client.
-        let Some(mut client) = Self::start_connection(&event_tx, &mut dispatcher, &channel_name)
+        let Some(mut client) = Self::start_connection(&event_tx, &mut dispatcher, &options)
         else {
             return;
         };

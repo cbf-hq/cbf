@@ -44,18 +44,25 @@ Minimal example:
 
 ```rust
 use std::path::PathBuf;
-use cbf::{start_chromium, ChromiumOptions};
+use cbf::chromium_backend::ChromiumBackendOptions;
+use cbf::chromium_process::{start_chromium, ChromiumProcessOptions, StartChromiumOptions};
 
-let (session, events, mut process) = start_chromium(ChromiumOptions {
-    executable_path: PathBuf::from("/path/to/chromium"),
-    user_data_dir: Some("./.cbf-user-data".owned()),
-    enable_logging: Some("stderr".owned()),
-    log_file: Some("/tmp/chromium_debug.log".owned()),
-    v: None,
-    vmodule: None,
-    channel_name: "exampleapp".owned(),
-    extra_args: vec![],
-})?;
+let channel_name = "exampleapp".to_owned();
+let (session, events, mut process) = start_chromium(
+    StartChromiumOptions {
+        process: ChromiumProcessOptions {
+            executable_path: PathBuf::from("/path/to/chromium"),
+            user_data_dir: Some("./.cbf-user-data".to_owned()),
+            enable_logging: Some("stderr".to_owned()),
+            log_file: Some("/tmp/chromium_debug.log".to_owned()),
+            v: None,
+            vmodule: None,
+            channel_name: channel_name.clone(),
+            extra_args: vec![],
+        },
+        backend: ChromiumBackendOptions::new(channel_name),
+    },
+)?;
 ```
 
 Important:
@@ -84,4 +91,4 @@ Important:
 ### Chromium fails to spawn
 
 - Symptom: process spawn errors from `start_chromium`.
-- Action: verify `ChromiumOptions.executable_path` is correct and executable.
+- Action: verify `ChromiumProcessOptions.executable_path` is correct and executable.

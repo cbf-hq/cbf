@@ -5,13 +5,13 @@ use std::{path::PathBuf, process::ExitStatus};
 use crate::{
     backend_delegate::BackendDelegate,
     browser::{BrowserSession, EventStream, connect},
-    chromium_backend::ChromiumBackend,
+    chromium_backend::{ChromiumBackend, ChromiumBackendOptions},
     error::Error,
 };
 
 /// Options for launching the Chromium process.
 #[derive(Debug, Clone)]
-pub struct ChromiumOptions {
+pub struct ChromiumProcessOptions {
     /// Path to the browser executable (e.g. "Chromium.app/Contents/MacOS/Chromium").
     pub executable_path: PathBuf,
     /// Path to the user data directory.
@@ -39,6 +39,15 @@ pub struct ChromiumOptions {
     pub channel_name: String,
     /// Additional arguments to pass to the browser process.
     pub extra_args: Vec<String>,
+}
+
+/// Combined options for launching Chromium and connecting the backend.
+#[derive(Debug, Clone)]
+pub struct StartChromiumOptions {
+    /// Options for the Chromium child process.
+    pub process: ChromiumProcessOptions,
+    /// Options for backend IPC connection behavior.
+    pub backend: ChromiumBackendOptions,
 }
 
 /// A handle to the running Chromium process.
@@ -76,46 +85,64 @@ impl ChromiumProcess {
 /// This function spawns the browser process with the specified options and
 /// establishes a CBF connection.
 pub fn start_chromium(
-    options: ChromiumOptions,
+    options: StartChromiumOptions,
     delegate: impl BackendDelegate,
 ) -> Result<(BrowserSession, EventStream, ChromiumProcess), Error> {
-    let mut command = Command::new(&options.executable_path);
+    let StartChromiumOptions { process, backend } = options;
+
+    let ChromiumProcessOptions {
+        executable_path,
+        user_data_dir,
+        enable_logging,
+        log_file,
+        v,
+        vmodule,
+        channel_name,
+        extra_args,
+    } = process;
+
+    let mut command = Command::new(&executable_path);
 
     command.arg("--enable-features=Cbf");
 
     // Set IPC channel argument
-    command.arg(format!("--cbf-ipc-channel={}", options.channel_name));
+    command.arg(format!("--cbf-ipc-channel={}", channel_name));
 
     // Set user data dir argument if provided
-    if let Some(user_data_dir) = &options.user_data_dir {
+    if let Some(user_data_dir) = &user_data_dir {
         command.arg(format!("--user-data-dir={}", user_data_dir));
     }
 
     // Set logging arguments
-    if let Some(enable_logging) = options.enable_logging {
+    if let Some(enable_logging) = enable_logging {
         command.arg(format!("--enable-logging={}", enable_logging));
     }
 
-    if let Some(log_file) = &options.log_file {
+    if let Some(log_file) = &log_file {
         command.arg(format!("--log-file={}", log_file));
     }
 
-    if let Some(v) = options.v {
+    if let Some(v) = v {
         command.arg(format!("--v={}", v));
     }
 
-    if let Some(vmodule) = &options.vmodule {
+    if let Some(vmodule) = &vmodule {
         command.arg(format!("--vmodule={}", vmodule));
     }
 
     // Add extra arguments
-    command.args(&options.extra_args);
+    command.args(&extra_args);
 
     // Spawn the process
     let child = command.spawn().map_err(Error::ProcessSpawnError)?;
 
     // Connect to the backend
-    let backend = ChromiumBackend::new(options.channel_name);
+    debug_assert_eq!(
+        backend.channel_name, channel_name,
+        "process.channel_name and backend.channel_name must match"
+    );
+
+    let backend = ChromiumBackend::new(backend);
     let (session, events) = connect(backend, delegate)?;
 
     Ok((session, events, ChromiumProcess { child }))
