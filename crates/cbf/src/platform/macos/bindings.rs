@@ -1,4 +1,7 @@
-//! Bindings for macOS CALayerHost.
+//! Objective-C bindings for macOS `CALayerHost`.
+//!
+//! These bindings are internal helpers for attaching Chromium rendering layers
+//! to the native macOS view hierarchy.
 
 #![allow(non_snake_case)]
 

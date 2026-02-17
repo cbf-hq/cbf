@@ -1,7 +1,7 @@
 use async_channel::{Receiver, Sender, TrySendError};
 
 use crate::{
-    Error,
+    error::Error,
     backend_delegate::BackendDelegate,
     command::BrowserCommand,
     data::{

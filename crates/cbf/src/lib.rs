@@ -1,8 +1,17 @@
+//! CBF (Chromium Browser Framework) is a reusable Rust browser backend framework.
+//!
+//! This crate provides a browser-generic high-level API for controlling browser
+//! backends and handling browser events. Chromium-specific integration and FFI
+//! details are kept in lower layers.
+//!
+//! For setup, architecture, and implementation details, see the repository
+//! documentation under `docs/`.
+
 pub mod backend_delegate;
-mod browser;
+pub mod browser;
 pub mod command;
 pub mod data;
-mod error;
+pub mod error;
 pub mod event;
 pub mod ffi;
 pub mod middleware;
@@ -14,13 +23,5 @@ pub mod chromium_backend;
 pub mod chromium_process;
 #[cfg(feature = "dummy-backend")]
 pub mod dummy_backend;
-
-pub use browser::*;
-pub use error::*;
-
-#[cfg(feature = "chromium-backend")]
-pub use chromium_backend::*;
-#[cfg(feature = "dummy-backend")]
-pub use dummy_backend::*;
 
 pub use cbf_sys as sys;

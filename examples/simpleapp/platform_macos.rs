@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use cbf::{
-    BrowserHandle,
+    browser::BrowserHandle,
     data::{
         drag::{DragDrop, DragUpdate},
         ids::WebPageId,
@@ -10,7 +10,7 @@ use cbf::{
         },
         surface::SurfaceHandle,
     },
-    platform::macos::{
+    platform::macos::browser_view::{
         BrowserViewMac, BrowserViewMacConfig, BrowserViewMacDelegate, BrowserViewMacImeEvent,
         BrowserViewMacNativeDragDrop, BrowserViewMacNativeDragUpdate,
     },

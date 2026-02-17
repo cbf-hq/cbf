@@ -1,3 +1,8 @@
+//! macOS `NSView` implementation used to host Chromium rendering surfaces.
+//!
+//! This module defines `BrowserViewMac` and related delegate/event types for
+//! translating native macOS input, IME, drag-and-drop, and context menu events.
+
 #![allow(non_snake_case)]
 
 use std::{
@@ -25,18 +30,21 @@ use objc2_foundation::{
 };
 use objc2_quartz_core::CATransaction;
 
-use crate::data::{
-    context_menu::{ContextMenu, ContextMenuIcon, ContextMenuItem, ContextMenuItemType},
-    drag::DragStartRequest,
-    ime::{ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, TextSelectionBounds},
-    key::KeyEvent,
-    mouse::{MouseEvent, MouseWheelEvent, PointerType},
+use crate::{
+    data::{
+        context_menu::{ContextMenu, ContextMenuIcon, ContextMenuItem, ContextMenuItemType},
+        drag::DragStartRequest,
+        ime::{ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, TextSelectionBounds},
+        key::KeyEvent,
+        mouse::{MouseEvent, MouseWheelEvent, PointerType},
+    },
+    ffi::{
+        convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
+        convert_nsevent_to_mouse_wheel_event,
+    },
 };
 
-use super::{
-    CALayerHost, ContextId, convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
-    convert_nsevent_to_mouse_wheel_event,
-};
+use super::bindings::{CALayerHost, ContextId};
 
 /// Callback interface for BrowserViewMac input and menu events.
 pub trait BrowserViewMacDelegate {
@@ -78,8 +86,8 @@ pub struct BrowserViewMacConfig {
 const NO_MENU_ID: u64 = 0;
 const NO_COMMAND_ID: i32 = i32::MIN;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// IME events emitted by BrowserViewMac.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BrowserViewMacImeEvent {
     /// Update IME composition text and selection.
     SetComposition {
@@ -136,11 +144,11 @@ pub struct BrowserViewMacIvars {
 }
 
 define_class!(
+    /// macOS NSView that hosts the Chromium rendering surface.
     #[unsafe(super(NSView, NSResponder, NSObject))]
     #[thread_kind = objc2::MainThreadOnly]
     #[name = "BrowserViewMac"]
     #[ivars = BrowserViewMacIvars]
-    /// macOS NSView that hosts the Chromium rendering surface.
     pub struct BrowserViewMac;
 
     impl BrowserViewMac {

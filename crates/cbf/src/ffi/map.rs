@@ -374,7 +374,9 @@ fn parse_surface_handle(handle: CbfSurfaceHandle) -> Result<SurfaceHandle, Error
         CBF_SURFACE_HANDLE_MAC_CA_CONTEXT_ID => {
             Ok(SurfaceHandle::MacCaContextId(handle.ca_context_id))
         }
-        CBF_SURFACE_HANDLE_WINDOWS_HWND => Ok(SurfaceHandle::WindowsHwnd(handle.win_hwnd)),
+        CBF_SURFACE_HANDLE_WINDOWS_HWND => {
+            unimplemented!("Windows HWND surface handle parsing not implemented yet")
+        }
         _ => Err(Error::InvalidEvent),
     }
 }
@@ -512,7 +514,7 @@ pub(super) fn to_ffi_ime_text_spans(spans: &[ImeTextSpan]) -> Vec<CbfImeTextSpan
     spans
         .iter()
         .map(|span| CbfImeTextSpan {
-            type_: ime_text_span_type_to_ffi(span.type_),
+            type_: ime_text_span_type_to_ffi(span.r#type),
             start_offset: span.start_offset,
             end_offset: span.end_offset,
             underline_color: span.underline_color,

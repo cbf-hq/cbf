@@ -1,7 +1,7 @@
 use super::ids::WebPageId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Classification of IME text spans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImeTextSpanType {
     Composition,
     Suggestion,
@@ -10,16 +10,16 @@ pub enum ImeTextSpanType {
     GrammarSuggestion,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Thickness of IME underline decorations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImeTextSpanThickness {
     None,
     Thin,
     Thick,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Style of IME underline decorations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImeTextSpanUnderlineStyle {
     None,
     Solid,
@@ -28,17 +28,17 @@ pub enum ImeTextSpanUnderlineStyle {
     Squiggle,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Range in IME text, using character indices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImeTextRange {
     pub start: i32,
     pub end: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Metadata for a single IME text span.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImeTextSpan {
-    pub type_: ImeTextSpanType,
+    pub r#type: ImeTextSpanType,
     pub start_offset: u32,
     pub end_offset: u32,
     pub underline_color: u32,
@@ -54,9 +54,9 @@ pub struct ImeTextSpan {
 
 impl ImeTextSpan {
     /// Create a span with no visual decorations to avoid default IME highlights.
-    pub fn no_decoration(type_: ImeTextSpanType, start_offset: u32, end_offset: u32) -> Self {
+    pub fn no_decoration(r#type: ImeTextSpanType, start_offset: u32, end_offset: u32) -> Self {
         Self {
-            type_,
+            r#type,
             start_offset,
             end_offset,
             underline_color: 0,
@@ -72,8 +72,8 @@ impl ImeTextSpan {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Current IME composition state for a web page.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImeComposition {
     pub web_page_id: WebPageId,
     pub text: String,
@@ -83,8 +83,8 @@ pub struct ImeComposition {
     pub spans: Vec<ImeTextSpan>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// IME commit payload to finalize composed text.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImeCommitText {
     pub web_page_id: WebPageId,
     pub text: String,
@@ -93,15 +93,15 @@ pub struct ImeCommitText {
     pub spans: Vec<ImeTextSpan>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Behavior used when finishing IME composition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfirmCompositionBehavior {
     DoNotKeepSelection,
     KeepSelection,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Rectangle used by IME bounds and selection information.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImeRect {
     pub x: i32,
     pub y: i32,
@@ -109,16 +109,16 @@ pub struct ImeRect {
     pub height: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Bounds of the current IME composition range.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImeCompositionBounds {
     pub range_start: i32,
     pub range_end: i32,
     pub character_bounds: Vec<ImeRect>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Bounds information for the current text selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextSelectionBounds {
     pub range_start: i32,
     pub range_end: i32,
@@ -126,8 +126,8 @@ pub struct TextSelectionBounds {
     pub first_selection_rect: ImeRect,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// IME bounds updates for composition and selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImeBoundsUpdate {
     pub composition: Option<ImeCompositionBounds>,
     pub selection: Option<TextSelectionBounds>,

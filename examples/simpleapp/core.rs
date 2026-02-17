@@ -4,7 +4,7 @@ use std::{
 };
 
 use cbf::{
-    BrowserHandle, BrowserSession,
+    browser::{BrowserHandle, BrowserSession},
     data::{
         context_menu::ContextMenu, drag::DragStartRequest, ids::WebPageId, ime::ImeBoundsUpdate,
         surface::SurfaceHandle,

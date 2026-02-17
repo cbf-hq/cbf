@@ -7,9 +7,9 @@
 //! See [`ErrorGuardLayer`] for exact policy and configuration knobs.
 
 use crate::{
-    ApiErrorKind,
     backend_delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     command::BrowserCommand,
+    error::ApiErrorKind,
     event::{BackendStopReason, BrowserEvent},
 };
 
@@ -146,7 +146,7 @@ impl BackendDelegate for ErrorGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BackendErrorInfo, backend_delegate::NoopDelegate};
+    use crate::{backend_delegate::NoopDelegate, error::BackendErrorInfo};
 
     fn make_backend_error(kind: ApiErrorKind, terminal_hint: bool) -> BrowserEvent {
         BrowserEvent::BackendError {

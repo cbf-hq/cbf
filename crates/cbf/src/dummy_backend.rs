@@ -3,15 +3,16 @@ use std::{collections::HashMap, thread, time::Duration};
 use async_channel::{Receiver, Sender, TryRecvError};
 
 use crate::{
-    Backend, Error,
     backend_delegate::{BackendDelegate, DelegateDispatcher},
+    browser::Backend,
     command::BrowserCommand,
     data::ids::WebPageId,
+    error::Error,
     event::{BackendStopReason, BrowserEvent, WebPageEvent},
 };
 
-#[derive(Debug, Default, Clone)]
 /// In-memory backend for development and API shaping.
+#[derive(Debug, Default, Clone)]
 pub struct DummyBackend {
     next_web_page_id: u64,
 }

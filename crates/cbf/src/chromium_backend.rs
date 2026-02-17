@@ -7,10 +7,11 @@ use std::{
 use async_channel::{Receiver, Sender, TryRecvError};
 
 use crate::{
-    ApiErrorKind, Backend, BackendErrorInfo, Error, Operation,
     backend_delegate::{BackendDelegate, DelegateDispatcher},
+    browser::Backend,
     command::BrowserCommand,
     data::ids::WebPageId,
+    error::{ApiErrorKind, BackendErrorInfo, Error, Operation},
     event::{BackendStopReason, BrowserEvent, DialogType, WebPageEvent},
     ffi::{Error as IpcError, IpcClient, IpcEvent},
 };
@@ -242,7 +243,7 @@ impl ChromiumBackend {
             match event {
                 Ok(event) => {
                     if let Some(reason) =
-                        handle_ipc_event(event, event_tx, client, state, dispatcher)
+                        Self::handle_ipc_event(event, event_tx, client, state, dispatcher)
                     {
                         return Some(reason);
                     }
@@ -259,6 +260,248 @@ impl ChromiumBackend {
                     ) {
                         return Some(reason);
                     }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn handle_ipc_event(
+        event: IpcEvent,
+        event_tx: &Sender<BrowserEvent>,
+        client: &mut IpcClient,
+        state: &mut CommunicationState,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+    ) -> Option<BackendStopReason> {
+        let mut emit = |event| dispatcher.dispatch_event(event, event_tx);
+
+        match event {
+            IpcEvent::WebPageCreated {
+                profile_id,
+                web_page_id,
+                request_id,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::Created { request_id },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::SurfaceHandleUpdated {
+                profile_id,
+                web_page_id,
+                handle,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::SurfaceHandleUpdated { handle },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::WebPageResizeAcknowledged { web_page_id, .. } => {
+                state.resizes_in_flight.remove(&web_page_id);
+                if let Some((width, height)) = state.pending_resizes.remove(&web_page_id) {
+                    state.resizes_in_flight.insert(web_page_id);
+                    if let Err(err) = client.set_web_page_size(web_page_id, width, height) {
+                        tracing::warn!(
+                            result = "err",
+                            error = "resize_failed",
+                            err = ?err,
+                            %web_page_id,
+                            "Failed to send pending resize"
+                        );
+                        state.resizes_in_flight.remove(&web_page_id);
+                    }
+                }
+            }
+            IpcEvent::WebPageDomHtmlRead {
+                profile_id,
+                web_page_id,
+                request_id,
+                html,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::DomHtmlRead { request_id, html },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::DragStartRequested {
+                profile_id,
+                web_page_id,
+                request,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::DragStartRequested { request },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::ImeBoundsUpdated {
+                profile_id,
+                web_page_id,
+                update,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::ImeBoundsUpdated { update },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::ContextMenuRequested {
+                profile_id,
+                web_page_id,
+                menu,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::ContextMenuRequested { menu },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::NewWebPageRequested {
+                profile_id,
+                web_page_id,
+                target_url,
+                is_popup,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::NewWebPageRequested {
+                        target_url,
+                        is_popup,
+                    },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::NavigationStateChanged {
+                profile_id,
+                web_page_id,
+                url,
+                can_go_back,
+                can_go_forward,
+                is_loading,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::NavigationStateChanged {
+                        url,
+                        can_go_back,
+                        can_go_forward,
+                        is_loading,
+                    },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::CursorChanged {
+                profile_id,
+                web_page_id,
+                cursor_type,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::CursorChanged { cursor_type },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::TitleUpdated {
+                profile_id,
+                web_page_id,
+                title,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::TitleUpdated { title },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::FaviconUrlUpdated {
+                profile_id,
+                web_page_id,
+                url,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::FaviconUrlUpdated { url },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::BeforeUnloadDialogRequested {
+                profile_id,
+                web_page_id,
+                request_id,
+                reason,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::JavaScriptDialogRequested {
+                        request_id,
+                        message: String::new(),
+                        default_prompt_text: None,
+                        r#type: DialogType::BeforeUnload,
+                        beforeunload_reason: Some(reason),
+                    },
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::WebPageClosed {
+                profile_id,
+                web_page_id,
+            } => {
+                state.resizes_in_flight.remove(&web_page_id);
+                state.pending_resizes.remove(&web_page_id);
+                if let Some(reason) = emit(BrowserEvent::WebPage {
+                    profile_id,
+                    web_page_id,
+                    event: WebPageEvent::Closed,
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::ShutdownBlocked {
+                request_id,
+                dirty_web_page_ids,
+            } => {
+                if let Some(reason) = emit(BrowserEvent::ShutdownBlocked {
+                    request_id,
+                    dirty_web_page_ids,
+                }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::ShutdownProceeding { request_id } => {
+                if let Some(reason) = emit(BrowserEvent::ShutdownProceeding { request_id }) {
+                    return Some(reason);
+                }
+            }
+            IpcEvent::ShutdownCancelled { request_id } => {
+                if let Some(reason) = emit(BrowserEvent::ShutdownCancelled { request_id }) {
+                    return Some(reason);
                 }
             }
         }
@@ -596,246 +839,4 @@ impl ChromiumBackend {
                 }),
         }
     }
-}
-
-fn handle_ipc_event(
-    event: IpcEvent,
-    event_tx: &Sender<BrowserEvent>,
-    client: &mut IpcClient,
-    state: &mut CommunicationState,
-    dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
-) -> Option<BackendStopReason> {
-    let mut emit = |event| dispatcher.dispatch_event(event, event_tx);
-
-    match event {
-        IpcEvent::WebPageCreated {
-            profile_id,
-            web_page_id,
-            request_id,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::Created { request_id },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::SurfaceHandleUpdated {
-            profile_id,
-            web_page_id,
-            handle,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::SurfaceHandleUpdated { handle },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::WebPageResizeAcknowledged { web_page_id, .. } => {
-            state.resizes_in_flight.remove(&web_page_id);
-            if let Some((width, height)) = state.pending_resizes.remove(&web_page_id) {
-                state.resizes_in_flight.insert(web_page_id);
-                if let Err(err) = client.set_web_page_size(web_page_id, width, height) {
-                    tracing::warn!(
-                        result = "err",
-                        error = "resize_failed",
-                        err = ?err,
-                        %web_page_id,
-                        "Failed to send pending resize"
-                    );
-                    state.resizes_in_flight.remove(&web_page_id);
-                }
-            }
-        }
-        IpcEvent::WebPageDomHtmlRead {
-            profile_id,
-            web_page_id,
-            request_id,
-            html,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::DomHtmlRead { request_id, html },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::DragStartRequested {
-            profile_id,
-            web_page_id,
-            request,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::DragStartRequested { request },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::ImeBoundsUpdated {
-            profile_id,
-            web_page_id,
-            update,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::ImeBoundsUpdated { update },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::ContextMenuRequested {
-            profile_id,
-            web_page_id,
-            menu,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::ContextMenuRequested { menu },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::NewWebPageRequested {
-            profile_id,
-            web_page_id,
-            target_url,
-            is_popup,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::NewWebPageRequested {
-                    target_url,
-                    is_popup,
-                },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::NavigationStateChanged {
-            profile_id,
-            web_page_id,
-            url,
-            can_go_back,
-            can_go_forward,
-            is_loading,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::NavigationStateChanged {
-                    url,
-                    can_go_back,
-                    can_go_forward,
-                    is_loading,
-                },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::CursorChanged {
-            profile_id,
-            web_page_id,
-            cursor_type,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::CursorChanged { cursor_type },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::TitleUpdated {
-            profile_id,
-            web_page_id,
-            title,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::TitleUpdated { title },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::FaviconUrlUpdated {
-            profile_id,
-            web_page_id,
-            url,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::FaviconUrlUpdated { url },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::BeforeUnloadDialogRequested {
-            profile_id,
-            web_page_id,
-            request_id,
-            reason,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::JavaScriptDialogRequested {
-                    request_id,
-                    message: String::new(),
-                    default_prompt_text: None,
-                    r#type: DialogType::BeforeUnload,
-                    beforeunload_reason: Some(reason),
-                },
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::WebPageClosed {
-            profile_id,
-            web_page_id,
-        } => {
-            state.resizes_in_flight.remove(&web_page_id);
-            state.pending_resizes.remove(&web_page_id);
-            if let Some(reason) = emit(BrowserEvent::WebPage {
-                profile_id,
-                web_page_id,
-                event: WebPageEvent::Closed,
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::ShutdownBlocked {
-            request_id,
-            dirty_web_page_ids,
-        } => {
-            if let Some(reason) = emit(BrowserEvent::ShutdownBlocked {
-                request_id,
-                dirty_web_page_ids,
-            }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::ShutdownProceeding { request_id } => {
-            if let Some(reason) = emit(BrowserEvent::ShutdownProceeding { request_id }) {
-                return Some(reason);
-            }
-        }
-        IpcEvent::ShutdownCancelled { request_id } => {
-            if let Some(reason) = emit(BrowserEvent::ShutdownCancelled { request_id }) {
-                return Some(reason);
-            }
-        }
-    }
-
-    None
 }

@@ -1,3 +1,8 @@
+//! Browser-generic events emitted from backend to the host application.
+//!
+//! This module defines top-level backend events (`BrowserEvent`) and
+//! web page-scoped events (`WebPageEvent`) for state synchronization.
+
 use cursor_icon::CursorIcon;
 
 use crate::data::{

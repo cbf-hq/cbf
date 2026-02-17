@@ -1,5 +1,5 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Keyboard event type as understood by the backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyEventType {
     RawKeyDown,
     KeyDown,
@@ -7,8 +7,8 @@ pub enum KeyEventType {
     Char,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Keyboard input payload sent to the backend.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyEvent {
     pub type_: KeyEventType,
     pub modifiers: u32,

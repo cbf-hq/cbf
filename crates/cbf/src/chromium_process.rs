@@ -3,7 +3,10 @@ use futures_lite::future::block_on;
 use std::{path::PathBuf, process::ExitStatus};
 
 use crate::{
-    BrowserSession, ChromiumBackend, Error, EventStream, backend_delegate::BackendDelegate, connect,
+    backend_delegate::BackendDelegate,
+    browser::{BrowserSession, EventStream, connect},
+    chromium_backend::ChromiumBackend,
+    error::Error,
 };
 
 /// Options for launching the Chromium process.

@@ -1,5 +1,5 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Context menu item kind coming from the backend.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextMenuItemType {
     Command,
     Check,
@@ -12,23 +12,23 @@ pub enum ContextMenuItemType {
     Title,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Icon payload for a context menu item.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextMenuIcon {
     pub png_bytes: Vec<u8>,
     pub width: u32,
     pub height: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Keyboard accelerator information for a context menu item.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextMenuAccelerator {
     pub key_equivalent: String,
     pub modifier_mask: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// A single context menu item tree node.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextMenuItem {
     pub r#type: ContextMenuItemType,
     pub command_id: i32,
@@ -49,8 +49,8 @@ pub struct ContextMenuItem {
     pub submenu: Vec<ContextMenuItem>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// The context menu tree requested by the backend.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextMenu {
     pub menu_id: u64,
     pub x: i32,

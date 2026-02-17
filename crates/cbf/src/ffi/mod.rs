@@ -1,3 +1,8 @@
+//! FFI bridge adapters between Rust-side models and `cbf-sys` C ABI types.
+//!
+//! This module handles low-level IPC event decoding and conversion utilities
+//! that remain internal to the crate boundary.
+
 use std::{ffi::CString, ptr};
 
 use cbf_sys::ffi::*;
@@ -18,8 +23,8 @@ use crate::event::BeforeUnloadReason;
 mod map;
 mod utils;
 
-#[cfg(target_os = "macos")]
 /// Convert native NSEvent input to CBF input events on macOS.
+#[cfg(target_os = "macos")]
 pub use map::{
     convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
     convert_nsevent_to_mouse_wheel_event,

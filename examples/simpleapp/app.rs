@@ -4,7 +4,7 @@ use std::{
 };
 
 use cbf::{
-    BrowserHandle, EventStream,
+    browser::{BrowserHandle, EventStream},
     chromium_process::{ChromiumProcess, start_chromium},
     event::BrowserEvent,
     middleware::{

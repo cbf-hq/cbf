@@ -1,3 +1,8 @@
+//! Browser-generic commands sent from the host application to a backend.
+//!
+//! This module defines request/operation inputs (`BrowserCommand`) used to
+//! control browser lifecycle, navigation, and input handling.
+
 use crate::data::{
     drag::{DragDrop, DragUpdate},
     ids::WebPageId,

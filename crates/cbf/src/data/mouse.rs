@@ -1,5 +1,5 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Mouse event kind delivered to the backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseEventType {
     Down,
     Up,
@@ -8,8 +8,8 @@ pub enum MouseEventType {
     Leave,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Mouse button identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseButton {
     None,
     Left,
@@ -19,8 +19,8 @@ pub enum MouseButton {
     Forward,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Pointer device type for mouse-like events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PointerType {
     Unknown,
     Mouse,
@@ -29,8 +29,8 @@ pub enum PointerType {
     Eraser,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Scroll granularity reported by the input device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScrollGranularity {
     PrecisePixel,
     Pixel,
@@ -39,8 +39,8 @@ pub enum ScrollGranularity {
     Document,
 }
 
-#[derive(Debug, Clone, PartialEq)]
 /// Mouse event payload sent to the backend.
+#[derive(Debug, Clone, PartialEq)]
 pub struct MouseEvent {
     pub type_: MouseEventType,
     pub modifiers: u32,
@@ -56,8 +56,8 @@ pub struct MouseEvent {
     pub pointer_type: PointerType,
 }
 
-#[derive(Debug, Clone, PartialEq)]
 /// Mouse wheel event payload sent to the backend.
+#[derive(Debug, Clone, PartialEq)]
 pub struct MouseWheelEvent {
     pub modifiers: u32,
     pub position_in_widget_x: f32,

@@ -10,7 +10,7 @@ license.workspace = true
 readme.workspace = true
 
 [features]
-# An in-memory backend implementation for local development and API experiments.
+default = ["chromium-backend"]
 dummy-backend = []
 chromium-backend = []
 
