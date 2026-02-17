@@ -83,6 +83,13 @@ Chromium side (from `chromium/src`):
 - `autoninja -C out/Default chrome`
 - `autoninja -C out/Default cbf_bridge`
 
+Tooling helpers:
+
+- `uv run tool`: access development tools.
+- `uv run tool patch`: access patch-related operations.
+- `uv run tool patch build -t <target>`: build a specific target.
+- `uv run tool patch build -t chrome -t cbf_bridge`: build both targets sequentially.
+
 ## Setup and Docs Routing
 
 - Start from `docs/setup-guide.md` (overview), then choose:
