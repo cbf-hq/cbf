@@ -63,6 +63,23 @@ Layering must remain strict:
 - Do not leak Chromium or Mojo implementation details into public `cbf` types.
 - Restrict conversion logic to boundary layers instead of spreading it through public API code.
 
+### Platform Boundary Rule
+
+- Do not re-implement Chromium-specific behavior in `cbf` (Rust high-level layer).
+- Keep Chromium-specific conversion/state-machine logic in Chromium code or `cbf-sys` (`cbf_bridge`).
+- When Chromium already provides a conversion path, use it via `cbf-sys` instead of recreating logic in Rust.
+
+### Constant Ownership Rule
+
+- Do not duplicate Chromium-owned constants in `cbf`.
+- If Rust needs Chromium constants or enum values, expose them through `cbf-sys`/`cbf_bridge`.
+- Avoid manually mirroring phase/flag values in high-level Rust code.
+
+### Bridge-First Rule
+
+- Prefer bridge APIs that forward Chromium-native values directly.
+- Rust should treat bridge output as the source of truth for Chromium-specific fields.
+
 Dependency direction remains:
 
 `Application -> cbf -> cbf-sys -> Chromium process`
