@@ -14,3 +14,4 @@ depot_tools
 
 # OS
 .DS_Store
+.grepai/
