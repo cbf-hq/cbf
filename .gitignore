@@ -5,6 +5,11 @@ __pycache__
 /target
 .cargo
 
+# Development tools
+.gemini/
+.codex/
+.grepai/
+
 # Chromium
 chromium/*
 !chromium/patches/
@@ -14,4 +19,4 @@ depot_tools
 
 # OS
 .DS_Store
-.grepai/
+
