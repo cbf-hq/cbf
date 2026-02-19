@@ -1,4 +1,4 @@
-From 3a6393d15999398668aa28b23835107bf7cdd4a2 Mon Sep 17 00:00:00 2001
+From a7c98a76bdfeed4aebb022a5fadd81cbfe2ce4e3 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Feb 2026 09:47:06 +0900
 Subject: [PATCH] CBF bridge series
@@ -15,11 +15,11 @@ Subject: [PATCH] CBF bridge series
  .../cbf/bridge/cbf_bridge_context_menu.cc     |  103 +
  .../cbf/bridge/cbf_bridge_converters.cc       |  179 ++
  .../cbf/bridge/cbf_bridge_converters.h        |   27 +
- .../browser/cbf/bridge/cbf_bridge_events.cc   |  387 ++++
- chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  503 +++++
- chrome/browser/cbf/bridge/cbf_bridge_input.cc |  737 +++++++
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  461 +++++
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  521 +++++
+ chrome/browser/cbf/bridge/cbf_bridge_input.cc |  813 ++++++++
  .../browser/cbf/bridge/cbf_bridge_internal.h  |   28 +
- chrome/browser/cbf/bridge/cbf_bridge_mac.mm   |  247 +++
+ chrome/browser/cbf/bridge/cbf_bridge_mac.mm   |  262 +++
  .../browser/cbf/bridge/cbf_bridge_profiles.cc |   94 +
  .../browser/cbf/bridge/cbf_bridge_shutdown.cc |  122 ++
  .../browser/cbf/bridge/cbf_bridge_support.cc  |   54 +
@@ -35,7 +35,7 @@ Subject: [PATCH] CBF bridge series
  chrome/browser/cbf/cbf_features.h             |   12 +
  .../cbf/cbf_java_script_dialog_manager.cc     |   91 +
  .../cbf/cbf_java_script_dialog_manager.h      |   51 +
- chrome/browser/cbf/cbf_profile_service.cc     | 1687 +++++++++++++++++
+ chrome/browser/cbf/cbf_profile_service.cc     | 1702 +++++++++++++++++
  chrome/browser/cbf/cbf_profile_service.h      |  214 +++
  chrome/browser/cbf/cbf_service.cc             |   79 +
  chrome/browser/cbf/cbf_service.h              |   36 +
@@ -46,7 +46,7 @@ Subject: [PATCH] CBF bridge series
  chrome/browser/cbf/cbf_tab_manager.h          |   73 +
  .../browser/cbf/cbf_web_contents_delegate.cc  |  138 ++
  .../browser/cbf/cbf_web_contents_delegate.h   |   74 +
- chrome/browser/cbf/mojom/cbf_browser.mojom    |  415 ++++
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  423 ++++
  chrome/browser/global_features.cc             |    9 +
  chrome/browser/global_features.h              |    7 +
  chrome/browser/ui/BUILD.gn                    |    1 +
@@ -66,7 +66,7 @@ Subject: [PATCH] CBF bridge series
  .../public/browser/web_contents_delegate.cc   |   13 +
  .../public/browser/web_contents_delegate.h    |   21 +
  ui/compositor/compositor.h                    |    1 +
- 62 files changed, 7873 insertions(+), 1 deletion(-)
+ 62 files changed, 8079 insertions(+), 1 deletion(-)
  create mode 100644 chrome/browser/cbf/BUILD.gn
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge.cc
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge.h
@@ -1399,10 +1399,10 @@ index 0000000000000..3a89ad677dc90
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_CONVERTERS_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
 new file mode 100644
-index 0000000000000..d766b597b0e95
+index 0000000000000..3e67e7eaa13de
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
-@@ -0,0 +1,387 @@
+@@ -0,0 +1,461 @@
 +#include "chrome/browser/cbf/bridge/cbf_bridge_client.h"
 +
 +#include "base/containers/span.h"
@@ -1533,6 +1533,42 @@ index 0000000000000..d766b597b0e95
 +  }
 +  out.items = out_infos;
 +  out.len = static_cast<uint32_t>(infos.size());
++  return out;
++}
++
++CbfStringList ToCbfStringList(const std::vector<std::string>& values) {
++  CbfStringList out = {};
++  if (values.empty()) {
++    return out;
++  }
++  auto* out_items = new char*[values.size()];
++  auto out_span = UNSAFE_BUFFERS(base::span(out_items, values.size()));
++  for (size_t i = 0; i < out_span.size(); ++i) {
++    out_span[i] = CopyCString(values[i]);
++  }
++  out.items = out_items;
++  out.len = static_cast<uint32_t>(values.size());
++  return out;
++}
++
++CbfStringPairList ToCbfStringPairList(
++    const std::vector<cbf::mojom::CbfStringPairPtr>& pairs) {
++  CbfStringPairList out = {};
++  if (pairs.empty()) {
++    return out;
++  }
++  auto* out_items = new CbfStringPair[pairs.size()];
++  auto out_span = UNSAFE_BUFFERS(base::span(out_items, pairs.size()));
++  for (size_t i = 0; i < out_span.size(); ++i) {
++    out_span[i] = {};
++    if (!pairs[i]) {
++      continue;
++    }
++    out_span[i].key = CopyCString(pairs[i]->key);
++    out_span[i].value = CopyCString(pairs[i]->value);
++  }
++  out.items = out_items;
++  out.len = static_cast<uint32_t>(pairs.size());
 +  return out;
 +}
 +
@@ -1690,6 +1726,12 @@ index 0000000000000..d766b597b0e95
 +            CopyCString(event.drag_start_request->data->html_base_url);
 +        out_event->drag_start_request.data.url_infos =
 +            ToCbfDragUrlInfos(event.drag_start_request->data->url_infos);
++        out_event->drag_start_request.data.filenames =
++            ToCbfStringList(event.drag_start_request->data->filenames);
++        out_event->drag_start_request.data.file_mime_types =
++            ToCbfStringList(event.drag_start_request->data->file_mime_types);
++        out_event->drag_start_request.data.custom_data =
++            ToCbfStringPairList(event.drag_start_request->data->custom_data);
 +      }
 +      out_event->drag_start_request.image =
 +          ToCbfDragImage(event.drag_start_request->image);
@@ -1735,6 +1777,29 @@ index 0000000000000..d766b597b0e95
 +  for (auto& info : infos) {
 +    delete[] info.url;
 +    delete[] info.title;
++  }
++  delete[] list.items;
++}
++
++void FreeStringList(CbfStringList list) {
++  if (!list.items || list.len == 0) {
++    return;
++  }
++  auto values = UNSAFE_BUFFERS(base::span(list.items, list.len));
++  for (char* value : values) {
++    delete[] value;
++  }
++  delete[] list.items;
++}
++
++void FreeStringPairList(CbfStringPairList list) {
++  if (!list.items || list.len == 0) {
++    return;
++  }
++  auto pairs = UNSAFE_BUFFERS(base::span(list.items, list.len));
++  for (auto& pair : pairs) {
++    delete[] pair.key;
++    delete[] pair.value;
 +  }
 +  delete[] list.items;
 +}
@@ -1785,6 +1850,15 @@ index 0000000000000..d766b597b0e95
 +    FreeDragUrlInfoList(event->drag_start_request.data.url_infos);
 +    event->drag_start_request.data.url_infos.items = nullptr;
 +    event->drag_start_request.data.url_infos.len = 0;
++    FreeStringList(event->drag_start_request.data.filenames);
++    event->drag_start_request.data.filenames.items = nullptr;
++    event->drag_start_request.data.filenames.len = 0;
++    FreeStringList(event->drag_start_request.data.file_mime_types);
++    event->drag_start_request.data.file_mime_types.items = nullptr;
++    event->drag_start_request.data.file_mime_types.len = 0;
++    FreeStringPairList(event->drag_start_request.data.custom_data);
++    event->drag_start_request.data.custom_data.items = nullptr;
++    event->drag_start_request.data.custom_data.len = 0;
 +    delete[] event->drag_start_request.image.png_bytes;
 +    event->drag_start_request.image.png_bytes = nullptr;
 +    event->drag_start_request.image.png_len = 0;
@@ -1792,10 +1866,10 @@ index 0000000000000..d766b597b0e95
 +}
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 new file mode 100644
-index 0000000000000..04e61e9beb207
+index 0000000000000..7d018e346a458
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
-@@ -0,0 +1,503 @@
+@@ -0,0 +1,521 @@
 +#ifndef CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_FFI_H_
 +#define CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_FFI_H_
 +
@@ -2058,11 +2132,29 @@ index 0000000000000..04e61e9beb207
 +  uint32_t len;
 +} CbfDragUrlInfoList;
 +
++typedef struct CbfStringList {
++  char** items;
++  uint32_t len;
++} CbfStringList;
++
++typedef struct CbfStringPair {
++  char* key;
++  char* value;
++} CbfStringPair;
++
++typedef struct CbfStringPairList {
++  CbfStringPair* items;
++  uint32_t len;
++} CbfStringPairList;
++
 +typedef struct CbfDragData {
 +  char* text;
 +  char* html;
 +  char* html_base_url;
 +  CbfDragUrlInfoList url_infos;
++  CbfStringList filenames;
++  CbfStringList file_mime_types;
++  CbfStringPairList custom_data;
 +} CbfDragData;
 +
 +typedef struct CbfDragImage {
@@ -2301,10 +2393,10 @@ index 0000000000000..04e61e9beb207
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_FFI_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_input.cc b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
 new file mode 100644
-index 0000000000000..0c867fb553e4a
+index 0000000000000..a7dfdfbc86c90
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
-@@ -0,0 +1,737 @@
+@@ -0,0 +1,813 @@
 +#include "chrome/browser/cbf/bridge/cbf_bridge.h"
 +#include "chrome/browser/cbf/bridge/cbf_bridge_client.h"
 +
@@ -2965,6 +3057,29 @@ index 0000000000000..0c867fb553e4a
 +  delete[] list.items;
 +}
 +
++void FreeConvertedStringList(CbfStringList list) {
++  if (!list.items || list.len == 0) {
++    return;
++  }
++  auto values = UNSAFE_BUFFERS(base::span(list.items, list.len));
++  for (char* value : values) {
++    delete[] value;
++  }
++  delete[] list.items;
++}
++
++void FreeConvertedStringPairList(CbfStringPairList list) {
++  if (!list.items || list.len == 0) {
++    return;
++  }
++  auto pairs = UNSAFE_BUFFERS(base::span(list.items, list.len));
++  for (auto& pair : pairs) {
++    delete[] pair.key;
++    delete[] pair.value;
++  }
++  delete[] list.items;
++}
++
 +}  // namespace
 +
 +extern "C" void cbf_bridge_convert_nspasteboard_to_drag_data(
@@ -3011,6 +3126,50 @@ index 0000000000000..0c867fb553e4a
 +    out_data->url_infos.items = out_infos;
 +    out_data->url_infos.len = static_cast<uint32_t>(span.size());
 +  }
++
++  out_data->filenames = {};
++  if (!mojom_data->filenames.empty()) {
++    auto* out_filenames = new char*[mojom_data->filenames.size()];
++    auto span = UNSAFE_BUFFERS(
++        base::span(out_filenames, mojom_data->filenames.size()));
++    for (size_t i = 0; i < span.size(); ++i) {
++      span[i] = cbf_bridge::internal::CopyCString(mojom_data->filenames[i]);
++    }
++    out_data->filenames.items = out_filenames;
++    out_data->filenames.len = static_cast<uint32_t>(span.size());
++  }
++
++  out_data->file_mime_types = {};
++  if (!mojom_data->file_mime_types.empty()) {
++    auto* out_mime_types = new char*[mojom_data->file_mime_types.size()];
++    auto span = UNSAFE_BUFFERS(
++        base::span(out_mime_types, mojom_data->file_mime_types.size()));
++    for (size_t i = 0; i < span.size(); ++i) {
++      span[i] =
++          cbf_bridge::internal::CopyCString(mojom_data->file_mime_types[i]);
++    }
++    out_data->file_mime_types.items = out_mime_types;
++    out_data->file_mime_types.len = static_cast<uint32_t>(span.size());
++  }
++
++  out_data->custom_data = {};
++  if (!mojom_data->custom_data.empty()) {
++    auto* out_pairs = new CbfStringPair[mojom_data->custom_data.size()];
++    auto span =
++        UNSAFE_BUFFERS(base::span(out_pairs, mojom_data->custom_data.size()));
++    for (size_t i = 0; i < span.size(); ++i) {
++      span[i] = {};
++      if (!mojom_data->custom_data[i]) {
++        continue;
++      }
++      span[i].key =
++          cbf_bridge::internal::CopyCString(mojom_data->custom_data[i]->key);
++      span[i].value =
++          cbf_bridge::internal::CopyCString(mojom_data->custom_data[i]->value);
++    }
++    out_data->custom_data.items = out_pairs;
++    out_data->custom_data.len = static_cast<uint32_t>(span.size());
++  }
 +#endif
 +}
 +
@@ -3027,6 +3186,15 @@ index 0000000000000..0c867fb553e4a
 +  FreeConvertedDragUrlInfos(data->url_infos);
 +  data->url_infos.items = nullptr;
 +  data->url_infos.len = 0;
++  FreeConvertedStringList(data->filenames);
++  data->filenames.items = nullptr;
++  data->filenames.len = 0;
++  FreeConvertedStringList(data->file_mime_types);
++  data->file_mime_types.items = nullptr;
++  data->file_mime_types.len = 0;
++  FreeConvertedStringPairList(data->custom_data);
++  data->custom_data.items = nullptr;
++  data->custom_data.len = 0;
 +}
 +
 +extern "C" void cbf_bridge_free_converted_key_event(CbfKeyEvent* event) {
@@ -3078,10 +3246,10 @@ index 0000000000000..2396f6646fc3c
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_INTERNAL_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_mac.mm b/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
 new file mode 100644
-index 0000000000000..9279c2adc0265
+index 0000000000000..c72865460fe2f
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
-@@ -0,0 +1,247 @@
+@@ -0,0 +1,262 @@
 +#include "chrome/browser/cbf/bridge/cbf_bridge_internal.h"
 +
 +#import <AppKit/AppKit.h>
@@ -3320,6 +3488,21 @@ index 0000000000000..9279c2adc0265
 +    info->url = url_info.url.spec();
 +    info->title = base::UTF16ToUTF8(url_info.title);
 +    data->url_infos.push_back(std::move(info));
++  }
++  data->filenames.reserve(drop_data.filenames.size());
++  for (const auto& file_info : drop_data.filenames) {
++    data->filenames.push_back(file_info.path.AsUTF8Unsafe());
++  }
++  data->file_mime_types.reserve(drop_data.file_mime_types.size());
++  for (const auto& mime_type : drop_data.file_mime_types) {
++    data->file_mime_types.push_back(base::UTF16ToUTF8(mime_type));
++  }
++  data->custom_data.reserve(drop_data.custom_data.size());
++  for (const auto& [key, value] : drop_data.custom_data) {
++    auto pair = mojom::CbfStringPair::New();
++    pair->key = base::UTF16ToUTF8(key);
++    pair->value = base::UTF16ToUTF8(value);
++    data->custom_data.push_back(std::move(pair));
 +  }
 +  return data;
 +}
@@ -4953,10 +5136,10 @@ index 0000000000000..8087933b94555
 +#endif  // CHROME_BROWSER_CBF_CBF_JAVA_SCRIPT_DIALOG_MANAGER_H_
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
 new file mode 100644
-index 0000000000000..4d92732000d97
+index 0000000000000..bd2ef698284c8
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
-@@ -0,0 +1,1687 @@
+@@ -0,0 +1,1702 @@
 +#include "chrome/browser/cbf/cbf_profile_service.h"
 +
 +#include <algorithm>
@@ -6615,6 +6798,21 @@ index 0000000000000..4d92732000d97
 +    info->title = base::UTF16ToUTF8(url_info.title);
 +    data->url_infos.push_back(std::move(info));
 +  }
++  data->filenames.reserve(drop_data.filenames.size());
++  for (const auto& file_info : drop_data.filenames) {
++    data->filenames.push_back(file_info.path.AsUTF8Unsafe());
++  }
++  data->file_mime_types.reserve(drop_data.file_mime_types.size());
++  for (const auto& mime_type : drop_data.file_mime_types) {
++    data->file_mime_types.push_back(base::UTF16ToUTF8(mime_type));
++  }
++  data->custom_data.reserve(drop_data.custom_data.size());
++  for (const auto& [key, value] : drop_data.custom_data) {
++    auto pair = mojom::CbfStringPair::New();
++    pair->key = base::UTF16ToUTF8(key);
++    pair->value = base::UTF16ToUTF8(value);
++    data->custom_data.push_back(std::move(pair));
++  }
 +  request->data = std::move(data);
 +
 +  if (!drag_image.drawsNothing()) {
@@ -7647,10 +7845,10 @@ index 0000000000000..7988899d6c927
 +#endif  // CHROME_BROWSER_CBF_CBF_WEB_CONTENTS_DELEGATE_H_
 diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
 new file mode 100644
-index 0000000000000..abb0bfc20796f
+index 0000000000000..fc2fe244d885f
 --- /dev/null
 +++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
-@@ -0,0 +1,415 @@
+@@ -0,0 +1,423 @@
 +module cbf.mojom;
 +
 +struct CbfProfileInfo {
@@ -7842,11 +8040,19 @@ index 0000000000000..abb0bfc20796f
 +  string title;
 +};
 +
++struct CbfStringPair {
++  string key;
++  string value;
++};
++
 +struct CbfDragData {
 +  string text;
 +  string html;
 +  string html_base_url;
 +  array<CbfDragUrlInfo> url_infos;
++  array<string> filenames;
++  array<string> file_mime_types;
++  array<CbfStringPair> custom_data;
 +};
 +
 +struct CbfDragImage {

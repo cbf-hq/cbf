@@ -675,7 +675,7 @@ impl BrowserViewMac {
             return false;
         };
 
-        let operation_mask = NSDragOperation::from_bits_truncate(request.allowed_operations as _);
+        let operation_mask = NSDragOperation::from_bits_truncate(request.allowed_operations.bits() as _);
         let source = HostDragSource::new(
             mtm,
             Retained::from(self),

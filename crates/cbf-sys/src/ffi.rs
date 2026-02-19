@@ -258,11 +258,35 @@ pub struct CbfDragUrlInfoList {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
+pub struct CbfStringList {
+    pub items: *mut *mut c_char,
+    pub len: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfStringPair {
+    pub key: *mut c_char,
+    pub value: *mut c_char,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfStringPairList {
+    pub items: *mut CbfStringPair,
+    pub len: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct CbfDragData {
     pub text: *mut c_char,
     pub html: *mut c_char,
     pub html_base_url: *mut c_char,
     pub url_infos: CbfDragUrlInfoList,
+    pub filenames: CbfStringList,
+    pub file_mime_types: CbfStringList,
+    pub custom_data: CbfStringPairList,
 }
 
 #[repr(C)]

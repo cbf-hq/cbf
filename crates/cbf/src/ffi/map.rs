@@ -151,9 +151,9 @@ fn parse_drag_start_request(request: CbfDragStartRequest) -> DragStartRequest {
             html: c_string_to_string(request.data.html),
             html_base_url: c_string_to_string(request.data.html_base_url),
             url_infos: parse_drag_url_infos(request.data.url_infos),
-            filenames: Vec::new(),
-            file_mime_types: Vec::new(),
-            custom_data: Default::default(),
+            filenames: parse_string_list(request.data.filenames),
+            file_mime_types: parse_string_list(request.data.file_mime_types),
+            custom_data: parse_string_pair_list(request.data.custom_data),
         },
         image: parse_drag_image(request.image),
     }
@@ -170,6 +170,28 @@ fn parse_drag_url_infos(list: CbfDragUrlInfoList) -> Vec<DragUrlInfo> {
             url: c_string_to_string(info.url),
             title: c_string_to_string(info.title),
         })
+        .collect()
+}
+
+fn parse_string_list(list: CbfStringList) -> Vec<String> {
+    if list.len == 0 || list.items.is_null() {
+        return Vec::new();
+    }
+    let values = unsafe { std::slice::from_raw_parts(list.items, list.len as usize) };
+    values
+        .iter()
+        .map(|value| c_string_to_string(*value))
+        .collect()
+}
+
+fn parse_string_pair_list(list: CbfStringPairList) -> std::collections::BTreeMap<String, String> {
+    if list.len == 0 || list.items.is_null() {
+        return Default::default();
+    }
+    let pairs = unsafe { std::slice::from_raw_parts(list.items, list.len as usize) };
+    pairs
+        .iter()
+        .map(|pair| (c_string_to_string(pair.key), c_string_to_string(pair.value)))
         .collect()
 }
 
@@ -610,9 +632,9 @@ pub fn convert_nspasteboard_to_drag_data(nspasteboard: NonNull<c_void>) -> DragD
         html: c_string_to_string(ffi_data.html),
         html_base_url: c_string_to_string(ffi_data.html_base_url),
         url_infos: parse_drag_url_infos(ffi_data.url_infos),
-        filenames: Vec::new(),
-        file_mime_types: Vec::new(),
-        custom_data: Default::default(),
+        filenames: parse_string_list(ffi_data.filenames),
+        file_mime_types: parse_string_list(ffi_data.file_mime_types),
+        custom_data: parse_string_pair_list(ffi_data.custom_data),
     };
 
     unsafe {
