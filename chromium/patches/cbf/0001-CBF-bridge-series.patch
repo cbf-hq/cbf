@@ -1,6 +1,6 @@
-From 0f57455e101675a6bfe6b32d16f3509b11d7a183 Mon Sep 17 00:00:00 2001
+From 705ba887ac383ab0c297eeb91ce4b32b87f0734a Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
-Date: Thu, 5 Feb 2026 11:28:25 +0900
+Date: Thu, 19 Feb 2026 09:47:06 +0900
 Subject: [PATCH] CBF bridge series
 
 ---
@@ -12,7 +12,7 @@ Subject: [PATCH] CBF bridge series
  chrome/browser/cbf/bridge/cbf_bridge_client.h |   63 +
  .../cbf/bridge/cbf_bridge_client_impl.cc      |  301 +++
  .../cbf/bridge/cbf_bridge_client_impl.h       |  159 ++
- .../cbf/bridge/cbf_bridge_context_menu.cc     |  103 ++
+ .../cbf/bridge/cbf_bridge_context_menu.cc     |  103 +
  .../cbf/bridge/cbf_bridge_converters.cc       |  179 ++
  .../cbf/bridge/cbf_bridge_converters.h        |   27 +
  .../browser/cbf/bridge/cbf_bridge_events.cc   |  387 ++++
@@ -35,7 +35,7 @@ Subject: [PATCH] CBF bridge series
  chrome/browser/cbf/cbf_features.h             |   12 +
  .../cbf/cbf_java_script_dialog_manager.cc     |   91 +
  .../cbf/cbf_java_script_dialog_manager.h      |   51 +
- chrome/browser/cbf/cbf_profile_service.cc     | 1626 +++++++++++++++++
+ chrome/browser/cbf/cbf_profile_service.cc     | 1687 +++++++++++++++++
  chrome/browser/cbf/cbf_profile_service.h      |  214 +++
  chrome/browser/cbf/cbf_service.cc             |   79 +
  chrome/browser/cbf/cbf_service.h              |   36 +
@@ -46,7 +46,7 @@ Subject: [PATCH] CBF bridge series
  chrome/browser/cbf/cbf_tab_manager.h          |   73 +
  .../browser/cbf/cbf_web_contents_delegate.cc  |  138 ++
  .../browser/cbf/cbf_web_contents_delegate.h   |   74 +
- chrome/browser/cbf/mojom/cbf_browser.mojom    |  415 +++++
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  415 ++++
  chrome/browser/global_features.cc             |    9 +
  chrome/browser/global_features.h              |    7 +
  chrome/browser/ui/BUILD.gn                    |    1 +
@@ -66,7 +66,7 @@ Subject: [PATCH] CBF bridge series
  .../public/browser/web_contents_delegate.cc   |   13 +
  .../public/browser/web_contents_delegate.h    |   21 +
  ui/compositor/compositor.h                    |    1 +
- 62 files changed, 7705 insertions(+), 1 deletion(-)
+ 62 files changed, 7766 insertions(+), 1 deletion(-)
  create mode 100644 chrome/browser/cbf/BUILD.gn
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge.cc
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge.h
@@ -4846,10 +4846,10 @@ index 0000000000000..8087933b94555
 +#endif  // CHROME_BROWSER_CBF_CBF_JAVA_SCRIPT_DIALOG_MANAGER_H_
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
 new file mode 100644
-index 0000000000000..f05bd1f0145d6
+index 0000000000000..4d92732000d97
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
-@@ -0,0 +1,1626 @@
+@@ -0,0 +1,1687 @@
 +#include "chrome/browser/cbf/cbf_profile_service.h"
 +
 +#include <algorithm>
@@ -4874,7 +4874,9 @@ index 0000000000000..f05bd1f0145d6
 +#include "chrome/browser/themes/theme_service_factory.h"
 +#include "chrome/browser/ui/tab_contents/chrome_web_contents_menu_helper.h"
 +#include "chrome/browser/profiles/profile.h"
++#include "components/input/render_widget_host_input_event_router.h"
 +#include "content/browser/renderer_host/render_widget_host_impl.h"
++#include "content/browser/renderer_host/render_widget_host_view_base.h"
 +#include "content/browser/web_contents/web_contents_impl.h"
 +#include "content/public/browser/render_frame_host.h"
 +#include "content/public/browser/navigation_controller.h"
@@ -5377,6 +5379,51 @@ index 0000000000000..f05bd1f0145d6
 +  return view ? view->GetRenderWidgetHost() : nullptr;
 +}
 +
++content::RenderWidgetHostViewBase* ResolveInputRootView(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return nullptr;
++  }
++  content::RenderWidgetHostView* view = web_contents->GetRenderWidgetHostView();
++  if (!view) {
++    return nullptr;
++  }
++  return static_cast<content::RenderWidgetHostViewBase*>(view);
++}
++
++input::RenderWidgetHostInputEventRouter* ResolveInputEventRouter(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return nullptr;
++  }
++  auto* web_contents_impl = static_cast<content::WebContentsImpl*>(web_contents);
++  return web_contents_impl->GetInputEventRouter();
++}
++
++bool RouteMouseEventViaInputRouter(content::WebContents* web_contents,
++                                   blink::WebMouseEvent* event,
++                                   const ui::LatencyInfo& latency_info) {
++  auto* router = ResolveInputEventRouter(web_contents);
++  auto* root_view = ResolveInputRootView(web_contents);
++  if (!router || !root_view) {
++    return false;
++  }
++  router->RouteMouseEvent(root_view, event, latency_info);
++  return true;
++}
++
++bool RouteMouseWheelEventViaInputRouter(content::WebContents* web_contents,
++                                        blink::WebMouseWheelEvent* event,
++                                        const ui::LatencyInfo& latency_info) {
++  auto* router = ResolveInputEventRouter(web_contents);
++  auto* root_view = ResolveInputRootView(web_contents);
++  if (!router || !root_view) {
++    return false;
++  }
++  router->RouteMouseWheelEvent(root_view, event, latency_info);
++  return true;
++}
++
 +cbf::mojom::CbfRectPtr ToCbfRect(const gfx::Rect& rect) {
 +  auto out = cbf::mojom::CbfRect::New();
 +  out->x = rect.x();
@@ -5603,17 +5650,6 @@ index 0000000000000..f05bd1f0145d6
 +  if (!web_contents) {
 +    return;
 +  }
-+  content::RenderWidgetHost* widget_host =
-+      ResolveInputRenderWidgetHost(web_contents);
-+  if (!widget_host) {
-+    DVLOG(1) << "SendMouseEvent dropped: no input widget host for web_page_id="
-+             << event->web_page_id;
-+    return;
-+  }
-+  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
-+  if (!widget_impl) {
-+    return;
-+  }
 +
 +  blink::WebMouseEvent mouse_event(
 +      ToWebInputEventType(event->type),
@@ -5628,7 +5664,23 @@ index 0000000000000..f05bd1f0145d6
 +  mouse_event.is_raw_movement_event = event->is_raw_movement_event;
 +  mouse_event.pointer_type = ToWebPointerType(event->pointer_type);
 +
-+  widget_impl->ForwardMouseEventWithLatencyInfo(mouse_event, ui::LatencyInfo());
++  ui::LatencyInfo latency_info;
++  if (RouteMouseEventViaInputRouter(web_contents, &mouse_event, latency_info)) {
++    return;
++  }
++
++  content::RenderWidgetHost* widget_host =
++      ResolveInputRenderWidgetHost(web_contents);
++  if (!widget_host) {
++    DVLOG(1) << "SendMouseEvent dropped: no input widget host for web_page_id="
++             << event->web_page_id;
++    return;
++  }
++  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++  if (!widget_impl) {
++    return;
++  }
++  widget_impl->ForwardMouseEventWithLatencyInfo(mouse_event, latency_info);
 +}
 +
 +void CbfProfileService::SendMouseWheelEvent(
@@ -5636,18 +5688,6 @@ index 0000000000000..f05bd1f0145d6
 +  content::WebContents* web_contents =
 +      tab_manager_.GetWebContents(event->web_page_id);
 +  if (!web_contents) {
-+    return;
-+  }
-+  content::RenderWidgetHost* widget_host =
-+      ResolveInputRenderWidgetHost(web_contents);
-+  if (!widget_host) {
-+    DVLOG(1)
-+        << "SendMouseWheelEvent dropped: no input widget host for web_page_id="
-+        << event->web_page_id;
-+    return;
-+  }
-+  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
-+  if (!widget_impl) {
 +    return;
 +  }
 +
@@ -5694,8 +5734,25 @@ index 0000000000000..f05bd1f0145d6
 +    wheel_phase_states_.erase(event->web_page_id);
 +  }
 +
-+  widget_impl->ForwardWheelEventWithLatencyInfo(wheel_event,
-+                                                ui::LatencyInfo());
++  ui::LatencyInfo latency_info;
++  if (RouteMouseWheelEventViaInputRouter(web_contents, &wheel_event,
++                                         latency_info)) {
++    return;
++  }
++
++  content::RenderWidgetHost* widget_host =
++      ResolveInputRenderWidgetHost(web_contents);
++  if (!widget_host) {
++    DVLOG(1)
++        << "SendMouseWheelEvent dropped: no input widget host for web_page_id="
++        << event->web_page_id;
++    return;
++  }
++  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++  if (!widget_impl) {
++    return;
++  }
++  widget_impl->ForwardWheelEventWithLatencyInfo(wheel_event, latency_info);
 +}
 +
 +void CbfProfileService::SendSyntheticWheelEndedEvent(WebPageId web_page_id) {
@@ -5715,17 +5772,6 @@ index 0000000000000..f05bd1f0145d6
 +    wheel_phase_states_.erase(state_it);
 +    return;
 +  }
-+  content::RenderWidgetHost* widget_host =
-+      ResolveInputRenderWidgetHost(web_contents);
-+  if (!widget_host) {
-+    wheel_phase_states_.erase(state_it);
-+    return;
-+  }
-+  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
-+  if (!widget_impl) {
-+    wheel_phase_states_.erase(state_it);
-+    return;
-+  }
 +
 +  blink::WebMouseWheelEvent ended_event = *phase_state.last_event;
 +  ended_event.SetTimeStamp(base::TimeTicks::Now());
@@ -5736,7 +5782,22 @@ index 0000000000000..f05bd1f0145d6
 +  ended_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
 +  ended_event.momentum_phase = blink::WebMouseWheelEvent::kPhaseNone;
 +
-+  widget_impl->ForwardWheelEventWithLatencyInfo(ended_event, ui::LatencyInfo());
++  ui::LatencyInfo latency_info;
++  if (!RouteMouseWheelEventViaInputRouter(web_contents, &ended_event,
++                                          latency_info)) {
++    content::RenderWidgetHost* widget_host =
++        ResolveInputRenderWidgetHost(web_contents);
++    if (!widget_host) {
++      wheel_phase_states_.erase(state_it);
++      return;
++    }
++    auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++    if (!widget_impl) {
++      wheel_phase_states_.erase(state_it);
++      return;
++    }
++    widget_impl->ForwardWheelEventWithLatencyInfo(ended_event, latency_info);
++  }
 +  wheel_phase_states_.erase(state_it);
 +}
 +
