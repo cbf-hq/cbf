@@ -26,7 +26,7 @@ mod utils;
 /// Convert native NSEvent input to CBF input events on macOS.
 #[cfg(target_os = "macos")]
 pub use map::{
-    convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
+    convert_nspasteboard_to_drag_data, convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
     convert_nsevent_to_mouse_wheel_event,
 };
 

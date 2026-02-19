@@ -1,4 +1,4 @@
-From 705ba887ac383ab0c297eeb91ce4b32b87f0734a Mon Sep 17 00:00:00 2001
+From 3a6393d15999398668aa28b23835107bf7cdd4a2 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Feb 2026 09:47:06 +0900
 Subject: [PATCH] CBF bridge series
@@ -16,10 +16,10 @@ Subject: [PATCH] CBF bridge series
  .../cbf/bridge/cbf_bridge_converters.cc       |  179 ++
  .../cbf/bridge/cbf_bridge_converters.h        |   27 +
  .../browser/cbf/bridge/cbf_bridge_events.cc   |  387 ++++
- chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  499 +++++
- chrome/browser/cbf/bridge/cbf_bridge_input.cc |  659 +++++++
- .../browser/cbf/bridge/cbf_bridge_internal.h  |   26 +
- chrome/browser/cbf/bridge/cbf_bridge_mac.mm   |  224 +++
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  503 +++++
+ chrome/browser/cbf/bridge/cbf_bridge_input.cc |  737 +++++++
+ .../browser/cbf/bridge/cbf_bridge_internal.h  |   28 +
+ chrome/browser/cbf/bridge/cbf_bridge_mac.mm   |  247 +++
  .../browser/cbf/bridge/cbf_bridge_profiles.cc |   94 +
  .../browser/cbf/bridge/cbf_bridge_shutdown.cc |  122 ++
  .../browser/cbf/bridge/cbf_bridge_support.cc  |   54 +
@@ -66,7 +66,7 @@ Subject: [PATCH] CBF bridge series
  .../public/browser/web_contents_delegate.cc   |   13 +
  .../public/browser/web_contents_delegate.h    |   21 +
  ui/compositor/compositor.h                    |    1 +
- 62 files changed, 7766 insertions(+), 1 deletion(-)
+ 62 files changed, 7873 insertions(+), 1 deletion(-)
  create mode 100644 chrome/browser/cbf/BUILD.gn
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge.cc
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge.h
@@ -1792,10 +1792,10 @@ index 0000000000000..d766b597b0e95
 +}
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 new file mode 100644
-index 0000000000000..e43b0e7c2c4f1
+index 0000000000000..04e61e9beb207
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
-@@ -0,0 +1,499 @@
+@@ -0,0 +1,503 @@
 +#ifndef CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_FFI_H_
 +#define CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_FFI_H_
 +
@@ -2265,6 +2265,10 @@ index 0000000000000..e43b0e7c2c4f1
 +    void* nsview,
 +    uint64_t web_page_id,
 +    CbfMouseWheelEvent* out_event);
++void cbf_bridge_convert_nspasteboard_to_drag_data(
++    void* nspasteboard,
++    CbfDragData* out_data);
++void cbf_bridge_free_converted_drag_data(CbfDragData* data);
 +bool cbf_bridge_client_execute_context_menu_command(
 +    CbfBridgeClientHandle* client,
 +    uint64_t menu_id,
@@ -2297,10 +2301,10 @@ index 0000000000000..e43b0e7c2c4f1
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_FFI_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_input.cc b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
 new file mode 100644
-index 0000000000000..e63cbf2be9132
+index 0000000000000..0c867fb553e4a
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
-@@ -0,0 +1,659 @@
+@@ -0,0 +1,737 @@
 +#include "chrome/browser/cbf/bridge/cbf_bridge.h"
 +#include "chrome/browser/cbf/bridge/cbf_bridge_client.h"
 +
@@ -2947,6 +2951,84 @@ index 0000000000000..e63cbf2be9132
 +#endif
 +}
 +
++namespace {
++
++void FreeConvertedDragUrlInfos(CbfDragUrlInfoList list) {
++  if (!list.items || list.len == 0) {
++    return;
++  }
++  auto infos = UNSAFE_BUFFERS(base::span(list.items, list.len));
++  for (auto& info : infos) {
++    delete[] info.url;
++    delete[] info.title;
++  }
++  delete[] list.items;
++}
++
++}  // namespace
++
++extern "C" void cbf_bridge_convert_nspasteboard_to_drag_data(
++    void* nspasteboard,
++    CbfDragData* out_data) {
++  if (!out_data) {
++    return;
++  }
++  *out_data = {};
++#if defined(__APPLE__)
++  if (!nspasteboard) {
++    return;
++  }
++  auto mojom_data = cbf::ConvertNSPasteboardToMojomDragData(nspasteboard);
++  if (!mojom_data) {
++    return;
++  }
++
++  out_data->text = !mojom_data->text.empty()
++                       ? cbf_bridge::internal::CopyCString(mojom_data->text)
++                       : nullptr;
++  out_data->html = !mojom_data->html.empty()
++                       ? cbf_bridge::internal::CopyCString(mojom_data->html)
++                       : nullptr;
++  out_data->html_base_url =
++      !mojom_data->html_base_url.empty()
++          ? cbf_bridge::internal::CopyCString(mojom_data->html_base_url)
++          : nullptr;
++
++  out_data->url_infos = {};
++  if (!mojom_data->url_infos.empty()) {
++    auto* out_infos = new CbfDragUrlInfo[mojom_data->url_infos.size()];
++    auto span =
++        UNSAFE_BUFFERS(base::span(out_infos, mojom_data->url_infos.size()));
++    for (size_t i = 0; i < span.size(); ++i) {
++      span[i] = {};
++      if (!mojom_data->url_infos[i]) {
++        continue;
++      }
++      span[i].url = cbf_bridge::internal::CopyCString(mojom_data->url_infos[i]->url);
++      span[i].title =
++          cbf_bridge::internal::CopyCString(mojom_data->url_infos[i]->title);
++    }
++    out_data->url_infos.items = out_infos;
++    out_data->url_infos.len = static_cast<uint32_t>(span.size());
++  }
++#endif
++}
++
++extern "C" void cbf_bridge_free_converted_drag_data(CbfDragData* data) {
++  if (!data) {
++    return;
++  }
++  delete[] data->text;
++  data->text = nullptr;
++  delete[] data->html;
++  data->html = nullptr;
++  delete[] data->html_base_url;
++  data->html_base_url = nullptr;
++  FreeConvertedDragUrlInfos(data->url_infos);
++  data->url_infos.items = nullptr;
++  data->url_infos.len = 0;
++}
++
 +extern "C" void cbf_bridge_free_converted_key_event(CbfKeyEvent* event) {
 +  if (!event) {
 +    return;
@@ -2962,10 +3044,10 @@ index 0000000000000..e63cbf2be9132
 +}
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_internal.h b/chrome/browser/cbf/bridge/cbf_bridge_internal.h
 new file mode 100644
-index 0000000000000..0cb155b56eece
+index 0000000000000..2396f6646fc3c
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_internal.h
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,28 @@
 +#ifndef CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_INTERNAL_H_
 +#define CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_INTERNAL_H_
 +
@@ -2987,6 +3069,8 @@ index 0000000000000..0cb155b56eece
 +    void* nsevent,
 +    void* nsview,
 +    uint64_t web_page_id);
++cbf::mojom::CbfDragDataPtr ConvertNSPasteboardToMojomDragData(
++    void* nspasteboard);
 +void ReleaseNSEvent(void* nsevent);
 +}  // namespace cbf
 +#endif
@@ -2994,10 +3078,10 @@ index 0000000000000..0cb155b56eece
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_INTERNAL_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_mac.mm b/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
 new file mode 100644
-index 0000000000000..1a7e1d76a9085
+index 0000000000000..9279c2adc0265
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
-@@ -0,0 +1,224 @@
+@@ -0,0 +1,247 @@
 +#include "chrome/browser/cbf/bridge/cbf_bridge_internal.h"
 +
 +#import <AppKit/AppKit.h>
@@ -3006,6 +3090,7 @@ index 0000000000000..1a7e1d76a9085
 +#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
 +#include "components/input/web_input_event_builders_mac.h"
++#include "content/browser/web_contents/web_drag_dest_mac.h"
 +#include "components/input/native_web_keyboard_event.h"
 +#include "third_party/blink/public/common/input/web_input_event.h"
 +#include "ui/events/keycodes/dom/keycode_converter.h"
@@ -3215,6 +3300,28 @@ index 0000000000000..1a7e1d76a9085
 +      ToMojomScrollGranularity(web_event.delta_units);
 +
 +  return mojom_event;
++}
++
++mojom::CbfDragDataPtr ConvertNSPasteboardToMojomDragData(void* nspasteboard) {
++  NSPasteboard* pasteboard = (__bridge NSPasteboard*)(nspasteboard);
++  if (!pasteboard) {
++    return nullptr;
++  }
++
++  content::DropData drop_data = content::PopulateDropDataFromPasteboard(pasteboard);
++
++  auto data = mojom::CbfDragData::New();
++  data->text = drop_data.text ? base::UTF16ToUTF8(*drop_data.text) : std::string();
++  data->html = drop_data.html ? base::UTF16ToUTF8(*drop_data.html) : std::string();
++  data->html_base_url = drop_data.html_base_url.spec();
++  data->url_infos.reserve(drop_data.url_infos.size());
++  for (const auto& url_info : drop_data.url_infos) {
++    auto info = mojom::CbfDragUrlInfo::New();
++    info->url = url_info.url.spec();
++    info->title = base::UTF16ToUTF8(url_info.title);
++    data->url_infos.push_back(std::move(info));
++  }
++  return data;
 +}
 +
 +void ReleaseNSEvent(void* nsevent) {

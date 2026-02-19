@@ -544,6 +544,11 @@ unsafe extern "C" {
         web_page_id: u64,
         out_event: *mut CbfMouseWheelEvent,
     );
+    pub fn cbf_bridge_convert_nspasteboard_to_drag_data(
+        nspasteboard: *mut std::ffi::c_void,
+        out_data: *mut CbfDragData,
+    );
+    pub fn cbf_bridge_free_converted_drag_data(data: *mut CbfDragData);
     pub fn cbf_bridge_client_set_composition(
         client: *mut CbfBridgeClientHandle,
         composition: *const CbfImeComposition,

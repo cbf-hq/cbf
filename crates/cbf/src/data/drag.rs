@@ -1,3 +1,5 @@
+use crate::data::ids::WebPageId;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DragUrlInfo {
     pub url: String,
@@ -25,7 +27,7 @@ pub struct DragImage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragStartRequest {
     pub session_id: u64,
-    pub web_page_id: crate::data::ids::WebPageId,
+    pub web_page_id: WebPageId,
     pub allowed_operations: u32,
     pub source_origin: String,
     pub data: DragData,
@@ -35,7 +37,7 @@ pub struct DragStartRequest {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragUpdate {
     pub session_id: u64,
-    pub web_page_id: crate::data::ids::WebPageId,
+    pub web_page_id: WebPageId,
     pub allowed_operations: u32,
     pub modifiers: u32,
     pub position_in_widget_x: f32,
@@ -47,7 +49,7 @@ pub struct DragUpdate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragDrop {
     pub session_id: u64,
-    pub web_page_id: crate::data::ids::WebPageId,
+    pub web_page_id: WebPageId,
     pub modifiers: u32,
     pub position_in_widget_x: f32,
     pub position_in_widget_y: f32,

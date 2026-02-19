@@ -582,6 +582,27 @@ pub fn convert_nsevent_to_key_event(web_page_id: u64, nsevent: NonNull<c_void>) 
 }
 
 #[cfg(target_os = "macos")]
+pub fn convert_nspasteboard_to_drag_data(nspasteboard: NonNull<c_void>) -> DragData {
+    let mut ffi_data = CbfDragData::default();
+    unsafe {
+        cbf_bridge_convert_nspasteboard_to_drag_data(nspasteboard.as_ptr(), &mut ffi_data);
+    }
+
+    let drag_data = DragData {
+        text: c_string_to_string(ffi_data.text),
+        html: c_string_to_string(ffi_data.html),
+        html_base_url: c_string_to_string(ffi_data.html_base_url),
+        url_infos: parse_drag_url_infos(ffi_data.url_infos),
+    };
+
+    unsafe {
+        cbf_bridge_free_converted_drag_data(&mut ffi_data);
+    }
+
+    drag_data
+}
+
+#[cfg(target_os = "macos")]
 pub fn convert_nsevent_to_mouse_event(
     web_page_id: u64,
     nsevent: NonNull<c_void>,
