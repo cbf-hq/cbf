@@ -16,8 +16,9 @@ use cbf::{
         drag::{DragData, DragImage, DragOperations, DragStartRequest, DragUrlInfo},
         ids::BrowsingContextId,
         ime::{
+            ChromeImeTextSpanStyle, ChromeImeTextSpanThickness, ChromeImeTextSpanUnderlineStyle,
             ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, ImeTextSpan,
-            ImeTextSpanThickness, ImeTextSpanType, ImeTextSpanUnderlineStyle, TextSelectionBounds,
+            ImeTextSpanType, TextSelectionBounds,
         },
         key::{KeyEvent, KeyEventType},
         mouse::{
@@ -29,7 +30,7 @@ use cbf::{
     event::BeforeUnloadReason,
 };
 
-use super::{Error, IpcEvent, utils::c_string_to_string};
+use super::{utils::c_string_to_string, Error, IpcEvent};
 
 pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
     match event.kind {
@@ -489,22 +490,26 @@ fn ime_text_span_type_to_ffi(value: ImeTextSpanType) -> u8 {
     }
 }
 
-fn ime_text_span_thickness_to_ffi(value: ImeTextSpanThickness) -> u8 {
+fn ime_text_span_thickness_to_ffi(value: ChromeImeTextSpanThickness) -> u8 {
     match value {
-        ImeTextSpanThickness::None => CBF_IME_TEXT_SPAN_THICKNESS_NONE,
-        ImeTextSpanThickness::Thin => CBF_IME_TEXT_SPAN_THICKNESS_THIN,
-        ImeTextSpanThickness::Thick => CBF_IME_TEXT_SPAN_THICKNESS_THICK,
+        ChromeImeTextSpanThickness::None => CBF_IME_TEXT_SPAN_THICKNESS_NONE,
+        ChromeImeTextSpanThickness::Thin => CBF_IME_TEXT_SPAN_THICKNESS_THIN,
+        ChromeImeTextSpanThickness::Thick => CBF_IME_TEXT_SPAN_THICKNESS_THICK,
     }
 }
 
-fn ime_text_span_underline_style_to_ffi(value: ImeTextSpanUnderlineStyle) -> u8 {
+fn ime_text_span_underline_style_to_ffi(value: ChromeImeTextSpanUnderlineStyle) -> u8 {
     match value {
-        ImeTextSpanUnderlineStyle::None => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_NONE,
-        ImeTextSpanUnderlineStyle::Solid => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SOLID,
-        ImeTextSpanUnderlineStyle::Dot => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_DOT,
-        ImeTextSpanUnderlineStyle::Dash => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_DASH,
-        ImeTextSpanUnderlineStyle::Squiggle => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SQUIGGLE,
+        ChromeImeTextSpanUnderlineStyle::None => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_NONE,
+        ChromeImeTextSpanUnderlineStyle::Solid => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SOLID,
+        ChromeImeTextSpanUnderlineStyle::Dot => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_DOT,
+        ChromeImeTextSpanUnderlineStyle::Dash => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_DASH,
+        ChromeImeTextSpanUnderlineStyle::Squiggle => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SQUIGGLE,
     }
+}
+
+fn chrome_ime_text_span_style_from_span(span: &ImeTextSpan) -> ChromeImeTextSpanStyle {
+    span.chrome_style.clone().unwrap_or_default()
 }
 
 pub(super) fn ime_range_to_ffi(value: &Option<ImeTextRange>) -> (i32, i32) {
@@ -518,25 +523,31 @@ pub(super) fn ime_range_to_ffi(value: &Option<ImeTextRange>) -> (i32, i32) {
 pub(super) fn to_ffi_ime_text_spans(spans: &[ImeTextSpan]) -> Vec<CbfImeTextSpan> {
     spans
         .iter()
-        .map(|span| CbfImeTextSpan {
-            type_: ime_text_span_type_to_ffi(span.r#type),
-            start_offset: span.start_offset,
-            end_offset: span.end_offset,
-            underline_color: span.underline_color,
-            thickness: ime_text_span_thickness_to_ffi(span.thickness),
-            underline_style: ime_text_span_underline_style_to_ffi(span.underline_style),
-            text_color: span.text_color,
-            background_color: span.background_color,
-            suggestion_highlight_color: span.suggestion_highlight_color,
-            remove_on_finish_composing: span.remove_on_finish_composing,
-            interim_char_selection: span.interim_char_selection,
-            should_hide_suggestion_menu: span.should_hide_suggestion_menu,
+        .map(|span| {
+            let chrome_style = chrome_ime_text_span_style_from_span(span);
+            CbfImeTextSpan {
+                type_: ime_text_span_type_to_ffi(span.r#type),
+                start_offset: span.start_offset,
+                end_offset: span.end_offset,
+                underline_color: chrome_style.underline_color,
+                thickness: ime_text_span_thickness_to_ffi(chrome_style.thickness),
+                underline_style: ime_text_span_underline_style_to_ffi(chrome_style.underline_style),
+                text_color: chrome_style.text_color,
+                background_color: chrome_style.background_color,
+                suggestion_highlight_color: chrome_style.suggestion_highlight_color,
+                remove_on_finish_composing: chrome_style.remove_on_finish_composing,
+                interim_char_selection: chrome_style.interim_char_selection,
+                should_hide_suggestion_menu: chrome_style.should_hide_suggestion_menu,
+            }
         })
         .collect()
 }
 
 #[cfg(target_os = "macos")]
-pub fn convert_nsevent_to_key_event(browsing_context_id: u64, nsevent: NonNull<c_void>) -> KeyEvent {
+pub fn convert_nsevent_to_key_event(
+    browsing_context_id: u64,
+    nsevent: NonNull<c_void>,
+) -> KeyEvent {
     KeyEvent::from(convert_nsevent_to_chrome_key_event(
         browsing_context_id,
         nsevent,

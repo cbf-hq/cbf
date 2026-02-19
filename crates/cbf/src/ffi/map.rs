@@ -507,17 +507,7 @@ fn chrome_ime_text_span_underline_style_to_ffi(value: ChromeImeTextSpanUnderline
 }
 
 fn chrome_ime_text_span_style_from_span(span: &ImeTextSpan) -> ChromeImeTextSpanStyle {
-    span.chrome_style.clone().unwrap_or(ChromeImeTextSpanStyle {
-        underline_color: span.underline_color,
-        thickness: span.thickness,
-        underline_style: span.underline_style,
-        text_color: span.text_color,
-        background_color: span.background_color,
-        suggestion_highlight_color: span.suggestion_highlight_color,
-        remove_on_finish_composing: span.remove_on_finish_composing,
-        interim_char_selection: span.interim_char_selection,
-        should_hide_suggestion_menu: span.should_hide_suggestion_menu,
-    })
+    span.chrome_style.clone().unwrap_or_default()
 }
 
 pub(super) fn ime_range_to_ffi(value: &Option<ImeTextRange>) -> (i32, i32) {

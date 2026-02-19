@@ -53,7 +53,9 @@ pub enum BrowserCommand {
     ListProfiles,
 
     /// Request to close a web page.
-    RequestCloseBrowsingContext { browsing_context_id: BrowsingContextId },
+    RequestCloseBrowsingContext {
+        browsing_context_id: BrowsingContextId,
+    },
 
     /// Resize a web page surface.
     ResizeBrowsingContext {
@@ -64,11 +66,18 @@ pub enum BrowserCommand {
 
     // --- Navigation ---
     /// Navigate a page to the provided URL.
-    Navigate { browsing_context_id: BrowsingContextId, url: String },
+    Navigate {
+        browsing_context_id: BrowsingContextId,
+        url: String,
+    },
     /// Navigate back in history for the page.
-    GoBack { browsing_context_id: BrowsingContextId },
+    GoBack {
+        browsing_context_id: BrowsingContextId,
+    },
     /// Navigate forward in history for the page.
-    GoForward { browsing_context_id: BrowsingContextId },
+    GoForward {
+        browsing_context_id: BrowsingContextId,
+    },
     /// Reload the current page, optionally bypassing caches.
     Reload {
         browsing_context_id: BrowsingContextId,
@@ -106,6 +115,9 @@ pub enum BrowserCommand {
         event: MouseWheelEvent,
     },
     /// Deliver drag update for host-owned drag session.
+    ///
+    /// Uses browser-generic drag payload. Backend-native details should stay
+    /// in backend-specific extension layers.
     SendDragUpdate { update: DragUpdate },
     /// Deliver drag drop for host-owned drag session.
     SendDragDrop { drop: DragDrop },
@@ -115,8 +127,13 @@ pub enum BrowserCommand {
         browsing_context_id: BrowsingContextId,
     },
     /// Update the current IME composition state.
+    ///
+    /// `ImeComposition` carries browser-generic span data and may include
+    /// optional Chromium-specific style details per span.
     SetComposition { composition: ImeComposition },
     /// Commit IME text input to the focused element.
+    ///
+    /// `ImeCommitText` follows the same span boundary as `SetComposition`.
     CommitText { commit: ImeCommitText },
     /// Finish composing IME text with the given selection behavior.
     FinishComposingText {

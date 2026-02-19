@@ -31,3 +31,9 @@
 - `cbf-chrome` 側で既存Chromium機能が欠落しない。
 - IME関連 command/event の型変換が一貫している。
 
+## 実装メモ（2026-02-19）
+
+- `ImeTextSpan` を generic core（`type/start/end`）中心へ再構成し、Chromium依存の見た目属性は `chrome_style: Option<ChromeImeTextSpanStyle>` に隔離。
+- 非公開プロジェクト方針に合わせ、従来フィールドと従来名 enum の互換レイヤは削除（破壊的更新許容）。
+- FFI変換は `chrome_style` を優先し、未指定時は `ChromeImeTextSpanStyle::default()` を適用。
+- `BrowserCommand::{SetComposition, CommitText}` と `BrowsingContextEvent::ImeBoundsUpdated` のコメントを更新し、generic境界を明文化。

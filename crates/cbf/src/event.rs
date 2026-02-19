@@ -6,8 +6,8 @@
 use cursor_icon::CursorIcon;
 
 use crate::data::{
-    context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId, ime::ImeBoundsUpdate,
-    profile::ProfileInfo, surface::SurfaceHandle,
+    context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId,
+    ime::ImeBoundsUpdate, profile::ProfileInfo, surface::SurfaceHandle,
 };
 use crate::error::BackendErrorInfo;
 
@@ -115,6 +115,9 @@ pub enum BrowsingContextEvent {
     SurfaceHandleUpdated { handle: SurfaceHandle },
 
     /// IME bounds information was updated.
+    ///
+    /// This payload is browser-generic. Backend-specific IME visual details
+    /// should not be carried through this event.
     ImeBoundsUpdated { update: ImeBoundsUpdate },
 
     /// A context menu display was requested.
@@ -149,6 +152,8 @@ pub enum BrowsingContextEvent {
     DomHtmlRead { request_id: u64, html: String },
 
     /// Renderer requested host-owned drag start.
+    ///
+    /// Carries browser-generic drag payload only.
     DragStartRequested { request: DragStartRequest },
 
     // --- Additional Signals ---
