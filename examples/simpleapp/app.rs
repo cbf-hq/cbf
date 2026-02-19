@@ -5,13 +5,13 @@ use std::{
 
 use cbf::{
     browser::{BrowserHandle, EventStream},
-    chromium_process::{ChromiumProcess, start_chromium},
     event::BrowserEvent,
     middleware::{
         MiddlewareBuilder, error_guard::ErrorGuardLayer, lifecycle::LifecycleLayer,
         logging::LoggingLayer,
     },
 };
+use cbf_chrome::chromium_process::{ChromiumProcess, start_chromium};
 use tracing::{Level, error, warn};
 use winit::{
     application::ApplicationHandler,

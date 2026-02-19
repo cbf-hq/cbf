@@ -15,7 +15,7 @@ use crate::error::BackendErrorInfo;
 #[derive(Debug)]
 pub enum BrowserEvent {
     /// The backend is connected and ready to accept commands.
-    BackendReady { backend_name: String },
+    BackendReady,
 
     /// The backend stopped due to shutdown, disconnect, or crash.
     BackendStopped { reason: BackendStopReason },
@@ -135,7 +135,6 @@ pub enum WebPageEvent {
     PermissionRequested {
         permission: PermissionType,
         request_id: u64,
-        response_channel: oneshot::Sender<bool>, // true = allow, false = deny
     },
 
     // --- Process Lifecycle ---

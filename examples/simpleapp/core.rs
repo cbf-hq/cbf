@@ -157,8 +157,8 @@ impl CoreState {
     /// page creation, backend readiness, shutdown notifications, etc.
     pub(crate) fn handle_browser_event(&mut self, event: BrowserEvent) -> Vec<CoreAction> {
         match event {
-            BrowserEvent::BackendReady { backend_name } => {
-                info!("backend ready: {backend_name}");
+            BrowserEvent::BackendReady => {
+                info!("backend ready");
                 if !self.page_create_requested {
                     self.page_create_requested = true;
                     if let Err(err) =
@@ -285,10 +285,10 @@ impl CoreState {
                     .confirm_beforeunload(web_page_id, request_id, false);
                 Vec::new()
             }
-            WebPageEvent::PermissionRequested {
-                response_channel, ..
-            } => {
-                _ = response_channel.send(false);
+            WebPageEvent::PermissionRequested { request_id, .. } => {
+                _ = self
+                    .browser_handle()
+                    .confirm_permission(web_page_id, request_id, false);
                 Vec::new()
             }
             WebPageEvent::CloseRequested | WebPageEvent::Closed => {

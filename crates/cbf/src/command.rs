@@ -32,6 +32,12 @@ pub enum BrowserCommand {
         request_id: u64,
         proceed: bool,
     },
+    /// Confirm a permission request.
+    ConfirmPermission {
+        web_page_id: WebPageId,
+        request_id: u64,
+        allow: bool,
+    },
 
     /// Create a new web page (tab).
     ///

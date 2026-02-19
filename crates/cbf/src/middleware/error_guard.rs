@@ -223,9 +223,7 @@ mod tests {
         );
         _ = guard.on_event(
             &mut ctx,
-            BrowserEvent::BackendReady {
-                backend_name: "chromium".to_string(),
-            },
+            BrowserEvent::BackendReady,
         );
 
         let decision = guard.on_event(

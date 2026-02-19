@@ -44,8 +44,8 @@ Minimal example:
 
 ```rust
 use std::path::PathBuf;
-use cbf::chromium_backend::ChromiumBackendOptions;
-use cbf::chromium_process::{start_chromium, ChromiumProcessOptions, StartChromiumOptions};
+use cbf_chrome::chromium_backend::ChromiumBackendOptions;
+use cbf_chrome::chromium_process::{start_chromium, ChromiumProcessOptions, StartChromiumOptions};
 
 let channel_name = "exampleapp".to_owned();
 let (session, events, mut process) = start_chromium(

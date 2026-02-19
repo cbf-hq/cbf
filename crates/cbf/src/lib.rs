@@ -13,15 +13,13 @@ pub mod command;
 pub mod data;
 pub mod error;
 pub mod event;
-pub mod ffi;
 pub mod middleware;
 pub mod platform;
 
-#[cfg(feature = "chromium-backend")]
-pub mod chromium_backend;
-#[cfg(feature = "chromium-backend")]
-pub mod chromium_process;
 #[cfg(feature = "dummy-backend")]
 pub mod dummy_backend;
 
 pub use cbf_sys as sys;
+
+#[allow(dead_code, unused_imports)]
+mod ffi;

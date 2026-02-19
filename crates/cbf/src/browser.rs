@@ -244,6 +244,20 @@ impl BrowserHandle {
         })
     }
 
+    /// Respond to a permission request for a page.
+    pub fn confirm_permission(
+        &self,
+        web_page_id: WebPageId,
+        request_id: u64,
+        allow: bool,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::ConfirmPermission {
+            web_page_id,
+            request_id,
+            allow,
+        })
+    }
+
     /// Force shutdown without waiting for confirmations.
     pub fn force_shutdown(&self) -> Result<(), Error> {
         self.send(BrowserCommand::ForceShutdown)

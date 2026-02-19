@@ -52,12 +52,7 @@ impl DummyBackend {
         let mut pages: HashMap<WebPageId, String> = HashMap::new();
         let mut dispatcher = DelegateDispatcher::new(delegate);
 
-        if let Some(reason) = dispatcher.dispatch_event(
-            BrowserEvent::BackendReady {
-                backend_name: "dummy".to_string(),
-            },
-            &event_tx,
-        ) {
+        if let Some(reason) = dispatcher.dispatch_event(BrowserEvent::BackendReady, &event_tx) {
             let mut forward = |_| (None, Vec::new());
             dispatcher.stop(&event_tx, reason, &mut forward);
             return;
@@ -122,6 +117,7 @@ impl DummyBackend {
             }
             BrowserCommand::ForceShutdown => (Some(BackendStopReason::ShutdownRequested), events),
             BrowserCommand::ConfirmBeforeUnload { .. } => (None, events),
+            BrowserCommand::ConfirmPermission { .. } => (None, events),
             BrowserCommand::CreateWebPage {
                 request_id,
                 initial_url,

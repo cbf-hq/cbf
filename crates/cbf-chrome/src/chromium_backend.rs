@@ -6,15 +6,16 @@ use std::{
 
 use async_channel::{Receiver, Sender, TryRecvError};
 
-use crate::{
+use cbf::{
     backend_delegate::{BackendDelegate, DelegateDispatcher},
     browser::Backend,
     command::BrowserCommand,
     data::ids::WebPageId,
     error::{ApiErrorKind, BackendErrorInfo, Error, Operation},
     event::{BackendStopReason, BrowserEvent, DialogType, WebPageEvent},
-    ffi::{Error as IpcError, IpcClient, IpcEvent},
 };
+
+use crate::ffi::{Error as IpcError, IpcClient, IpcEvent};
 
 /// Backend implementation that speaks the Chromium IPC protocol.
 #[derive(Debug, Clone)]
@@ -165,12 +166,7 @@ impl ChromiumBackend {
         };
 
         // Notify that the backend is ready after establishing the connection.
-        if let Some(stop_reason) = dispatcher.dispatch_event(
-            BrowserEvent::BackendReady {
-                backend_name: "chromium".to_string(),
-            },
-            event_tx,
-        ) {
+        if let Some(stop_reason) = dispatcher.dispatch_event(BrowserEvent::BackendReady, event_tx) {
             let mut forward = |command| Self::execute_command(command, &mut client, event_tx);
             dispatcher.stop(event_tx, stop_reason, &mut forward);
             return None;
@@ -674,6 +670,7 @@ impl ChromiumBackend {
                     operation: Operation::ConfirmBeforeUnload,
                     source,
                 }),
+            BrowserCommand::ConfirmPermission { .. } => Ok(None),
             BrowserCommand::CreateWebPage {
                 request_id,
                 initial_url,

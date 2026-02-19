@@ -2,12 +2,13 @@ use async_process::{Child, Command};
 use futures_lite::future::block_on;
 use std::{path::PathBuf, process::ExitStatus};
 
-use crate::{
+use cbf::{
     backend_delegate::BackendDelegate,
     browser::{BrowserSession, EventStream, connect},
-    chromium_backend::{ChromiumBackend, ChromiumBackendOptions},
     error::Error,
 };
+
+use crate::chromium_backend::{ChromiumBackend, ChromiumBackendOptions};
 
 /// Options for launching the Chromium process.
 #[derive(Debug, Clone)]

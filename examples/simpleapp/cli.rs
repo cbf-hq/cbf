@@ -1,6 +1,6 @@
 use std::{env, path::PathBuf};
 
-use cbf::{
+use cbf_chrome::{
     chromium_backend::ChromiumBackendOptions,
     chromium_process::{ChromiumProcessOptions, StartChromiumOptions},
 };

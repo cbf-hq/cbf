@@ -1,20 +1,16 @@
 [package]
-name = "cbf"
+name = "cbf-chrome"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-description.workspace = true
+description = "Chromium-specific safe API layer for CBF"
 repository.workspace = true
 keywords.workspace = true
 license.workspace = true
 readme.workspace = true
 
-[features]
-default = ["chromium-backend"]
-dummy-backend = []
-chromium-backend = []
-
 [dependencies]
+cbf = { path = "../cbf" }
 cbf-sys = { path = "../cbf-sys" }
 thiserror.workspace = true
 cursor-icon = { workspace = true }
@@ -44,38 +40,3 @@ features = [
   "NSGeometry",
   "objc2-core-foundation"
 ]
-
-[target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
-workspace = true
-features = [
-  "NSApplication",
-  "NSCell",
-  "NSDragging",
-  "NSDraggingItem",
-  "NSDraggingSession",
-  "NSEvent",
-  "NSGraphicsContext",
-  "NSImage",
-  "NSMenu",
-  "NSMenuItem",
-  "NSMenuItemBadge",
-  "NSPasteboard",
-  "NSResponder",
-  "NSTextInputClient",
-  "NSView",
-  "NSWindow",
-  "objc2-quartz-core"
-]
-
-[dev-dependencies]
-cbf-chrome = { path = "../cbf-chrome" }
-clap = { workspace = true, features = ["derive"] }
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
-winit.workspace = true
-raw-window-handle.workspace = true
-dirs.workspace = true
-
-[[example]]
-name = "simpleapp"
-path = "../../examples/simpleapp/main.rs"
-required-features = ["chromium-backend"]
