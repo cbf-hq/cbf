@@ -6,7 +6,10 @@ use std::{
 use cbf::{
     browser::{BrowserHandle, BrowserSession},
     data::{
-        context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId, ime::ImeBoundsUpdate,
+        context_menu::ContextMenu,
+        drag::{DragOperations, DragStartRequest},
+        ids::BrowsingContextId,
+        ime::ImeBoundsUpdate,
         surface::SurfaceHandle,
     },
     event::{BackendStopReason, BrowserEvent, BrowsingContextEvent},
@@ -23,8 +26,8 @@ use crate::cli::Cli;
 pub(crate) struct SharedState {
     /// The currently active browsing context ID, if any.
     pub(crate) browsing_context_id: Option<BrowsingContextId>,
-    /// Maps drag session IDs to their allowed operations bitmask.
-    pub(crate) drag_allowed_operations: HashMap<u64, u32>,
+    /// Maps drag session IDs to their allowed operations.
+    pub(crate) drag_allowed_operations: HashMap<u64, DragOperations>,
 }
 
 /// Gets the currently active browsing context ID from shared state.
@@ -40,21 +43,24 @@ pub(crate) fn set_browsing_context_id(shared: &Arc<Mutex<SharedState>>, browsing
 }
 
 /// Gets the allowed drag operations for a given drag session.
-/// Returns 0 if the session is not found.
-pub(crate) fn drag_allowed_operations(shared: &Arc<Mutex<SharedState>>, session_id: u64) -> u32 {
+/// Returns no allowed operations if the session is not found.
+pub(crate) fn drag_allowed_operations(
+    shared: &Arc<Mutex<SharedState>>,
+    session_id: u64,
+) -> DragOperations {
     let guard = shared.lock().expect("shared state lock poisoned");
     guard
         .drag_allowed_operations
         .get(&session_id)
         .copied()
-        .unwrap_or(0)
+        .unwrap_or_default()
 }
 
 /// Sets the allowed drag operations for a given drag session.
 pub(crate) fn set_drag_allowed_operations(
     shared: &Arc<Mutex<SharedState>>,
     session_id: u64,
-    allowed_operations: u32,
+    allowed_operations: DragOperations,
 ) {
     let mut guard = shared.lock().expect("shared state lock poisoned");
     guard

@@ -9,6 +9,8 @@ use cbf_sys::ffi::*;
 use cursor_icon::CursorIcon;
 use tracing::{debug, warn};
 
+use crate::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
+
 use cbf::data::{
     drag::{DragDrop, DragStartRequest, DragUpdate},
     ids::BrowsingContextId,
@@ -26,8 +28,9 @@ mod utils;
 /// Convert native NSEvent input to CBF input events on macOS.
 #[cfg(target_os = "macos")]
 pub use map::{
-    convert_nspasteboard_to_drag_data, convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
-    convert_nsevent_to_mouse_wheel_event,
+    convert_nsevent_to_chrome_key_event, convert_nsevent_to_chrome_mouse_wheel_event,
+    convert_nsevent_to_key_event, convert_nsevent_to_mouse_event, convert_nsevent_to_mouse_wheel_event,
+    convert_nspasteboard_to_drag_data,
 };
 
 use map::{
@@ -428,6 +431,17 @@ impl IpcClient {
         event: &KeyEvent,
         commands: &[String],
     ) -> Result<(), Error> {
+        let chrome_event = ChromeKeyEvent::from(event.clone());
+        self.send_key_event_raw(browsing_context_id, &chrome_event, commands)
+    }
+
+    /// Send a Chromium-shaped keyboard event to the page.
+    pub fn send_key_event_raw(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        event: &ChromeKeyEvent,
+        commands: &[String],
+    ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -515,6 +529,16 @@ impl IpcClient {
         browsing_context_id: BrowsingContextId,
         event: &MouseWheelEvent,
     ) -> Result<(), Error> {
+        let chrome_event = ChromeMouseWheelEvent::from(event.clone());
+        self.send_mouse_wheel_event_raw(browsing_context_id, &chrome_event)
+    }
+
+    /// Send a Chromium-shaped mouse wheel event to the page.
+    pub fn send_mouse_wheel_event_raw(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        event: &ChromeMouseWheelEvent,
+    ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -554,7 +578,7 @@ impl IpcClient {
         let ffi_update = CbfDragUpdate {
             session_id: update.session_id,
             web_page_id: update.browsing_context_id.get(),
-            allowed_operations: update.allowed_operations,
+            allowed_operations: update.allowed_operations.bits(),
             modifiers: update.modifiers,
             position_in_widget_x: update.position_in_widget_x,
             position_in_widget_y: update.position_in_widget_y,

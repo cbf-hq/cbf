@@ -11,11 +11,12 @@ use crate::{
             self, ContextMenu, ContextMenuAccelerator, ContextMenuIcon, ContextMenuItem,
             ContextMenuItemType,
         },
-        drag::{DragData, DragImage, DragStartRequest, DragUrlInfo},
+        drag::{DragData, DragImage, DragOperations, DragStartRequest, DragUrlInfo},
         ids::BrowsingContextId,
         ime::{
+            ChromeImeTextSpanStyle, ChromeImeTextSpanThickness, ChromeImeTextSpanUnderlineStyle,
             ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, ImeTextSpan,
-            ImeTextSpanThickness, ImeTextSpanType, ImeTextSpanUnderlineStyle, TextSelectionBounds,
+            ImeTextSpanType, TextSelectionBounds,
         },
         key::{KeyEvent, KeyEventType},
         mouse::{
@@ -27,7 +28,7 @@ use crate::{
     event::BeforeUnloadReason,
 };
 
-use super::{Error, IpcEvent, utils::c_string_to_string};
+use super::{utils::c_string_to_string, Error, IpcEvent};
 
 pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
     match event.kind {
@@ -143,13 +144,16 @@ fn parse_drag_start_request(request: CbfDragStartRequest) -> DragStartRequest {
     DragStartRequest {
         session_id: request.session_id,
         browsing_context_id: BrowsingContextId::new(request.web_page_id),
-        allowed_operations: request.allowed_operations,
+        allowed_operations: DragOperations::from_bits(request.allowed_operations),
         source_origin: c_string_to_string(request.source_origin),
         data: DragData {
             text: c_string_to_string(request.data.text),
             html: c_string_to_string(request.data.html),
             html_base_url: c_string_to_string(request.data.html_base_url),
             url_infos: parse_drag_url_infos(request.data.url_infos),
+            filenames: Vec::new(),
+            file_mime_types: Vec::new(),
+            custom_data: Default::default(),
         },
         image: parse_drag_image(request.image),
     }
@@ -484,22 +488,36 @@ fn ime_text_span_type_to_ffi(value: ImeTextSpanType) -> u8 {
     }
 }
 
-fn ime_text_span_thickness_to_ffi(value: ImeTextSpanThickness) -> u8 {
+fn chrome_ime_text_span_thickness_to_ffi(value: ChromeImeTextSpanThickness) -> u8 {
     match value {
-        ImeTextSpanThickness::None => CBF_IME_TEXT_SPAN_THICKNESS_NONE,
-        ImeTextSpanThickness::Thin => CBF_IME_TEXT_SPAN_THICKNESS_THIN,
-        ImeTextSpanThickness::Thick => CBF_IME_TEXT_SPAN_THICKNESS_THICK,
+        ChromeImeTextSpanThickness::None => CBF_IME_TEXT_SPAN_THICKNESS_NONE,
+        ChromeImeTextSpanThickness::Thin => CBF_IME_TEXT_SPAN_THICKNESS_THIN,
+        ChromeImeTextSpanThickness::Thick => CBF_IME_TEXT_SPAN_THICKNESS_THICK,
     }
 }
 
-fn ime_text_span_underline_style_to_ffi(value: ImeTextSpanUnderlineStyle) -> u8 {
+fn chrome_ime_text_span_underline_style_to_ffi(value: ChromeImeTextSpanUnderlineStyle) -> u8 {
     match value {
-        ImeTextSpanUnderlineStyle::None => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_NONE,
-        ImeTextSpanUnderlineStyle::Solid => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SOLID,
-        ImeTextSpanUnderlineStyle::Dot => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_DOT,
-        ImeTextSpanUnderlineStyle::Dash => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_DASH,
-        ImeTextSpanUnderlineStyle::Squiggle => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SQUIGGLE,
+        ChromeImeTextSpanUnderlineStyle::None => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_NONE,
+        ChromeImeTextSpanUnderlineStyle::Solid => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SOLID,
+        ChromeImeTextSpanUnderlineStyle::Dot => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_DOT,
+        ChromeImeTextSpanUnderlineStyle::Dash => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_DASH,
+        ChromeImeTextSpanUnderlineStyle::Squiggle => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SQUIGGLE,
     }
+}
+
+fn chrome_ime_text_span_style_from_span(span: &ImeTextSpan) -> ChromeImeTextSpanStyle {
+    span.chrome_style.clone().unwrap_or(ChromeImeTextSpanStyle {
+        underline_color: span.underline_color,
+        thickness: span.thickness,
+        underline_style: span.underline_style,
+        text_color: span.text_color,
+        background_color: span.background_color,
+        suggestion_highlight_color: span.suggestion_highlight_color,
+        remove_on_finish_composing: span.remove_on_finish_composing,
+        interim_char_selection: span.interim_char_selection,
+        should_hide_suggestion_menu: span.should_hide_suggestion_menu,
+    })
 }
 
 pub(super) fn ime_range_to_ffi(value: &Option<ImeTextRange>) -> (i32, i32) {
@@ -513,25 +531,34 @@ pub(super) fn ime_range_to_ffi(value: &Option<ImeTextRange>) -> (i32, i32) {
 pub(super) fn to_ffi_ime_text_spans(spans: &[ImeTextSpan]) -> Vec<CbfImeTextSpan> {
     spans
         .iter()
-        .map(|span| CbfImeTextSpan {
-            type_: ime_text_span_type_to_ffi(span.r#type),
-            start_offset: span.start_offset,
-            end_offset: span.end_offset,
-            underline_color: span.underline_color,
-            thickness: ime_text_span_thickness_to_ffi(span.thickness),
-            underline_style: ime_text_span_underline_style_to_ffi(span.underline_style),
-            text_color: span.text_color,
-            background_color: span.background_color,
-            suggestion_highlight_color: span.suggestion_highlight_color,
-            remove_on_finish_composing: span.remove_on_finish_composing,
-            interim_char_selection: span.interim_char_selection,
-            should_hide_suggestion_menu: span.should_hide_suggestion_menu,
+        .map(|span| {
+            let chrome_style = chrome_ime_text_span_style_from_span(span);
+
+            CbfImeTextSpan {
+                type_: ime_text_span_type_to_ffi(span.r#type),
+                start_offset: span.start_offset,
+                end_offset: span.end_offset,
+                underline_color: chrome_style.underline_color,
+                thickness: chrome_ime_text_span_thickness_to_ffi(chrome_style.thickness),
+                underline_style: chrome_ime_text_span_underline_style_to_ffi(
+                    chrome_style.underline_style,
+                ),
+                text_color: chrome_style.text_color,
+                background_color: chrome_style.background_color,
+                suggestion_highlight_color: chrome_style.suggestion_highlight_color,
+                remove_on_finish_composing: chrome_style.remove_on_finish_composing,
+                interim_char_selection: chrome_style.interim_char_selection,
+                should_hide_suggestion_menu: chrome_style.should_hide_suggestion_menu,
+            }
         })
         .collect()
 }
 
 #[cfg(target_os = "macos")]
-pub fn convert_nsevent_to_key_event(browsing_context_id: u64, nsevent: NonNull<c_void>) -> KeyEvent {
+pub fn convert_nsevent_to_key_event(
+    browsing_context_id: u64,
+    nsevent: NonNull<c_void>,
+) -> KeyEvent {
     let mut ffi_event = CbfKeyEvent::default();
     unsafe {
         cbf_bridge_convert_nsevent(nsevent.as_ptr(), browsing_context_id, &mut ffi_event);
@@ -546,8 +573,8 @@ pub fn convert_nsevent_to_key_event(browsing_context_id: u64, nsevent: NonNull<c
             _ => KeyEventType::RawKeyDown,
         },
         modifiers: ffi_event.modifiers,
-        windows_key_code: ffi_event.windows_key_code,
-        native_key_code: ffi_event.native_key_code,
+        key_code: ffi_event.windows_key_code,
+        platform_key_code: ffi_event.native_key_code,
         dom_code: if ffi_event.dom_code.is_null() {
             None
         } else {
@@ -593,6 +620,9 @@ pub fn convert_nspasteboard_to_drag_data(nspasteboard: NonNull<c_void>) -> DragD
         html: c_string_to_string(ffi_data.html),
         html_base_url: c_string_to_string(ffi_data.html_base_url),
         url_infos: parse_drag_url_infos(ffi_data.url_infos),
+        filenames: Vec::new(),
+        file_mime_types: Vec::new(),
+        custom_data: Default::default(),
     };
 
     unsafe {
@@ -667,8 +697,6 @@ pub fn convert_nsevent_to_mouse_wheel_event(
         delta_y: ffi_event.delta_y,
         wheel_ticks_x: ffi_event.wheel_ticks_x,
         wheel_ticks_y: ffi_event.wheel_ticks_y,
-        phase: ffi_event.phase,
-        momentum_phase: ffi_event.momentum_phase,
         delta_units: scroll_granularity_from_ffi(ffi_event.delta_units),
     }
 }

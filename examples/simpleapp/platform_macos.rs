@@ -141,8 +141,8 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
             let event = cbf::data::key::KeyEvent {
                 type_: cbf::data::key::KeyEventType::Char,
                 modifiers: 0,
-                windows_key_code: 0,
-                native_key_code: 0,
+                key_code: 0,
+                platform_key_code: 0,
                 dom_code: None,
                 dom_key: None,
                 text: Some(text.clone()),

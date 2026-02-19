@@ -26,8 +26,8 @@ mod utils;
 /// Convert native NSEvent input to CBF input events on macOS.
 #[cfg(target_os = "macos")]
 pub use map::{
-    convert_nspasteboard_to_drag_data, convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
-    convert_nsevent_to_mouse_wheel_event,
+    convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
+    convert_nsevent_to_mouse_wheel_event, convert_nspasteboard_to_drag_data,
 };
 
 use map::{
@@ -274,12 +274,17 @@ impl IpcClient {
     }
 
     /// Request closing the specified web page.
-    pub fn request_close_browsing_context(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+    pub fn request_close_browsing_context(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+    ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_request_close_web_page(self.inner, browsing_context_id.get()) } {
+        if unsafe {
+            cbf_bridge_client_request_close_web_page(self.inner, browsing_context_id.get())
+        } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -298,7 +303,12 @@ impl IpcClient {
         }
 
         if unsafe {
-            cbf_bridge_client_set_web_page_size(self.inner, browsing_context_id.get(), width, height)
+            cbf_bridge_client_set_web_page_size(
+                self.inner,
+                browsing_context_id.get(),
+                width,
+                height,
+            )
         } {
             Ok(())
         } else {
@@ -316,7 +326,9 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_set_web_page_focus(self.inner, browsing_context_id.get(), focused) } {
+        if unsafe {
+            cbf_bridge_client_set_web_page_focus(self.inner, browsing_context_id.get(), focused)
+        } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -349,14 +361,20 @@ impl IpcClient {
     }
 
     /// Navigate the page to the provided URL.
-    pub fn navigate(&mut self, browsing_context_id: BrowsingContextId, url: &str) -> Result<(), Error> {
+    pub fn navigate(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        url: &str,
+    ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
         let url = CString::new(url).map_err(|_| Error::InvalidInput)?;
 
-        if unsafe { cbf_bridge_client_navigate(self.inner, browsing_context_id.get(), url.as_ptr()) } {
+        if unsafe {
+            cbf_bridge_client_navigate(self.inner, browsing_context_id.get(), url.as_ptr())
+        } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -390,12 +408,17 @@ impl IpcClient {
     }
 
     /// Reload the page, optionally ignoring caches.
-    pub fn reload(&mut self, browsing_context_id: BrowsingContextId, ignore_cache: bool) -> Result<(), Error> {
+    pub fn reload(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        ignore_cache: bool,
+    ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_reload(self.inner, browsing_context_id.get(), ignore_cache) } {
+        if unsafe { cbf_bridge_client_reload(self.inner, browsing_context_id.get(), ignore_cache) }
+        {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -413,7 +436,11 @@ impl IpcClient {
         }
 
         if unsafe {
-            cbf_bridge_client_get_web_page_dom_html(self.inner, browsing_context_id.get(), request_id)
+            cbf_bridge_client_get_web_page_dom_html(
+                self.inner,
+                browsing_context_id.get(),
+                request_id,
+            )
         } {
             Ok(())
         } else {
@@ -448,8 +475,8 @@ impl IpcClient {
             web_page_id: browsing_context_id.get(),
             type_: key_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
-            windows_key_code: event.windows_key_code,
-            native_key_code: event.native_key_code,
+            windows_key_code: event.key_code,
+            native_key_code: event.platform_key_code,
             dom_code: dom_code.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
             dom_key: dom_key.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
             text: text.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
@@ -533,8 +560,8 @@ impl IpcClient {
             delta_y: event.delta_y,
             wheel_ticks_x: event.wheel_ticks_x,
             wheel_ticks_y: event.wheel_ticks_y,
-            phase: event.phase,
-            momentum_phase: event.momentum_phase,
+            phase: 0,
+            momentum_phase: 0,
             delta_units: scroll_granularity_to_ffi(event.delta_units),
         };
 
@@ -554,7 +581,7 @@ impl IpcClient {
         let ffi_update = CbfDragUpdate {
             session_id: update.session_id,
             web_page_id: update.browsing_context_id.get(),
-            allowed_operations: update.allowed_operations,
+            allowed_operations: update.allowed_operations.bits(),
             modifiers: update.modifiers,
             position_in_widget_x: update.position_in_widget_x,
             position_in_widget_y: update.position_in_widget_y,
@@ -602,8 +629,9 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_send_drag_cancel(self.inner, session_id, browsing_context_id.get()) }
-        {
+        if unsafe {
+            cbf_bridge_client_send_drag_cancel(self.inner, session_id, browsing_context_id.get())
+        } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -611,6 +639,9 @@ impl IpcClient {
     }
 
     /// Update the IME composition state.
+    ///
+    /// Browser-generic spans are always serialized, and optional Chromium-specific
+    /// span style details are serialized when present.
     pub fn set_composition(&mut self, composition: &ImeComposition) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
@@ -646,6 +677,9 @@ impl IpcClient {
     }
 
     /// Commit IME text input to the page.
+    ///
+    /// Browser-generic spans are always serialized, and optional Chromium-specific
+    /// span style details are serialized when present.
     pub fn commit_text(&mut self, commit: &ImeCommitText) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);

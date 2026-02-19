@@ -12,8 +12,8 @@ pub enum KeyEventType {
 pub struct KeyEvent {
     pub type_: KeyEventType,
     pub modifiers: u32,
-    pub windows_key_code: i32,
-    pub native_key_code: i32,
+    pub key_code: i32,
+    pub platform_key_code: i32,
     pub dom_code: Option<String>,
     pub dom_key: Option<String>,
     pub text: Option<String>,
@@ -26,39 +26,24 @@ pub struct KeyEvent {
 
 impl KeyEvent {
     /// Build a raw key down event.
-    pub fn raw_key_down(native_key_code: i32, windows_key_code: i32, modifiers: u32) -> Self {
-        Self::new(
-            KeyEventType::RawKeyDown,
-            native_key_code,
-            windows_key_code,
-            modifiers,
-        )
+    pub fn raw_key_down(platform_key_code: i32, key_code: i32, modifiers: u32) -> Self {
+        Self::new(KeyEventType::RawKeyDown, platform_key_code, key_code, modifiers)
     }
 
     /// Build a key down event.
-    pub fn key_down(native_key_code: i32, windows_key_code: i32, modifiers: u32) -> Self {
-        Self::new(
-            KeyEventType::KeyDown,
-            native_key_code,
-            windows_key_code,
-            modifiers,
-        )
+    pub fn key_down(platform_key_code: i32, key_code: i32, modifiers: u32) -> Self {
+        Self::new(KeyEventType::KeyDown, platform_key_code, key_code, modifiers)
     }
 
     /// Build a key up event.
-    pub fn key_up(native_key_code: i32, windows_key_code: i32, modifiers: u32) -> Self {
-        Self::new(
-            KeyEventType::KeyUp,
-            native_key_code,
-            windows_key_code,
-            modifiers,
-        )
+    pub fn key_up(platform_key_code: i32, key_code: i32, modifiers: u32) -> Self {
+        Self::new(KeyEventType::KeyUp, platform_key_code, key_code, modifiers)
     }
 
     /// Build a character input event.
     pub fn char_input(
-        native_key_code: i32,
-        windows_key_code: i32,
+        platform_key_code: i32,
+        key_code: i32,
         modifiers: u32,
         text: impl Into<String>,
         unmodified_text: impl Into<String>,
@@ -66,26 +51,21 @@ impl KeyEvent {
         Self {
             text: Some(text.into()),
             unmodified_text: Some(unmodified_text.into()),
-            ..Self::new(
-                KeyEventType::Char,
-                native_key_code,
-                windows_key_code,
-                modifiers,
-            )
+            ..Self::new(KeyEventType::Char, platform_key_code, key_code, modifiers)
         }
     }
 
     fn new(
         type_: KeyEventType,
-        native_key_code: i32,
-        windows_key_code: i32,
+        platform_key_code: i32,
+        key_code: i32,
         modifiers: u32,
     ) -> Self {
         Self {
             type_,
             modifiers,
-            windows_key_code,
-            native_key_code,
+            key_code,
+            platform_key_code,
             dom_code: None,
             dom_key: None,
             text: None,

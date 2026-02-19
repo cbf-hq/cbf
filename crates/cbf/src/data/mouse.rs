@@ -71,7 +71,5 @@ pub struct MouseWheelEvent {
     pub delta_y: f32,
     pub wheel_ticks_x: f32,
     pub wheel_ticks_y: f32,
-    pub phase: u32,
-    pub momentum_phase: u32,
     pub delta_units: ScrollGranularity,
 }

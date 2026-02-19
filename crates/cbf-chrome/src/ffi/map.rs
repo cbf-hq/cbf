@@ -5,13 +5,15 @@ use cbf_sys::ffi::*;
 use cursor_icon::CursorIcon;
 use tracing::debug;
 
+use crate::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
+
 use cbf::{
     data::{
         context_menu::{
             self, ContextMenu, ContextMenuAccelerator, ContextMenuIcon, ContextMenuItem,
             ContextMenuItemType,
         },
-        drag::{DragData, DragImage, DragStartRequest, DragUrlInfo},
+        drag::{DragData, DragImage, DragOperations, DragStartRequest, DragUrlInfo},
         ids::BrowsingContextId,
         ime::{
             ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, ImeTextSpan,
@@ -143,13 +145,16 @@ fn parse_drag_start_request(request: CbfDragStartRequest) -> DragStartRequest {
     DragStartRequest {
         session_id: request.session_id,
         browsing_context_id: BrowsingContextId::new(request.web_page_id),
-        allowed_operations: request.allowed_operations,
+        allowed_operations: DragOperations::from_bits(request.allowed_operations),
         source_origin: c_string_to_string(request.source_origin),
         data: DragData {
             text: c_string_to_string(request.data.text),
             html: c_string_to_string(request.data.html),
             html_base_url: c_string_to_string(request.data.html_base_url),
             url_infos: parse_drag_url_infos(request.data.url_infos),
+            filenames: Vec::new(),
+            file_mime_types: Vec::new(),
+            custom_data: Default::default(),
         },
         image: parse_drag_image(request.image),
     }
@@ -532,12 +537,23 @@ pub(super) fn to_ffi_ime_text_spans(spans: &[ImeTextSpan]) -> Vec<CbfImeTextSpan
 
 #[cfg(target_os = "macos")]
 pub fn convert_nsevent_to_key_event(browsing_context_id: u64, nsevent: NonNull<c_void>) -> KeyEvent {
+    KeyEvent::from(convert_nsevent_to_chrome_key_event(
+        browsing_context_id,
+        nsevent,
+    ))
+}
+
+#[cfg(target_os = "macos")]
+pub fn convert_nsevent_to_chrome_key_event(
+    browsing_context_id: u64,
+    nsevent: NonNull<c_void>,
+) -> ChromeKeyEvent {
     let mut ffi_event = CbfKeyEvent::default();
     unsafe {
         cbf_bridge_convert_nsevent(nsevent.as_ptr(), browsing_context_id, &mut ffi_event);
     }
 
-    let event = KeyEvent {
+    let event = ChromeKeyEvent {
         type_: match ffi_event.type_ {
             CBF_KEY_EVENT_RAW_KEY_DOWN => KeyEventType::RawKeyDown,
             CBF_KEY_EVENT_KEY_DOWN => KeyEventType::KeyDown,
@@ -593,6 +609,9 @@ pub fn convert_nspasteboard_to_drag_data(nspasteboard: NonNull<c_void>) -> DragD
         html: c_string_to_string(ffi_data.html),
         html_base_url: c_string_to_string(ffi_data.html_base_url),
         url_infos: parse_drag_url_infos(ffi_data.url_infos),
+        filenames: Vec::new(),
+        file_mime_types: Vec::new(),
+        custom_data: Default::default(),
     };
 
     unsafe {
@@ -644,6 +663,19 @@ pub fn convert_nsevent_to_mouse_wheel_event(
     nsevent: NonNull<c_void>,
     nsview: NonNull<c_void>,
 ) -> MouseWheelEvent {
+    MouseWheelEvent::from(convert_nsevent_to_chrome_mouse_wheel_event(
+        browsing_context_id,
+        nsevent,
+        nsview,
+    ))
+}
+
+#[cfg(target_os = "macos")]
+pub fn convert_nsevent_to_chrome_mouse_wheel_event(
+    browsing_context_id: u64,
+    nsevent: NonNull<c_void>,
+    nsview: NonNull<c_void>,
+) -> ChromeMouseWheelEvent {
     let mut ffi_event = CbfMouseWheelEvent::default();
     unsafe {
         cbf_bridge_convert_nsevent_to_mouse_wheel_event(
@@ -654,7 +686,7 @@ pub fn convert_nsevent_to_mouse_wheel_event(
         );
     }
 
-    MouseWheelEvent {
+    ChromeMouseWheelEvent {
         modifiers: ffi_event.modifiers,
         position_in_widget_x: ffi_event.position_in_widget_x,
         position_in_widget_y: ffi_event.position_in_widget_y,
