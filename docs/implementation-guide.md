@@ -32,7 +32,7 @@ The bridge must be robust under shutdown, tab close, and process restart races.
 
 - Do not capture raw `WebContents*` across async boundaries.
 - Do not capture owning `this` pointers in callbacks that may outlive owners.
-- Use stable logical IDs (for example `WebPageId`) and resolve at execution time.
+- Use stable logical IDs (for example `BrowsingContextId`) and resolve at execution time.
 - Guard owners with weak pointers (`WeakPtr` pattern).
 - If re-resolution fails, treat it as a safe no-op instead of crashing.
 

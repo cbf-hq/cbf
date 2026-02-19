@@ -1,4 +1,4 @@
-use super::ids::WebPageId;
+use super::ids::BrowsingContextId;
 
 /// Classification of IME text spans.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +75,7 @@ impl ImeTextSpan {
 /// Current IME composition state for a web page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImeComposition {
-    pub web_page_id: WebPageId,
+    pub browsing_context_id: BrowsingContextId,
     pub text: String,
     pub selection_start: i32,
     pub selection_end: i32,
@@ -86,7 +86,7 @@ pub struct ImeComposition {
 /// IME commit payload to finalize composed text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImeCommitText {
-    pub web_page_id: WebPageId,
+    pub browsing_context_id: BrowsingContextId,
     pub text: String,
     pub relative_caret_position: i32,
     pub replacement_range: Option<ImeTextRange>,

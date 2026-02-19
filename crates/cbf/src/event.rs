@@ -1,12 +1,12 @@
 //! Browser-generic events emitted from backend to the host application.
 //!
 //! This module defines top-level backend events (`BrowserEvent`) and
-//! web page-scoped events (`WebPageEvent`) for state synchronization.
+//! web page-scoped events (`BrowsingContextEvent`) for state synchronization.
 
 use cursor_icon::CursorIcon;
 
 use crate::data::{
-    context_menu::ContextMenu, drag::DragStartRequest, ids::WebPageId, ime::ImeBoundsUpdate,
+    context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId, ime::ImeBoundsUpdate,
     profile::ProfileInfo, surface::SurfaceHandle,
 };
 use crate::error::BackendErrorInfo;
@@ -27,10 +27,10 @@ pub enum BrowserEvent {
     },
 
     /// An event scoped to a specific web page (tab).
-    WebPage {
+    BrowsingContext {
         profile_id: String,
-        web_page_id: WebPageId,
-        event: WebPageEvent,
+        browsing_context_id: BrowsingContextId,
+        event: BrowsingContextEvent,
     },
 
     /// Result of listing available profiles.
@@ -39,7 +39,7 @@ pub enum BrowserEvent {
     /// Shutdown is blocked by dirty pages that require confirmation.
     ShutdownBlocked {
         request_id: u64,
-        dirty_web_page_ids: Vec<WebPageId>,
+        dirty_browsing_context_ids: Vec<BrowsingContextId>,
     },
 
     /// Shutdown has started and is proceeding.
@@ -64,7 +64,7 @@ pub enum BackendStopReason {
 /// Events emitted from a specific web page (tab).
 /// The host application consumes these events to update UI and state.
 #[derive(Debug)]
-pub enum WebPageEvent {
+pub enum BrowsingContextEvent {
     /// The web page was created.
     Created { request_id: u64 },
 
@@ -99,7 +99,7 @@ pub enum WebPageEvent {
 
     // --- Window & Tab Lifecycle ---
     /// A new web page was requested (e.g., window.open, target="_blank").
-    NewWebPageRequested {
+    NewBrowsingContextRequested {
         target_url: String,
         // TODO: Add WindowOpenDisposition (Popup, NewTab, etc.).
         is_popup: bool,
@@ -176,7 +176,7 @@ pub enum DialogType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BeforeUnloadReason {
     Unknown,
-    CloseWebPage,
+    CloseBrowsingContext,
     Navigate,
     Reload,
     WindowClose,

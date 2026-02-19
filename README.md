@@ -1,7 +1,7 @@
 # CBF (Chromium Browser Framework)
 
 CBF is a Rust-oriented browser backend framework built on Chromium.
-It provides a stable, application-agnostic API surface for controlling web pages and receiving browser events, while isolating Chromium/Mojo implementation details behind an FFI boundary.
+It provides a stable, application-agnostic API surface for controlling browsing contexts and receiving browser events, while isolating Chromium/Mojo implementation details behind an FFI boundary.
 
 ## Documentation Index
 
@@ -24,7 +24,7 @@ It provides a stable, application-agnostic API surface for controlling web pages
 ## Vision
 
 - Keep CBF independent from any specific product domain.
-- Expose browser-generic vocabulary (`Browser`, `WebPage`, `Navigation`, `Dialog`, `Permission`).
+- Expose browser-generic vocabulary (`Browser`, `BrowsingContext`, `Navigation`, `Dialog`, `Permission`).
 - Treat IPC failures as normal conditions (disconnects, timeouts, crashes).
 - Improve framework quality so CBF can be reused by other browser projects.
 
@@ -61,9 +61,9 @@ Design principles:
 
 Implemented or already modeled at API level:
 
-- Open/manage web pages (WebContents-based model)
+- Open/manage browsing contexts (WebContents-based model)
 - Mouse/keyboard input handling pipeline (in progress at boundary level)
-- Window open requests (`NewWebPageRequested`)
+- Window open requests (`NewBrowsingContextRequested`)
 - JavaScript dialog requests (alert/confirm/prompt, beforeunload)
 - Title updates
 - Cursor updates
@@ -82,9 +82,9 @@ Still to expand:
 
 ## Ownership and Lifecycle
 
-- `WebPage` maps to Chromium `content::WebContents` as the core unit.
+- `BrowsingContext` maps to Chromium `content::WebContents` as the core unit.
 - Ownership should stay in the Chromium process (e.g., `TabManager`).
-- Rust side uses stable logical IDs (`WebPageId`), not raw Chromium pointers/IDs.
+- Rust side uses stable logical IDs (`BrowsingContextId`), not raw Chromium pointers/IDs.
 - Across async boundaries, avoid passing raw pointers. Use `ID + re-resolve` and weak ownership checks.
 
 ## Example: simpleapp

@@ -31,16 +31,16 @@ pub enum Operation {
     ForceShutdown,
     ConfirmBeforeUnload,
     ConfirmPermission,
-    CreateWebPage,
+    CreateBrowsingContext,
     ListProfiles,
-    RequestCloseWebPage,
-    ResizeWebPage,
+    RequestCloseBrowsingContext,
+    ResizeBrowsingContext,
     Navigate,
     GoBack,
     GoForward,
     Reload,
-    GetWebPageDomHtml,
-    SetWebPageFocus,
+    GetBrowsingContextDomHtml,
+    SetBrowsingContextFocus,
     SendKeyEvent,
     SendMouseEvent,
     SendMouseWheelEvent,
@@ -62,16 +62,16 @@ impl Operation {
             BrowserCommand::ForceShutdown => Self::ForceShutdown,
             BrowserCommand::ConfirmBeforeUnload { .. } => Self::ConfirmBeforeUnload,
             BrowserCommand::ConfirmPermission { .. } => Self::ConfirmPermission,
-            BrowserCommand::CreateWebPage { .. } => Self::CreateWebPage,
+            BrowserCommand::CreateBrowsingContext { .. } => Self::CreateBrowsingContext,
             BrowserCommand::ListProfiles => Self::ListProfiles,
-            BrowserCommand::RequestCloseWebPage { .. } => Self::RequestCloseWebPage,
-            BrowserCommand::ResizeWebPage { .. } => Self::ResizeWebPage,
+            BrowserCommand::RequestCloseBrowsingContext { .. } => Self::RequestCloseBrowsingContext,
+            BrowserCommand::ResizeBrowsingContext { .. } => Self::ResizeBrowsingContext,
             BrowserCommand::Navigate { .. } => Self::Navigate,
             BrowserCommand::GoBack { .. } => Self::GoBack,
             BrowserCommand::GoForward { .. } => Self::GoForward,
             BrowserCommand::Reload { .. } => Self::Reload,
-            BrowserCommand::GetWebPageDomHtml { .. } => Self::GetWebPageDomHtml,
-            BrowserCommand::SetWebPageFocus { .. } => Self::SetWebPageFocus,
+            BrowserCommand::GetBrowsingContextDomHtml { .. } => Self::GetBrowsingContextDomHtml,
+            BrowserCommand::SetBrowsingContextFocus { .. } => Self::SetBrowsingContextFocus,
             BrowserCommand::SendKeyEvent { .. } => Self::SendKeyEvent,
             BrowserCommand::SendMouseEvent { .. } => Self::SendMouseEvent,
             BrowserCommand::SendMouseWheelEvent { .. } => Self::SendMouseWheelEvent,
@@ -95,16 +95,16 @@ impl std::fmt::Display for Operation {
             Self::ForceShutdown => "force_shutdown",
             Self::ConfirmBeforeUnload => "confirm_beforeunload",
             Self::ConfirmPermission => "confirm_permission",
-            Self::CreateWebPage => "create_web_page",
+            Self::CreateBrowsingContext => "create_browsing_context",
             Self::ListProfiles => "list_profiles",
-            Self::RequestCloseWebPage => "request_close_web_page",
-            Self::ResizeWebPage => "resize_web_page",
+            Self::RequestCloseBrowsingContext => "request_close_browsing_context",
+            Self::ResizeBrowsingContext => "resize_browsing_context",
             Self::Navigate => "navigate",
             Self::GoBack => "go_back",
             Self::GoForward => "go_forward",
             Self::Reload => "reload",
-            Self::GetWebPageDomHtml => "get_web_page_dom_html",
-            Self::SetWebPageFocus => "set_web_page_focus",
+            Self::GetBrowsingContextDomHtml => "get_browsing_context_dom_html",
+            Self::SetBrowsingContextFocus => "set_browsing_context_focus",
             Self::SendKeyEvent => "send_key_event",
             Self::SendMouseEvent => "send_mouse_event",
             Self::SendMouseWheelEvent => "send_mouse_wheel_event",
@@ -183,12 +183,12 @@ impl std::fmt::Display for BackendErrorInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{command::BrowserCommand, data::ids::WebPageId};
+    use crate::{command::BrowserCommand, data::ids::BrowsingContextId};
 
     #[test]
     fn operation_from_command_maps_to_expected_variant() {
         let command = BrowserCommand::Navigate {
-            web_page_id: WebPageId::new(1),
+            browsing_context_id: BrowsingContextId::new(1),
             url: "https://example.com".to_string(),
         };
 
@@ -211,12 +211,12 @@ mod tests {
 
     #[test]
     fn operation_from_command_covers_profile_command() {
-        let command = BrowserCommand::CreateWebPage {
+        let command = BrowserCommand::CreateBrowsingContext {
             request_id: 42,
             initial_url: None,
             profile_id: Some("default".to_string()),
         };
 
-        assert_eq!(Operation::from_command(&command), Operation::CreateWebPage);
+        assert_eq!(Operation::from_command(&command), Operation::CreateBrowsingContext);
     }
 }

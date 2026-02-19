@@ -12,7 +12,7 @@ use cbf::{
             ContextMenuItemType,
         },
         drag::{DragData, DragImage, DragStartRequest, DragUrlInfo},
-        ids::WebPageId,
+        ids::BrowsingContextId,
         ime::{
             ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, ImeTextSpan,
             ImeTextSpanThickness, ImeTextSpanType, ImeTextSpanUnderlineStyle, TextSelectionBounds,
@@ -36,23 +36,23 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
 
             Ok(IpcEvent::SurfaceHandleUpdated {
                 profile_id: c_string_to_string(event.profile_id),
-                web_page_id: WebPageId::new(event.web_page_id),
+                browsing_context_id: BrowsingContextId::new(event.web_page_id),
                 handle,
             })
         }
-        CBF_EVENT_WEB_PAGE_CREATED => Ok(IpcEvent::WebPageCreated {
+        CBF_EVENT_WEB_PAGE_CREATED => Ok(IpcEvent::WebContentsCreated {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
             request_id: event.request_id,
         }),
         CBF_EVENT_IME_BOUNDS_UPDATED => Ok(IpcEvent::ImeBoundsUpdated {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
             update: parse_ime_bounds(event.ime_bounds),
         }),
         CBF_EVENT_SHUTDOWN_BLOCKED => Ok(IpcEvent::ShutdownBlocked {
             request_id: event.request_id,
-            dirty_web_page_ids: parse_web_page_ids(event.dirty_web_page_ids),
+            dirty_browsing_context_ids: parse_browsing_context_ids(event.dirty_web_page_ids),
         }),
         CBF_EVENT_SHUTDOWN_PROCEEDING => Ok(IpcEvent::ShutdownProceeding {
             request_id: event.request_id,
@@ -62,18 +62,18 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_CONTEXT_MENU_REQUESTED => Ok(IpcEvent::ContextMenuRequested {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
             menu: parse_context_menu(event.context_menu),
         }),
-        CBF_EVENT_NEW_WEB_PAGE_REQUESTED => Ok(IpcEvent::NewWebPageRequested {
+        CBF_EVENT_NEW_WEB_PAGE_REQUESTED => Ok(IpcEvent::NewWebContentsRequested {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
             target_url: c_string_to_string(event.target_url),
             is_popup: event.is_popup,
         }),
         CBF_EVENT_NAVIGATION_STATE_CHANGED => Ok(IpcEvent::NavigationStateChanged {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
             url: c_string_to_string(event.url),
             can_go_back: event.can_go_back,
             can_go_forward: event.can_go_forward,
@@ -81,48 +81,48 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_CURSOR_CHANGED => Ok(IpcEvent::CursorChanged {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
             cursor_type: cursor_icon_from_ffi(event.cursor_type),
         }),
         CBF_EVENT_TITLE_UPDATED => Ok(IpcEvent::TitleUpdated {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
             title: c_string_to_string(event.title),
         }),
         CBF_EVENT_FAVICON_URL_UPDATED => Ok(IpcEvent::FaviconUrlUpdated {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
             url: c_string_to_string(event.favicon_url),
         }),
         CBF_EVENT_BEFOREUNLOAD_DIALOG_REQUESTED => {
             let profile_id = c_string_to_string(event.profile_id);
-            let web_page_id = WebPageId::new(event.web_page_id);
+            let browsing_context_id = BrowsingContextId::new(event.web_page_id);
             let reason = beforeunload_reason_from_ffi(event.beforeunload_reason);
             debug!(
                 ?profile_id,
-                %web_page_id,
+                %browsing_context_id,
                 request_id = event.request_id,
                 ?reason,
                 "CBF beforeunload event received"
             );
             Ok(IpcEvent::BeforeUnloadDialogRequested {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 request_id: event.request_id,
                 reason,
             })
         }
-        CBF_EVENT_WEB_PAGE_CLOSED => Ok(IpcEvent::WebPageClosed {
+        CBF_EVENT_WEB_PAGE_CLOSED => Ok(IpcEvent::WebContentsClosed {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
         }),
-        CBF_EVENT_WEB_PAGE_RESIZE_ACKNOWLEDGED => Ok(IpcEvent::WebPageResizeAcknowledged {
+        CBF_EVENT_WEB_PAGE_RESIZE_ACKNOWLEDGED => Ok(IpcEvent::WebContentsResizeAcknowledged {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
         }),
-        CBF_EVENT_WEB_PAGE_DOM_HTML_READ => Ok(IpcEvent::WebPageDomHtmlRead {
+        CBF_EVENT_WEB_PAGE_DOM_HTML_READ => Ok(IpcEvent::WebContentsDomHtmlRead {
             profile_id: c_string_to_string(event.profile_id),
-            web_page_id: WebPageId::new(event.web_page_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
             request_id: event.request_id,
             html: c_string_to_string(event.dom_html),
         }),
@@ -130,7 +130,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             let profile_id = c_string_to_string(event.profile_id);
             let request = parse_drag_start_request(event.drag_start_request);
             Ok(IpcEvent::DragStartRequested {
-                web_page_id: request.web_page_id,
+                browsing_context_id: request.browsing_context_id,
                 profile_id,
                 request,
             })
@@ -142,7 +142,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
 fn parse_drag_start_request(request: CbfDragStartRequest) -> DragStartRequest {
     DragStartRequest {
         session_id: request.session_id,
-        web_page_id: WebPageId::new(request.web_page_id),
+        browsing_context_id: BrowsingContextId::new(request.web_page_id),
         allowed_operations: request.allowed_operations,
         source_origin: c_string_to_string(request.source_origin),
         data: DragData {
@@ -221,13 +221,13 @@ fn parse_ime_bounds(update: CbfImeBoundsUpdate) -> ImeBoundsUpdate {
     }
 }
 
-fn parse_web_page_ids(list: CbfWebPageIdList) -> Vec<WebPageId> {
+fn parse_browsing_context_ids(list: CbfWebPageIdList) -> Vec<BrowsingContextId> {
     if list.len == 0 || list.items.is_null() {
         return Vec::new();
     }
 
     let ids = unsafe { std::slice::from_raw_parts(list.items, list.len as usize) };
-    ids.iter().copied().map(WebPageId::new).collect()
+    ids.iter().copied().map(BrowsingContextId::new).collect()
 }
 
 fn parse_context_menu(menu: CbfContextMenu) -> ContextMenu {
@@ -322,7 +322,7 @@ fn rect_from_ffi(rect: CbfRect) -> ImeRect {
 
 fn beforeunload_reason_from_ffi(value: u8) -> BeforeUnloadReason {
     match value {
-        CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE => BeforeUnloadReason::CloseWebPage,
+        CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE => BeforeUnloadReason::CloseBrowsingContext,
         CBF_BEFOREUNLOAD_REASON_NAVIGATE => BeforeUnloadReason::Navigate,
         CBF_BEFOREUNLOAD_REASON_RELOAD => BeforeUnloadReason::Reload,
         CBF_BEFOREUNLOAD_REASON_WINDOW_CLOSE => BeforeUnloadReason::WindowClose,
@@ -531,10 +531,10 @@ pub(super) fn to_ffi_ime_text_spans(spans: &[ImeTextSpan]) -> Vec<CbfImeTextSpan
 }
 
 #[cfg(target_os = "macos")]
-pub fn convert_nsevent_to_key_event(web_page_id: u64, nsevent: NonNull<c_void>) -> KeyEvent {
+pub fn convert_nsevent_to_key_event(browsing_context_id: u64, nsevent: NonNull<c_void>) -> KeyEvent {
     let mut ffi_event = CbfKeyEvent::default();
     unsafe {
-        cbf_bridge_convert_nsevent(nsevent.as_ptr(), web_page_id, &mut ffi_event);
+        cbf_bridge_convert_nsevent(nsevent.as_ptr(), browsing_context_id, &mut ffi_event);
     }
 
     let event = KeyEvent {
@@ -604,7 +604,7 @@ pub fn convert_nspasteboard_to_drag_data(nspasteboard: NonNull<c_void>) -> DragD
 
 #[cfg(target_os = "macos")]
 pub fn convert_nsevent_to_mouse_event(
-    web_page_id: u64,
+    browsing_context_id: u64,
     nsevent: NonNull<c_void>,
     nsview: NonNull<c_void>,
     pointer_type: PointerType,
@@ -615,7 +615,7 @@ pub fn convert_nsevent_to_mouse_event(
         cbf_bridge_convert_nsevent_to_mouse_event(
             nsevent.as_ptr(),
             nsview.as_ptr(),
-            web_page_id,
+            browsing_context_id,
             pointer_type_to_ffi(pointer_type),
             unaccelerated_movement,
             &mut ffi_event,
@@ -640,7 +640,7 @@ pub fn convert_nsevent_to_mouse_event(
 
 #[cfg(target_os = "macos")]
 pub fn convert_nsevent_to_mouse_wheel_event(
-    web_page_id: u64,
+    browsing_context_id: u64,
     nsevent: NonNull<c_void>,
     nsview: NonNull<c_void>,
 ) -> MouseWheelEvent {
@@ -649,7 +649,7 @@ pub fn convert_nsevent_to_mouse_wheel_event(
         cbf_bridge_convert_nsevent_to_mouse_wheel_event(
             nsevent.as_ptr(),
             nsview.as_ptr(),
-            web_page_id,
+            browsing_context_id,
             &mut ffi_event,
         );
     }

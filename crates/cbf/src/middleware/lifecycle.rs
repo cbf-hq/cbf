@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use crate::{
     backend_delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     command::BrowserCommand,
-    data::ids::WebPageId,
-    event::{BackendStopReason, BrowserEvent, DialogType, WebPageEvent},
+    data::ids::BrowsingContextId,
+    event::{BackendStopReason, BrowserEvent, DialogType, BrowsingContextEvent},
 };
 
 use super::DelegateLayer;
@@ -49,31 +49,31 @@ impl DelegateLayer for LifecycleLayer {
 
 struct Lifecycle {
     inner: Box<dyn BackendDelegate>,
-    pending_beforeunload: HashSet<(WebPageId, u64)>,
+    pending_beforeunload: HashSet<(BrowsingContextId, u64)>,
 }
 
 impl Lifecycle {
     fn resolve_all_pending(&mut self, ctx: &mut DelegateContext) {
-        for (web_page_id, request_id) in self.pending_beforeunload.drain() {
+        for (browsing_context_id, request_id) in self.pending_beforeunload.drain() {
             ctx.enqueue_command(BrowserCommand::ConfirmBeforeUnload {
-                web_page_id,
+                browsing_context_id,
                 request_id,
                 proceed: false,
             });
         }
     }
 
-    fn resolve_pending_for_page(&mut self, ctx: &mut DelegateContext, web_page_id: WebPageId) {
+    fn resolve_pending_for_page(&mut self, ctx: &mut DelegateContext, browsing_context_id: BrowsingContextId) {
         let request_ids: Vec<u64> = self
             .pending_beforeunload
             .iter()
-            .filter_map(|(id, request_id)| (*id == web_page_id).then_some(*request_id))
+            .filter_map(|(id, request_id)| (*id == browsing_context_id).then_some(*request_id))
             .collect();
 
         for request_id in request_ids {
-            self.pending_beforeunload.remove(&(web_page_id, request_id));
+            self.pending_beforeunload.remove(&(browsing_context_id, request_id));
             ctx.enqueue_command(BrowserCommand::ConfirmBeforeUnload {
-                web_page_id,
+                browsing_context_id,
                 request_id,
                 proceed: false,
             });
@@ -88,23 +88,23 @@ impl BackendDelegate for Lifecycle {
         command: BrowserCommand,
     ) -> CommandDecision {
         if let BrowserCommand::ConfirmBeforeUnload {
-            web_page_id,
+            browsing_context_id,
             request_id,
             ..
         } = &command
         {
             self.pending_beforeunload
-                .remove(&(*web_page_id, *request_id));
+                .remove(&(*browsing_context_id, *request_id));
         }
 
         self.inner.on_command(ctx, command)
     }
 
     fn on_event(&mut self, ctx: &mut DelegateContext, event: BrowserEvent) -> EventDecision {
-        if let BrowserEvent::WebPage {
-            web_page_id,
+        if let BrowserEvent::BrowsingContext {
+            browsing_context_id,
             event:
-                WebPageEvent::JavaScriptDialogRequested {
+                BrowsingContextEvent::JavaScriptDialogRequested {
                     request_id, r#type, ..
                 },
             ..
@@ -112,16 +112,16 @@ impl BackendDelegate for Lifecycle {
             && *r#type == DialogType::BeforeUnload
         {
             self.pending_beforeunload
-                .insert((*web_page_id, *request_id));
+                .insert((*browsing_context_id, *request_id));
         }
 
-        if let BrowserEvent::WebPage {
-            web_page_id,
-            event: WebPageEvent::Closed,
+        if let BrowserEvent::BrowsingContext {
+            browsing_context_id,
+            event: BrowsingContextEvent::Closed,
             ..
         } = &event
         {
-            self.resolve_pending_for_page(ctx, *web_page_id);
+            self.resolve_pending_for_page(ctx, *browsing_context_id);
         }
 
         self.inner.on_event(ctx, event)

@@ -4,7 +4,7 @@ use cbf::{
     browser::BrowserHandle,
     data::{
         drag::{DragDrop, DragUpdate},
-        ids::WebPageId,
+        ids::BrowsingContextId,
         ime::{
             ConfirmCompositionBehavior, ImeCommitText, ImeComposition, ImeTextSpan, ImeTextSpanType,
         },
@@ -30,7 +30,7 @@ use crate::{
     app::PlatformApp,
     app::run_with_platform,
     core::{
-        CoreAction, CoreState, SharedState, current_web_page_id, drag_allowed_operations,
+        CoreAction, CoreState, SharedState, current_browsing_context_id, drag_allowed_operations,
         remove_drag_session, set_drag_allowed_operations,
     },
 };
@@ -47,10 +47,10 @@ struct SimpleBrowserViewDelegate {
 impl SimpleBrowserViewDelegate {
     fn with_page_id<F>(&self, f: F)
     where
-        F: FnOnce(WebPageId),
+        F: FnOnce(BrowsingContextId),
     {
-        if let Some(web_page_id) = current_web_page_id(&self.shared) {
-            f(web_page_id);
+        if let Some(browsing_context_id) = current_browsing_context_id(&self.shared) {
+            f(browsing_context_id);
         }
     }
 }
@@ -64,8 +64,8 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         event: cbf::data::key::KeyEvent,
         commands: Vec<String>,
     ) {
-        self.with_page_id(|web_page_id| {
-            if let Err(err) = self.handle.send_key_event(web_page_id, event, commands) {
+        self.with_page_id(|browsing_context_id| {
+            if let Err(err) = self.handle.send_key_event(browsing_context_id, event, commands) {
                 warn!("failed to forward key event: {err}");
             }
         });
@@ -74,7 +74,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
     /// Called when an IME event occurs, such as composition or text commit.
     /// This is critical for international text input (e.g., Japanese, Chinese).
     fn on_ime_event(&self, _view: &BrowserViewMac, event: BrowserViewMacImeEvent) {
-        self.with_page_id(|web_page_id| match event {
+        self.with_page_id(|browsing_context_id| match event {
             BrowserViewMacImeEvent::SetComposition {
                 text,
                 selection,
@@ -89,7 +89,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
                     });
 
                 let composition = ImeComposition {
-                    web_page_id,
+                    browsing_context_id,
                     text,
                     selection_start,
                     selection_end,
@@ -112,7 +112,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
                 relative_caret_position,
             } => {
                 let commit = ImeCommitText {
-                    web_page_id,
+                    browsing_context_id,
                     text,
                     relative_caret_position,
                     replacement_range: replacement,
@@ -128,7 +128,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
                 } else {
                     ConfirmCompositionBehavior::DoNotKeepSelection
                 };
-                if let Err(err) = self.handle.finish_composing_text(web_page_id, behavior) {
+                if let Err(err) = self.handle.finish_composing_text(browsing_context_id, behavior) {
                     warn!("failed to finish ime composition: {err}");
                 }
             }
@@ -137,7 +137,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
 
     /// Called when a character input event occurs (fallback for text input not handled by IME).
     fn on_char_event(&self, _view: &BrowserViewMac, text: String) {
-        self.with_page_id(|web_page_id| {
+        self.with_page_id(|browsing_context_id| {
             let event = cbf::data::key::KeyEvent {
                 type_: cbf::data::key::KeyEventType::Char,
                 modifiers: 0,
@@ -153,7 +153,7 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
                 location: 0,
             };
 
-            if let Err(err) = self.handle.send_key_event(web_page_id, event, Vec::new()) {
+            if let Err(err) = self.handle.send_key_event(browsing_context_id, event, Vec::new()) {
                 warn!("failed to send char input: {err}");
             }
         });
@@ -161,8 +161,8 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
 
     /// Called when a mouse event occurs.
     fn on_mouse_event(&self, _view: &BrowserViewMac, event: cbf::data::mouse::MouseEvent) {
-        self.with_page_id(|web_page_id| {
-            if let Err(err) = self.handle.send_mouse_event(web_page_id, event) {
+        self.with_page_id(|browsing_context_id| {
+            if let Err(err) = self.handle.send_mouse_event(browsing_context_id, event) {
                 warn!("failed to forward mouse event: {err}");
             }
         });
@@ -174,8 +174,8 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         _view: &BrowserViewMac,
         event: cbf::data::mouse::MouseWheelEvent,
     ) {
-        self.with_page_id(|web_page_id| {
-            if let Err(err) = self.handle.send_mouse_wheel_event(web_page_id, event) {
+        self.with_page_id(|browsing_context_id| {
+            if let Err(err) = self.handle.send_mouse_wheel_event(browsing_context_id, event) {
                 warn!("failed to forward mouse wheel event: {err}");
             }
         });
@@ -200,8 +200,8 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
 
     /// Called when the browser view focus state changes.
     fn on_focus_changed(&self, _view: &BrowserViewMac, focused: bool) {
-        self.with_page_id(|web_page_id| {
-            if let Err(err) = self.handle.set_web_page_focus(web_page_id, focused) {
+        self.with_page_id(|browsing_context_id| {
+            if let Err(err) = self.handle.set_browsing_context_focus(browsing_context_id, focused) {
                 warn!("failed to sync page focus: {err}");
             }
         });
@@ -209,10 +209,10 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
 
     /// Called when a native drag operation moves over the browser view.
     fn on_native_drag_update(&self, _view: &BrowserViewMac, event: BrowserViewMacNativeDragUpdate) {
-        self.with_page_id(|web_page_id| {
+        self.with_page_id(|browsing_context_id| {
             let update = DragUpdate {
                 session_id: event.session_id,
-                web_page_id,
+                browsing_context_id,
                 allowed_operations: drag_allowed_operations(&self.shared, event.session_id),
                 modifiers: event.modifiers,
                 position_in_widget_x: event.position_in_widget_x,
@@ -229,10 +229,10 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
 
     /// Called when a native drag operation is dropped on the browser view.
     fn on_native_drag_drop(&self, _view: &BrowserViewMac, event: BrowserViewMacNativeDragDrop) {
-        self.with_page_id(|web_page_id| {
+        self.with_page_id(|browsing_context_id| {
             let drop = DragDrop {
                 session_id: event.session_id,
-                web_page_id,
+                browsing_context_id,
                 modifiers: event.modifiers,
                 position_in_widget_x: event.position_in_widget_x,
                 position_in_widget_y: event.position_in_widget_y,
@@ -250,8 +250,8 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
 
     /// Called when a native drag operation is cancelled (e.g., ESC key or dragged outside drop zones).
     fn on_native_drag_cancel(&self, _view: &BrowserViewMac, session_id: u64) {
-        self.with_page_id(|web_page_id| {
-            if let Err(err) = self.handle.send_drag_cancel(session_id, web_page_id) {
+        self.with_page_id(|browsing_context_id| {
+            if let Err(err) = self.handle.send_drag_cancel(session_id, browsing_context_id) {
                 warn!("failed to forward native drag cancel: {err}");
             }
             remove_drag_session(&self.shared, session_id);
@@ -449,7 +449,7 @@ fn view_frame_for_window(window: &Window) -> CGRect {
 }
 
 /// Calculates the page size (width, height in pixels) for the given window.
-/// This is used to tell the browser backend the size of the web page.
+/// This is used to tell the browser backend the size of the browsing context.
 fn page_size_for_window(window: &Window) -> (u32, u32) {
     let logical = window.inner_size().to_logical::<f64>(window.scale_factor());
     (

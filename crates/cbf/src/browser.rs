@@ -6,7 +6,7 @@ use crate::{
     command::BrowserCommand,
     data::{
         drag::{DragDrop, DragUpdate},
-        ids::WebPageId,
+        ids::BrowsingContextId,
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         key::KeyEvent,
         mouse::{MouseEvent, MouseWheelEvent},
@@ -52,75 +52,75 @@ impl BrowserHandle {
     }
 
     /// Create a new web page (tab) with an optional initial URL and profile.
-    pub fn create_web_page(
+    pub fn create_browsing_context(
         &self,
         request_id: u64,
         initial_url: Option<String>,
         profile_id: Option<String>,
     ) -> Result<(), Error> {
-        self.send(BrowserCommand::CreateWebPage {
+        self.send(BrowserCommand::CreateBrowsingContext {
             request_id,
             initial_url,
             profile_id,
         })
     }
 
-    pub fn resize_web_page(
+    pub fn resize_browsing_context(
         &self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         width: u32,
         height: u32,
     ) -> Result<(), Error> {
-        self.send(BrowserCommand::ResizeWebPage {
-            web_page_id,
+        self.send(BrowserCommand::ResizeBrowsingContext {
+            browsing_context_id,
             width,
             height,
         })
     }
 
     /// Request closing the given web page.
-    pub fn request_close_web_page(&self, web_page_id: WebPageId) -> Result<(), Error> {
-        self.send(BrowserCommand::RequestCloseWebPage { web_page_id })
+    pub fn request_close_browsing_context(&self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+        self.send(BrowserCommand::RequestCloseBrowsingContext { browsing_context_id })
     }
 
     /// Navigate the web page to the provided URL.
-    pub fn navigate(&self, web_page_id: WebPageId, url: String) -> Result<(), Error> {
-        self.send(BrowserCommand::Navigate { web_page_id, url })
+    pub fn navigate(&self, browsing_context_id: BrowsingContextId, url: String) -> Result<(), Error> {
+        self.send(BrowserCommand::Navigate { browsing_context_id, url })
     }
 
     /// Navigate back in history for the given web page.
-    pub fn go_back(&self, web_page_id: WebPageId) -> Result<(), Error> {
-        self.send(BrowserCommand::GoBack { web_page_id })
+    pub fn go_back(&self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+        self.send(BrowserCommand::GoBack { browsing_context_id })
     }
 
     /// Navigate forward in history for the given web page.
-    pub fn go_forward(&self, web_page_id: WebPageId) -> Result<(), Error> {
-        self.send(BrowserCommand::GoForward { web_page_id })
+    pub fn go_forward(&self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+        self.send(BrowserCommand::GoForward { browsing_context_id })
     }
 
     /// Reload the current page, optionally bypassing caches.
-    pub fn reload(&self, web_page_id: WebPageId, ignore_cache: bool) -> Result<(), Error> {
+    pub fn reload(&self, browsing_context_id: BrowsingContextId, ignore_cache: bool) -> Result<(), Error> {
         self.send(BrowserCommand::Reload {
-            web_page_id,
+            browsing_context_id,
             ignore_cache,
         })
     }
 
-    pub fn get_web_page_dom_html(
+    pub fn get_browsing_context_dom_html(
         &self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
     ) -> Result<(), Error> {
-        self.send(BrowserCommand::GetWebPageDomHtml {
-            web_page_id,
+        self.send(BrowserCommand::GetBrowsingContextDomHtml {
+            browsing_context_id,
             request_id,
         })
     }
 
     /// Update whether the web page should receive text input focus.
-    pub fn set_web_page_focus(&self, web_page_id: WebPageId, focused: bool) -> Result<(), Error> {
-        self.send(BrowserCommand::SetWebPageFocus {
-            web_page_id,
+    pub fn set_browsing_context_focus(&self, browsing_context_id: BrowsingContextId, focused: bool) -> Result<(), Error> {
+        self.send(BrowserCommand::SetBrowsingContextFocus {
+            browsing_context_id,
             focused,
         })
     }
@@ -133,29 +133,29 @@ impl BrowserHandle {
     /// Send a keyboard input event to the web page.
     pub fn send_key_event(
         &self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         event: KeyEvent,
         commands: Vec<String>,
     ) -> Result<(), Error> {
         self.send(BrowserCommand::SendKeyEvent {
-            web_page_id,
+            browsing_context_id,
             event,
             commands,
         })
     }
 
     /// Send a mouse input event to the web page.
-    pub fn send_mouse_event(&self, web_page_id: WebPageId, event: MouseEvent) -> Result<(), Error> {
-        self.send(BrowserCommand::SendMouseEvent { web_page_id, event })
+    pub fn send_mouse_event(&self, browsing_context_id: BrowsingContextId, event: MouseEvent) -> Result<(), Error> {
+        self.send(BrowserCommand::SendMouseEvent { browsing_context_id, event })
     }
 
     /// Send a mouse wheel event to the web page.
     pub fn send_mouse_wheel_event(
         &self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         event: MouseWheelEvent,
     ) -> Result<(), Error> {
-        self.send(BrowserCommand::SendMouseWheelEvent { web_page_id, event })
+        self.send(BrowserCommand::SendMouseWheelEvent { browsing_context_id, event })
     }
 
     /// Send a drag update event for host-owned drag session.
@@ -169,10 +169,10 @@ impl BrowserHandle {
     }
 
     /// Cancel a host-owned drag session.
-    pub fn send_drag_cancel(&self, session_id: u64, web_page_id: WebPageId) -> Result<(), Error> {
+    pub fn send_drag_cancel(&self, session_id: u64, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
         self.send(BrowserCommand::SendDragCancel {
             session_id,
-            web_page_id,
+            browsing_context_id,
         })
     }
 
@@ -189,11 +189,11 @@ impl BrowserHandle {
     /// Finish IME composing with the specified selection behavior.
     pub fn finish_composing_text(
         &self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         behavior: ConfirmCompositionBehavior,
     ) -> Result<(), Error> {
         self.send(BrowserCommand::FinishComposingText {
-            web_page_id,
+            browsing_context_id,
             behavior,
         })
     }
@@ -233,12 +233,12 @@ impl BrowserHandle {
     /// Respond to a beforeunload confirmation request for a page.
     pub fn confirm_beforeunload(
         &self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
         proceed: bool,
     ) -> Result<(), Error> {
         self.send(BrowserCommand::ConfirmBeforeUnload {
-            web_page_id,
+            browsing_context_id,
             request_id,
             proceed,
         })
@@ -247,12 +247,12 @@ impl BrowserHandle {
     /// Respond to a permission request for a page.
     pub fn confirm_permission(
         &self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
         allow: bool,
     ) -> Result<(), Error> {
         self.send(BrowserCommand::ConfirmPermission {
-            web_page_id,
+            browsing_context_id,
             request_id,
             allow,
         })

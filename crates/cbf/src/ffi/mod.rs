@@ -11,7 +11,7 @@ use tracing::{debug, warn};
 
 use crate::data::{
     drag::{DragDrop, DragStartRequest, DragUpdate},
-    ids::WebPageId,
+    ids::BrowsingContextId,
     ime::{ConfirmCompositionBehavior, ImeBoundsUpdate, ImeCommitText, ImeComposition},
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
@@ -42,38 +42,38 @@ pub enum IpcEvent {
     /// The rendering surface handle for a page was updated.
     SurfaceHandleUpdated {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         handle: SurfaceHandle,
     },
     /// A new web page was created by the backend.
     WebPageCreated {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
     },
     /// IME bounds information changed.
     ImeBoundsUpdated {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         update: ImeBoundsUpdate,
     },
     /// The backend requested a context menu.
     ContextMenuRequested {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         menu: crate::data::context_menu::ContextMenu,
     },
     /// The backend requested opening a new page.
-    NewWebPageRequested {
+    NewBrowsingContextRequested {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         target_url: String,
         is_popup: bool,
     },
     /// Navigation state changed for a page.
     NavigationStateChanged {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         url: String,
         can_go_back: bool,
         can_go_forward: bool,
@@ -82,55 +82,55 @@ pub enum IpcEvent {
     /// Cursor appearance changed for a page.
     CursorChanged {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         cursor_type: CursorIcon,
     },
     /// The page title changed for a page.
     TitleUpdated {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         title: String,
     },
     /// The page favicon URL changed for a page.
     FaviconUrlUpdated {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         url: String,
     },
     /// A beforeunload dialog was requested.
     BeforeUnloadDialogRequested {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
         reason: BeforeUnloadReason,
     },
     /// A web page closed event was observed.
     WebPageClosed {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
     },
     /// A resize acknowledgement was received for a page.
     WebPageResizeAcknowledged {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
     },
     /// The DOM HTML was read for a page.
     WebPageDomHtmlRead {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
         html: String,
     },
     /// Host-owned drag start request from renderer.
     DragStartRequested {
         profile_id: String,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request: DragStartRequest,
     },
     /// Shutdown is blocked by dirty pages.
     ShutdownBlocked {
         request_id: u64,
-        dirty_web_page_ids: Vec<WebPageId>,
+        dirty_browsing_context_ids: Vec<BrowsingContextId>,
     },
     /// Shutdown has started.
     ShutdownProceeding { request_id: u64 },
@@ -246,7 +246,7 @@ impl IpcClient {
     }
 
     /// Create a web page (tab) via the IPC bridge.
-    pub fn create_web_page(
+    pub fn create_browsing_context(
         &mut self,
         request_id: u64,
         initial_url: &str,
@@ -274,12 +274,12 @@ impl IpcClient {
     }
 
     /// Request closing the specified web page.
-    pub fn request_close_web_page(&mut self, web_page_id: WebPageId) -> Result<(), Error> {
+    pub fn request_close_browsing_context(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_request_close_web_page(self.inner, web_page_id.get()) } {
+        if unsafe { cbf_bridge_client_request_close_web_page(self.inner, browsing_context_id.get()) } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -289,7 +289,7 @@ impl IpcClient {
     /// Update the surface size of the specified web page.
     pub fn set_web_page_size(
         &mut self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         width: u32,
         height: u32,
     ) -> Result<(), Error> {
@@ -298,7 +298,7 @@ impl IpcClient {
         }
 
         if unsafe {
-            cbf_bridge_client_set_web_page_size(self.inner, web_page_id.get(), width, height)
+            cbf_bridge_client_set_web_page_size(self.inner, browsing_context_id.get(), width, height)
         } {
             Ok(())
         } else {
@@ -307,16 +307,16 @@ impl IpcClient {
     }
 
     /// Update whether the specified web page should receive text input focus.
-    pub fn set_web_page_focus(
+    pub fn set_browsing_context_focus(
         &mut self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         focused: bool,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_set_web_page_focus(self.inner, web_page_id.get(), focused) } {
+        if unsafe { cbf_bridge_client_set_web_page_focus(self.inner, browsing_context_id.get(), focused) } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -326,7 +326,7 @@ impl IpcClient {
     /// Respond to a beforeunload confirmation request.
     pub fn confirm_beforeunload(
         &mut self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
         proceed: bool,
     ) -> Result<(), Error> {
@@ -337,7 +337,7 @@ impl IpcClient {
         if unsafe {
             cbf_bridge_client_confirm_beforeunload(
                 self.inner,
-                web_page_id.get(),
+                browsing_context_id.get(),
                 request_id,
                 proceed,
             )
@@ -349,14 +349,14 @@ impl IpcClient {
     }
 
     /// Navigate the page to the provided URL.
-    pub fn navigate(&mut self, web_page_id: WebPageId, url: &str) -> Result<(), Error> {
+    pub fn navigate(&mut self, browsing_context_id: BrowsingContextId, url: &str) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
         let url = CString::new(url).map_err(|_| Error::InvalidInput)?;
 
-        if unsafe { cbf_bridge_client_navigate(self.inner, web_page_id.get(), url.as_ptr()) } {
+        if unsafe { cbf_bridge_client_navigate(self.inner, browsing_context_id.get(), url.as_ptr()) } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -364,12 +364,12 @@ impl IpcClient {
     }
 
     /// Navigate back in history for the page.
-    pub fn go_back(&mut self, web_page_id: WebPageId) -> Result<(), Error> {
+    pub fn go_back(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_go_back(self.inner, web_page_id.get()) } {
+        if unsafe { cbf_bridge_client_go_back(self.inner, browsing_context_id.get()) } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -377,12 +377,12 @@ impl IpcClient {
     }
 
     /// Navigate forward in history for the page.
-    pub fn go_forward(&mut self, web_page_id: WebPageId) -> Result<(), Error> {
+    pub fn go_forward(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_go_forward(self.inner, web_page_id.get()) } {
+        if unsafe { cbf_bridge_client_go_forward(self.inner, browsing_context_id.get()) } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -390,12 +390,12 @@ impl IpcClient {
     }
 
     /// Reload the page, optionally ignoring caches.
-    pub fn reload(&mut self, web_page_id: WebPageId, ignore_cache: bool) -> Result<(), Error> {
+    pub fn reload(&mut self, browsing_context_id: BrowsingContextId, ignore_cache: bool) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_reload(self.inner, web_page_id.get(), ignore_cache) } {
+        if unsafe { cbf_bridge_client_reload(self.inner, browsing_context_id.get(), ignore_cache) } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -403,9 +403,9 @@ impl IpcClient {
     }
 
     /// Request the DOM HTML for the specified page.
-    pub fn get_web_page_dom_html(
+    pub fn get_browsing_context_dom_html(
         &mut self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -413,7 +413,7 @@ impl IpcClient {
         }
 
         if unsafe {
-            cbf_bridge_client_get_web_page_dom_html(self.inner, web_page_id.get(), request_id)
+            cbf_bridge_client_get_web_page_dom_html(self.inner, browsing_context_id.get(), request_id)
         } {
             Ok(())
         } else {
@@ -424,7 +424,7 @@ impl IpcClient {
     /// Send a keyboard event to the page.
     pub fn send_key_event(
         &mut self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         event: &KeyEvent,
         commands: &[String],
     ) -> Result<(), Error> {
@@ -445,7 +445,7 @@ impl IpcClient {
             command_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
 
         let ffi_event = CbfKeyEvent {
-            web_page_id: web_page_id.get(),
+            web_page_id: browsing_context_id.get(),
             type_: key_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             windows_key_code: event.windows_key_code,
@@ -479,7 +479,7 @@ impl IpcClient {
     /// Send a mouse event to the page.
     pub fn send_mouse_event(
         &mut self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         event: &MouseEvent,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -487,7 +487,7 @@ impl IpcClient {
         }
 
         let ffi_event = CbfMouseEvent {
-            web_page_id: web_page_id.get(),
+            web_page_id: browsing_context_id.get(),
             type_: mouse_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             button: mouse_button_to_ffi(event.button),
@@ -512,7 +512,7 @@ impl IpcClient {
     /// Send a mouse wheel event to the page.
     pub fn send_mouse_wheel_event(
         &mut self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         event: &MouseWheelEvent,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -520,7 +520,7 @@ impl IpcClient {
         }
 
         let ffi_event = CbfMouseWheelEvent {
-            web_page_id: web_page_id.get(),
+            web_page_id: browsing_context_id.get(),
             modifiers: event.modifiers,
             position_in_widget_x: event.position_in_widget_x,
             position_in_widget_y: event.position_in_widget_y,
@@ -553,7 +553,7 @@ impl IpcClient {
 
         let ffi_update = CbfDragUpdate {
             session_id: update.session_id,
-            web_page_id: update.web_page_id.get(),
+            web_page_id: update.browsing_context_id.get(),
             allowed_operations: update.allowed_operations,
             modifiers: update.modifiers,
             position_in_widget_x: update.position_in_widget_x,
@@ -577,7 +577,7 @@ impl IpcClient {
 
         let ffi_drop = CbfDragDrop {
             session_id: drop.session_id,
-            web_page_id: drop.web_page_id.get(),
+            web_page_id: drop.browsing_context_id.get(),
             modifiers: drop.modifiers,
             position_in_widget_x: drop.position_in_widget_x,
             position_in_widget_y: drop.position_in_widget_y,
@@ -596,13 +596,13 @@ impl IpcClient {
     pub fn send_drag_cancel(
         &mut self,
         session_id: u64,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_send_drag_cancel(self.inner, session_id, web_page_id.get()) }
+        if unsafe { cbf_bridge_client_send_drag_cancel(self.inner, session_id, browsing_context_id.get()) }
         {
             Ok(())
         } else {
@@ -629,7 +629,7 @@ impl IpcClient {
         let (replacement_start, replacement_end) = ime_range_to_ffi(&composition.replacement_range);
 
         let ffi_composition = CbfImeComposition {
-            web_page_id: composition.web_page_id.get(),
+            web_page_id: composition.browsing_context_id.get(),
             text: text.as_ptr(),
             selection_start: composition.selection_start,
             selection_end: composition.selection_end,
@@ -664,7 +664,7 @@ impl IpcClient {
         let (replacement_start, replacement_end) = ime_range_to_ffi(&commit.replacement_range);
 
         let ffi_commit = CbfImeCommitText {
-            web_page_id: commit.web_page_id.get(),
+            web_page_id: commit.browsing_context_id.get(),
             text: text.as_ptr(),
             relative_caret_position: commit.relative_caret_position,
             replacement_range_start: replacement_start,
@@ -682,7 +682,7 @@ impl IpcClient {
     /// Finish composing IME text with the specified behavior.
     pub fn finish_composing_text(
         &mut self,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         behavior: ConfirmCompositionBehavior,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -695,7 +695,7 @@ impl IpcClient {
         };
 
         if unsafe {
-            cbf_bridge_client_finish_composing_text(self.inner, web_page_id.get(), behavior)
+            cbf_bridge_client_finish_composing_text(self.inner, browsing_context_id.get(), behavior)
         } {
             Ok(())
         } else {

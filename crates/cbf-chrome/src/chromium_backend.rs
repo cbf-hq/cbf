@@ -10,9 +10,9 @@ use cbf::{
     backend_delegate::{BackendDelegate, DelegateDispatcher},
     browser::Backend,
     command::BrowserCommand,
-    data::ids::WebPageId,
+    data::ids::BrowsingContextId,
     error::{ApiErrorKind, BackendErrorInfo, Error, Operation},
-    event::{BackendStopReason, BrowserEvent, DialogType, WebPageEvent},
+    event::{BackendStopReason, BrowserEvent, DialogType, BrowsingContextEvent},
 };
 
 use crate::ffi::{Error as IpcError, IpcClient, IpcEvent};
@@ -49,8 +49,8 @@ impl ChromiumBackendOptions {
 }
 
 struct CommunicationState {
-    resizes_in_flight: HashSet<WebPageId>,
-    pending_resizes: HashMap<WebPageId, (u32, u32)>,
+    resizes_in_flight: HashSet<BrowsingContextId>,
+    pending_resizes: HashMap<BrowsingContextId, (u32, u32)>,
 }
 
 #[derive(Debug)]
@@ -297,111 +297,111 @@ impl ChromiumBackend {
         let mut emit = |event| dispatcher.dispatch_event(event, event_tx);
 
         match event {
-            IpcEvent::WebPageCreated {
+            IpcEvent::WebContentsCreated {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 request_id,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::Created { request_id },
+                    browsing_context_id,
+                    event: BrowsingContextEvent::Created { request_id },
                 }) {
                     return Some(reason);
                 }
             }
             IpcEvent::SurfaceHandleUpdated {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 handle,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::SurfaceHandleUpdated { handle },
+                    browsing_context_id,
+                    event: BrowsingContextEvent::SurfaceHandleUpdated { handle },
                 }) {
                     return Some(reason);
                 }
             }
-            IpcEvent::WebPageResizeAcknowledged { web_page_id, .. } => {
-                state.resizes_in_flight.remove(&web_page_id);
-                if let Some((width, height)) = state.pending_resizes.remove(&web_page_id) {
-                    state.resizes_in_flight.insert(web_page_id);
-                    if let Err(err) = client.set_web_page_size(web_page_id, width, height) {
+            IpcEvent::WebContentsResizeAcknowledged { browsing_context_id, .. } => {
+                state.resizes_in_flight.remove(&browsing_context_id);
+                if let Some((width, height)) = state.pending_resizes.remove(&browsing_context_id) {
+                    state.resizes_in_flight.insert(browsing_context_id);
+                    if let Err(err) = client.set_web_contents_size(browsing_context_id, width, height) {
                         tracing::warn!(
                             result = "err",
                             error = "resize_failed",
                             err = ?err,
-                            %web_page_id,
+                            %browsing_context_id,
                             "Failed to send pending resize"
                         );
-                        state.resizes_in_flight.remove(&web_page_id);
+                        state.resizes_in_flight.remove(&browsing_context_id);
                     }
                 }
             }
-            IpcEvent::WebPageDomHtmlRead {
+            IpcEvent::WebContentsDomHtmlRead {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 request_id,
                 html,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::DomHtmlRead { request_id, html },
+                    browsing_context_id,
+                    event: BrowsingContextEvent::DomHtmlRead { request_id, html },
                 }) {
                     return Some(reason);
                 }
             }
             IpcEvent::DragStartRequested {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 request,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::DragStartRequested { request },
+                    browsing_context_id,
+                    event: BrowsingContextEvent::DragStartRequested { request },
                 }) {
                     return Some(reason);
                 }
             }
             IpcEvent::ImeBoundsUpdated {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 update,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::ImeBoundsUpdated { update },
+                    browsing_context_id,
+                    event: BrowsingContextEvent::ImeBoundsUpdated { update },
                 }) {
                     return Some(reason);
                 }
             }
             IpcEvent::ContextMenuRequested {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 menu,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::ContextMenuRequested { menu },
+                    browsing_context_id,
+                    event: BrowsingContextEvent::ContextMenuRequested { menu },
                 }) {
                     return Some(reason);
                 }
             }
-            IpcEvent::NewWebPageRequested {
+            IpcEvent::NewWebContentsRequested {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 target_url,
                 is_popup,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::NewWebPageRequested {
+                    browsing_context_id,
+                    event: BrowsingContextEvent::NewBrowsingContextRequested {
                         target_url,
                         is_popup,
                     },
@@ -411,16 +411,16 @@ impl ChromiumBackend {
             }
             IpcEvent::NavigationStateChanged {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 url,
                 can_go_back,
                 can_go_forward,
                 is_loading,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::NavigationStateChanged {
+                    browsing_context_id,
+                    event: BrowsingContextEvent::NavigationStateChanged {
                         url,
                         can_go_back,
                         can_go_forward,
@@ -432,53 +432,53 @@ impl ChromiumBackend {
             }
             IpcEvent::CursorChanged {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 cursor_type,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::CursorChanged { cursor_type },
+                    browsing_context_id,
+                    event: BrowsingContextEvent::CursorChanged { cursor_type },
                 }) {
                     return Some(reason);
                 }
             }
             IpcEvent::TitleUpdated {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 title,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::TitleUpdated { title },
+                    browsing_context_id,
+                    event: BrowsingContextEvent::TitleUpdated { title },
                 }) {
                     return Some(reason);
                 }
             }
             IpcEvent::FaviconUrlUpdated {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 url,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::FaviconUrlUpdated { url },
+                    browsing_context_id,
+                    event: BrowsingContextEvent::FaviconUrlUpdated { url },
                 }) {
                     return Some(reason);
                 }
             }
             IpcEvent::BeforeUnloadDialogRequested {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
                 request_id,
                 reason,
             } => {
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::JavaScriptDialogRequested {
+                    browsing_context_id,
+                    event: BrowsingContextEvent::JavaScriptDialogRequested {
                         request_id,
                         message: String::new(),
                         default_prompt_text: None,
@@ -489,27 +489,27 @@ impl ChromiumBackend {
                     return Some(reason);
                 }
             }
-            IpcEvent::WebPageClosed {
+            IpcEvent::WebContentsClosed {
                 profile_id,
-                web_page_id,
+                browsing_context_id,
             } => {
-                state.resizes_in_flight.remove(&web_page_id);
-                state.pending_resizes.remove(&web_page_id);
-                if let Some(reason) = emit(BrowserEvent::WebPage {
+                state.resizes_in_flight.remove(&browsing_context_id);
+                state.pending_resizes.remove(&browsing_context_id);
+                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
                     profile_id,
-                    web_page_id,
-                    event: WebPageEvent::Closed,
+                    browsing_context_id,
+                    event: BrowsingContextEvent::Closed,
                 }) {
                     return Some(reason);
                 }
             }
             IpcEvent::ShutdownBlocked {
                 request_id,
-                dirty_web_page_ids,
+                dirty_browsing_context_ids,
             } => {
                 if let Some(reason) = emit(BrowserEvent::ShutdownBlocked {
                     request_id,
-                    dirty_web_page_ids,
+                    dirty_browsing_context_ids,
                 }) {
                     return Some(reason);
                 }
@@ -548,23 +548,23 @@ impl ChromiumBackend {
                 },
             };
 
-            if let BrowserCommand::ResizeWebPage {
-                web_page_id,
+            if let BrowserCommand::ResizeBrowsingContext {
+                browsing_context_id,
                 width,
                 height,
             } = command
             {
-                let mut latest_resizes: HashMap<WebPageId, (u32, u32)> = HashMap::new();
-                latest_resizes.insert(web_page_id, (width, height));
+                let mut latest_resizes: HashMap<BrowsingContextId, (u32, u32)> = HashMap::new();
+                latest_resizes.insert(browsing_context_id, (width, height));
 
                 loop {
                     match command_rx.try_recv() {
-                        Ok(BrowserCommand::ResizeWebPage {
-                            web_page_id,
+                        Ok(BrowserCommand::ResizeBrowsingContext {
+                            browsing_context_id,
                             width,
                             height,
                         }) => {
-                            latest_resizes.insert(web_page_id, (width, height));
+                            latest_resizes.insert(browsing_context_id, (width, height));
                         }
                         Ok(other) => {
                             pending_command = Some(other);
@@ -575,17 +575,17 @@ impl ChromiumBackend {
                     }
                 }
 
-                for (web_page_id, (width, height)) in latest_resizes {
-                    if state.resizes_in_flight.contains(&web_page_id) {
-                        state.pending_resizes.insert(web_page_id, (width, height));
+                for (browsing_context_id, (width, height)) in latest_resizes {
+                    if state.resizes_in_flight.contains(&browsing_context_id) {
+                        state.pending_resizes.insert(browsing_context_id, (width, height));
                         continue;
                     }
 
-                    state.resizes_in_flight.insert(web_page_id);
+                    state.resizes_in_flight.insert(browsing_context_id);
                     let mut forward = |command| Self::execute_command(command, client, event_tx);
                     if let Some(reason) = dispatcher.dispatch_command(
-                        BrowserCommand::ResizeWebPage {
-                            web_page_id,
+                        BrowserCommand::ResizeBrowsingContext {
+                            browsing_context_id,
                             width,
                             height,
                         },
@@ -660,18 +660,18 @@ impl ChromiumBackend {
                 })
             }
             BrowserCommand::ConfirmBeforeUnload {
-                web_page_id,
+                browsing_context_id,
                 request_id,
                 proceed,
             } => client
-                .confirm_beforeunload(web_page_id, request_id, proceed)
+                .confirm_beforeunload(browsing_context_id, request_id, proceed)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
                     operation: Operation::ConfirmBeforeUnload,
                     source,
                 }),
             BrowserCommand::ConfirmPermission { .. } => Ok(None),
-            BrowserCommand::CreateWebPage {
+            BrowserCommand::CreateBrowsingContext {
                 request_id,
                 initial_url,
                 profile_id,
@@ -680,22 +680,22 @@ impl ChromiumBackend {
                 let profile = profile_id.unwrap_or_default();
 
                 client
-                    .create_web_page(request_id, &url, &profile)
+                    .create_web_contents(request_id, &url, &profile)
                     .map(|_| None)
                     .map_err(|source| CommandExecutionError::IpcCall {
-                        operation: Operation::CreateWebPage,
+                        operation: Operation::CreateBrowsingContext,
                         source,
                     })
             }
-            BrowserCommand::ResizeWebPage {
-                web_page_id,
+            BrowserCommand::ResizeBrowsingContext {
+                browsing_context_id,
                 width,
                 height,
             } => client
-                .set_web_page_size(web_page_id, width, height)
+                .set_web_contents_size(browsing_context_id, width, height)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::ResizeWebPage,
+                    operation: Operation::ResizeBrowsingContext,
                     source,
                 }),
             BrowserCommand::ListProfiles => match client.list_profiles() {
@@ -710,25 +710,25 @@ impl ChromiumBackend {
                 }),
             },
             BrowserCommand::SendKeyEvent {
-                web_page_id,
+                browsing_context_id,
                 event,
                 commands,
             } => client
-                .send_key_event(web_page_id, &event, &commands)
+                .send_key_event(browsing_context_id, &event, &commands)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
                     operation: Operation::SendKeyEvent,
                     source,
                 }),
-            BrowserCommand::SendMouseEvent { web_page_id, event } => client
-                .send_mouse_event(web_page_id, &event)
+            BrowserCommand::SendMouseEvent { browsing_context_id, event } => client
+                .send_mouse_event(browsing_context_id, &event)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
                     operation: Operation::SendMouseEvent,
                     source,
                 }),
-            BrowserCommand::SendMouseWheelEvent { web_page_id, event } => client
-                .send_mouse_wheel_event(web_page_id, &event)
+            BrowserCommand::SendMouseWheelEvent { browsing_context_id, event } => client
+                .send_mouse_wheel_event(browsing_context_id, &event)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
                     operation: Operation::SendMouseWheelEvent,
@@ -750,9 +750,9 @@ impl ChromiumBackend {
                 }),
             BrowserCommand::SendDragCancel {
                 session_id,
-                web_page_id,
+                browsing_context_id,
             } => client
-                .send_drag_cancel(session_id, web_page_id)
+                .send_drag_cancel(session_id, browsing_context_id)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
                     operation: Operation::SendDragCancel,
@@ -773,10 +773,10 @@ impl ChromiumBackend {
                     source,
                 }),
             BrowserCommand::FinishComposingText {
-                web_page_id,
+                browsing_context_id,
                 behavior,
             } => client
-                .finish_composing_text(web_page_id, behavior)
+                .finish_composing_text(browsing_context_id, behavior)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
                     operation: Operation::FinishComposingText,
@@ -800,62 +800,62 @@ impl ChromiumBackend {
                     operation: Operation::DismissContextMenu,
                     source,
                 }),
-            BrowserCommand::RequestCloseWebPage { web_page_id } => client
-                .request_close_web_page(web_page_id)
+            BrowserCommand::RequestCloseBrowsingContext { browsing_context_id } => client
+                .request_close_web_contents(browsing_context_id)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::RequestCloseWebPage,
+                    operation: Operation::RequestCloseBrowsingContext,
                     source,
                 }),
-            BrowserCommand::Navigate { web_page_id, url } => client
-                .navigate(web_page_id, &url)
+            BrowserCommand::Navigate { browsing_context_id, url } => client
+                .navigate(browsing_context_id, &url)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
                     operation: Operation::Navigate,
                     source,
                 }),
-            BrowserCommand::GoBack { web_page_id } => client
-                .go_back(web_page_id)
+            BrowserCommand::GoBack { browsing_context_id } => client
+                .go_back(browsing_context_id)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
                     operation: Operation::GoBack,
                     source,
                 }),
-            BrowserCommand::GoForward { web_page_id } => client
-                .go_forward(web_page_id)
+            BrowserCommand::GoForward { browsing_context_id } => client
+                .go_forward(browsing_context_id)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
                     operation: Operation::GoForward,
                     source,
                 }),
             BrowserCommand::Reload {
-                web_page_id,
+                browsing_context_id,
                 ignore_cache,
             } => client
-                .reload(web_page_id, ignore_cache)
+                .reload(browsing_context_id, ignore_cache)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
                     operation: Operation::Reload,
                     source,
                 }),
-            BrowserCommand::GetWebPageDomHtml {
-                web_page_id,
+            BrowserCommand::GetBrowsingContextDomHtml {
+                browsing_context_id,
                 request_id,
             } => client
-                .get_web_page_dom_html(web_page_id, request_id)
+                .get_web_contents_dom_html(browsing_context_id, request_id)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::GetWebPageDomHtml,
+                    operation: Operation::GetBrowsingContextDomHtml,
                     source,
                 }),
-            BrowserCommand::SetWebPageFocus {
-                web_page_id,
+            BrowserCommand::SetBrowsingContextFocus {
+                browsing_context_id,
                 focused,
             } => client
-                .set_web_page_focus(web_page_id, focused)
+                .set_web_contents_focus(browsing_context_id, focused)
                 .map(|_| None)
                 .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::SetWebPageFocus,
+                    operation: Operation::SetBrowsingContextFocus,
                     source,
                 }),
         }

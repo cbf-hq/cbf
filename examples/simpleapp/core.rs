@@ -6,10 +6,10 @@ use std::{
 use cbf::{
     browser::{BrowserHandle, BrowserSession},
     data::{
-        context_menu::ContextMenu, drag::DragStartRequest, ids::WebPageId, ime::ImeBoundsUpdate,
+        context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId, ime::ImeBoundsUpdate,
         surface::SurfaceHandle,
     },
-    event::{BackendStopReason, BrowserEvent, WebPageEvent},
+    event::{BackendStopReason, BrowserEvent, BrowsingContextEvent},
 };
 use cursor_icon::CursorIcon;
 use tracing::{error, info, warn};
@@ -21,22 +21,22 @@ use crate::cli::Cli;
 /// This struct is protected by a mutex and can be accessed from multiple parts of the application.
 #[derive(Default)]
 pub(crate) struct SharedState {
-    /// The currently active web page ID, if any.
-    pub(crate) web_page_id: Option<WebPageId>,
+    /// The currently active browsing context ID, if any.
+    pub(crate) browsing_context_id: Option<BrowsingContextId>,
     /// Maps drag session IDs to their allowed operations bitmask.
     pub(crate) drag_allowed_operations: HashMap<u64, u32>,
 }
 
-/// Gets the currently active web page ID from shared state.
-pub(crate) fn current_web_page_id(shared: &Arc<Mutex<SharedState>>) -> Option<WebPageId> {
+/// Gets the currently active browsing context ID from shared state.
+pub(crate) fn current_browsing_context_id(shared: &Arc<Mutex<SharedState>>) -> Option<BrowsingContextId> {
     let guard = shared.lock().expect("shared state lock poisoned");
-    guard.web_page_id
+    guard.browsing_context_id
 }
 
-/// Sets the currently active web page ID in shared state.
-pub(crate) fn set_web_page_id(shared: &Arc<Mutex<SharedState>>, web_page_id: Option<WebPageId>) {
+/// Sets the currently active browsing context ID in shared state.
+pub(crate) fn set_browsing_context_id(shared: &Arc<Mutex<SharedState>>, browsing_context_id: Option<BrowsingContextId>) {
     let mut guard = shared.lock().expect("shared state lock poisoned");
-    guard.web_page_id = web_page_id;
+    guard.browsing_context_id = browsing_context_id;
 }
 
 /// Gets the allowed drag operations for a given drag session.
@@ -75,7 +75,7 @@ pub(crate) struct CoreState {
     cli: Cli,
     session: BrowserSession,
     shared: Arc<Mutex<SharedState>>,
-    /// Whether we've already requested web page creation (to avoid duplicates).
+    /// Whether we've already requested browsing context creation (to avoid duplicates).
     page_create_requested: bool,
     /// Whether we've initiated shutdown sequence.
     shutdown_requested: bool,
@@ -110,31 +110,31 @@ impl CoreState {
         self.session.handle()
     }
 
-    pub(crate) fn current_web_page_id(&self) -> Option<WebPageId> {
-        current_web_page_id(&self.shared)
+    pub(crate) fn current_browsing_context_id(&self) -> Option<BrowsingContextId> {
+        current_browsing_context_id(&self.shared)
     }
 
     pub(crate) fn sync_page_size(&self, width: u32, height: u32) {
-        let Some(web_page_id) = self.current_web_page_id() else {
+        let Some(browsing_context_id) = self.current_browsing_context_id() else {
             return;
         };
 
         if let Err(err) = self
             .browser_handle()
-            .resize_web_page(web_page_id, width, height)
+            .resize_browsing_context(browsing_context_id, width, height)
         {
             warn!("failed to resize page: {err}");
         }
     }
 
     pub(crate) fn set_page_focus(&self, focused: bool) {
-        let Some(web_page_id) = self.current_web_page_id() else {
+        let Some(browsing_context_id) = self.current_browsing_context_id() else {
             return;
         };
 
         if let Err(err) = self
             .browser_handle()
-            .set_web_page_focus(web_page_id, focused)
+            .set_browsing_context_focus(browsing_context_id, focused)
         {
             warn!("failed to sync page focus: {err}");
         }
@@ -163,9 +163,9 @@ impl CoreState {
                     self.page_create_requested = true;
                     if let Err(err) =
                         self.browser_handle()
-                            .create_web_page(1, Some(self.cli.url.clone()), None)
+                            .create_browsing_context(1, Some(self.cli.url.clone()), None)
                     {
-                        error!("failed to create web page: {err}");
+                        error!("failed to create browsing context: {err}");
                         return vec![CoreAction::ExitEventLoop];
                     }
                 }
@@ -198,17 +198,17 @@ impl CoreState {
                 );
                 Vec::new()
             }
-            BrowserEvent::WebPage {
-                web_page_id, event, ..
-            } => self.handle_web_page_event(web_page_id, event),
+            BrowserEvent::BrowsingContext {
+                browsing_context_id, event, ..
+            } => self.handle_browsing_context_event(browsing_context_id, event),
             BrowserEvent::ProfilesListed { .. } => Vec::new(),
             BrowserEvent::ShutdownBlocked {
                 request_id,
-                dirty_web_page_ids,
+                dirty_browsing_context_ids,
             } => {
                 warn!(
                     "shutdown blocked request_id={request_id}, dirty_pages={}",
-                    dirty_web_page_ids.len()
+                    dirty_browsing_context_ids.len()
                 );
                 if let Err(err) = self.browser_handle().confirm_shutdown(request_id, true) {
                     warn!("failed to confirm shutdown: {err}");
@@ -257,54 +257,54 @@ impl CoreState {
         }
     }
 
-    fn handle_web_page_event(
+    fn handle_browsing_context_event(
         &mut self,
-        web_page_id: WebPageId,
-        event: WebPageEvent,
+        browsing_context_id: BrowsingContextId,
+        event: BrowsingContextEvent,
     ) -> Vec<CoreAction> {
         match event {
-            WebPageEvent::Created { .. } => {
-                set_web_page_id(&self.shared, Some(web_page_id));
+            BrowsingContextEvent::Created { .. } => {
+                set_browsing_context_id(&self.shared, Some(browsing_context_id));
                 vec![CoreAction::SyncViewResizeAndFocus]
             }
-            WebPageEvent::SurfaceHandleUpdated { handle } => {
+            BrowsingContextEvent::SurfaceHandleUpdated { handle } => {
                 vec![CoreAction::ApplySurfaceHandle(handle)]
             }
-            WebPageEvent::TitleUpdated { title } => vec![CoreAction::UpdateWindowTitle(title)],
-            WebPageEvent::CursorChanged { cursor_type } => {
+            BrowsingContextEvent::TitleUpdated { title } => vec![CoreAction::UpdateWindowTitle(title)],
+            BrowsingContextEvent::CursorChanged { cursor_type } => {
                 vec![CoreAction::UpdateCursor(cursor_type)]
             }
-            WebPageEvent::ImeBoundsUpdated { update } => vec![CoreAction::ApplyImeBounds(update)],
-            WebPageEvent::ContextMenuRequested { menu } => vec![CoreAction::ShowContextMenu(menu)],
-            WebPageEvent::DragStartRequested { request } => {
+            BrowsingContextEvent::ImeBoundsUpdated { update } => vec![CoreAction::ApplyImeBounds(update)],
+            BrowsingContextEvent::ContextMenuRequested { menu } => vec![CoreAction::ShowContextMenu(menu)],
+            BrowsingContextEvent::DragStartRequested { request } => {
                 vec![CoreAction::StartPlatformDrag(request)]
             }
-            WebPageEvent::JavaScriptDialogRequested { request_id, .. } => {
+            BrowsingContextEvent::JavaScriptDialogRequested { request_id, .. } => {
                 _ = self
                     .browser_handle()
-                    .confirm_beforeunload(web_page_id, request_id, false);
+                    .confirm_beforeunload(browsing_context_id, request_id, false);
                 Vec::new()
             }
-            WebPageEvent::PermissionRequested { request_id, .. } => {
+            BrowsingContextEvent::PermissionRequested { request_id, .. } => {
                 _ = self
                     .browser_handle()
-                    .confirm_permission(web_page_id, request_id, false);
+                    .confirm_permission(browsing_context_id, request_id, false);
                 Vec::new()
             }
-            WebPageEvent::CloseRequested | WebPageEvent::Closed => {
+            BrowsingContextEvent::CloseRequested | BrowsingContextEvent::Closed => {
                 self.request_shutdown_once();
                 vec![CoreAction::ExitEventLoop]
             }
-            WebPageEvent::SelectionChanged { .. }
-            | WebPageEvent::ScrollPositionChanged { .. }
-            | WebPageEvent::NavigationStateChanged { .. }
-            | WebPageEvent::FaviconUrlUpdated { .. }
-            | WebPageEvent::UpdateTargetUrl { .. }
-            | WebPageEvent::FullscreenToggled { .. }
-            | WebPageEvent::NewWebPageRequested { .. }
-            | WebPageEvent::RenderProcessGone { .. }
-            | WebPageEvent::AudioStateChanged { .. }
-            | WebPageEvent::DomHtmlRead { .. } => Vec::new(),
+            BrowsingContextEvent::SelectionChanged { .. }
+            | BrowsingContextEvent::ScrollPositionChanged { .. }
+            | BrowsingContextEvent::NavigationStateChanged { .. }
+            | BrowsingContextEvent::FaviconUrlUpdated { .. }
+            | BrowsingContextEvent::UpdateTargetUrl { .. }
+            | BrowsingContextEvent::FullscreenToggled { .. }
+            | BrowsingContextEvent::NewBrowsingContextRequested { .. }
+            | BrowsingContextEvent::RenderProcessGone { .. }
+            | BrowsingContextEvent::AudioStateChanged { .. }
+            | BrowsingContextEvent::DomHtmlRead { .. } => Vec::new(),
         }
     }
 }

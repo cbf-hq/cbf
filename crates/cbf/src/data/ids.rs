@@ -1,14 +1,14 @@
 /// A stable identifier for a web page (tab) managed by the browser backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct WebPageId(pub u64);
+pub struct BrowsingContextId(pub u64);
 
-impl std::fmt::Display for WebPageId {
+impl std::fmt::Display for BrowsingContextId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.get())
     }
 }
 
-impl WebPageId {
+impl BrowsingContextId {
     /// Create a new identifier from a raw numeric value.
     pub const fn new(raw: u64) -> Self {
         Self(raw)

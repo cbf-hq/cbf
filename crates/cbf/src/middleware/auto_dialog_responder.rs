@@ -12,8 +12,8 @@ use std::{
 use crate::{
     backend_delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     command::BrowserCommand,
-    data::ids::WebPageId,
-    event::{BrowserEvent, DialogType, WebPageEvent},
+    data::ids::BrowsingContextId,
+    event::{BrowserEvent, DialogType, BrowsingContextEvent},
 };
 
 use super::DelegateLayer;
@@ -78,12 +78,12 @@ struct AutoDialogResponder {
     inner: Box<dyn BackendDelegate>,
     timeout: Option<Duration>,
     proceed: bool,
-    pending: HashMap<(WebPageId, u64), Instant>,
+    pending: HashMap<(BrowsingContextId, u64), Instant>,
 }
 
 impl AutoDialogResponder {
-    fn clear_web_page(&mut self, web_page_id: WebPageId) {
-        self.pending.retain(|(id, _), _| *id != web_page_id);
+    fn clear_browsing_context(&mut self, browsing_context_id: BrowsingContextId) {
+        self.pending.retain(|(id, _), _| *id != browsing_context_id);
     }
 }
 
@@ -94,12 +94,12 @@ impl BackendDelegate for AutoDialogResponder {
         command: BrowserCommand,
     ) -> CommandDecision {
         if let BrowserCommand::ConfirmBeforeUnload {
-            web_page_id,
+            browsing_context_id,
             request_id,
             ..
         } = &command
         {
-            self.pending.remove(&(*web_page_id, *request_id));
+            self.pending.remove(&(*browsing_context_id, *request_id));
         }
 
         self.inner.on_command(ctx, command)
@@ -107,24 +107,24 @@ impl BackendDelegate for AutoDialogResponder {
 
     fn on_event(&mut self, ctx: &mut DelegateContext, event: BrowserEvent) -> EventDecision {
         match &event {
-            BrowserEvent::WebPage {
-                web_page_id,
+            BrowserEvent::BrowsingContext {
+                browsing_context_id,
                 event:
-                    WebPageEvent::JavaScriptDialogRequested {
+                    BrowsingContextEvent::JavaScriptDialogRequested {
                         request_id, r#type, ..
                     },
                 ..
             } if *r#type == DialogType::BeforeUnload => {
                 if let Some(timeout) = self.timeout {
                     self.pending
-                        .insert((*web_page_id, *request_id), Instant::now() + timeout);
+                        .insert((*browsing_context_id, *request_id), Instant::now() + timeout);
                 }
             }
-            BrowserEvent::WebPage {
-                web_page_id,
-                event: WebPageEvent::Closed,
+            BrowserEvent::BrowsingContext {
+                browsing_context_id,
+                event: BrowsingContextEvent::Closed,
                 ..
-            } => self.clear_web_page(*web_page_id),
+            } => self.clear_browsing_context(*browsing_context_id),
             _ => {}
         }
 
@@ -134,16 +134,16 @@ impl BackendDelegate for AutoDialogResponder {
     fn on_idle(&mut self, ctx: &mut DelegateContext) {
         if self.timeout.is_some() {
             let now = Instant::now();
-            let expired: Vec<(WebPageId, u64)> = self
+            let expired: Vec<(BrowsingContextId, u64)> = self
                 .pending
                 .iter()
                 .filter_map(|(key, deadline)| (*deadline <= now).then_some(*key))
                 .collect();
 
-            for (web_page_id, request_id) in expired {
-                self.pending.remove(&(web_page_id, request_id));
+            for (browsing_context_id, request_id) in expired {
+                self.pending.remove(&(browsing_context_id, request_id));
                 ctx.enqueue_command(BrowserCommand::ConfirmBeforeUnload {
-                    web_page_id,
+                    browsing_context_id,
                     request_id,
                     proceed: self.proceed,
                 });

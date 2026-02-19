@@ -2,7 +2,7 @@
 
 `simpleapp` is a minimal CBF example that implements only the essential features.
 
-It keeps one window and one surface, and continuously renders a single web page.
+It keeps one window and one surface, and continuously renders a single browsing context.
 
 ## Current Platform Status
 
@@ -12,12 +12,12 @@ It keeps one window and one surface, and continuously renders a single web page.
 ## Features
 
 - Single `winit` window
-- Full-window web page rendering via `BrowserViewMac`
+- Full-window browsing context rendering via `BrowserViewMac`
 - Keyboard input
 - IME support
 - Mouse input
 - Cursor icon sync from web content
-- Window title sync from web page title
+- Window title sync from browsing context title
 - Native drag and drop handling
 
 ## Prerequisites

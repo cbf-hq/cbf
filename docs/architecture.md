@@ -55,9 +55,9 @@ Expected session shape:
 
 MVP-capable or already modeled in API/docs:
 
-- Web page open/manage (WebContents-backed)
+- browsing context open/manage (WebContents-backed)
 - JavaScript dialog requests (alert/confirm/prompt/beforeunload)
-- Window-open/new page requests
+- Window-open/new browsing context requests
 - Title/cursor/favicon updates
 - Navigation/loading state skeleton
 - Render process crash notifications
@@ -73,9 +73,9 @@ Expected extensions:
 
 ## 6. Ownership and Process Boundaries
 
-- `WebPage` is conceptually backed by Chromium `content::WebContents`.
+- `BrowsingContext` is conceptually backed by Chromium `content::WebContents`.
 - `WebContents` ownership stays in the Chromium process.
-- Rust side tracks stable logical IDs (`WebPageId`), not raw Chromium object identity.
+- Rust side tracks stable logical IDs (`BrowsingContextId`), not raw Chromium object identity.
 
 Rationale:
 

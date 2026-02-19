@@ -6,22 +6,22 @@ use crate::{
     backend_delegate::{BackendDelegate, DelegateDispatcher},
     browser::Backend,
     command::BrowserCommand,
-    data::ids::WebPageId,
+    data::ids::BrowsingContextId,
     error::Error,
-    event::{BackendStopReason, BrowserEvent, WebPageEvent},
+    event::{BackendStopReason, BrowserEvent, BrowsingContextEvent},
 };
 
 /// In-memory backend for development and API shaping.
 #[derive(Debug, Default, Clone)]
 pub struct DummyBackend {
-    next_web_page_id: u64,
+    next_browsing_context_id: u64,
 }
 
 impl DummyBackend {
     /// Create a new dummy backend instance.
     pub fn new() -> Self {
         Self {
-            next_web_page_id: 1,
+            next_browsing_context_id: 1,
         }
     }
 }
@@ -34,7 +34,7 @@ impl Backend for DummyBackend {
         let (command_tx, command_rx) = async_channel::unbounded::<BrowserCommand>();
         let (event_tx, event_rx) = async_channel::unbounded::<BrowserEvent>();
 
-        let next_id = self.next_web_page_id;
+        let next_id = self.next_browsing_context_id;
 
         thread::spawn(move || Self::run_communication(command_rx, event_tx, next_id, delegate));
 
@@ -49,7 +49,7 @@ impl DummyBackend {
         mut next_id: u64,
         delegate: impl BackendDelegate,
     ) {
-        let mut pages: HashMap<WebPageId, String> = HashMap::new();
+        let mut pages: HashMap<BrowsingContextId, String> = HashMap::new();
         let mut dispatcher = DelegateDispatcher::new(delegate);
 
         if let Some(reason) = dispatcher.dispatch_event(BrowserEvent::BackendReady, &event_tx) {
@@ -94,7 +94,7 @@ impl DummyBackend {
 
     fn execute_command(
         command: BrowserCommand,
-        pages: &mut HashMap<WebPageId, String>,
+        pages: &mut HashMap<BrowsingContextId, String>,
         next_id: &mut u64,
     ) -> (Option<BackendStopReason>, Vec<BrowserEvent>) {
         let mut events = Vec::new();
@@ -118,27 +118,27 @@ impl DummyBackend {
             BrowserCommand::ForceShutdown => (Some(BackendStopReason::ShutdownRequested), events),
             BrowserCommand::ConfirmBeforeUnload { .. } => (None, events),
             BrowserCommand::ConfirmPermission { .. } => (None, events),
-            BrowserCommand::CreateWebPage {
+            BrowserCommand::CreateBrowsingContext {
                 request_id,
                 initial_url,
                 profile_id: _,
             } => {
-                let web_page_id = WebPageId::new(*next_id);
+                let browsing_context_id = BrowsingContextId::new(*next_id);
                 *next_id += 1;
 
                 let url = initial_url.unwrap_or_else(|| "about:blank".to_string());
-                pages.insert(web_page_id, url.clone());
+                pages.insert(browsing_context_id, url.clone());
 
-                push_web_page_event(
+                push_browsing_context_event(
                     &mut events,
-                    web_page_id,
-                    WebPageEvent::Created { request_id },
+                    browsing_context_id,
+                    BrowsingContextEvent::Created { request_id },
                 );
-                push_navigation_state(&mut events, web_page_id, pages, false, false);
-                push_web_page_event(
+                push_navigation_state(&mut events, browsing_context_id, pages, false, false);
+                push_browsing_context_event(
                     &mut events,
-                    web_page_id,
-                    WebPageEvent::TitleUpdated { title: url },
+                    browsing_context_id,
+                    BrowsingContextEvent::TitleUpdated { title: url },
                 );
                 (None, events)
             }
@@ -148,53 +148,53 @@ impl DummyBackend {
                 });
                 (None, events)
             }
-            BrowserCommand::Navigate { web_page_id, url } => {
-                pages.insert(web_page_id, url.clone());
+            BrowserCommand::Navigate { browsing_context_id, url } => {
+                pages.insert(browsing_context_id, url.clone());
 
-                push_navigation_state(&mut events, web_page_id, pages, false, true);
-                push_web_page_event(
+                push_navigation_state(&mut events, browsing_context_id, pages, false, true);
+                push_browsing_context_event(
                     &mut events,
-                    web_page_id,
-                    WebPageEvent::TitleUpdated { title: url },
+                    browsing_context_id,
+                    BrowsingContextEvent::TitleUpdated { title: url },
                 );
-                push_navigation_state(&mut events, web_page_id, pages, true, false);
+                push_navigation_state(&mut events, browsing_context_id, pages, true, false);
                 (None, events)
             }
             BrowserCommand::Reload {
-                web_page_id,
+                browsing_context_id,
                 ignore_cache: _,
             } => {
                 let title = pages
-                    .get(&web_page_id)
+                    .get(&browsing_context_id)
                     .cloned()
                     .unwrap_or_else(|| "about:blank".to_string());
 
-                push_navigation_state(&mut events, web_page_id, pages, false, true);
-                push_web_page_event(
+                push_navigation_state(&mut events, browsing_context_id, pages, false, true);
+                push_browsing_context_event(
                     &mut events,
-                    web_page_id,
-                    WebPageEvent::TitleUpdated { title },
+                    browsing_context_id,
+                    BrowsingContextEvent::TitleUpdated { title },
                 );
-                push_navigation_state(&mut events, web_page_id, pages, true, false);
+                push_navigation_state(&mut events, browsing_context_id, pages, true, false);
                 (None, events)
             }
-            BrowserCommand::GetWebPageDomHtml {
-                web_page_id,
+            BrowserCommand::GetBrowsingContextDomHtml {
+                browsing_context_id,
                 request_id,
             } => {
                 let html = "<html><body>Dummy DOM</body></html>".to_string();
-                push_web_page_event(
+                push_browsing_context_event(
                     &mut events,
-                    web_page_id,
-                    WebPageEvent::DomHtmlRead { request_id, html },
+                    browsing_context_id,
+                    BrowsingContextEvent::DomHtmlRead { request_id, html },
                 );
                 (None, events)
             }
-            BrowserCommand::GoBack { web_page_id } | BrowserCommand::GoForward { web_page_id } => {
-                push_navigation_state(&mut events, web_page_id, pages, true, false);
+            BrowserCommand::GoBack { browsing_context_id } | BrowserCommand::GoForward { browsing_context_id } => {
+                push_navigation_state(&mut events, browsing_context_id, pages, true, false);
                 (None, events)
             }
-            BrowserCommand::SetWebPageFocus { .. } | BrowserCommand::ResizeWebPage { .. } => {
+            BrowserCommand::SetBrowsingContextFocus { .. } | BrowserCommand::ResizeBrowsingContext { .. } => {
                 (None, events)
             }
             BrowserCommand::SendKeyEvent { .. }
@@ -208,42 +208,42 @@ impl DummyBackend {
             | BrowserCommand::FinishComposingText { .. }
             | BrowserCommand::ExecuteContextMenuCommand { .. }
             | BrowserCommand::DismissContextMenu { .. } => (None, events),
-            BrowserCommand::RequestCloseWebPage { web_page_id } => {
-                pages.remove(&web_page_id);
-                push_web_page_event(&mut events, web_page_id, WebPageEvent::CloseRequested);
+            BrowserCommand::RequestCloseBrowsingContext { browsing_context_id } => {
+                pages.remove(&browsing_context_id);
+                push_browsing_context_event(&mut events, browsing_context_id, BrowsingContextEvent::CloseRequested);
                 (None, events)
             }
         }
     }
 }
 
-fn push_web_page_event(
+fn push_browsing_context_event(
     events: &mut Vec<BrowserEvent>,
-    web_page_id: WebPageId,
-    event: WebPageEvent,
+    browsing_context_id: BrowsingContextId,
+    event: BrowsingContextEvent,
 ) {
-    events.push(BrowserEvent::WebPage {
+    events.push(BrowserEvent::BrowsingContext {
         profile_id: String::new(),
-        web_page_id,
+        browsing_context_id,
         event,
     });
 }
 
 fn push_navigation_state(
     events: &mut Vec<BrowserEvent>,
-    web_page_id: WebPageId,
-    pages: &HashMap<WebPageId, String>,
+    browsing_context_id: BrowsingContextId,
+    pages: &HashMap<BrowsingContextId, String>,
     can_go_back: bool,
     is_loading: bool,
 ) {
     let url = pages
-        .get(&web_page_id)
+        .get(&browsing_context_id)
         .cloned()
         .unwrap_or_else(|| "about:blank".to_string());
-    push_web_page_event(
+    push_browsing_context_event(
         events,
-        web_page_id,
-        WebPageEvent::NavigationStateChanged {
+        browsing_context_id,
+        BrowsingContextEvent::NavigationStateChanged {
             url,
             can_go_back,
             can_go_forward: false,

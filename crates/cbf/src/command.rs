@@ -5,7 +5,7 @@
 
 use crate::data::{
     drag::{DragDrop, DragUpdate},
-    ids::WebPageId,
+    ids::BrowsingContextId,
     ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
@@ -28,13 +28,13 @@ pub enum BrowserCommand {
 
     /// Confirm a beforeunload dialog request.
     ConfirmBeforeUnload {
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
         proceed: bool,
     },
     /// Confirm a permission request.
     ConfirmPermission {
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
         allow: bool,
     },
@@ -43,7 +43,7 @@ pub enum BrowserCommand {
     ///
     /// - `initial_url`: If `None`, the backend may create an empty page.
     /// - `profile_id`: An optional profile identifier (backend-specific).
-    CreateWebPage {
+    CreateBrowsingContext {
         request_id: u64,
         initial_url: Option<String>,
         profile_id: Option<String>,
@@ -53,56 +53,56 @@ pub enum BrowserCommand {
     ListProfiles,
 
     /// Request to close a web page.
-    RequestCloseWebPage { web_page_id: WebPageId },
+    RequestCloseBrowsingContext { browsing_context_id: BrowsingContextId },
 
     /// Resize a web page surface.
-    ResizeWebPage {
-        web_page_id: WebPageId,
+    ResizeBrowsingContext {
+        browsing_context_id: BrowsingContextId,
         width: u32,
         height: u32,
     },
 
     // --- Navigation ---
     /// Navigate a page to the provided URL.
-    Navigate { web_page_id: WebPageId, url: String },
+    Navigate { browsing_context_id: BrowsingContextId, url: String },
     /// Navigate back in history for the page.
-    GoBack { web_page_id: WebPageId },
+    GoBack { browsing_context_id: BrowsingContextId },
     /// Navigate forward in history for the page.
-    GoForward { web_page_id: WebPageId },
+    GoForward { browsing_context_id: BrowsingContextId },
     /// Reload the current page, optionally bypassing caches.
     Reload {
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         ignore_cache: bool,
     },
 
     /// Request the DOM HTML of a web page.
-    GetWebPageDomHtml {
-        web_page_id: WebPageId,
+    GetBrowsingContextDomHtml {
+        browsing_context_id: BrowsingContextId,
         request_id: u64,
     },
 
     // --- Focus / Lifecycle ---
     /// Update whether the given web page should be focused for text input.
-    SetWebPageFocus {
-        web_page_id: WebPageId,
+    SetBrowsingContextFocus {
+        browsing_context_id: BrowsingContextId,
         focused: bool,
     },
 
     // --- Input ---
     /// Deliver a keyboard event to the page.
     SendKeyEvent {
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         event: KeyEvent,
         commands: Vec<String>,
     },
     /// Deliver a mouse event to the page.
     SendMouseEvent {
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         event: MouseEvent,
     },
     /// Deliver a mouse wheel event to the page.
     SendMouseWheelEvent {
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         event: MouseWheelEvent,
     },
     /// Deliver drag update for host-owned drag session.
@@ -112,7 +112,7 @@ pub enum BrowserCommand {
     /// Cancel host-owned drag session.
     SendDragCancel {
         session_id: u64,
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
     },
     /// Update the current IME composition state.
     SetComposition { composition: ImeComposition },
@@ -120,7 +120,7 @@ pub enum BrowserCommand {
     CommitText { commit: ImeCommitText },
     /// Finish composing IME text with the given selection behavior.
     FinishComposingText {
-        web_page_id: WebPageId,
+        browsing_context_id: BrowsingContextId,
         behavior: ConfirmCompositionBehavior,
     },
 
