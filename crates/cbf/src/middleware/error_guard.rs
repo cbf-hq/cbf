@@ -105,13 +105,13 @@ impl BackendDelegate for ErrorGuard {
     fn on_command(
         &mut self,
         ctx: &mut DelegateContext,
-        command: BrowserCommand,
+        command: &BrowserCommand,
     ) -> CommandDecision {
         self.inner.on_command(ctx, command)
     }
 
-    fn on_event(&mut self, ctx: &mut DelegateContext, event: BrowserEvent) -> EventDecision {
-        let stop_reason = match &event {
+    fn on_event(&mut self, ctx: &mut DelegateContext, event: &BrowserEvent) -> EventDecision {
+        let stop_reason = match event {
             BrowserEvent::BackendError {
                 info,
                 terminal_hint,
@@ -171,7 +171,7 @@ mod tests {
 
         let decision = guard.on_event(
             &mut DelegateContext::default(),
-            make_backend_error(ApiErrorKind::ProtocolMismatch, false),
+            &make_backend_error(ApiErrorKind::ProtocolMismatch, false),
         );
 
         assert!(matches!(decision, EventDecision::Stop(_)));
@@ -190,15 +190,15 @@ mod tests {
         let mut ctx = DelegateContext::default();
         let first = guard.on_event(
             &mut ctx,
-            make_backend_error(ApiErrorKind::CommandDispatchFailed, false),
+            &make_backend_error(ApiErrorKind::CommandDispatchFailed, false),
         );
         let second = guard.on_event(
             &mut ctx,
-            make_backend_error(ApiErrorKind::CommandDispatchFailed, false),
+            &make_backend_error(ApiErrorKind::CommandDispatchFailed, false),
         );
         let third = guard.on_event(
             &mut ctx,
-            make_backend_error(ApiErrorKind::CommandDispatchFailed, false),
+            &make_backend_error(ApiErrorKind::CommandDispatchFailed, false),
         );
 
         assert!(!matches!(first, EventDecision::Stop(_)));
@@ -219,16 +219,13 @@ mod tests {
         let mut ctx = DelegateContext::default();
         _ = guard.on_event(
             &mut ctx,
-            make_backend_error(ApiErrorKind::EventProcessingFailed, false),
+            &make_backend_error(ApiErrorKind::EventProcessingFailed, false),
         );
-        _ = guard.on_event(
-            &mut ctx,
-            BrowserEvent::BackendReady,
-        );
+        _ = guard.on_event(&mut ctx, &BrowserEvent::BackendReady);
 
         let decision = guard.on_event(
             &mut ctx,
-            make_backend_error(ApiErrorKind::EventProcessingFailed, false),
+            &make_backend_error(ApiErrorKind::EventProcessingFailed, false),
         );
 
         assert!(!matches!(decision, EventDecision::Stop(_)));

@@ -143,16 +143,16 @@ impl BackendDelegate for Logging {
     fn on_command(
         &mut self,
         ctx: &mut DelegateContext,
-        command: BrowserCommand,
+        command: &BrowserCommand,
     ) -> CommandDecision {
-        self.log_command_received(&command);
+        self.log_command_received(command);
         let decision = self.inner.on_command(ctx, command);
         self.log_command_decision(&decision);
         decision
     }
 
-    fn on_event(&mut self, ctx: &mut DelegateContext, event: BrowserEvent) -> EventDecision {
-        self.log_event_received(&event);
+    fn on_event(&mut self, ctx: &mut DelegateContext, event: &BrowserEvent) -> EventDecision {
+        self.log_event_received(event);
         let decision = self.inner.on_event(ctx, event);
         self.log_event_decision(&decision);
         decision

@@ -12,7 +12,7 @@ use crate::data::{
 use crate::error::BackendErrorInfo;
 
 /// Events emitted by the browser backend as a whole.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BrowserEvent {
     /// The backend is connected and ready to accept commands.
     BackendReady,
@@ -63,7 +63,7 @@ pub enum BackendStopReason {
 
 /// Events emitted from a specific web page (tab).
 /// The host application consumes these events to update UI and state.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BrowsingContextEvent {
     /// The web page was created.
     Created { request_id: u64 },
@@ -185,7 +185,7 @@ pub enum BeforeUnloadReason {
 }
 
 /// Response payload for a JavaScript dialog request.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DialogResponse {
     Success {
         input: Option<String>, // Input text for prompt dialogs.

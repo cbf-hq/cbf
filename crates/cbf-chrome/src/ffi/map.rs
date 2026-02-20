@@ -31,7 +31,7 @@ use cbf::{
 
 use crate::surface::SurfaceHandle;
 
-use super::{utils::c_string_to_string, Error, IpcEvent};
+use super::{Error, IpcEvent, utils::c_string_to_string};
 
 pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
     match event.kind {

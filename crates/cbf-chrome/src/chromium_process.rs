@@ -88,7 +88,14 @@ impl ChromiumProcess {
 pub fn start_chromium(
     options: StartChromiumOptions,
     delegate: impl BackendDelegate,
-) -> Result<(BrowserSession, EventStream, ChromiumProcess), Error> {
+) -> Result<
+    (
+        BrowserSession<ChromiumBackend>,
+        EventStream<ChromiumBackend>,
+        ChromiumProcess,
+    ),
+    Error,
+> {
     let StartChromiumOptions { process, backend } = options;
 
     let ChromiumProcessOptions {
@@ -144,7 +151,7 @@ pub fn start_chromium(
     );
 
     let backend = ChromiumBackend::new(backend);
-    let (session, events) = connect(backend, delegate)?;
+    let (session, events) = connect(backend, delegate, None)?;
 
     Ok((session, events, ChromiumProcess { child }))
 }

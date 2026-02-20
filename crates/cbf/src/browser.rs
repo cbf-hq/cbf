@@ -1,7 +1,6 @@
 use async_channel::{Receiver, Sender, TrySendError};
 
 use crate::{
-    error::Error,
     backend_delegate::BackendDelegate,
     command::BrowserCommand,
     data::{
@@ -11,44 +10,184 @@ use crate::{
         key::KeyEvent,
         mouse::{MouseEvent, MouseWheelEvent},
     },
+    error::Error,
     event::BrowserEvent,
 };
 
-/// Channel sender used to push `BrowserCommand` to a backend.
-pub type CommandSender = Sender<BrowserCommand>;
-/// Stream of `BrowserEvent` emitted by a backend.
-pub type EventStream = Receiver<BrowserEvent>;
-
-/// A backend implementation that can drive Chromium (or a Chromium fork).
+/// A backend implementation that can drive a browser process.
 ///
-/// `cbf` keeps this trait small on purpose: the high-level API surface is
-/// expressed via commands and events, and transport details live behind this.
+/// The `cbf` layer stays browser-generic. Backend-specific command/event
+/// contracts are represented as raw associated types and converted through
+/// `to_raw_command` / `to_generic_event`.
 pub trait Backend: Send + 'static {
+    type RawCommand: Send + 'static;
+    type RawEvent: Send + 'static;
+    type RawDelegate: Send + 'static;
+
+    /// Converts a browser-generic command into backend-native raw command.
+    fn to_raw_command(command: BrowserCommand) -> Self::RawCommand;
+
+    /// Converts a backend-native raw event into browser-generic event if possible.
+    fn to_generic_event(raw: &Self::RawEvent) -> Option<BrowserEvent>;
+
     /// Establish a command/event channel pair for this backend.
     fn connect<D: BackendDelegate>(
         self,
         delegate: D,
-    ) -> Result<(CommandSender, EventStream), Error>;
+        raw_delegate: Option<Self::RawDelegate>,
+    ) -> Result<(CommandSender<Self>, EventStream<Self>), Error>
+    where
+        Self: Sized;
 }
 
-/// A clonable handle used to send commands to the browser backend.
-#[derive(Debug, Clone)]
-pub struct BrowserHandle {
-    command_tx: CommandSender,
+/// Channel sender used to push backend raw commands.
+pub struct CommandSender<B: Backend> {
+    tx: Sender<B::RawCommand>,
 }
 
-impl BrowserHandle {
-    pub(crate) fn new(command_tx: CommandSender) -> Self {
-        Self { command_tx }
+impl<B: Backend> Clone for CommandSender<B> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+        }
+    }
+}
+
+impl<B: Backend> std::fmt::Debug for CommandSender<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommandSender").finish_non_exhaustive()
+    }
+}
+
+impl<B: Backend> CommandSender<B> {
+    #[doc(hidden)]
+    pub fn from_raw_sender(tx: Sender<B::RawCommand>) -> Self {
+        Self { tx }
     }
 
-    /// Send a raw browser command to the backend.
+    /// Send a browser-generic command to the backend.
     pub fn send(&self, command: BrowserCommand) -> Result<(), Error> {
-        match self.command_tx.try_send(command) {
+        let raw = B::to_raw_command(command);
+        self.try_send_raw(raw)
+    }
+
+    fn try_send_raw(&self, raw: B::RawCommand) -> Result<(), Error> {
+        match self.tx.try_send(raw) {
             Ok(()) => Ok(()),
             Err(TrySendError::Closed(_)) => Err(Error::Disconnected),
             Err(TrySendError::Full(_)) => Err(Error::QueueFull),
         }
+    }
+}
+
+/// Explicit raw command escape hatch.
+pub trait RawCommandSenderExt<B: Backend> {
+    fn send_raw(&self, raw: B::RawCommand) -> Result<(), Error>;
+}
+
+impl<B: Backend> RawCommandSenderExt<B> for CommandSender<B> {
+    fn send_raw(&self, raw: B::RawCommand) -> Result<(), Error> {
+        self.try_send_raw(raw)
+    }
+}
+
+/// Event payload that carries both raw and browser-generic interpretation.
+pub struct OpaqueEvent<B: Backend> {
+    raw: B::RawEvent,
+    generic: Option<BrowserEvent>,
+}
+
+impl<B: Backend> OpaqueEvent<B> {
+    fn new(raw: B::RawEvent) -> Self {
+        let generic = B::to_generic_event(&raw);
+        Self { raw, generic }
+    }
+
+    pub fn as_generic(&self) -> Option<&BrowserEvent> {
+        self.generic.as_ref()
+    }
+}
+
+impl<B: Backend> std::fmt::Debug for OpaqueEvent<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpaqueEvent").finish_non_exhaustive()
+    }
+}
+
+/// Explicit raw event escape hatch.
+pub trait RawOpaqueEventExt<B: Backend> {
+    fn as_raw(&self) -> &B::RawEvent;
+}
+
+impl<B: Backend> RawOpaqueEventExt<B> for OpaqueEvent<B> {
+    fn as_raw(&self) -> &B::RawEvent {
+        &self.raw
+    }
+}
+
+/// Stream of backend raw events.
+pub struct EventStream<B: Backend> {
+    rx: Receiver<B::RawEvent>,
+}
+
+impl<B: Backend> Clone for EventStream<B> {
+    fn clone(&self) -> Self {
+        Self {
+            rx: self.rx.clone(),
+        }
+    }
+}
+
+impl<B: Backend> std::fmt::Debug for EventStream<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventStream").finish_non_exhaustive()
+    }
+}
+
+impl<B: Backend> EventStream<B> {
+    #[doc(hidden)]
+    pub fn from_raw_receiver(rx: Receiver<B::RawEvent>) -> Self {
+        Self { rx }
+    }
+
+    pub async fn recv(&self) -> Result<OpaqueEvent<B>, Error> {
+        let raw = self.rx.recv().await.map_err(|_| Error::Disconnected)?;
+        Ok(OpaqueEvent::new(raw))
+    }
+
+    pub fn recv_blocking(&self) -> Result<OpaqueEvent<B>, Error> {
+        let raw = self.rx.recv_blocking().map_err(|_| Error::Disconnected)?;
+        Ok(OpaqueEvent::new(raw))
+    }
+}
+
+/// A clonable handle used to send commands to the browser backend.
+pub struct BrowserHandle<B: Backend> {
+    command_tx: CommandSender<B>,
+}
+
+impl<B: Backend> Clone for BrowserHandle<B> {
+    fn clone(&self) -> Self {
+        Self {
+            command_tx: self.command_tx.clone(),
+        }
+    }
+}
+
+impl<B: Backend> std::fmt::Debug for BrowserHandle<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrowserHandle").finish_non_exhaustive()
+    }
+}
+
+impl<B: Backend> BrowserHandle<B> {
+    pub(crate) fn new(command_tx: CommandSender<B>) -> Self {
+        Self { command_tx }
+    }
+
+    /// Send a browser-generic command to the backend.
+    pub fn send(&self, command: BrowserCommand) -> Result<(), Error> {
+        self.command_tx.send(command)
     }
 
     /// Create a new web page (tab) with an optional initial URL and profile.
@@ -79,27 +218,47 @@ impl BrowserHandle {
     }
 
     /// Request closing the given web page.
-    pub fn request_close_browsing_context(&self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
-        self.send(BrowserCommand::RequestCloseBrowsingContext { browsing_context_id })
+    pub fn request_close_browsing_context(
+        &self,
+        browsing_context_id: BrowsingContextId,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::RequestCloseBrowsingContext {
+            browsing_context_id,
+        })
     }
 
     /// Navigate the web page to the provided URL.
-    pub fn navigate(&self, browsing_context_id: BrowsingContextId, url: String) -> Result<(), Error> {
-        self.send(BrowserCommand::Navigate { browsing_context_id, url })
+    pub fn navigate(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        url: String,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::Navigate {
+            browsing_context_id,
+            url,
+        })
     }
 
     /// Navigate back in history for the given web page.
     pub fn go_back(&self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
-        self.send(BrowserCommand::GoBack { browsing_context_id })
+        self.send(BrowserCommand::GoBack {
+            browsing_context_id,
+        })
     }
 
     /// Navigate forward in history for the given web page.
     pub fn go_forward(&self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
-        self.send(BrowserCommand::GoForward { browsing_context_id })
+        self.send(BrowserCommand::GoForward {
+            browsing_context_id,
+        })
     }
 
     /// Reload the current page, optionally bypassing caches.
-    pub fn reload(&self, browsing_context_id: BrowsingContextId, ignore_cache: bool) -> Result<(), Error> {
+    pub fn reload(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        ignore_cache: bool,
+    ) -> Result<(), Error> {
         self.send(BrowserCommand::Reload {
             browsing_context_id,
             ignore_cache,
@@ -118,7 +277,11 @@ impl BrowserHandle {
     }
 
     /// Update whether the web page should receive text input focus.
-    pub fn set_browsing_context_focus(&self, browsing_context_id: BrowsingContextId, focused: bool) -> Result<(), Error> {
+    pub fn set_browsing_context_focus(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        focused: bool,
+    ) -> Result<(), Error> {
         self.send(BrowserCommand::SetBrowsingContextFocus {
             browsing_context_id,
             focused,
@@ -145,8 +308,15 @@ impl BrowserHandle {
     }
 
     /// Send a mouse input event to the web page.
-    pub fn send_mouse_event(&self, browsing_context_id: BrowsingContextId, event: MouseEvent) -> Result<(), Error> {
-        self.send(BrowserCommand::SendMouseEvent { browsing_context_id, event })
+    pub fn send_mouse_event(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        event: MouseEvent,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::SendMouseEvent {
+            browsing_context_id,
+            event,
+        })
     }
 
     /// Send a mouse wheel event to the web page.
@@ -155,7 +325,10 @@ impl BrowserHandle {
         browsing_context_id: BrowsingContextId,
         event: MouseWheelEvent,
     ) -> Result<(), Error> {
-        self.send(BrowserCommand::SendMouseWheelEvent { browsing_context_id, event })
+        self.send(BrowserCommand::SendMouseWheelEvent {
+            browsing_context_id,
+            event,
+        })
     }
 
     /// Send a drag update event for host-owned drag session.
@@ -169,7 +342,11 @@ impl BrowserHandle {
     }
 
     /// Cancel a host-owned drag session.
-    pub fn send_drag_cancel(&self, session_id: u64, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+    pub fn send_drag_cancel(
+        &self,
+        session_id: u64,
+        browsing_context_id: BrowsingContextId,
+    ) -> Result<(), Error> {
         self.send(BrowserCommand::SendDragCancel {
             session_id,
             browsing_context_id,
@@ -264,21 +441,27 @@ impl BrowserHandle {
     }
 }
 
-/// A session that owns the initial command handle.
-#[derive(Debug)]
-pub struct BrowserSession {
-    handle: BrowserHandle,
+impl<B: Backend> RawCommandSenderExt<B> for BrowserHandle<B> {
+    fn send_raw(&self, raw: B::RawCommand) -> Result<(), Error> {
+        self.command_tx.send_raw(raw)
+    }
 }
 
-impl BrowserSession {
-    pub(crate) fn new(command_tx: CommandSender) -> Self {
+/// A session that owns the initial command handle.
+#[derive(Debug)]
+pub struct BrowserSession<B: Backend> {
+    handle: BrowserHandle<B>,
+}
+
+impl<B: Backend> BrowserSession<B> {
+    pub(crate) fn new(command_tx: CommandSender<B>) -> Self {
         Self {
             handle: BrowserHandle::new(command_tx),
         }
     }
 
     /// Get a cloneable handle for issuing browser commands.
-    pub fn handle(&self) -> BrowserHandle {
+    pub fn handle(&self) -> BrowserHandle<B> {
         self.handle.clone()
     }
 }
@@ -290,7 +473,8 @@ impl BrowserSession {
 pub fn connect<B: Backend, D: BackendDelegate>(
     backend: B,
     delegate: D,
-) -> Result<(BrowserSession, EventStream), Error> {
-    let (command_tx, events) = backend.connect(delegate)?;
+    raw_delegate: Option<B::RawDelegate>,
+) -> Result<(BrowserSession<B>, EventStream<B>), Error> {
+    let (command_tx, events) = backend.connect(delegate, raw_delegate)?;
     Ok((BrowserSession::new(command_tx), events))
 }

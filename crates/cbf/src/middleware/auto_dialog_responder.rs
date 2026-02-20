@@ -13,7 +13,7 @@ use crate::{
     backend_delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     command::BrowserCommand,
     data::ids::BrowsingContextId,
-    event::{BrowserEvent, DialogType, BrowsingContextEvent},
+    event::{BrowserEvent, BrowsingContextEvent, DialogType},
 };
 
 use super::DelegateLayer;
@@ -91,13 +91,13 @@ impl BackendDelegate for AutoDialogResponder {
     fn on_command(
         &mut self,
         ctx: &mut DelegateContext,
-        command: BrowserCommand,
+        command: &BrowserCommand,
     ) -> CommandDecision {
         if let BrowserCommand::ConfirmBeforeUnload {
             browsing_context_id,
             request_id,
             ..
-        } = &command
+        } = command
         {
             self.pending.remove(&(*browsing_context_id, *request_id));
         }
@@ -105,8 +105,8 @@ impl BackendDelegate for AutoDialogResponder {
         self.inner.on_command(ctx, command)
     }
 
-    fn on_event(&mut self, ctx: &mut DelegateContext, event: BrowserEvent) -> EventDecision {
-        match &event {
+    fn on_event(&mut self, ctx: &mut DelegateContext, event: &BrowserEvent) -> EventDecision {
+        match event {
             BrowserEvent::BrowsingContext {
                 browsing_context_id,
                 event:
@@ -116,8 +116,10 @@ impl BackendDelegate for AutoDialogResponder {
                 ..
             } if *r#type == DialogType::BeforeUnload => {
                 if let Some(timeout) = self.timeout {
-                    self.pending
-                        .insert((*browsing_context_id, *request_id), Instant::now() + timeout);
+                    self.pending.insert(
+                        (*browsing_context_id, *request_id),
+                        Instant::now() + timeout,
+                    );
                 }
             }
             BrowserEvent::BrowsingContext {

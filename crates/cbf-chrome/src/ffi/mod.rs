@@ -30,8 +30,8 @@ mod utils;
 #[cfg(target_os = "macos")]
 pub use map::{
     convert_nsevent_to_chrome_key_event, convert_nsevent_to_chrome_mouse_wheel_event,
-    convert_nsevent_to_key_event, convert_nsevent_to_mouse_event, convert_nsevent_to_mouse_wheel_event,
-    convert_nspasteboard_to_drag_data,
+    convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
+    convert_nsevent_to_mouse_wheel_event, convert_nspasteboard_to_drag_data,
 };
 
 use map::{
@@ -278,12 +278,17 @@ impl IpcClient {
     }
 
     /// Request closing the specified web page.
-    pub fn request_close_web_contents(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+    pub fn request_close_web_contents(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+    ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_request_close_web_page(self.inner, browsing_context_id.get()) } {
+        if unsafe {
+            cbf_bridge_client_request_close_web_page(self.inner, browsing_context_id.get())
+        } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -302,7 +307,12 @@ impl IpcClient {
         }
 
         if unsafe {
-            cbf_bridge_client_set_web_page_size(self.inner, browsing_context_id.get(), width, height)
+            cbf_bridge_client_set_web_page_size(
+                self.inner,
+                browsing_context_id.get(),
+                width,
+                height,
+            )
         } {
             Ok(())
         } else {
@@ -320,7 +330,9 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_set_web_page_focus(self.inner, browsing_context_id.get(), focused) } {
+        if unsafe {
+            cbf_bridge_client_set_web_page_focus(self.inner, browsing_context_id.get(), focused)
+        } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -353,14 +365,20 @@ impl IpcClient {
     }
 
     /// Navigate the page to the provided URL.
-    pub fn navigate(&mut self, browsing_context_id: BrowsingContextId, url: &str) -> Result<(), Error> {
+    pub fn navigate(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        url: &str,
+    ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
         let url = CString::new(url).map_err(|_| Error::InvalidInput)?;
 
-        if unsafe { cbf_bridge_client_navigate(self.inner, browsing_context_id.get(), url.as_ptr()) } {
+        if unsafe {
+            cbf_bridge_client_navigate(self.inner, browsing_context_id.get(), url.as_ptr())
+        } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -394,12 +412,17 @@ impl IpcClient {
     }
 
     /// Reload the page, optionally ignoring caches.
-    pub fn reload(&mut self, browsing_context_id: BrowsingContextId, ignore_cache: bool) -> Result<(), Error> {
+    pub fn reload(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        ignore_cache: bool,
+    ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_reload(self.inner, browsing_context_id.get(), ignore_cache) } {
+        if unsafe { cbf_bridge_client_reload(self.inner, browsing_context_id.get(), ignore_cache) }
+        {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -417,7 +440,11 @@ impl IpcClient {
         }
 
         if unsafe {
-            cbf_bridge_client_get_web_page_dom_html(self.inner, browsing_context_id.get(), request_id)
+            cbf_bridge_client_get_web_page_dom_html(
+                self.inner,
+                browsing_context_id.get(),
+                request_id,
+            )
         } {
             Ok(())
         } else {
@@ -627,8 +654,9 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe { cbf_bridge_client_send_drag_cancel(self.inner, session_id, browsing_context_id.get()) }
-        {
+        if unsafe {
+            cbf_bridge_client_send_drag_cancel(self.inner, session_id, browsing_context_id.get())
+        } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)

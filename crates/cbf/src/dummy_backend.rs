@@ -3,8 +3,8 @@ use std::{collections::HashMap, thread, time::Duration};
 use async_channel::{Receiver, Sender, TryRecvError};
 
 use crate::{
-    backend_delegate::{BackendDelegate, DelegateDispatcher},
-    browser::Backend,
+    backend_delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
+    browser::{Backend, CommandSender, EventStream},
     command::BrowserCommand,
     data::ids::BrowsingContextId,
     error::Error,
@@ -27,10 +27,23 @@ impl DummyBackend {
 }
 
 impl Backend for DummyBackend {
+    type RawCommand = BrowserCommand;
+    type RawEvent = BrowserEvent;
+    type RawDelegate = ();
+
+    fn to_raw_command(command: BrowserCommand) -> Self::RawCommand {
+        command
+    }
+
+    fn to_generic_event(raw: &Self::RawEvent) -> Option<BrowserEvent> {
+        Some(raw.clone())
+    }
+
     fn connect<D: BackendDelegate>(
         self,
         delegate: D,
-    ) -> Result<(Sender<BrowserCommand>, Receiver<BrowserEvent>), Error> {
+        _raw_delegate: Option<Self::RawDelegate>,
+    ) -> Result<(CommandSender<Self>, EventStream<Self>), Error> {
         let (command_tx, command_rx) = async_channel::unbounded::<BrowserCommand>();
         let (event_tx, event_rx) = async_channel::unbounded::<BrowserEvent>();
 
@@ -38,11 +51,99 @@ impl Backend for DummyBackend {
 
         thread::spawn(move || Self::run_communication(command_rx, event_tx, next_id, delegate));
 
-        Ok((command_tx, event_rx))
+        Ok((
+            CommandSender::from_raw_sender(command_tx),
+            EventStream::from_raw_receiver(event_rx),
+        ))
     }
 }
 
 impl DummyBackend {
+    fn emit_event(event_tx: &Sender<BrowserEvent>, event: BrowserEvent) {
+        _ = event_tx.send_blocking(event);
+    }
+
+    fn dispatch_generic_event(
+        event: BrowserEvent,
+        event_tx: &Sender<BrowserEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+    ) -> Option<BackendStopReason> {
+        match dispatcher.dispatch_event(&event) {
+            EventDecision::Forward => {
+                Self::emit_event(event_tx, event);
+                None
+            }
+            EventDecision::Stop(reason) => Some(reason),
+        }
+    }
+
+    fn run_generic_command_with_delegate(
+        command: BrowserCommand,
+        event_tx: &Sender<BrowserEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        pages: &mut HashMap<BrowsingContextId, String>,
+        next_id: &mut u64,
+    ) -> Option<BackendStopReason> {
+        match dispatcher.dispatch_command(&command) {
+            CommandDecision::Forward => {
+                let (reason, events) = Self::execute_command(command, pages, next_id);
+                for event in events {
+                    if let Some(reason) = Self::dispatch_generic_event(event, event_tx, dispatcher)
+                    {
+                        return Some(reason);
+                    }
+                }
+                reason
+            }
+            CommandDecision::Drop => None,
+            CommandDecision::Stop(reason) => Some(reason),
+        }
+    }
+
+    fn drain_delegate_queue(
+        event_tx: &Sender<BrowserEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        pages: &mut HashMap<BrowsingContextId, String>,
+        next_id: &mut u64,
+        mut pending_commands: Vec<BrowserCommand>,
+    ) -> Option<BackendStopReason> {
+        loop {
+            for command in pending_commands {
+                if let Some(reason) = Self::run_generic_command_with_delegate(
+                    command, event_tx, dispatcher, pages, next_id,
+                ) {
+                    return Some(reason);
+                }
+            }
+
+            pending_commands = dispatcher.flush();
+            if pending_commands.is_empty() {
+                return None;
+            }
+        }
+    }
+
+    fn stop_backend(
+        reason: BackendStopReason,
+        event_tx: &Sender<BrowserEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        pages: &mut HashMap<BrowsingContextId, String>,
+        next_id: &mut u64,
+    ) {
+        let (mut final_reason, queued_commands) = dispatcher.stop(reason);
+        if let Some(reason) =
+            Self::drain_delegate_queue(event_tx, dispatcher, pages, next_id, queued_commands)
+        {
+            final_reason = reason;
+        }
+        Self::emit_event(
+            event_tx,
+            BrowserEvent::BackendStopped {
+                reason: final_reason,
+            },
+        );
+    }
+
     fn run_communication(
         command_rx: Receiver<BrowserCommand>,
         event_tx: Sender<BrowserEvent>,
@@ -52,9 +153,10 @@ impl DummyBackend {
         let mut pages: HashMap<BrowsingContextId, String> = HashMap::new();
         let mut dispatcher = DelegateDispatcher::new(delegate);
 
-        if let Some(reason) = dispatcher.dispatch_event(BrowserEvent::BackendReady, &event_tx) {
-            let mut forward = |_| (None, Vec::new());
-            dispatcher.stop(&event_tx, reason, &mut forward);
+        let ready_event = BrowserEvent::BackendReady;
+        if let Some(reason) = Self::dispatch_generic_event(ready_event, &event_tx, &mut dispatcher)
+        {
+            Self::stop_backend(reason, &event_tx, &mut dispatcher, &mut pages, &mut next_id);
             return;
         }
 
@@ -62,9 +164,15 @@ impl DummyBackend {
 
         loop {
             dispatcher.on_idle();
-            let mut forward = |command| Self::execute_command(command, &mut pages, &mut next_id);
-            if let Some(reason) = dispatcher.flush(&event_tx, &mut forward) {
-                dispatcher.stop(&event_tx, reason, &mut forward);
+            let queued_commands = dispatcher.flush();
+            if let Some(reason) = Self::drain_delegate_queue(
+                &event_tx,
+                &mut dispatcher,
+                &mut pages,
+                &mut next_id,
+                queued_commands,
+            ) {
+                Self::stop_backend(reason, &event_tx, &mut dispatcher, &mut pages, &mut next_id);
                 return;
             }
 
@@ -75,18 +183,37 @@ impl DummyBackend {
                     continue;
                 }
                 Err(TryRecvError::Closed) => {
-                    dispatcher.stop(&event_tx, BackendStopReason::Disconnected, &mut forward);
+                    Self::stop_backend(
+                        BackendStopReason::Disconnected,
+                        &event_tx,
+                        &mut dispatcher,
+                        &mut pages,
+                        &mut next_id,
+                    );
                     return;
                 }
             };
 
-            if let Some(reason) = dispatcher.dispatch_command(command, &event_tx, &mut forward) {
-                dispatcher.stop(&event_tx, reason, &mut forward);
+            if let Some(reason) = Self::run_generic_command_with_delegate(
+                command,
+                &event_tx,
+                &mut dispatcher,
+                &mut pages,
+                &mut next_id,
+            ) {
+                Self::stop_backend(reason, &event_tx, &mut dispatcher, &mut pages, &mut next_id);
                 return;
             }
 
-            if let Some(reason) = dispatcher.flush(&event_tx, &mut forward) {
-                dispatcher.stop(&event_tx, reason, &mut forward);
+            let queued_commands = dispatcher.flush();
+            if let Some(reason) = Self::drain_delegate_queue(
+                &event_tx,
+                &mut dispatcher,
+                &mut pages,
+                &mut next_id,
+                queued_commands,
+            ) {
+                Self::stop_backend(reason, &event_tx, &mut dispatcher, &mut pages, &mut next_id);
                 return;
             }
         }
@@ -148,7 +275,10 @@ impl DummyBackend {
                 });
                 (None, events)
             }
-            BrowserCommand::Navigate { browsing_context_id, url } => {
+            BrowserCommand::Navigate {
+                browsing_context_id,
+                url,
+            } => {
                 pages.insert(browsing_context_id, url.clone());
 
                 push_navigation_state(&mut events, browsing_context_id, pages, false, true);
@@ -190,13 +320,17 @@ impl DummyBackend {
                 );
                 (None, events)
             }
-            BrowserCommand::GoBack { browsing_context_id } | BrowserCommand::GoForward { browsing_context_id } => {
+            BrowserCommand::GoBack {
+                browsing_context_id,
+            }
+            | BrowserCommand::GoForward {
+                browsing_context_id,
+            } => {
                 push_navigation_state(&mut events, browsing_context_id, pages, true, false);
                 (None, events)
             }
-            BrowserCommand::SetBrowsingContextFocus { .. } | BrowserCommand::ResizeBrowsingContext { .. } => {
-                (None, events)
-            }
+            BrowserCommand::SetBrowsingContextFocus { .. }
+            | BrowserCommand::ResizeBrowsingContext { .. } => (None, events),
             BrowserCommand::SendKeyEvent { .. }
             | BrowserCommand::SendMouseEvent { .. }
             | BrowserCommand::SendMouseWheelEvent { .. }
@@ -208,9 +342,15 @@ impl DummyBackend {
             | BrowserCommand::FinishComposingText { .. }
             | BrowserCommand::ExecuteContextMenuCommand { .. }
             | BrowserCommand::DismissContextMenu { .. } => (None, events),
-            BrowserCommand::RequestCloseBrowsingContext { browsing_context_id } => {
+            BrowserCommand::RequestCloseBrowsingContext {
+                browsing_context_id,
+            } => {
                 pages.remove(&browsing_context_id);
-                push_browsing_context_event(&mut events, browsing_context_id, BrowsingContextEvent::CloseRequested);
+                push_browsing_context_event(
+                    &mut events,
+                    browsing_context_id,
+                    BrowsingContextEvent::CloseRequested,
+                );
                 (None, events)
             }
         }

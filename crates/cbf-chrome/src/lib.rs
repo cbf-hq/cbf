@@ -5,7 +5,9 @@
 
 pub mod chromium_backend;
 pub mod chromium_process;
+pub mod command;
 pub mod context_menu;
+pub mod event;
 pub mod ffi;
 pub mod input;
 pub mod surface;

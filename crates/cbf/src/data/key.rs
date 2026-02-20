@@ -27,12 +27,22 @@ pub struct KeyEvent {
 impl KeyEvent {
     /// Build a raw key down event.
     pub fn raw_key_down(platform_key_code: i32, key_code: i32, modifiers: u32) -> Self {
-        Self::new(KeyEventType::RawKeyDown, platform_key_code, key_code, modifiers)
+        Self::new(
+            KeyEventType::RawKeyDown,
+            platform_key_code,
+            key_code,
+            modifiers,
+        )
     }
 
     /// Build a key down event.
     pub fn key_down(platform_key_code: i32, key_code: i32, modifiers: u32) -> Self {
-        Self::new(KeyEventType::KeyDown, platform_key_code, key_code, modifiers)
+        Self::new(
+            KeyEventType::KeyDown,
+            platform_key_code,
+            key_code,
+            modifiers,
+        )
     }
 
     /// Build a key up event.
@@ -55,12 +65,7 @@ impl KeyEvent {
         }
     }
 
-    fn new(
-        type_: KeyEventType,
-        platform_key_code: i32,
-        key_code: i32,
-        modifiers: u32,
-    ) -> Self {
+    fn new(type_: KeyEventType, platform_key_code: i32, key_code: i32, modifiers: u32) -> Self {
         Self {
             type_,
             modifiers,

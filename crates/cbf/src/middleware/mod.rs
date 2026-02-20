@@ -18,10 +18,10 @@ pub mod lifecycle;
 pub mod logging;
 
 use crate::{
-    error::{Error, InvalidConfiguration},
     backend_delegate::{
         BackendDelegate, CommandDecision, DelegateContext, EventDecision, NoopDelegate,
     },
+    error::{Error, InvalidConfiguration},
     event::BackendStopReason,
 };
 
@@ -106,7 +106,7 @@ impl BackendDelegate for MiddlewareDelegate {
     fn on_command(
         &mut self,
         ctx: &mut DelegateContext,
-        command: crate::command::BrowserCommand,
+        command: &crate::command::BrowserCommand,
     ) -> CommandDecision {
         self.inner.on_command(ctx, command)
     }
@@ -114,7 +114,7 @@ impl BackendDelegate for MiddlewareDelegate {
     fn on_event(
         &mut self,
         ctx: &mut DelegateContext,
-        event: crate::event::BrowserEvent,
+        event: &crate::event::BrowserEvent,
     ) -> EventDecision {
         self.inner.on_event(ctx, event)
     }

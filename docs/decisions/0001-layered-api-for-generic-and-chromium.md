@@ -35,16 +35,21 @@ Dependency direction is:
 For command/event handling, we adopt a single-stream model in `cbf` with explicit raw opt-in:
 
 - `CommandSender::send(...)` remains the default generic path
-- `CommandSender::send_raw(...)` is provided as explicit raw API
+- `RawCommandSenderExt::send_raw(...)` is provided as explicit raw API
 - `EventStream::recv(...)` returns `OpaqueEvent<B>`
 - `OpaqueEvent::as_generic()` is the default interpretation path
 - `RawOpaqueEventExt::as_raw()` is extension API for explicit raw access
 
 Design constraints:
 
-- Raw APIs are explicitly marked/isolated (for example by module/feature gating) so generic-first discovery remains the default.
+- Raw APIs are explicitly marked/isolated (for example by extension traits and/or module/feature gating) so generic-first discovery remains the default.
 - Raw types are backend-native contract types (`RawCommand` / `RawEvent`) and must not grow into additional unbounded raw type families without a new ADR.
 - The `Backend` trait uses `type RawCommand;` / `type RawEvent;` and conversion methods are named `to_raw_command` and `to_generic_event`.
+- The `Backend` trait also carries `type RawDelegate;`, and `connect` accepts `raw_delegate: Option<Self::RawDelegate>` during the current migration stage to keep backend setup shape consistent across implementations.
+- Delegate hooks are policy-only (forward/drop/stop); they must not rewrite command/event payloads.
+- Delegate dispatch is decision-first: dispatcher methods return decisions, and forward paths are executed immediately by the caller.
+- `flush` is queue-drain only (`BrowserCommand` extraction), and backend implementations own transport execution/emit ordering.
+- Raw stream contracts stay raw-only (for example `ChromeEvent` does not carry a `Generic` wrapper variant).
 - `cbf` public API must not introduce Chromium-specific nouns or Chromium internal concepts.
 
 ## Consequences
@@ -58,7 +63,7 @@ Design constraints:
 
 ### Negative / Trade-offs
 
-- `cbf` still exposes raw entry points (`send_raw`, `as_raw` via extension), so neutrality relies on disciplined API placement and documentation.
+- `cbf` still exposes raw entry points (`send_raw`, `as_raw` via extension traits), so neutrality relies on disciplined API placement and documentation.
 - Additional crate split increases maintenance overhead (versioning, CI matrix, docs synchronization).
 - Conversion and mapping logic becomes more explicit and may require more boilerplate in `cbf-chrome`.
 
@@ -81,6 +86,10 @@ Design constraints:
 - This ADR defines architecture and API boundary policy; it does not define the full migration plan for each existing type.
 - Existing `cbf-sys` responsibilities are expected to move/split into `cbf-chrome-sys` as part of implementation work.
 - Any future expansion of raw contracts beyond `RawCommand` / `RawEvent` requires explicit reassessment.
+- The `connect(..., raw_delegate: Option<...>)` form is a staged decision for experimentation in this non-public phase. Re-evaluate when:
+  - optional-argument noise becomes a repeated ergonomics issue, or
+  - additional connection parameters are introduced.
+  At that point, prefer either `connect_with_raw_delegate(...)` split APIs or a `ConnectOptions` object.
 - Concrete API sketch for implementation is documented in:
   - `docs/decisions/0001-api-design-sketch.md`
   - The sketch is based on the direction discussed from `NEW_ARCH_STUB.rs`, with ADR-aligned naming and `OpaqueEvent` flow.
@@ -89,7 +98,7 @@ Design constraints:
 
 - Introduce new crates: `cbf-chrome` and `cbf-chrome-sys`.
 - Implement the API sketch in `docs/decisions/0001-api-design-sketch.md` incrementally, starting from command/event transport boundaries.
-- Define and document `OpaqueEvent`, `as_generic`, `send_raw`, and `RawOpaqueEventExt::as_raw` APIs.
+- Define and document `OpaqueEvent`, `as_generic`, `RawCommandSenderExt::send_raw`, and `RawOpaqueEventExt::as_raw` APIs.
 - Move Chromium-specific data vocabulary out of `cbf` models where applicable (starting with key/mouse/IME/drag areas).
 - Add CI/docs guardrails to prevent Chromium-specific terms from leaking into `cbf` public API.
 - Update setup/architecture documentation to reflect new dependency graph and crate responsibilities.

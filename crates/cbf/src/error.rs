@@ -217,6 +217,9 @@ mod tests {
             profile_id: Some("default".to_string()),
         };
 
-        assert_eq!(Operation::from_command(&command), Operation::CreateBrowsingContext);
+        assert_eq!(
+            Operation::from_command(&command),
+            Operation::CreateBrowsingContext
+        );
     }
 }

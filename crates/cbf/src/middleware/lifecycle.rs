@@ -10,7 +10,7 @@ use crate::{
     backend_delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     command::BrowserCommand,
     data::ids::BrowsingContextId,
-    event::{BackendStopReason, BrowserEvent, DialogType, BrowsingContextEvent},
+    event::{BackendStopReason, BrowserEvent, BrowsingContextEvent, DialogType},
 };
 
 use super::DelegateLayer;
@@ -63,7 +63,11 @@ impl Lifecycle {
         }
     }
 
-    fn resolve_pending_for_page(&mut self, ctx: &mut DelegateContext, browsing_context_id: BrowsingContextId) {
+    fn resolve_pending_for_page(
+        &mut self,
+        ctx: &mut DelegateContext,
+        browsing_context_id: BrowsingContextId,
+    ) {
         let request_ids: Vec<u64> = self
             .pending_beforeunload
             .iter()
@@ -71,7 +75,8 @@ impl Lifecycle {
             .collect();
 
         for request_id in request_ids {
-            self.pending_beforeunload.remove(&(browsing_context_id, request_id));
+            self.pending_beforeunload
+                .remove(&(browsing_context_id, request_id));
             ctx.enqueue_command(BrowserCommand::ConfirmBeforeUnload {
                 browsing_context_id,
                 request_id,
@@ -85,13 +90,13 @@ impl BackendDelegate for Lifecycle {
     fn on_command(
         &mut self,
         ctx: &mut DelegateContext,
-        command: BrowserCommand,
+        command: &BrowserCommand,
     ) -> CommandDecision {
         if let BrowserCommand::ConfirmBeforeUnload {
             browsing_context_id,
             request_id,
             ..
-        } = &command
+        } = command
         {
             self.pending_beforeunload
                 .remove(&(*browsing_context_id, *request_id));
@@ -100,7 +105,7 @@ impl BackendDelegate for Lifecycle {
         self.inner.on_command(ctx, command)
     }
 
-    fn on_event(&mut self, ctx: &mut DelegateContext, event: BrowserEvent) -> EventDecision {
+    fn on_event(&mut self, ctx: &mut DelegateContext, event: &BrowserEvent) -> EventDecision {
         if let BrowserEvent::BrowsingContext {
             browsing_context_id,
             event:

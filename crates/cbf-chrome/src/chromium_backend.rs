@@ -7,15 +7,19 @@ use std::{
 use async_channel::{Receiver, Sender, TryRecvError};
 
 use cbf::{
-    backend_delegate::{BackendDelegate, DelegateDispatcher},
-    browser::Backend,
+    backend_delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
+    browser::{Backend, CommandSender, EventStream},
     command::BrowserCommand,
     data::ids::BrowsingContextId,
     error::{ApiErrorKind, BackendErrorInfo, Error, Operation},
-    event::{BackendStopReason, BrowserEvent, DialogType, BrowsingContextEvent},
+    event::{BackendStopReason, BrowserEvent},
 };
 
-use crate::ffi::{Error as IpcError, IpcClient, IpcEvent};
+use crate::{
+    command::ChromeCommand,
+    event::{to_generic_event, ChromeEvent},
+    ffi::{Error as IpcError, IpcClient, IpcEvent},
+};
 
 /// Backend implementation that speaks the Chromium IPC protocol.
 #[derive(Debug, Clone)]
@@ -56,12 +60,19 @@ struct CommunicationState {
 #[derive(Debug)]
 enum CommandExecutionError {
     IpcCall {
-        operation: Operation,
+        operation: Option<Operation>,
         source: IpcError,
     },
 }
 
 impl CommandExecutionError {
+    fn from_ipc_call(command: &ChromeCommand, source: IpcError) -> Self {
+        Self::IpcCall {
+            operation: operation_from_raw_command(command),
+            source,
+        }
+    }
+
     fn into_backend_error_info(self) -> BackendErrorInfo {
         match self {
             Self::IpcCall { operation, source } => BackendErrorInfo {
@@ -70,11 +81,18 @@ impl CommandExecutionError {
                     IpcError::InvalidInput => ApiErrorKind::InvalidInput,
                     IpcError::InvalidEvent => ApiErrorKind::ProtocolMismatch,
                 },
-                operation: Some(operation),
+                operation,
                 detail: Some(format!("{source:?}")),
             },
         }
     }
+}
+
+fn operation_from_raw_command(command: &ChromeCommand) -> Option<Operation> {
+    command
+        .to_browser_command()
+        .as_ref()
+        .map(Operation::from_command)
 }
 
 fn backend_error_connect_timeout(source: IpcError) -> BackendErrorInfo {
@@ -107,19 +125,33 @@ fn backend_error_terminal_hint(kind: ApiErrorKind) -> bool {
 }
 
 impl Backend for ChromiumBackend {
+    type RawCommand = ChromeCommand;
+    type RawEvent = ChromeEvent;
+    type RawDelegate = ();
+
+    fn to_raw_command(command: BrowserCommand) -> Self::RawCommand {
+        command.into()
+    }
+
+    fn to_generic_event(raw: &Self::RawEvent) -> Option<BrowserEvent> {
+        to_generic_event(raw)
+    }
+
     fn connect<D: BackendDelegate>(
         self,
         delegate: D,
-    ) -> Result<(Sender<BrowserCommand>, Receiver<BrowserEvent>), Error> {
-        let (command_tx, command_rx) = async_channel::unbounded::<BrowserCommand>();
-        let (event_tx, event_rx) = async_channel::unbounded::<BrowserEvent>();
+        _raw_delegate: Option<Self::RawDelegate>,
+    ) -> Result<(CommandSender<Self>, EventStream<Self>), Error> {
+        let (command_tx, command_rx) = async_channel::unbounded::<ChromeCommand>();
+        let (event_tx, event_rx) = async_channel::unbounded::<ChromeEvent>();
         let options = self.options;
 
-        thread::spawn(move || {
-            Self::run_communication(options, command_rx, event_tx, delegate)
-        });
+        thread::spawn(move || Self::run_communication(options, command_rx, event_tx, delegate));
 
-        Ok((command_tx, event_rx))
+        Ok((
+            CommandSender::from_raw_sender(command_tx),
+            EventStream::from_raw_receiver(event_rx),
+        ))
     }
 }
 
@@ -129,8 +161,116 @@ impl ChromiumBackend {
         Self { options }
     }
 
+    fn emit_raw_event(event_tx: &Sender<ChromeEvent>, event: ChromeEvent) {
+        _ = event_tx.send_blocking(event);
+    }
+
+    fn handle_raw_event_with_delegate_gate(
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        event_tx: &Sender<ChromeEvent>,
+        event: ChromeEvent,
+    ) -> Option<BackendStopReason> {
+        if let Some(generic_event) = Self::to_generic_event(&event) {
+            match dispatcher.dispatch_event(&generic_event) {
+                EventDecision::Forward => {
+                    Self::emit_raw_event(event_tx, event);
+                    None
+                }
+                EventDecision::Stop(reason) => Some(reason),
+            }
+        } else {
+            Self::emit_raw_event(event_tx, event);
+            None
+        }
+    }
+
+    fn run_generic_command_with_delegate(
+        command: BrowserCommand,
+        client: &mut IpcClient,
+        event_tx: &Sender<ChromeEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+    ) -> Option<BackendStopReason> {
+        match dispatcher.dispatch_command(&command) {
+            CommandDecision::Forward => {
+                let raw_command = Self::to_raw_command(command);
+                let (reason, events) = Self::execute_raw_command(raw_command, client);
+                for event in events {
+                    if let Some(reason) =
+                        Self::handle_raw_event_with_delegate_gate(dispatcher, event_tx, event)
+                    {
+                        return Some(reason);
+                    }
+                }
+                reason
+            }
+            CommandDecision::Drop => None,
+            CommandDecision::Stop(reason) => Some(reason),
+        }
+    }
+
+    fn run_raw_command(
+        command: ChromeCommand,
+        client: &mut IpcClient,
+        event_tx: &Sender<ChromeEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+    ) -> Option<BackendStopReason> {
+        let (reason, events) = Self::execute_raw_command(command, client);
+        for event in events {
+            if let Some(reason) =
+                Self::handle_raw_event_with_delegate_gate(dispatcher, event_tx, event)
+            {
+                return Some(reason);
+            }
+        }
+        reason
+    }
+
+    fn drain_delegate_queue(
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        client: &mut IpcClient,
+        event_tx: &Sender<ChromeEvent>,
+        mut pending_commands: Vec<BrowserCommand>,
+    ) -> Option<BackendStopReason> {
+        loop {
+            for command in pending_commands {
+                if let Some(reason) =
+                    Self::run_generic_command_with_delegate(command, client, event_tx, dispatcher)
+                {
+                    return Some(reason);
+                }
+            }
+
+            pending_commands = dispatcher.flush();
+            if pending_commands.is_empty() {
+                return None;
+            }
+        }
+    }
+
+    fn stop_backend(
+        reason: BackendStopReason,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        client: Option<&mut IpcClient>,
+        event_tx: &Sender<ChromeEvent>,
+    ) {
+        let (mut final_reason, queued_commands) = dispatcher.stop(reason);
+        if let Some(client) = client {
+            if let Some(reason) =
+                Self::drain_delegate_queue(dispatcher, client, event_tx, queued_commands)
+            {
+                final_reason = reason;
+            }
+        }
+        Self::emit_raw_event(
+            event_tx,
+            ChromeEvent::BackendStopped {
+                reason: final_reason,
+            },
+        );
+    }
+
     fn start_connection(
-        event_tx: &Sender<BrowserEvent>,
+        event_tx: &Sender<ChromeEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
         options: &ChromiumBackendOptions,
     ) -> Option<IpcClient> {
@@ -145,18 +285,16 @@ impl ChromiumBackend {
                         .is_some_and(|timeout| start_time.elapsed() > timeout)
                     {
                         let info = backend_error_connect_timeout(err);
-                        let stop_reason = dispatcher
-                            .dispatch_event(
-                                BrowserEvent::BackendError {
-                                    terminal_hint: true,
-                                    info: info.clone(),
-                                },
-                                event_tx,
-                            )
-                            .unwrap_or(BackendStopReason::Error(info));
-                        let mut no_forward = |_| (None, Vec::new());
-                        dispatcher.stop(event_tx, stop_reason, &mut no_forward);
-
+                        let stop_reason = Self::handle_raw_event_with_delegate_gate(
+                            dispatcher,
+                            event_tx,
+                            ChromeEvent::BackendError {
+                                terminal_hint: true,
+                                info: info.clone(),
+                            },
+                        )
+                        .unwrap_or(BackendStopReason::Error(info));
+                        Self::stop_backend(stop_reason, dispatcher, None, event_tx);
                         return None;
                     }
 
@@ -166,55 +304,65 @@ impl ChromiumBackend {
         };
 
         // Notify that the backend is ready after establishing the connection.
-        if let Some(stop_reason) = dispatcher.dispatch_event(BrowserEvent::BackendReady, event_tx) {
-            let mut forward = |command| Self::execute_command(command, &mut client, event_tx);
-            dispatcher.stop(event_tx, stop_reason, &mut forward);
+        if let Some(stop_reason) = Self::handle_raw_event_with_delegate_gate(
+            dispatcher,
+            event_tx,
+            ChromeEvent::BackendReady,
+        ) {
+            Self::stop_backend(stop_reason, dispatcher, Some(&mut client), event_tx);
             return None;
         }
 
         Some(client)
     }
 
-    fn poll_event(
-        command_rx: &Receiver<BrowserCommand>,
+    fn dispatch_raw_command(
+        command: ChromeCommand,
         client: &mut IpcClient,
-        event_tx: &Sender<BrowserEvent>,
+        event_tx: &Sender<ChromeEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+    ) -> Option<BackendStopReason> {
+        if let Some(command) = command.to_browser_command() {
+            return Self::run_generic_command_with_delegate(command, client, event_tx, dispatcher);
+        }
+
+        Self::run_raw_command(command, client, event_tx, dispatcher)
+    }
+
+    fn poll_event(
+        command_rx: &Receiver<ChromeCommand>,
+        client: &mut IpcClient,
+        event_tx: &Sender<ChromeEvent>,
         state: &mut CommunicationState,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> bool {
         dispatcher.on_idle();
 
-        macro_rules! make_forward {
-            () => {
-                |command| Self::execute_command(command, client, event_tx)
-            };
-        }
-
-        let mut forward = make_forward!();
-        if let Some(stop_reason) = dispatcher.flush(event_tx, &mut forward) {
-            dispatcher.stop(event_tx, stop_reason, &mut forward);
+        let queued_commands = dispatcher.flush();
+        if let Some(stop_reason) =
+            Self::drain_delegate_queue(dispatcher, client, event_tx, queued_commands)
+        {
+            Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
         }
 
         if let Some(stop_reason) =
             Self::process_command_queue(command_rx, client, event_tx, state, dispatcher)
         {
-            let mut forward = make_forward!();
-            dispatcher.stop(event_tx, stop_reason, &mut forward);
-
+            Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
         };
 
         if let Some(stop_reason) = Self::process_event_queue(client, event_tx, state, dispatcher) {
-            let mut forward = make_forward!();
-            dispatcher.stop(event_tx, stop_reason, &mut forward);
-
+            Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
         };
 
-        let mut forward = make_forward!();
-        if let Some(stop_reason) = dispatcher.flush(event_tx, &mut forward) {
-            dispatcher.stop(event_tx, stop_reason, &mut forward);
+        let queued_commands = dispatcher.flush();
+        if let Some(stop_reason) =
+            Self::drain_delegate_queue(dispatcher, client, event_tx, queued_commands)
+        {
+            Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
         }
 
@@ -223,15 +371,14 @@ impl ChromiumBackend {
 
     fn run_communication(
         options: ChromiumBackendOptions,
-        command_rx: Receiver<BrowserCommand>,
-        event_tx: Sender<BrowserEvent>,
+        command_rx: Receiver<ChromeCommand>,
+        event_tx: Sender<ChromeEvent>,
         delegate: impl BackendDelegate,
     ) {
         let mut dispatcher = DelegateDispatcher::new(delegate);
 
         // Start the connection and get the IPC client.
-        let Some(mut client) = Self::start_connection(&event_tx, &mut dispatcher, &options)
-        else {
+        let Some(mut client) = Self::start_connection(&event_tx, &mut dispatcher, &options) else {
             return;
         };
 
@@ -255,7 +402,7 @@ impl ChromiumBackend {
 
     fn process_event_queue(
         client: &mut IpcClient,
-        event_tx: &Sender<BrowserEvent>,
+        event_tx: &Sender<ChromeEvent>,
         state: &mut CommunicationState,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> Option<BackendStopReason> {
@@ -271,12 +418,13 @@ impl ChromiumBackend {
                 Err(err) => {
                     let info = backend_error_event(err);
                     let terminal_hint = backend_error_terminal_hint(info.kind);
-                    if let Some(reason) = dispatcher.dispatch_event(
-                        BrowserEvent::BackendError {
+                    if let Some(reason) = Self::handle_raw_event_with_delegate_gate(
+                        dispatcher,
+                        event_tx,
+                        ChromeEvent::BackendError {
                             info,
                             terminal_hint,
                         },
-                        event_tx,
                     ) {
                         return Some(reason);
                     }
@@ -289,242 +437,54 @@ impl ChromiumBackend {
 
     fn handle_ipc_event(
         event: IpcEvent,
-        event_tx: &Sender<BrowserEvent>,
+        event_tx: &Sender<ChromeEvent>,
         client: &mut IpcClient,
         state: &mut CommunicationState,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> Option<BackendStopReason> {
-        let mut emit = |event| dispatcher.dispatch_event(event, event_tx);
-
-        match event {
-            IpcEvent::WebContentsCreated {
-                profile_id,
+        match &event {
+            IpcEvent::WebContentsResizeAcknowledged {
                 browsing_context_id,
-                request_id,
+                ..
             } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::Created { request_id },
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::SurfaceHandleUpdated { .. } => {}
-            IpcEvent::WebContentsResizeAcknowledged { browsing_context_id, .. } => {
-                state.resizes_in_flight.remove(&browsing_context_id);
-                if let Some((width, height)) = state.pending_resizes.remove(&browsing_context_id) {
-                    state.resizes_in_flight.insert(browsing_context_id);
-                    if let Err(err) = client.set_web_contents_size(browsing_context_id, width, height) {
-                        tracing::warn!(
-                            result = "err",
-                            error = "resize_failed",
-                            err = ?err,
-                            %browsing_context_id,
-                            "Failed to send pending resize"
-                        );
-                        state.resizes_in_flight.remove(&browsing_context_id);
+                state.resizes_in_flight.remove(browsing_context_id);
+                if let Some((width, height)) = state.pending_resizes.remove(browsing_context_id) {
+                    state.resizes_in_flight.insert(*browsing_context_id);
+                    if let Some(reason) = Self::dispatch_raw_command(
+                        ChromeCommand::SetWebContentsSize {
+                            browsing_context_id: *browsing_context_id,
+                            width,
+                            height,
+                        },
+                        client,
+                        event_tx,
+                        dispatcher,
+                    ) {
+                        return Some(reason);
                     }
                 }
             }
-            IpcEvent::WebContentsDomHtmlRead {
-                profile_id,
-                browsing_context_id,
-                request_id,
-                html,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::DomHtmlRead { request_id, html },
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::DragStartRequested {
-                profile_id,
-                browsing_context_id,
-                request,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::DragStartRequested { request },
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::ImeBoundsUpdated {
-                profile_id,
-                browsing_context_id,
-                update,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::ImeBoundsUpdated { update },
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::ContextMenuRequested {
-                profile_id,
-                browsing_context_id,
-                menu,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::ContextMenuRequested { menu },
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::NewWebContentsRequested {
-                profile_id,
-                browsing_context_id,
-                target_url,
-                is_popup,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::NewBrowsingContextRequested {
-                        target_url,
-                        is_popup,
-                    },
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::NavigationStateChanged {
-                profile_id,
-                browsing_context_id,
-                url,
-                can_go_back,
-                can_go_forward,
-                is_loading,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::NavigationStateChanged {
-                        url,
-                        can_go_back,
-                        can_go_forward,
-                        is_loading,
-                    },
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::CursorChanged {
-                profile_id,
-                browsing_context_id,
-                cursor_type,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::CursorChanged { cursor_type },
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::TitleUpdated {
-                profile_id,
-                browsing_context_id,
-                title,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::TitleUpdated { title },
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::FaviconUrlUpdated {
-                profile_id,
-                browsing_context_id,
-                url,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::FaviconUrlUpdated { url },
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::BeforeUnloadDialogRequested {
-                profile_id,
-                browsing_context_id,
-                request_id,
-                reason,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::JavaScriptDialogRequested {
-                        request_id,
-                        message: String::new(),
-                        default_prompt_text: None,
-                        r#type: DialogType::BeforeUnload,
-                        beforeunload_reason: Some(reason),
-                    },
-                }) {
-                    return Some(reason);
-                }
-            }
             IpcEvent::WebContentsClosed {
-                profile_id,
                 browsing_context_id,
+                ..
             } => {
-                state.resizes_in_flight.remove(&browsing_context_id);
-                state.pending_resizes.remove(&browsing_context_id);
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::Closed,
-                }) {
-                    return Some(reason);
-                }
+                state.resizes_in_flight.remove(browsing_context_id);
+                state.pending_resizes.remove(browsing_context_id);
             }
-            IpcEvent::ShutdownBlocked {
-                request_id,
-                dirty_browsing_context_ids,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::ShutdownBlocked {
-                    request_id,
-                    dirty_browsing_context_ids,
-                }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::ShutdownProceeding { request_id } => {
-                if let Some(reason) = emit(BrowserEvent::ShutdownProceeding { request_id }) {
-                    return Some(reason);
-                }
-            }
-            IpcEvent::ShutdownCancelled { request_id } => {
-                if let Some(reason) = emit(BrowserEvent::ShutdownCancelled { request_id }) {
-                    return Some(reason);
-                }
-            }
+            _ => {}
         }
 
-        None
+        Self::handle_raw_event_with_delegate_gate(dispatcher, event_tx, ChromeEvent::Ipc(event))
     }
 
     fn process_command_queue(
-        command_rx: &Receiver<BrowserCommand>,
+        command_rx: &Receiver<ChromeCommand>,
         client: &mut IpcClient,
-        event_tx: &Sender<BrowserEvent>,
+        event_tx: &Sender<ChromeEvent>,
         state: &mut CommunicationState,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> Option<BackendStopReason> {
-        let mut pending_command: Option<BrowserCommand> = None;
+        let mut pending_command: Option<ChromeCommand> = None;
 
         loop {
             let command = match pending_command.take() {
@@ -536,7 +496,7 @@ impl ChromiumBackend {
                 },
             };
 
-            if let BrowserCommand::ResizeBrowsingContext {
+            if let ChromeCommand::SetWebContentsSize {
                 browsing_context_id,
                 width,
                 height,
@@ -547,7 +507,7 @@ impl ChromiumBackend {
 
                 loop {
                     match command_rx.try_recv() {
-                        Ok(BrowserCommand::ResizeBrowsingContext {
+                        Ok(ChromeCommand::SetWebContentsSize {
                             browsing_context_id,
                             width,
                             height,
@@ -565,20 +525,22 @@ impl ChromiumBackend {
 
                 for (browsing_context_id, (width, height)) in latest_resizes {
                     if state.resizes_in_flight.contains(&browsing_context_id) {
-                        state.pending_resizes.insert(browsing_context_id, (width, height));
+                        state
+                            .pending_resizes
+                            .insert(browsing_context_id, (width, height));
                         continue;
                     }
 
                     state.resizes_in_flight.insert(browsing_context_id);
-                    let mut forward = |command| Self::execute_command(command, client, event_tx);
-                    if let Some(reason) = dispatcher.dispatch_command(
-                        BrowserCommand::ResizeBrowsingContext {
+                    if let Some(reason) = Self::dispatch_raw_command(
+                        ChromeCommand::SetWebContentsSize {
                             browsing_context_id,
                             width,
                             height,
                         },
+                        client,
                         event_tx,
-                        &mut forward,
+                        dispatcher,
                     ) {
                         return Some(reason);
                     }
@@ -587,27 +549,25 @@ impl ChromiumBackend {
                 continue;
             }
 
-            let mut forward = |command| Self::execute_command(command, client, event_tx);
-            if let Some(reason) = dispatcher.dispatch_command(command, event_tx, &mut forward) {
+            if let Some(reason) = Self::dispatch_raw_command(command, client, event_tx, dispatcher)
+            {
                 return Some(reason);
             }
         }
     }
 
-    fn execute_command(
-        command: BrowserCommand,
+    fn execute_raw_command(
+        command: ChromeCommand,
         client: &mut IpcClient,
-        event_tx: &Sender<BrowserEvent>,
-    ) -> (Option<BackendStopReason>, Vec<BrowserEvent>) {
-        match Self::handle_command(command, client, event_tx) {
-            Ok(Some(reason)) => (Some(reason), Vec::new()),
-            Ok(None) => (None, Vec::new()),
+    ) -> (Option<BackendStopReason>, Vec<ChromeEvent>) {
+        match Self::handle_command(command, client) {
+            Ok((reason, events)) => (reason, events),
             Err(err) => {
                 let info = err.into_backend_error_info();
                 let terminal_hint = backend_error_terminal_hint(info.kind);
                 (
                     None,
-                    vec![BrowserEvent::BackendError {
+                    vec![ChromeEvent::BackendError {
                         info,
                         terminal_hint,
                     }],
@@ -617,235 +577,146 @@ impl ChromiumBackend {
     }
 
     fn handle_command(
-        command: BrowserCommand,
+        command: ChromeCommand,
         client: &mut IpcClient,
-        event_tx: &Sender<BrowserEvent>,
-    ) -> Result<Option<BackendStopReason>, CommandExecutionError> {
-        match command {
-            BrowserCommand::Shutdown { request_id } => client
-                .request_shutdown(request_id)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::Shutdown,
-                    source,
-                }),
-            BrowserCommand::ConfirmShutdown {
+    ) -> Result<(Option<BackendStopReason>, Vec<ChromeEvent>), CommandExecutionError> {
+        let result = match &command {
+            ChromeCommand::RequestShutdown { request_id } => client
+                .request_shutdown(*request_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::ConfirmShutdown {
                 request_id,
                 proceed,
             } => client
-                .confirm_shutdown(request_id, proceed)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::ConfirmShutdown,
-                    source,
-                }),
-            BrowserCommand::ForceShutdown => {
-                client.force_shutdown().map(|_| None).map_err(|source| {
-                    CommandExecutionError::IpcCall {
-                        operation: Operation::ForceShutdown,
-                        source,
-                    }
-                })
-            }
-            BrowserCommand::ConfirmBeforeUnload {
+                .confirm_shutdown(*request_id, *proceed)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::ForceShutdown => client.force_shutdown().map(|_| (None, Vec::new())),
+            ChromeCommand::ConfirmBeforeUnload {
                 browsing_context_id,
                 request_id,
                 proceed,
             } => client
-                .confirm_beforeunload(browsing_context_id, request_id, proceed)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::ConfirmBeforeUnload,
-                    source,
-                }),
-            BrowserCommand::ConfirmPermission { .. } => Ok(None),
-            BrowserCommand::CreateBrowsingContext {
+                .confirm_beforeunload(*browsing_context_id, *request_id, *proceed)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::ConfirmPermission { .. } => Ok((None, Vec::new())),
+            ChromeCommand::CreateWebContents {
                 request_id,
                 initial_url,
                 profile_id,
             } => {
-                let url = initial_url.unwrap_or_else(|| "about:blank".to_string());
-                let profile = profile_id.unwrap_or_default();
+                let url = initial_url
+                    .clone()
+                    .unwrap_or_else(|| "about:blank".to_string());
+                let profile = profile_id.clone().unwrap_or_default();
 
                 client
-                    .create_web_contents(request_id, &url, &profile)
-                    .map(|_| None)
-                    .map_err(|source| CommandExecutionError::IpcCall {
-                        operation: Operation::CreateBrowsingContext,
-                        source,
-                    })
+                    .create_web_contents(*request_id, &url, &profile)
+                    .map(|_| (None, Vec::new()))
             }
-            BrowserCommand::ResizeBrowsingContext {
+            ChromeCommand::SetWebContentsSize {
                 browsing_context_id,
                 width,
                 height,
             } => client
-                .set_web_contents_size(browsing_context_id, width, height)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::ResizeBrowsingContext,
-                    source,
-                }),
-            BrowserCommand::ListProfiles => match client.list_profiles() {
-                Ok(profiles) => {
-                    _ = event_tx.send_blocking(BrowserEvent::ProfilesListed { profiles });
-
-                    Ok(None)
-                }
-                Err(source) => Err(CommandExecutionError::IpcCall {
-                    operation: Operation::ListProfiles,
-                    source,
-                }),
-            },
-            BrowserCommand::SendKeyEvent {
+                .set_web_contents_size(*browsing_context_id, *width, *height)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::ListProfiles => client
+                .list_profiles()
+                .map(|profiles| (None, vec![ChromeEvent::ProfilesListed { profiles }])),
+            ChromeCommand::SendKeyEvent {
                 browsing_context_id,
                 event,
                 commands,
             } => client
-                .send_key_event(browsing_context_id, &event, &commands)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::SendKeyEvent,
-                    source,
-                }),
-            BrowserCommand::SendMouseEvent { browsing_context_id, event } => client
-                .send_mouse_event(browsing_context_id, &event)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::SendMouseEvent,
-                    source,
-                }),
-            BrowserCommand::SendMouseWheelEvent { browsing_context_id, event } => client
-                .send_mouse_wheel_event(browsing_context_id, &event)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::SendMouseWheelEvent,
-                    source,
-                }),
-            BrowserCommand::SendDragUpdate { update } => client
-                .send_drag_update(&update)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::SendDragUpdate,
-                    source,
-                }),
-            BrowserCommand::SendDragDrop { drop } => client
-                .send_drag_drop(&drop)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::SendDragDrop,
-                    source,
-                }),
-            BrowserCommand::SendDragCancel {
+                .send_key_event(*browsing_context_id, &event.clone().into(), commands)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SendMouseEvent {
+                browsing_context_id,
+                event,
+            } => client
+                .send_mouse_event(*browsing_context_id, event)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SendMouseWheelEvent {
+                browsing_context_id,
+                event,
+            } => client
+                .send_mouse_wheel_event(*browsing_context_id, &event.clone().into())
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SendDragUpdate { update } => {
+                client.send_drag_update(update).map(|_| (None, Vec::new()))
+            }
+            ChromeCommand::SendDragDrop { drop } => {
+                client.send_drag_drop(drop).map(|_| (None, Vec::new()))
+            }
+            ChromeCommand::SendDragCancel {
                 session_id,
                 browsing_context_id,
             } => client
-                .send_drag_cancel(session_id, browsing_context_id)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::SendDragCancel,
-                    source,
-                }),
-            BrowserCommand::SetComposition { composition } => client
-                .set_composition(&composition)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::SetComposition,
-                    source,
-                }),
-            BrowserCommand::CommitText { commit } => client
-                .commit_text(&commit)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::CommitText,
-                    source,
-                }),
-            BrowserCommand::FinishComposingText {
+                .send_drag_cancel(*session_id, *browsing_context_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SetImeComposition { composition } => client
+                .set_composition(composition)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::CommitImeText { commit } => {
+                client.commit_text(commit).map(|_| (None, Vec::new()))
+            }
+            ChromeCommand::FinishComposingText {
                 browsing_context_id,
                 behavior,
             } => client
-                .finish_composing_text(browsing_context_id, behavior)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::FinishComposingText,
-                    source,
-                }),
-            BrowserCommand::ExecuteContextMenuCommand {
+                .finish_composing_text(*browsing_context_id, *behavior)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::ExecuteContextMenuCommand {
                 menu_id,
                 command_id,
                 event_flags,
             } => client
-                .execute_context_menu_command(menu_id, command_id, event_flags)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::ExecuteContextMenuCommand,
-                    source,
-                }),
-            BrowserCommand::DismissContextMenu { menu_id } => client
-                .dismiss_context_menu(menu_id)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::DismissContextMenu,
-                    source,
-                }),
-            BrowserCommand::RequestCloseBrowsingContext { browsing_context_id } => client
-                .request_close_web_contents(browsing_context_id)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::RequestCloseBrowsingContext,
-                    source,
-                }),
-            BrowserCommand::Navigate { browsing_context_id, url } => client
-                .navigate(browsing_context_id, &url)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::Navigate,
-                    source,
-                }),
-            BrowserCommand::GoBack { browsing_context_id } => client
-                .go_back(browsing_context_id)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::GoBack,
-                    source,
-                }),
-            BrowserCommand::GoForward { browsing_context_id } => client
-                .go_forward(browsing_context_id)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::GoForward,
-                    source,
-                }),
-            BrowserCommand::Reload {
+                .execute_context_menu_command(*menu_id, *command_id, *event_flags)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::DismissContextMenu { menu_id } => client
+                .dismiss_context_menu(*menu_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::RequestCloseWebContents {
+                browsing_context_id,
+            } => client
+                .request_close_web_contents(*browsing_context_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::Navigate {
+                browsing_context_id,
+                url,
+            } => client
+                .navigate(*browsing_context_id, url)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::GoBack {
+                browsing_context_id,
+            } => client
+                .go_back(*browsing_context_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::GoForward {
+                browsing_context_id,
+            } => client
+                .go_forward(*browsing_context_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::Reload {
                 browsing_context_id,
                 ignore_cache,
             } => client
-                .reload(browsing_context_id, ignore_cache)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::Reload,
-                    source,
-                }),
-            BrowserCommand::GetBrowsingContextDomHtml {
+                .reload(*browsing_context_id, *ignore_cache)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::GetWebContentsDomHtml {
                 browsing_context_id,
                 request_id,
             } => client
-                .get_web_contents_dom_html(browsing_context_id, request_id)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::GetBrowsingContextDomHtml,
-                    source,
-                }),
-            BrowserCommand::SetBrowsingContextFocus {
+                .get_web_contents_dom_html(*browsing_context_id, *request_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SetWebContentsFocus {
                 browsing_context_id,
                 focused,
             } => client
-                .set_web_contents_focus(browsing_context_id, focused)
-                .map(|_| None)
-                .map_err(|source| CommandExecutionError::IpcCall {
-                    operation: Operation::SetBrowsingContextFocus,
-                    source,
-                }),
-        }
+                .set_web_contents_focus(*browsing_context_id, *focused)
+                .map(|_| (None, Vec::new())),
+        };
+
+        result.map_err(|source| CommandExecutionError::from_ipc_call(&command, source))
     }
 }
