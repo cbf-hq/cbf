@@ -14,8 +14,8 @@ It is intentionally close to the current `NEW_ARCH_STUB.rs` idea, but updated to
 ## Layering
 
 ```text
-cbf            (generic safe API)
-cbf-chrome     (chromium-specific safe API + Backend impl)
+cbf            (browser-generic safe API)
+cbf-chrome     (chrome-specific safe API + Backend impl)
 cbf-chrome-sys (unsafe FFI/wire to cbf_bridge)
 ```
 

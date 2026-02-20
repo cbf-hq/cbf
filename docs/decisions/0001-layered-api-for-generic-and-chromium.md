@@ -13,17 +13,17 @@ Examples can be found in:
 - `crates/cbf/src/data/ime.rs`
 - `docs/knowledge/drag-data-field-mapping.md`
 
-This creates an ambiguous API boundary: users are told `cbf` is browser-generic, but parts of the surface are effectively Chromium-specific.
+This creates an ambiguous API boundary: users are told `cbf` is browser-generic, but parts of the surface are effectively chrome-specific.
 As drag-related features expand, this ambiguity is expected to grow and increase cognitive load for API consumers.
 
-At the same time, we still need an explicit escape hatch for Chromium-specific commands/events, without forcing users to maintain separate event loops for generic vs native paths.
+At the same time, we still need an explicit escape hatch for chrome-specific commands/events, without forcing users to maintain separate event loops for generic vs native paths.
 
 ## Decision
 
 We split responsibilities into three layers:
 
 - `cbf`: browser-generic safe API (no Chromium vocabulary in public data model)
-- `cbf-chrome`: Chromium-specific safe API and backend implementation
+- `cbf-chrome`: chrome-specific safe API and backend implementation
 - `cbf-chrome-sys`: unsafe FFI/wire boundary to `cbf_bridge` (dylib)
 
 Dependency direction is:
@@ -50,14 +50,14 @@ Design constraints:
 - Delegate dispatch is decision-first: dispatcher methods return decisions, and forward paths are executed immediately by the caller.
 - `flush` is queue-drain only (`BrowserCommand` extraction), and backend implementations own transport execution/emit ordering.
 - Raw stream contracts stay raw-only (for example `ChromeEvent` does not carry a `Generic` wrapper variant).
-- `cbf` public API must not introduce Chromium-specific nouns or Chromium internal concepts.
+- `cbf` public API must not introduce chrome-specific nouns or Chromium internal concepts.
 
 ## Consequences
 
 ### Positive
 
-- Clarifies layer boundaries: generic in `cbf`, Chromium-specific in `cbf-chrome`, unsafe wire in `cbf-chrome-sys`.
-- Reduces user confusion about where Chromium-specific behavior should be implemented.
+- Clarifies layer boundaries: browser-generic in `cbf`, chrome-specific in `cbf-chrome`, unsafe wire in `cbf-chrome-sys`.
+- Reduces user confusion about where chrome-specific behavior should be implemented.
 - Keeps one receive flow (`OpaqueEvent`) while still allowing explicit raw handling.
 - Improves long-term extensibility for additional backends (`cbf-firefox`, `cbf-webkit`, etc.) without changing `cbf`’s generic contract.
 
@@ -71,7 +71,7 @@ Design constraints:
 
 ### A. Keep current mixed surface in `cbf`
 
-- Rejected because Chromium-specific vocabulary leakage would continue to increase and make API semantics less predictable.
+- Rejected because chrome-specific vocabulary leakage would continue to increase and make API semantics less predictable.
 
 ### B. Strict separation with no raw access in `cbf` (raw only in `cbf-chrome`)
 
@@ -79,12 +79,12 @@ Design constraints:
 
 ### C. Make `cbf` depend on `cbf-chrome`
 
-- Rejected because it breaks `cbf` neutrality and couples browser-generic API evolution to Chromium-specific concerns.
+- Rejected because it breaks `cbf` neutrality and couples browser-generic API evolution to chrome-specific concerns.
 
 ## Notes
 
 - This ADR defines architecture and API boundary policy; it does not define the full migration plan for each existing type.
-- Existing `cbf-sys` responsibilities are expected to move/split into `cbf-chrome-sys` as part of implementation work.
+- Legacy `cbf-sys` responsibilities are now owned by `cbf-chrome-sys`.
 - Any future expansion of raw contracts beyond `RawCommand` / `RawEvent` requires explicit reassessment.
 - The `connect(..., raw_delegate: Option<...>)` form is a staged decision for experimentation in this non-public phase. Re-evaluate when:
   - optional-argument noise becomes a repeated ergonomics issue, or
@@ -99,6 +99,6 @@ Design constraints:
 - Introduce new crates: `cbf-chrome` and `cbf-chrome-sys`.
 - Implement the API sketch in `docs/decisions/0001-api-design-sketch.md` incrementally, starting from command/event transport boundaries.
 - Define and document `OpaqueEvent`, `as_generic`, `RawCommandSenderExt::send_raw`, and `RawOpaqueEventExt::as_raw` APIs.
-- Move Chromium-specific data vocabulary out of `cbf` models where applicable (starting with key/mouse/IME/drag areas).
-- Add CI/docs guardrails to prevent Chromium-specific terms from leaking into `cbf` public API.
+- Move chrome-specific data vocabulary out of `cbf` models where applicable (starting with key/mouse/IME/drag areas).
+- Add CI/docs guardrails to prevent chrome-specific terms from leaking into `cbf` public API.
 - Update setup/architecture documentation to reflect new dependency graph and crate responsibilities.

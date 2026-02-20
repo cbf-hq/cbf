@@ -15,8 +15,9 @@ This repository is for framework development, not product-specific app developme
 
 This repository owns:
 
-- High-level API crate (`cbf`)
-- Low-level FFI crate (`cbf-sys`)
+- High-level browser-generic API crate (`cbf`)
+- Chrome-specific backend crate (`cbf-chrome`)
+- Low-level FFI crate (`cbf-chrome-sys`)
 - Chromium bridge integration and related patches
 - Reliability of async IPC, lifecycle, and crash behavior
 
@@ -29,13 +30,13 @@ This repository does not own:
 
 Dependency direction:
 
-`Application -> cbf -> cbf-sys -> Chromium process`
+`Application -> cbf -> cbf-chrome -> cbf-chrome-sys -> Chromium process`
 
 Hard rules:
 
 1. Public `cbf` API must remain browser-generic.
 2. Chromium/Mojo internals must not leak into public API.
-3. C ABI/FFI contracts must stay in `cbf-sys`.
+3. C ABI/FFI contracts must stay in `cbf-chrome-sys`.
 4. WebContents ownership stays in Chromium process.
 5. Rust side uses stable logical IDs (`WebPageId`) across boundaries.
 
@@ -74,9 +75,11 @@ Expose failures as events/errors so upstream can choose recovery.
 Rust:
 
 - `cargo check -p cbf`
-- `cargo check -p cbf-sys`
+- `cargo check -p cbf-chrome`
+- `cargo check -p cbf-chrome-sys`
 - `cargo test -p cbf`
-- `cargo test -p cbf-sys`
+- `cargo test -p cbf-chrome`
+- `cargo test -p cbf-chrome-sys`
 
 Chromium side (from `chromium/src`):
 
@@ -101,7 +104,7 @@ Tooling helpers:
 
 ## Bridge Runtime and Linking Rules
 
-- `cbf-sys` link path is configured by `CBF_BRIDGE_LIB_DIR`.
+- `cbf-chrome-sys` link path is configured by `CBF_BRIDGE_LIB_DIR`.
 - Prefer project-local config in `.cargo/config.toml`:
   - `[env]`
   - `CBF_BRIDGE_LIB_DIR = "/path/to/cbf_bridge/libdir"`
@@ -143,14 +146,14 @@ Use Conventional Commits: `<type>(<scope>): <subject>`.
 Core scopes:
 
 - `cbf`
-- `sys`
-- `bridge`
 - `chrome`
+- `chrome-sys`
+- `bridge`
 
 ## PR Checklist
 
 - [ ] No product domain terms leaked into public `cbf` API
-- [ ] No FFI concern leaked above `cbf-sys`
+- [ ] No FFI concern leaked above `cbf-chrome-sys`
 - [ ] Async lifetime safety rules respected
 - [ ] Failure paths (disconnect/crash/timeout) validated
 - [ ] Documentation updated when needed

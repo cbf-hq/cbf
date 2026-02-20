@@ -25,8 +25,8 @@ CBF is designed to be product-agnostic and reusable across multiple applications
 
 Three-layer model:
 
-- `cbf` (high-level API)
-- `cbf-chrome` (Chromium-specific safe API/backend)
+- `cbf` (browser-generic high-level API)
+- `cbf-chrome` (chrome-specific safe API/backend)
 - `cbf-chrome-sys` (C ABI/FFI boundary)
 - Chromium fork + `cbf_bridge` (Mojo implementation)
 

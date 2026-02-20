@@ -17,8 +17,9 @@ Read these first:
 
 Main areas:
 
-- `cbf` (high-level Rust API)
-- `cbf-sys` (FFI boundary)
+- `cbf` (browser-generic high-level Rust API)
+- `cbf-chrome` (chrome-specific safe backend API)
+- `cbf-chrome-sys` (FFI boundary)
 - Chromium bridge/fork (`cbf_bridge`, Chromium-side integration)
 - Documentation and tests
 
@@ -40,7 +41,7 @@ Use Conventional Commits:
 Examples:
 
 - `feat(cbf): add browser event for ...`
-- `fix(sys): handle missing bridge library path`
+- `fix(chrome-sys): handle missing bridge library path`
 - `refactor(bridge): move callback ownership to WeakPtr`
 - `chore(chrome): repin fork patch for Mxx`
 
@@ -49,9 +50,9 @@ Examples:
 Core scopes:
 
 - `cbf`
-- `sys`
-- `bridge`
 - `chrome`
+- `chrome-sys`
+- `bridge`
 
 Additional scopes for non-runtime changes:
 
@@ -75,7 +76,7 @@ CBF uses a small, explicit label taxonomy to keep triage consistent.
 ### Label groups
 
 - `type/*`: what kind of work this is (`type/bug`, `type/feature`, `type/docs`, ...)
-- `area/*`: which layer is affected (`area/cbf`, `area/sys`, `area/bridge`, `area/chrome`, ...)
+- `area/*`: which layer is affected (`area/cbf`, `area/chrome`, `area/chrome-sys`, `area/bridge`, ...)
 - `priority/*`: urgency (`priority/p0` to `priority/p3`)
 - `status/*`: current workflow state (`status/needs-triage`, `status/in-progress`, ...)
 - OSS onboarding labels: `good first issue`, `help wanted`
