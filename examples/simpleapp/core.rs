@@ -10,10 +10,10 @@ use cbf::{
         drag::{DragOperations, DragStartRequest},
         ids::BrowsingContextId,
         ime::ImeBoundsUpdate,
-        surface::SurfaceHandle,
     },
     event::{BackendStopReason, BrowserEvent, BrowsingContextEvent},
 };
+use cbf_chrome::{chromium_backend::ChromiumBackend, surface::SurfaceHandle};
 use cursor_icon::CursorIcon;
 use tracing::{error, info, warn};
 use winit::event::WindowEvent;
@@ -31,13 +31,18 @@ pub(crate) struct SharedState {
 }
 
 /// Gets the currently active browsing context ID from shared state.
-pub(crate) fn current_browsing_context_id(shared: &Arc<Mutex<SharedState>>) -> Option<BrowsingContextId> {
+pub(crate) fn current_browsing_context_id(
+    shared: &Arc<Mutex<SharedState>>,
+) -> Option<BrowsingContextId> {
     let guard = shared.lock().expect("shared state lock poisoned");
     guard.browsing_context_id
 }
 
 /// Sets the currently active browsing context ID in shared state.
-pub(crate) fn set_browsing_context_id(shared: &Arc<Mutex<SharedState>>, browsing_context_id: Option<BrowsingContextId>) {
+pub(crate) fn set_browsing_context_id(
+    shared: &Arc<Mutex<SharedState>>,
+    browsing_context_id: Option<BrowsingContextId>,
+) {
     let mut guard = shared.lock().expect("shared state lock poisoned");
     guard.browsing_context_id = browsing_context_id;
 }
@@ -79,7 +84,7 @@ pub(crate) fn remove_drag_session(shared: &Arc<Mutex<SharedState>>, session_id: 
 /// to the platform-specific UI layer.
 pub(crate) struct CoreState {
     cli: Cli,
-    session: BrowserSession,
+    session: BrowserSession<ChromiumBackend>,
     shared: Arc<Mutex<SharedState>>,
     /// Whether we've already requested browsing context creation (to avoid duplicates).
     page_create_requested: bool,
@@ -102,7 +107,11 @@ pub(crate) enum CoreAction {
 }
 
 impl CoreState {
-    pub(crate) fn new(cli: Cli, session: BrowserSession, shared: Arc<Mutex<SharedState>>) -> Self {
+    pub(crate) fn new(
+        cli: Cli,
+        session: BrowserSession<ChromiumBackend>,
+        shared: Arc<Mutex<SharedState>>,
+    ) -> Self {
         Self {
             cli,
             session,
@@ -112,7 +121,7 @@ impl CoreState {
         }
     }
 
-    pub(crate) fn browser_handle(&self) -> BrowserHandle {
+    pub(crate) fn browser_handle(&self) -> BrowserHandle<ChromiumBackend> {
         self.session.handle()
     }
 
@@ -125,9 +134,9 @@ impl CoreState {
             return;
         };
 
-        if let Err(err) = self
-            .browser_handle()
-            .resize_browsing_context(browsing_context_id, width, height)
+        if let Err(err) =
+            self.browser_handle()
+                .resize_browsing_context(browsing_context_id, width, height)
         {
             warn!("failed to resize page: {err}");
         }
@@ -157,6 +166,10 @@ impl CoreState {
         }
     }
 
+    pub(crate) fn handle_surface_update(&self, _browsing_context_id: BrowsingContextId, handle: SurfaceHandle) -> Vec<CoreAction> {
+        vec![CoreAction::ApplySurfaceHandle(handle)]
+    }
+
     /// Handles incoming browser events and returns platform actions to execute.
     ///
     /// This is the main event processing loop for browser-originated events like
@@ -167,10 +180,11 @@ impl CoreState {
                 info!("backend ready");
                 if !self.page_create_requested {
                     self.page_create_requested = true;
-                    if let Err(err) =
-                        self.browser_handle()
-                            .create_browsing_context(1, Some(self.cli.url.clone()), None)
-                    {
+                    if let Err(err) = self.browser_handle().create_browsing_context(
+                        1,
+                        Some(self.cli.url.clone()),
+                        None,
+                    ) {
                         error!("failed to create browsing context: {err}");
                         return vec![CoreAction::ExitEventLoop];
                     }
@@ -205,7 +219,9 @@ impl CoreState {
                 Vec::new()
             }
             BrowserEvent::BrowsingContext {
-                browsing_context_id, event, ..
+                browsing_context_id,
+                event,
+                ..
             } => self.handle_browsing_context_event(browsing_context_id, event),
             BrowserEvent::ProfilesListed { .. } => Vec::new(),
             BrowserEvent::ShutdownBlocked {
@@ -272,9 +288,6 @@ impl CoreState {
             BrowsingContextEvent::Created { .. } => {
                 set_browsing_context_id(&self.shared, Some(browsing_context_id));
                 vec![CoreAction::SyncViewResizeAndFocus]
-            }
-            BrowsingContextEvent::SurfaceHandleUpdated { handle } => {
-                vec![CoreAction::ApplySurfaceHandle(handle)]
             }
             BrowsingContextEvent::TitleUpdated { title } => vec![CoreAction::UpdateWindowTitle(title)],
             BrowsingContextEvent::CursorChanged { cursor_type } => {

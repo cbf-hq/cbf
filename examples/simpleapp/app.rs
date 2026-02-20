@@ -4,6 +4,7 @@ use std::{
 };
 
 use cbf::{
+    browser::RawOpaqueEventExt,
     browser::{BrowserHandle, EventStream},
     event::BrowserEvent,
     middleware::{
@@ -11,7 +12,13 @@ use cbf::{
         logging::LoggingLayer,
     },
 };
-use cbf_chrome::chromium_process::{ChromiumProcess, start_chromium};
+use cbf_chrome::{
+    chromium_backend::ChromiumBackend,
+    event::ChromeEvent,
+    ffi::IpcEvent,
+    chromium_process::{ChromiumProcess, start_chromium},
+    surface::SurfaceHandle,
+};
 use tracing::{Level, error, warn};
 use winit::{
     application::ApplicationHandler,
@@ -30,6 +37,10 @@ use crate::{
 #[derive(Debug)]
 pub(crate) enum UserEvent {
     Browser(BrowserEvent),
+    SurfaceHandleUpdated {
+        browsing_context_id: cbf::data::ids::BrowsingContextId,
+        handle: SurfaceHandle,
+    },
 }
 
 /// Spawns a background thread that forwards browser events to the winit event loop.
@@ -37,12 +48,32 @@ pub(crate) enum UserEvent {
 /// This thread continuously reads from the CBF event stream and sends events
 /// to the event loop proxy. It terminates when either the event stream closes
 /// or the event loop proxy becomes invalid.
-pub(crate) fn spawn_browser_event_forwarder(events: EventStream, proxy: EventLoopProxy<UserEvent>) {
+pub(crate) fn spawn_browser_event_forwarder(
+    events: EventStream<ChromiumBackend>,
+    proxy: EventLoopProxy<UserEvent>,
+) {
     thread::spawn(move || {
         loop {
             match events.recv_blocking() {
                 Ok(event) => {
-                    if proxy.send_event(UserEvent::Browser(event)).is_err() {
+                    if let ChromeEvent::Ipc(IpcEvent::SurfaceHandleUpdated {
+                        browsing_context_id,
+                        handle,
+                        ..
+                    }) = event.as_raw().clone()
+                        && proxy
+                            .send_event(UserEvent::SurfaceHandleUpdated {
+                                browsing_context_id,
+                                handle,
+                            })
+                            .is_err()
+                    {
+                        return;
+                    }
+
+                    if let Some(event) = event.as_generic().cloned()
+                        && proxy.send_event(UserEvent::Browser(event)).is_err()
+                    {
                         return;
                     }
                 }
@@ -62,7 +93,8 @@ pub(crate) fn spawn_browser_event_forwarder(events: EventStream, proxy: EventLoo
 /// this trait to provide its own native window and browser view handling.
 pub(crate) trait PlatformApp {
     /// Creates a new platform application instance.
-    fn new(browser_handle: BrowserHandle, shared: Arc<Mutex<SharedState>>) -> Self;
+    fn new(browser_handle: BrowserHandle<ChromiumBackend>, shared: Arc<Mutex<SharedState>>)
+    -> Self;
 
     /// Returns the winit window ID, if a window has been created.
     fn window_id(&self) -> Option<WindowId>;
@@ -101,8 +133,13 @@ impl<P: PlatformApp> ApplicationHandler<UserEvent> for AppRunner<P> {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
-        let UserEvent::Browser(event) = event;
-        let actions = self.core.handle_browser_event(event);
+        let actions = match event {
+            UserEvent::Browser(event) => self.core.handle_browser_event(event),
+            UserEvent::SurfaceHandleUpdated {
+                browsing_context_id,
+                handle,
+            } => self.core.handle_surface_update(browsing_context_id, handle),
+        };
         self.platform
             .apply_core_actions(event_loop, &mut self.core, actions);
     }
