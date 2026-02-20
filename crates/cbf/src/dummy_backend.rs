@@ -3,10 +3,10 @@ use std::{collections::HashMap, thread, time::Duration};
 use async_channel::{Receiver, Sender, TryRecvError};
 
 use crate::{
-    delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
     browser::{Backend, CommandSender, EventStream},
     command::BrowserCommand,
     data::ids::BrowsingContextId,
+    delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
     error::Error,
     event::{BackendStopReason, BrowserEvent, BrowsingContextEvent},
 };

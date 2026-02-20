@@ -7,8 +7,8 @@
 use tracing::{Level, debug, error, info, trace, warn};
 
 use crate::{
-    delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     command::BrowserCommand,
+    delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     event::{BackendStopReason, BrowserEvent},
 };
 

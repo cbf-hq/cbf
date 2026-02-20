@@ -7,11 +7,11 @@
 //! For setup, architecture, and implementation details, see the repository
 //! documentation under `docs/`.
 
-pub mod delegate;
 pub mod browser;
 pub mod browser_session;
 pub mod command;
 pub mod data;
+pub mod delegate;
 pub mod error;
 pub mod event;
 pub mod middleware;

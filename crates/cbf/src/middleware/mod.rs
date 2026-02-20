@@ -18,9 +18,7 @@ pub mod lifecycle;
 pub mod logging;
 
 use crate::{
-    delegate::{
-        BackendDelegate, CommandDecision, DelegateContext, EventDecision, NoopDelegate,
-    },
+    delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision, NoopDelegate},
     error::{Error, InvalidConfiguration},
     event::BackendStopReason,
 };

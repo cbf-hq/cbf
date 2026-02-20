@@ -3,8 +3,8 @@ use futures_lite::future::block_on;
 use std::{path::PathBuf, process::ExitStatus};
 
 use cbf::{
-    delegate::BackendDelegate,
     browser::{BrowserSession, EventStream},
+    delegate::BackendDelegate,
     error::Error,
 };
 

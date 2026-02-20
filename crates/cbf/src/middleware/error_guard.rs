@@ -7,8 +7,8 @@
 //! See [`ErrorGuardLayer`] for exact policy and configuration knobs.
 
 use crate::{
-    delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     command::BrowserCommand,
+    delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     error::ApiErrorKind,
     event::{BackendStopReason, BrowserEvent},
 };

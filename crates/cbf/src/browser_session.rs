@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::{
-    delegate::BackendDelegate,
     browser::{Backend, BrowserHandle, CommandSender, EventStream},
+    delegate::BackendDelegate,
     error::Error,
 };
 
@@ -63,6 +63,6 @@ impl<B: Backend> BrowserSession<B> {
 
 impl<B: Backend> Drop for BrowserSession<B> {
     fn drop(&mut self) {
-        let _ = self.close();
+        _ = self.close();
     }
 }

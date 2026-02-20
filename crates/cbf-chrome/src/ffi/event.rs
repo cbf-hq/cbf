@@ -1,10 +1,7 @@
 use cursor_icon::CursorIcon;
 
 use cbf::data::{
-    context_menu::ContextMenu,
-    drag::DragStartRequest,
-    ids::BrowsingContextId,
-    ime::ImeBoundsUpdate,
+    context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId, ime::ImeBoundsUpdate,
 };
 use cbf::event::BeforeUnloadReason;
 
