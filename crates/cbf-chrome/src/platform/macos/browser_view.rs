@@ -30,21 +30,19 @@ use objc2_foundation::{
 };
 use objc2_quartz_core::CATransaction;
 
-use crate::{
-    data::{
-        context_menu::{ContextMenu, ContextMenuIcon, ContextMenuItem, ContextMenuItemType},
-        drag::DragStartRequest,
-        ime::{ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, TextSelectionBounds},
-        key::KeyEvent,
-        mouse::{MouseEvent, MouseWheelEvent, PointerType},
-    },
-    ffi::{
-        convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
-        convert_nsevent_to_mouse_wheel_event,
-    },
+use cbf::data::{
+    context_menu::{ContextMenu, ContextMenuIcon, ContextMenuItem, ContextMenuItemType},
+    drag::DragStartRequest,
+    ime::{ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, TextSelectionBounds},
+    key::KeyEvent,
+    mouse::{MouseEvent, MouseWheelEvent, PointerType},
 };
 
 use super::bindings::{CALayerHost, ContextId};
+use crate::ffi::{
+    convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
+    convert_nsevent_to_mouse_wheel_event,
+};
 
 /// Callback interface for BrowserViewMac input and menu events.
 pub trait BrowserViewMacDelegate {
@@ -675,7 +673,8 @@ impl BrowserViewMac {
             return false;
         };
 
-        let operation_mask = NSDragOperation::from_bits_truncate(request.allowed_operations.bits() as _);
+        let operation_mask =
+            NSDragOperation::from_bits_truncate(request.allowed_operations.bits() as _);
         let source = HostDragSource::new(
             mtm,
             Retained::from(self),

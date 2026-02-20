@@ -23,49 +23,6 @@ futures-lite.workspace = true
 oneshot = { workspace = true, features = ["async", "std"] }
 tracing.workspace = true
 
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { workspace = true }
-objc2-core-foundation = { workspace = true, features = ["CFCGTypes"] }
-objc2-quartz-core = { workspace = true, features = [
-  "CALayer", "CATransaction", "objc2-core-foundation"
-] }
-
-[target.'cfg(target_os = "macos")'.dependencies.objc2-foundation]
-workspace = true
-features = [
-  "NSArray",
-  "NSAttributedString",
-  "NSData",
-  "NSObject",
-  "NSObjCRuntime",
-  "NSRange",
-  "NSString",
-  "NSGeometry",
-  "objc2-core-foundation"
-]
-
-[target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
-workspace = true
-features = [
-  "NSApplication",
-  "NSCell",
-  "NSDragging",
-  "NSDraggingItem",
-  "NSDraggingSession",
-  "NSEvent",
-  "NSGraphicsContext",
-  "NSImage",
-  "NSMenu",
-  "NSMenuItem",
-  "NSMenuItemBadge",
-  "NSPasteboard",
-  "NSResponder",
-  "NSTextInputClient",
-  "NSView",
-  "NSWindow",
-  "objc2-quartz-core"
-]
-
 [dev-dependencies]
 cbf-chrome = { path = "../cbf-chrome" }
 clap = { workspace = true, features = ["derive"] }

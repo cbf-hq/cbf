@@ -42,7 +42,7 @@ This value is used as pasteboard writer content for `NSDraggingItem`.
 
 Key code:
 
-- `crates/cbf/src/platform/macos/browser_view.rs`
+- `crates/cbf-chrome/src/platform/macos/browser_view.rs`
 
 Practical implication: `"Atelier"` is a legacy fallback string and not core protocol data.
 

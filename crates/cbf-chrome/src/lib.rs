@@ -10,6 +10,7 @@ pub mod context_menu;
 pub mod event;
 pub mod ffi;
 pub mod input;
+pub mod platform;
 pub mod surface;
 
 pub use cbf;
