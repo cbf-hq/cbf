@@ -1,4 +1,4 @@
-From a7c98a76bdfeed4aebb022a5fadd81cbfe2ce4e3 Mon Sep 17 00:00:00 2001
+From aae152a3510ed3a5b2361f52975cfd133bafd5f4 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Feb 2026 09:47:06 +0900
 Subject: [PATCH] CBF bridge series
@@ -19,7 +19,7 @@ Subject: [PATCH] CBF bridge series
  chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  521 +++++
  chrome/browser/cbf/bridge/cbf_bridge_input.cc |  813 ++++++++
  .../browser/cbf/bridge/cbf_bridge_internal.h  |   28 +
- chrome/browser/cbf/bridge/cbf_bridge_mac.mm   |  262 +++
+ chrome/browser/cbf/bridge/cbf_bridge_mac.mm   |  293 +++
  .../browser/cbf/bridge/cbf_bridge_profiles.cc |   94 +
  .../browser/cbf/bridge/cbf_bridge_shutdown.cc |  122 ++
  .../browser/cbf/bridge/cbf_bridge_support.cc  |   54 +
@@ -66,7 +66,7 @@ Subject: [PATCH] CBF bridge series
  .../public/browser/web_contents_delegate.cc   |   13 +
  .../public/browser/web_contents_delegate.h    |   21 +
  ui/compositor/compositor.h                    |    1 +
- 62 files changed, 8079 insertions(+), 1 deletion(-)
+ 62 files changed, 8110 insertions(+), 1 deletion(-)
  create mode 100644 chrome/browser/cbf/BUILD.gn
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge.cc
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge.h
@@ -1399,7 +1399,7 @@ index 0000000000000..3a89ad677dc90
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_CONVERTERS_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
 new file mode 100644
-index 0000000000000..3e67e7eaa13de
+index 0000000000000..7d0464f7e2ea1
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
 @@ -0,0 +1,461 @@
@@ -1431,7 +1431,7 @@ index 0000000000000..3e67e7eaa13de
 +    return out;
 +  }
 +  const size_t len = icon->png_bytes.size();
-+  auto* bytes = new uint8_t[len];
++  uint8_t* bytes = new uint8_t[len];
 +  auto out_bytes = UNSAFE_BUFFERS(base::span(bytes, len));
 +  for (size_t i = 0; i < out_bytes.size(); ++i) {
 +    out_bytes[i] = icon->png_bytes[i];
@@ -1489,7 +1489,7 @@ index 0000000000000..3e67e7eaa13de
 +  if (items.empty()) {
 +    return out;
 +  }
-+  auto* out_items = new CbfContextMenuItem[items.size()];
++  CbfContextMenuItem* out_items = new CbfContextMenuItem[items.size()];
 +  auto out_span = UNSAFE_BUFFERS(base::span(out_items, items.size()));
 +  for (size_t i = 0; i < out_span.size(); ++i) {
 +    FillCbfMenuItem(items[i], &out_span[i]);
@@ -1521,7 +1521,7 @@ index 0000000000000..3e67e7eaa13de
 +  if (infos.empty()) {
 +    return out;
 +  }
-+  auto* out_infos = new CbfDragUrlInfo[infos.size()];
++  CbfDragUrlInfo* out_infos = new CbfDragUrlInfo[infos.size()];
 +  auto out_span = UNSAFE_BUFFERS(base::span(out_infos, infos.size()));
 +  for (size_t i = 0; i < out_span.size(); ++i) {
 +    out_span[i] = {};
@@ -1541,7 +1541,7 @@ index 0000000000000..3e67e7eaa13de
 +  if (values.empty()) {
 +    return out;
 +  }
-+  auto* out_items = new char*[values.size()];
++  char** out_items = new char*[values.size()];
 +  auto out_span = UNSAFE_BUFFERS(base::span(out_items, values.size()));
 +  for (size_t i = 0; i < out_span.size(); ++i) {
 +    out_span[i] = CopyCString(values[i]);
@@ -1557,7 +1557,7 @@ index 0000000000000..3e67e7eaa13de
 +  if (pairs.empty()) {
 +    return out;
 +  }
-+  auto* out_items = new CbfStringPair[pairs.size()];
++  CbfStringPair* out_items = new CbfStringPair[pairs.size()];
 +  auto out_span = UNSAFE_BUFFERS(base::span(out_items, pairs.size()));
 +  for (size_t i = 0; i < out_span.size(); ++i) {
 +    out_span[i] = {};
@@ -1578,7 +1578,7 @@ index 0000000000000..3e67e7eaa13de
 +    return out;
 +  }
 +  const size_t len = image->png_bytes.size();
-+  auto* bytes = new uint8_t[len];
++  uint8_t* bytes = new uint8_t[len];
 +  auto out_bytes = UNSAFE_BUFFERS(base::span(bytes, len));
 +  for (size_t i = 0; i < out_bytes.size(); ++i) {
 +    out_bytes[i] = image->png_bytes[i];
@@ -1639,7 +1639,7 @@ index 0000000000000..3e67e7eaa13de
 +      out_event->ime_bounds.composition.range_end = composition.range_end;
 +      const size_t bounds_len = composition.character_bounds.size();
 +      if (bounds_len > 0) {
-+        auto* bounds = new CbfRect[bounds_len];
++        CbfRect* bounds = new CbfRect[bounds_len];
 +        auto out_bounds = UNSAFE_BUFFERS(base::span(bounds, bounds_len));
 +        for (size_t i = 0; i < out_bounds.size(); ++i) {
 +          out_bounds[i] = ToCbfRect(composition.character_bounds[i]);
@@ -1664,7 +1664,7 @@ index 0000000000000..3e67e7eaa13de
 +  if (event.kind == kEventShutdownBlocked) {
 +    const size_t list_len = event.dirty_web_page_ids.size();
 +    if (list_len > 0) {
-+      auto* ids = new uint64_t[list_len];
++      uint64_t* ids = new uint64_t[list_len];
 +      auto out_ids = UNSAFE_BUFFERS(base::span(ids, list_len));
 +      for (size_t i = 0; i < out_ids.size(); ++i) {
 +        out_ids[i] = event.dirty_web_page_ids[i];
@@ -2393,7 +2393,7 @@ index 0000000000000..7d018e346a458
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_FFI_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_input.cc b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
 new file mode 100644
-index 0000000000000..a7dfdfbc86c90
+index 0000000000000..11d2486bcbcd9
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
 @@ -0,0 +1,813 @@
@@ -3111,7 +3111,7 @@ index 0000000000000..a7dfdfbc86c90
 +
 +  out_data->url_infos = {};
 +  if (!mojom_data->url_infos.empty()) {
-+    auto* out_infos = new CbfDragUrlInfo[mojom_data->url_infos.size()];
++    CbfDragUrlInfo* out_infos = new CbfDragUrlInfo[mojom_data->url_infos.size()];
 +    auto span =
 +        UNSAFE_BUFFERS(base::span(out_infos, mojom_data->url_infos.size()));
 +    for (size_t i = 0; i < span.size(); ++i) {
@@ -3129,7 +3129,7 @@ index 0000000000000..a7dfdfbc86c90
 +
 +  out_data->filenames = {};
 +  if (!mojom_data->filenames.empty()) {
-+    auto* out_filenames = new char*[mojom_data->filenames.size()];
++    char** out_filenames = new char*[mojom_data->filenames.size()];
 +    auto span = UNSAFE_BUFFERS(
 +        base::span(out_filenames, mojom_data->filenames.size()));
 +    for (size_t i = 0; i < span.size(); ++i) {
@@ -3141,7 +3141,7 @@ index 0000000000000..a7dfdfbc86c90
 +
 +  out_data->file_mime_types = {};
 +  if (!mojom_data->file_mime_types.empty()) {
-+    auto* out_mime_types = new char*[mojom_data->file_mime_types.size()];
++    char** out_mime_types = new char*[mojom_data->file_mime_types.size()];
 +    auto span = UNSAFE_BUFFERS(
 +        base::span(out_mime_types, mojom_data->file_mime_types.size()));
 +    for (size_t i = 0; i < span.size(); ++i) {
@@ -3154,7 +3154,7 @@ index 0000000000000..a7dfdfbc86c90
 +
 +  out_data->custom_data = {};
 +  if (!mojom_data->custom_data.empty()) {
-+    auto* out_pairs = new CbfStringPair[mojom_data->custom_data.size()];
++    CbfStringPair* out_pairs = new CbfStringPair[mojom_data->custom_data.size()];
 +    auto span =
 +        UNSAFE_BUFFERS(base::span(out_pairs, mojom_data->custom_data.size()));
 +    for (size_t i = 0; i < span.size(); ++i) {
@@ -3246,10 +3246,10 @@ index 0000000000000..2396f6646fc3c
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_INTERNAL_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_mac.mm b/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
 new file mode 100644
-index 0000000000000..c72865460fe2f
+index 0000000000000..5458a164de593
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,293 @@
 +#include "chrome/browser/cbf/bridge/cbf_bridge_internal.h"
 +
 +#import <AppKit/AppKit.h>
@@ -3258,7 +3258,6 @@ index 0000000000000..c72865460fe2f
 +#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
 +#include "components/input/web_input_event_builders_mac.h"
-+#include "content/browser/web_contents/web_drag_dest_mac.h"
 +#include "components/input/native_web_keyboard_event.h"
 +#include "third_party/blink/public/common/input/web_input_event.h"
 +#include "ui/events/keycodes/dom/keycode_converter.h"
@@ -3476,32 +3475,64 @@ index 0000000000000..c72865460fe2f
 +    return nullptr;
 +  }
 +
-+  content::DropData drop_data = content::PopulateDropDataFromPasteboard(pasteboard);
-+
 +  auto data = mojom::CbfDragData::New();
-+  data->text = drop_data.text ? base::UTF16ToUTF8(*drop_data.text) : std::string();
-+  data->html = drop_data.html ? base::UTF16ToUTF8(*drop_data.html) : std::string();
-+  data->html_base_url = drop_data.html_base_url.spec();
-+  data->url_infos.reserve(drop_data.url_infos.size());
-+  for (const auto& url_info : drop_data.url_infos) {
++
++  NSString* text = [pasteboard stringForType:NSPasteboardTypeString];
++  data->text = text ? std::string([text UTF8String]) : std::string();
++
++  NSData* html_data = [pasteboard dataForType:NSPasteboardTypeHTML];
++  if (html_data) {
++    NSString* html =
++        [[NSString alloc] initWithData:html_data encoding:NSUTF8StringEncoding];
++    data->html = html ? std::string([html UTF8String]) : std::string();
++  } else {
++    data->html = std::string();
++  }
++
++  data->html_base_url = std::string();
++
++  NSString* url = [pasteboard stringForType:NSPasteboardTypeURL];
++  if (url) {
 +    auto info = mojom::CbfDragUrlInfo::New();
-+    info->url = url_info.url.spec();
-+    info->title = base::UTF16ToUTF8(url_info.title);
++    info->url = std::string([url UTF8String]);
++    info->title = info->url;
 +    data->url_infos.push_back(std::move(info));
 +  }
-+  data->filenames.reserve(drop_data.filenames.size());
-+  for (const auto& file_info : drop_data.filenames) {
-+    data->filenames.push_back(file_info.path.AsUTF8Unsafe());
++
++  NSDictionary* file_url_options = @{
++    NSPasteboardURLReadingFileURLsOnlyKey : @YES,
++  };
++  NSArray<NSURL*>* file_urls = [pasteboard readObjectsForClasses:@[ [NSURL class] ]
++                                                         options:file_url_options];
++  if (file_urls) {
++    data->filenames.reserve([file_urls count]);
++    for (NSURL* file_url in file_urls) {
++      if (![file_url isFileURL]) {
++        continue;
++      }
++      data->filenames.push_back(std::string([[file_url path] UTF8String]));
++    }
 +  }
-+  data->file_mime_types.reserve(drop_data.file_mime_types.size());
-+  for (const auto& mime_type : drop_data.file_mime_types) {
-+    data->file_mime_types.push_back(base::UTF16ToUTF8(mime_type));
-+  }
-+  data->custom_data.reserve(drop_data.custom_data.size());
-+  for (const auto& [key, value] : drop_data.custom_data) {
++
++  // MIME types are not consistently available from NSPasteboard for all drag
++  // sources. Keep this additive field empty when not provided.
++  data->file_mime_types.clear();
++
++  NSArray<NSPasteboardType>* types = [pasteboard types];
++  for (NSPasteboardType type in types) {
++    if ([type isEqualToString:NSPasteboardTypeString] ||
++        [type isEqualToString:NSPasteboardTypeHTML] ||
++        [type isEqualToString:NSPasteboardTypeURL] ||
++        [type isEqualToString:NSPasteboardTypeFileURL]) {
++      continue;
++    }
++    NSString* value = [pasteboard stringForType:type];
++    if (!value || [value length] == 0) {
++      continue;
++    }
 +    auto pair = mojom::CbfStringPair::New();
-+    pair->key = base::UTF16ToUTF8(key);
-+    pair->value = base::UTF16ToUTF8(value);
++    pair->key = std::string([type UTF8String]);
++    pair->value = std::string([value UTF8String]);
 +    data->custom_data.push_back(std::move(pair));
 +  }
 +  return data;
