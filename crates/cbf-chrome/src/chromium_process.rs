@@ -4,7 +4,7 @@ use std::{path::PathBuf, process::ExitStatus};
 
 use cbf::{
     backend_delegate::BackendDelegate,
-    browser::{BrowserSession, EventStream, connect},
+    browser::{BrowserSession, EventStream},
     error::Error,
 };
 
@@ -156,7 +156,7 @@ pub fn start_chromium(
     );
 
     let backend = ChromiumBackend::new(backend);
-    let (session, events) = connect(backend, delegate, None)?;
+    let (session, events) = BrowserSession::connect(backend, delegate, None)?;
 
     Ok((session, events, ChromiumProcess { child }))
 }

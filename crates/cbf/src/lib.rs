@@ -9,6 +9,7 @@
 
 pub mod backend_delegate;
 pub mod browser;
+pub mod browser_session;
 pub mod command;
 pub mod data;
 pub mod error;

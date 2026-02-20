@@ -14,6 +14,8 @@ use crate::{
     event::BrowserEvent,
 };
 
+pub use crate::browser_session::BrowserSession;
+
 /// A backend implementation that can drive a browser process.
 ///
 /// The `cbf` layer stays browser-generic. Backend-specific command/event
@@ -447,34 +449,14 @@ impl<B: Backend> RawCommandSenderExt<B> for BrowserHandle<B> {
     }
 }
 
-/// A session that owns the initial command handle.
-#[derive(Debug)]
-pub struct BrowserSession<B: Backend> {
-    handle: BrowserHandle<B>,
-}
-
-impl<B: Backend> BrowserSession<B> {
-    pub(crate) fn new(command_tx: CommandSender<B>) -> Self {
-        Self {
-            handle: BrowserHandle::new(command_tx),
-        }
-    }
-
-    /// Get a cloneable handle for issuing browser commands.
-    pub fn handle(&self) -> BrowserHandle<B> {
-        self.handle.clone()
-    }
-}
-
 /// Connect to a backend and obtain a command session and an event stream.
 ///
-/// This split form is the minimum core API: most applications want to drive
-/// the backend from one place, while consuming events elsewhere.
+/// This function remains as a compatibility wrapper.
+#[deprecated(note = "Use BrowserSession::connect instead.")]
 pub fn connect<B: Backend, D: BackendDelegate>(
     backend: B,
     delegate: D,
     raw_delegate: Option<B::RawDelegate>,
 ) -> Result<(BrowserSession<B>, EventStream<B>), Error> {
-    let (command_tx, events) = backend.connect(delegate, raw_delegate)?;
-    Ok((BrowserSession::new(command_tx), events))
+    BrowserSession::connect(backend, delegate, raw_delegate)
 }
