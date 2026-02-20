@@ -448,15 +448,3 @@ impl<B: Backend> RawCommandSenderExt<B> for BrowserHandle<B> {
         self.command_tx.send_raw(raw)
     }
 }
-
-/// Connect to a backend and obtain a command session and an event stream.
-///
-/// This function remains as a compatibility wrapper.
-#[deprecated(note = "Use BrowserSession::connect instead.")]
-pub fn connect<B: Backend, D: BackendDelegate>(
-    backend: B,
-    delegate: D,
-    raw_delegate: Option<B::RawDelegate>,
-) -> Result<(BrowserSession<B>, EventStream<B>), Error> {
-    BrowserSession::connect(backend, delegate, raw_delegate)
-}
