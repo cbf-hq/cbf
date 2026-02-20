@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::{
-    backend_delegate::BackendDelegate,
+    delegate::BackendDelegate,
     browser::{Backend, BrowserHandle, CommandSender, EventStream},
     error::Error,
 };

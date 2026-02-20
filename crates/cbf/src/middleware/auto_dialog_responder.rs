@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::{
-    backend_delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
+    delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     command::BrowserCommand,
     data::ids::BrowsingContextId,
     event::{BrowserEvent, BrowsingContextEvent, DialogType},

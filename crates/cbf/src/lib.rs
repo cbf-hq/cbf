@@ -7,7 +7,7 @@
 //! For setup, architecture, and implementation details, see the repository
 //! documentation under `docs/`.
 
-pub mod backend_delegate;
+pub mod delegate;
 pub mod browser;
 pub mod browser_session;
 pub mod command;

@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    backend_delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
+    delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
     command::BrowserCommand,
     data::ids::BrowsingContextId,
     event::{BackendStopReason, BrowserEvent, BrowsingContextEvent, DialogType},

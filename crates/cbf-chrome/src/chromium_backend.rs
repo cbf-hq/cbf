@@ -7,7 +7,7 @@ use std::{
 use async_channel::{Receiver, Sender, TryRecvError};
 
 use cbf::{
-    backend_delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
+    delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
     browser::{Backend, CommandSender, EventStream},
     command::BrowserCommand,
     data::ids::BrowsingContextId,
