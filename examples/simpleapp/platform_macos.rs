@@ -11,12 +11,12 @@ use cbf::{
     },
 };
 use cbf_chrome::{
-    chromium_backend::ChromiumBackend,
+    backend::ChromiumBackend,
+    data::surface::SurfaceHandle,
     platform::macos::browser_view::{
         BrowserViewMac, BrowserViewMacConfig, BrowserViewMacDelegate, BrowserViewMacImeEvent,
         BrowserViewMacNativeDragDrop, BrowserViewMacNativeDragUpdate,
     },
-    surface::SurfaceHandle,
 };
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::NSView;

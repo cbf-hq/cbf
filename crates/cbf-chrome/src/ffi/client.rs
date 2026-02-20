@@ -17,7 +17,7 @@ use super::map::{
 };
 use super::utils::{c_string_to_string, to_optional_cstring};
 use super::{Error, IpcEvent};
-use crate::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
+use crate::data::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
 
 /// Client wrapper for the CBF IPC bridge.
 pub struct IpcClient {

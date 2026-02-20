@@ -13,11 +13,11 @@ use cbf::{
     },
 };
 use cbf_chrome::{
-    chromium_backend::ChromiumBackend,
-    chromium_process::{ChromiumProcess, start_chromium},
+    backend::ChromiumBackend,
+    data::surface::SurfaceHandle,
     event::ChromeEvent,
     ffi::IpcEvent,
-    surface::SurfaceHandle,
+    process::{ChromiumProcess, start_chromium},
 };
 use tracing::{Level, error, warn};
 use winit::{

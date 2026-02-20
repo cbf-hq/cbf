@@ -1,8 +1,8 @@
 use std::{env, path::PathBuf};
 
 use cbf_chrome::{
-    chromium_backend::ChromiumBackendOptions,
-    chromium_process::{ChromiumProcessOptions, StartChromiumOptions},
+    backend::ChromiumBackendOptions,
+    process::{ChromiumProcessOptions, StartChromiumOptions},
 };
 use clap::Parser;
 

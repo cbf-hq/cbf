@@ -13,7 +13,7 @@ use cbf::{
     },
     event::{BackendStopReason, BrowserEvent, BrowsingContextEvent},
 };
-use cbf_chrome::{chromium_backend::ChromiumBackend, surface::SurfaceHandle};
+use cbf_chrome::{backend::ChromiumBackend, data::surface::SurfaceHandle};
 use cursor_icon::CursorIcon;
 use tracing::{error, info, warn};
 use winit::event::WindowEvent;

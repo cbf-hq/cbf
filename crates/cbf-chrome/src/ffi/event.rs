@@ -5,7 +5,7 @@ use cbf::data::{
 };
 use cbf::event::BeforeUnloadReason;
 
-use crate::surface::SurfaceHandle;
+use crate::data::surface::SurfaceHandle;
 
 /// Low-level IPC events emitted by the Chromium bridge.
 #[derive(Debug, Clone, PartialEq)]

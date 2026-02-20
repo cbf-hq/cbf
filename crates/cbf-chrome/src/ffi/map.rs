@@ -5,8 +5,6 @@ use cbf_chrome_sys::ffi::*;
 use cursor_icon::CursorIcon;
 use tracing::debug;
 
-use crate::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
-
 use cbf::{
     data::{
         context_menu::{
@@ -29,9 +27,11 @@ use cbf::{
     event::BeforeUnloadReason,
 };
 
-use crate::surface::SurfaceHandle;
-
 use super::{Error, IpcEvent, utils::c_string_to_string};
+use crate::data::{
+    input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+    surface::SurfaceHandle,
+};
 
 pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
     match event.kind {
@@ -268,7 +268,7 @@ fn parse_context_menu(menu: CbfContextMenu) -> ContextMenu {
         items: parse_context_menu_items(menu.items),
     };
 
-    crate::context_menu::filter_supported(menu)
+    crate::data::context_menu::filter_supported(menu)
 }
 
 fn parse_context_menu_items(list: CbfContextMenuItemList) -> Vec<ContextMenuItem> {

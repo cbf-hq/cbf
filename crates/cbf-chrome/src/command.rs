@@ -9,7 +9,7 @@ use cbf::{
     },
 };
 
-use crate::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
+use crate::data::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
 
 /// Chromium-specific transport command vocabulary.
 #[derive(Debug, Clone, PartialEq)]
