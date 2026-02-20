@@ -254,12 +254,11 @@ impl ChromiumBackend {
         event_tx: &Sender<ChromeEvent>,
     ) {
         let (mut final_reason, queued_commands) = dispatcher.stop(reason);
-        if let Some(client) = client {
-            if let Some(reason) =
+        if let Some(client) = client
+            && let Some(reason) =
                 Self::drain_delegate_queue(dispatcher, client, event_tx, queued_commands)
-            {
-                final_reason = reason;
-            }
+        {
+            final_reason = reason;
         }
         Self::emit_raw_event(
             event_tx,
@@ -474,7 +473,11 @@ impl ChromiumBackend {
             _ => {}
         }
 
-        Self::handle_raw_event_with_delegate_gate(dispatcher, event_tx, ChromeEvent::Ipc(event))
+        Self::handle_raw_event_with_delegate_gate(
+            dispatcher,
+            event_tx,
+            ChromeEvent::Ipc(Box::new(event)),
+        )
     }
 
     fn process_command_queue(

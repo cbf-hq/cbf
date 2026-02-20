@@ -14,9 +14,9 @@ use cbf::{
 };
 use cbf_chrome::{
     chromium_backend::ChromiumBackend,
+    chromium_process::{ChromiumProcess, start_chromium},
     event::ChromeEvent,
     ffi::IpcEvent,
-    chromium_process::{ChromiumProcess, start_chromium},
     surface::SurfaceHandle,
 };
 use tracing::{Level, error, warn};
@@ -56,11 +56,12 @@ pub(crate) fn spawn_browser_event_forwarder(
         loop {
             match events.recv_blocking() {
                 Ok(event) => {
-                    if let ChromeEvent::Ipc(IpcEvent::SurfaceHandleUpdated {
-                        browsing_context_id,
-                        handle,
-                        ..
-                    }) = event.as_raw().clone()
+                    if let ChromeEvent::Ipc(ipc_event) = event.as_raw().clone()
+                        && let IpcEvent::SurfaceHandleUpdated {
+                            browsing_context_id,
+                            handle,
+                            ..
+                        } = *ipc_event
                         && proxy
                             .send_event(UserEvent::SurfaceHandleUpdated {
                                 browsing_context_id,

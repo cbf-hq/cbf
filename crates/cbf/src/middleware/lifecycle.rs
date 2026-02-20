@@ -108,12 +108,14 @@ impl BackendDelegate for Lifecycle {
     fn on_event(&mut self, ctx: &mut DelegateContext, event: &BrowserEvent) -> EventDecision {
         if let BrowserEvent::BrowsingContext {
             browsing_context_id,
-            event:
-                BrowsingContextEvent::JavaScriptDialogRequested {
-                    request_id, r#type, ..
-                },
+            event,
             ..
-        } = &event
+        } = event
+            && let BrowsingContextEvent::JavaScriptDialogRequested {
+                request_id,
+                r#type,
+                ..
+            } = event.as_ref()
             && *r#type == DialogType::BeforeUnload
         {
             self.pending_beforeunload
@@ -122,9 +124,10 @@ impl BackendDelegate for Lifecycle {
 
         if let BrowserEvent::BrowsingContext {
             browsing_context_id,
-            event: BrowsingContextEvent::Closed,
+            event,
             ..
-        } = &event
+        } = event
+            && matches!(event.as_ref(), BrowsingContextEvent::Closed)
         {
             self.resolve_pending_for_page(ctx, *browsing_context_id);
         }

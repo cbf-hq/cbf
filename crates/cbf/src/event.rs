@@ -30,7 +30,7 @@ pub enum BrowserEvent {
     BrowsingContext {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
-        event: BrowsingContextEvent,
+        event: Box<BrowsingContextEvent>,
     },
 
     /// Result of listing available profiles.

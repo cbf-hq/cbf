@@ -11,33 +11,23 @@ pub enum ImeTextSpanType {
 }
 
 /// Chromium-specific thickness of IME underline decorations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChromeImeTextSpanThickness {
+    #[default]
     None,
     Thin,
     Thick,
 }
 
-impl Default for ChromeImeTextSpanThickness {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
 /// Chromium-specific style of IME underline decorations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChromeImeTextSpanUnderlineStyle {
+    #[default]
     None,
     Solid,
     Dot,
     Dash,
     Squiggle,
-}
-
-impl Default for ChromeImeTextSpanUnderlineStyle {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// Range in IME text, using character indices.

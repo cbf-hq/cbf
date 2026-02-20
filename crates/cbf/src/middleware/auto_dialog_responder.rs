@@ -106,28 +106,26 @@ impl BackendDelegate for AutoDialogResponder {
     }
 
     fn on_event(&mut self, ctx: &mut DelegateContext, event: &BrowserEvent) -> EventDecision {
-        match event {
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event:
-                    BrowsingContextEvent::JavaScriptDialogRequested {
-                        request_id, r#type, ..
-                    },
-                ..
-            } if *r#type == DialogType::BeforeUnload => {
-                if let Some(timeout) = self.timeout {
-                    self.pending.insert(
-                        (*browsing_context_id, *request_id),
-                        Instant::now() + timeout,
-                    );
-                }
+        if let BrowserEvent::BrowsingContext {
+            browsing_context_id,
+            event,
+            ..
+        } = event
+        {
+            if let BrowsingContextEvent::JavaScriptDialogRequested {
+                request_id, r#type, ..
+            } = event.as_ref()
+                && *r#type == DialogType::BeforeUnload
+                && let Some(timeout) = self.timeout
+            {
+                self.pending.insert(
+                    (*browsing_context_id, *request_id),
+                    Instant::now() + timeout,
+                );
             }
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event: BrowsingContextEvent::Closed,
-                ..
-            } => self.clear_browsing_context(*browsing_context_id),
-            _ => {}
+            if matches!(event.as_ref(), BrowsingContextEvent::Closed) {
+                self.clear_browsing_context(*browsing_context_id);
+            }
         }
 
         self.inner.on_event(ctx, event)

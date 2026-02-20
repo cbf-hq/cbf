@@ -12,6 +12,7 @@ use tracing::{debug, warn};
 use crate::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
 
 use cbf::data::{
+    context_menu::ContextMenu,
     drag::{DragDrop, DragStartRequest, DragUpdate},
     ids::BrowsingContextId,
     ime::{ConfirmCompositionBehavior, ImeBoundsUpdate, ImeCommitText, ImeComposition},
@@ -65,7 +66,7 @@ pub enum IpcEvent {
     ContextMenuRequested {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
-        menu: cbf::data::context_menu::ContextMenu,
+        menu: ContextMenu,
     },
     /// The backend requested opening a new page.
     NewWebContentsRequested {

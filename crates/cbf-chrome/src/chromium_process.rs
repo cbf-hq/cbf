@@ -85,6 +85,11 @@ impl ChromiumProcess {
 ///
 /// This function spawns the browser process with the specified options and
 /// establishes a CBF connection.
+///
+/// # Panics
+///
+/// In debug builds, panics if `options.process.channel_name` and
+/// `options.backend.channel_name` do not match.
 pub fn start_chromium(
     options: StartChromiumOptions,
     delegate: impl BackendDelegate,

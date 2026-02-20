@@ -365,7 +365,7 @@ fn push_browsing_context_event(
     events.push(BrowserEvent::BrowsingContext {
         profile_id: String::new(),
         browsing_context_id,
-        event,
+        event: Box::new(event),
     });
 }
 

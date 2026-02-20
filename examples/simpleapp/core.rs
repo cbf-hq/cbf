@@ -222,7 +222,7 @@ impl CoreState {
                 browsing_context_id,
                 event,
                 ..
-            } => self.handle_browsing_context_event(browsing_context_id, event),
+            } => self.handle_browsing_context_event(browsing_context_id, *event),
             BrowserEvent::ProfilesListed { .. } => Vec::new(),
             BrowserEvent::ShutdownBlocked {
                 request_id,
