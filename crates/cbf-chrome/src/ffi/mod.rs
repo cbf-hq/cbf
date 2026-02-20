@@ -1,11 +1,11 @@
-//! FFI bridge adapters between Rust-side models and `cbf-sys` C ABI types.
+//! FFI bridge adapters between Rust-side models and `cbf-chrome-sys` C ABI types.
 //!
 //! This module handles low-level IPC event decoding and conversion utilities
 //! that remain internal to the crate boundary.
 
 use std::{ffi::CString, ptr};
 
-use cbf_sys::ffi::*;
+use cbf_chrome_sys::ffi::*;
 use cursor_icon::CursorIcon;
 use tracing::{debug, warn};
 

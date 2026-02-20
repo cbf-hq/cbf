@@ -31,10 +31,11 @@ It provides a stable, application-agnostic API surface for controlling browsing 
 ## Layered Architecture
 
 - `cbf` (high-level Rust API)
-    - Public commands/events and session lifecycle.
-    - Converts low-level FFI events into stable Rust API types.
-- `cbf-sys` (low-level Rust FFI boundary)
-    - C ABI types/functions and linkage contract.
+    - Browser-generic public commands/events and session lifecycle.
+- `cbf-chrome` (Chromium-specific safe API/backend)
+    - Chromium backend implementation and safe extension surface.
+- `cbf-chrome-sys` (low-level Rust FFI boundary)
+    - Chromium bridge C ABI types/functions and linkage contract.
     - No high-level browser domain logic.
 - Chromium fork (and `cbf_bridge` target)
     - Mojo-based IPC implementation and WebContents-side integration.
@@ -42,7 +43,7 @@ It provides a stable, application-agnostic API surface for controlling browsing 
 
 Dependency direction:
 
-`Application -> cbf -> cbf-sys -> Chromium process`
+`Application -> cbf -> cbf-chrome -> cbf-chrome-sys -> Chromium process`
 
 ## API Model
 

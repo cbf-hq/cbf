@@ -11,7 +11,7 @@ readme.workspace = true
 
 [dependencies]
 cbf = { path = "../cbf" }
-cbf-sys = { path = "../cbf-sys" }
+cbf-chrome-sys = { path = "../cbf-chrome-sys" }
 thiserror.workspace = true
 cursor-icon = { workspace = true }
 async-channel.workspace = true

@@ -1,9 +1,9 @@
 [package]
-name = "cbf-sys"
+name = "cbf-chrome-sys"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-description = "Low-level Rust FFI boundary for cbf crate"
+description = "Chromium-specific low-level Rust FFI/wire boundary for CBF"
 repository.workspace = true
 keywords.workspace = true
 license.workspace = true

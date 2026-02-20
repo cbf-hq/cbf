@@ -6,7 +6,7 @@ This note summarizes current findings about drag-and-drop data fields across:
 
 - Chromium `content::DropData`
 - CBF Chromium-side `mojom::CbfDragData`
-- Rust-side `DragData` (`cbf` / `cbf-sys`)
+- Rust-side `DragData` (`cbf` / `cbf-chrome-sys`)
 
 It focuses on field semantics, directionality (browser->external vs external->browser), and API design implications for CBF.
 
@@ -109,7 +109,7 @@ Operationally:
 
 ## 7. CBF API Layering Guidance
 
-Given CBF architecture constraints (browser-generic API, Chromium internals hidden behind `cbf-sys`):
+Given CBF architecture constraints (browser-generic API, Chromium internals hidden behind `cbf-chrome-sys`):
 
 - Good browser-generic expansion candidates:
   - `filenames`

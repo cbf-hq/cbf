@@ -32,7 +32,8 @@ Then verify Rust crates:
 
 ```bash
 cargo check -p cbf
-cargo check -p cbf-sys
+cargo check -p cbf-chrome
+cargo check -p cbf-chrome-sys
 ```
 
 ## 3. Start Chromium from CBF (Default Path)
@@ -76,7 +77,7 @@ Important:
 ## 4. Suggested Validation Checklist
 
 - `cbf` compiles and tests pass.
-- `cbf-sys` compiles and links correctly.
+- `cbf-chrome-sys` compiles and links correctly.
 - Can launch Chromium via `start_chromium`.
 - Can connect from Rust side and receive baseline lifecycle events.
 - Crash/disconnect paths produce expected events/errors.

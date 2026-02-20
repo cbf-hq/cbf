@@ -42,16 +42,17 @@ autoninja -C out/Default cbf_bridge
 ```
 
 - `chrome`: Chromium browser binary target.
-- `cbf_bridge`: Mojo IPC client bridge used by `cbf-sys`.
+- `cbf_bridge`: Mojo IPC client bridge used by `cbf-chrome-sys`.
 
 ## 4. Configure Bridge Library Path
 
-`cbf-sys` links against `cbf_bridge` from `CBF_BRIDGE_LIB_DIR`:
+`cbf-chrome-sys` links against `cbf_bridge` from `CBF_BRIDGE_LIB_DIR`:
 
 ```bash
 export CBF_BRIDGE_LIB_DIR="/path/to/chromium/src/out/Default"
 cargo check -p cbf
-cargo check -p cbf-sys
+cargo check -p cbf-chrome
+cargo check -p cbf-chrome-sys
 ```
 
 You can also set this per-project in `.cargo/config.toml`:
@@ -73,7 +74,7 @@ want to avoid changing global machine environment variables.
 Validation checklist:
 
 - `cbf` compiles and tests pass.
-- `cbf-sys` compiles and links correctly.
+- `cbf-chrome-sys` compiles and links correctly.
 - `cbf_bridge` builds against your target Chromium revision.
 - Can launch Chromium and connect from Rust side.
 - Crash/disconnect paths produce expected events/errors.

@@ -88,7 +88,7 @@ scrolling.
 For CBF architecture:
 
 - `cbf` (high-level Rust) should not implement Chromium wheel phase logic.
-- Chromium-specific event semantics should stay in Chromium side or `cbf-sys`
+- Chromium-specific event semantics should stay in Chromium side or `cbf-chrome-sys`
   boundary code.
 - If synthesis is unavoidable, keep it semantic-minimal and avoid inventing
   momentum/inertial state unless truly present.

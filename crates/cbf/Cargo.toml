@@ -15,7 +15,6 @@ dummy-backend = []
 chromium-backend = []
 
 [dependencies]
-cbf-sys = { path = "../cbf-sys" }
 thiserror.workspace = true
 cursor-icon = { workspace = true }
 async-channel.workspace = true

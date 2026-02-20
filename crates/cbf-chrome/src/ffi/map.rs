@@ -1,7 +1,7 @@
 #[cfg(target_os = "macos")]
 use std::{ffi::c_void, ptr::NonNull};
 
-use cbf_sys::ffi::*;
+use cbf_chrome_sys::ffi::*;
 use cursor_icon::CursorIcon;
 use tracing::debug;
 

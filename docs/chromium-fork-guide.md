@@ -11,7 +11,7 @@ Do not assume stock upstream Chromium has equivalent behavior.
 ## 2. Relevant Source Layout
 
 - CBF-related Chromium code: `chromium/src/chrome/browser/cbf/`
-- Bridge implementation for `cbf-sys`: `chromium/src/chrome/browser/cbf/bridge`
+- Bridge implementation for `cbf-chrome-sys`: `chromium/src/chrome/browser/cbf/bridge`
 - CBF patch set: `chromium/patches/cbf`
 
 ## 3. Build Targets
@@ -24,7 +24,7 @@ autoninja -C out/Default cbf_bridge
 ```
 
 - `chrome`: browser binary with CBF feature path.
-- `cbf_bridge`: shared library used by `cbf-sys`.
+- `cbf_bridge`: shared library used by `cbf-chrome-sys`.
 
 ## 4. Patch and Drift Policy
 

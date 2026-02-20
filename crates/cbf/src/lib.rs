@@ -14,12 +14,6 @@ pub mod data;
 pub mod error;
 pub mod event;
 pub mod middleware;
-pub mod platform;
 
 #[cfg(feature = "dummy-backend")]
 pub mod dummy_backend;
-
-pub use cbf_sys as sys;
-
-#[allow(dead_code, unused_imports)]
-mod ffi;

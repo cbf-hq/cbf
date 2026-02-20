@@ -26,16 +26,17 @@ CBF is designed to be product-agnostic and reusable across multiple applications
 Three-layer model:
 
 - `cbf` (high-level API)
-- `cbf-sys` (C ABI/FFI boundary)
+- `cbf-chrome` (Chromium-specific safe API/backend)
+- `cbf-chrome-sys` (C ABI/FFI boundary)
 - Chromium fork + `cbf_bridge` (Mojo implementation)
 
 Dependency direction:
 
-`Application -> cbf -> cbf-sys -> Chromium process`
+`Application -> cbf -> cbf-chrome -> cbf-chrome-sys -> Chromium process`
 
 Key rule:
 
-- Chromium/Mojo details must terminate at `cbf-sys` and conversion code, not leak into the public `cbf` API.
+- Chromium/Mojo details must terminate at `cbf-chrome-sys` and conversion code, not leak into the public `cbf` API.
 - Detailed implementation constraints are maintained in `docs/implementation-guide.md`.
 
 ## 4. API Model

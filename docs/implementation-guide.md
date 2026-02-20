@@ -1,6 +1,6 @@
 # CBF Implementation Guide
 
-This guide is for contributors implementing `cbf-sys` and the Chromium-side bridge.
+This guide is for contributors implementing `cbf-chrome-sys` and the Chromium-side bridge.
 For setup flow, see:
 
 - `docs/user-setup-guide.md` (prebuilt artifact users)
@@ -12,7 +12,7 @@ For setup flow, see:
 This document defines implementation invariants for:
 
 - Chromium bridge code (`cbf_bridge` and related Mojo plumbing)
-- `cbf-sys` FFI boundary code
+- `cbf-chrome-sys` FFI boundary code
 - Conversion points between low-level bridge events and high-level `cbf` API
 
 It is not a setup or onboarding guide for users of the library.
@@ -58,7 +58,7 @@ Prefer:
 
 Layering must remain strict:
 
-- Keep C ABI types and exported C functions in `cbf-sys`.
+- Keep C ABI types and exported C functions in `cbf-chrome-sys`.
 - Keep high-level browser domain API in `cbf`.
 - Do not leak Chromium or Mojo implementation details into public `cbf` types.
 - Restrict conversion logic to boundary layers instead of spreading it through public API code.
@@ -66,13 +66,13 @@ Layering must remain strict:
 ### Platform Boundary Rule
 
 - Do not re-implement Chromium-specific behavior in `cbf` (Rust high-level layer).
-- Keep Chromium-specific conversion/state-machine logic in Chromium code or `cbf-sys` (`cbf_bridge`).
-- When Chromium already provides a conversion path, use it via `cbf-sys` instead of recreating logic in Rust.
+- Keep Chromium-specific conversion/state-machine logic in Chromium code or `cbf-chrome-sys` (`cbf_bridge`).
+- When Chromium already provides a conversion path, use it via `cbf-chrome-sys` instead of recreating logic in Rust.
 
 ### Constant Ownership Rule
 
 - Do not duplicate Chromium-owned constants in `cbf`.
-- If Rust needs Chromium constants or enum values, expose them through `cbf-sys`/`cbf_bridge`.
+- If Rust needs Chromium constants or enum values, expose them through `cbf-chrome-sys`/`cbf_bridge`.
 - Avoid manually mirroring phase/flag values in high-level Rust code.
 
 ### Bridge-First Rule
@@ -82,7 +82,7 @@ Layering must remain strict:
 
 Dependency direction remains:
 
-`Application -> cbf -> cbf-sys -> Chromium process`
+`Application -> cbf -> cbf-chrome -> cbf-chrome-sys -> Chromium process`
 
 ## 5. Failure Handling Contract
 
@@ -121,7 +121,7 @@ Before merging bridge/boundary changes, confirm:
 - `base::Unretained` usage (if any) is justified, documented, and tracked.
 - Race-prone paths use `DCHECK + return` style guards where missing objects are expected.
 - New API surface additions stay browser-generic at `cbf` layer.
-- Chromium-specific details remain contained in bridge or `cbf-sys`.
+- Chromium-specific details remain contained in bridge or `cbf-chrome-sys`.
 - Disconnect/crash paths have explicit behavior and tests where feasible.
 
 ## 8. Advanced: Manual Chromium Launch
