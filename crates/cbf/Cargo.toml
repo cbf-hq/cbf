@@ -10,9 +10,8 @@ license.workspace = true
 readme.workspace = true
 
 [features]
-default = ["chromium-backend"]
+default = []
 dummy-backend = []
-chromium-backend = []
 
 [dependencies]
 thiserror.workspace = true
@@ -42,4 +41,3 @@ features = ["NSView"]
 [[example]]
 name = "simpleapp"
 path = "../../examples/simpleapp/main.rs"
-required-features = ["chromium-backend"]
