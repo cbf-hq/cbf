@@ -112,9 +112,7 @@ impl BackendDelegate for Lifecycle {
             ..
         } = event
             && let BrowsingContextEvent::JavaScriptDialogRequested {
-                request_id,
-                r#type,
-                ..
+                request_id, r#type, ..
             } = event.as_ref()
             && *r#type == DialogType::BeforeUnload
         {

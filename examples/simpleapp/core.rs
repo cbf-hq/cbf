@@ -166,7 +166,11 @@ impl CoreState {
         }
     }
 
-    pub(crate) fn handle_surface_update(&self, _browsing_context_id: BrowsingContextId, handle: SurfaceHandle) -> Vec<CoreAction> {
+    pub(crate) fn handle_surface_update(
+        &self,
+        _browsing_context_id: BrowsingContextId,
+        handle: SurfaceHandle,
+    ) -> Vec<CoreAction> {
         vec![CoreAction::ApplySurfaceHandle(handle)]
     }
 
@@ -289,25 +293,35 @@ impl CoreState {
                 set_browsing_context_id(&self.shared, Some(browsing_context_id));
                 vec![CoreAction::SyncViewResizeAndFocus]
             }
-            BrowsingContextEvent::TitleUpdated { title } => vec![CoreAction::UpdateWindowTitle(title)],
+            BrowsingContextEvent::TitleUpdated { title } => {
+                vec![CoreAction::UpdateWindowTitle(title)]
+            }
             BrowsingContextEvent::CursorChanged { cursor_type } => {
                 vec![CoreAction::UpdateCursor(cursor_type)]
             }
-            BrowsingContextEvent::ImeBoundsUpdated { update } => vec![CoreAction::ApplyImeBounds(update)],
-            BrowsingContextEvent::ContextMenuRequested { menu } => vec![CoreAction::ShowContextMenu(menu)],
+            BrowsingContextEvent::ImeBoundsUpdated { update } => {
+                vec![CoreAction::ApplyImeBounds(update)]
+            }
+            BrowsingContextEvent::ContextMenuRequested { menu } => {
+                vec![CoreAction::ShowContextMenu(menu)]
+            }
             BrowsingContextEvent::DragStartRequested { request } => {
                 vec![CoreAction::StartPlatformDrag(request)]
             }
             BrowsingContextEvent::JavaScriptDialogRequested { request_id, .. } => {
-                _ = self
-                    .browser_handle()
-                    .confirm_beforeunload(browsing_context_id, request_id, false);
+                _ = self.browser_handle().confirm_beforeunload(
+                    browsing_context_id,
+                    request_id,
+                    false,
+                );
                 Vec::new()
             }
             BrowsingContextEvent::PermissionRequested { request_id, .. } => {
-                _ = self
-                    .browser_handle()
-                    .confirm_permission(browsing_context_id, request_id, false);
+                _ = self.browser_handle().confirm_permission(
+                    browsing_context_id,
+                    request_id,
+                    false,
+                );
                 Vec::new()
             }
             BrowsingContextEvent::CloseRequested | BrowsingContextEvent::Closed => {

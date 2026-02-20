@@ -17,7 +17,7 @@ use cbf::{
 
 use crate::{
     command::ChromeCommand,
-    event::{to_generic_event, ChromeEvent},
+    event::{ChromeEvent, to_generic_event},
     ffi::{Error as IpcError, IpcClient, IpcEvent},
 };
 

@@ -81,9 +81,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
             browsing_context_id: *browsing_context_id,
-            event: Box::new(BrowsingContextEvent::ContextMenuRequested {
-                menu: menu.clone(),
-            }),
+            event: Box::new(BrowsingContextEvent::ContextMenuRequested { menu: menu.clone() }),
         }),
         IpcEvent::NewWebContentsRequested {
             profile_id,
@@ -144,9 +142,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
             browsing_context_id: *browsing_context_id,
-            event: Box::new(BrowsingContextEvent::FaviconUrlUpdated {
-                url: url.clone(),
-            }),
+            event: Box::new(BrowsingContextEvent::FaviconUrlUpdated { url: url.clone() }),
         }),
         IpcEvent::BeforeUnloadDialogRequested {
             profile_id,

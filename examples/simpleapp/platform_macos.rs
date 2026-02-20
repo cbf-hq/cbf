@@ -63,7 +63,10 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         commands: Vec<String>,
     ) {
         self.with_page_id(|browsing_context_id| {
-            if let Err(err) = self.handle.send_key_event(browsing_context_id, event, commands) {
+            if let Err(err) = self
+                .handle
+                .send_key_event(browsing_context_id, event, commands)
+            {
                 warn!("failed to forward key event: {err}");
             }
         });
@@ -249,7 +252,10 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
 
     fn on_native_drag_cancel(&self, _view: &BrowserViewMac, session_id: u64) {
         self.with_page_id(|browsing_context_id| {
-            if let Err(err) = self.handle.send_drag_cancel(session_id, browsing_context_id) {
+            if let Err(err) = self
+                .handle
+                .send_drag_cancel(session_id, browsing_context_id)
+            {
                 warn!("failed to forward native drag cancel: {err}");
             }
             remove_drag_session(&self.shared, session_id);
