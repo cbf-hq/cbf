@@ -310,19 +310,7 @@ impl ChromiumBackend {
                     return Some(reason);
                 }
             }
-            IpcEvent::SurfaceHandleUpdated {
-                profile_id,
-                browsing_context_id,
-                handle,
-            } => {
-                if let Some(reason) = emit(BrowserEvent::BrowsingContext {
-                    profile_id,
-                    browsing_context_id,
-                    event: BrowsingContextEvent::SurfaceHandleUpdated { handle },
-                }) {
-                    return Some(reason);
-                }
-            }
+            IpcEvent::SurfaceHandleUpdated { .. } => {}
             IpcEvent::WebContentsResizeAcknowledged { browsing_context_id, .. } => {
                 state.resizes_in_flight.remove(&browsing_context_id);
                 if let Some((width, height)) = state.pending_resizes.remove(&browsing_context_id) {

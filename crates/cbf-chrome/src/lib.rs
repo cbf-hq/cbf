@@ -5,7 +5,9 @@
 
 pub mod chromium_backend;
 pub mod chromium_process;
+pub mod context_menu;
 pub mod ffi;
 pub mod input;
+pub mod surface;
 
 pub use cbf;

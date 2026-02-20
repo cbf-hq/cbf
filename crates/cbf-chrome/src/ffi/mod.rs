@@ -18,9 +18,10 @@ use cbf::data::{
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
     profile::ProfileInfo,
-    surface::SurfaceHandle,
 };
 use cbf::event::BeforeUnloadReason;
+
+use crate::surface::SurfaceHandle;
 
 mod map;
 mod utils;

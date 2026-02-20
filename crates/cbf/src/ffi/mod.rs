@@ -16,7 +16,6 @@ use crate::data::{
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
     profile::ProfileInfo,
-    surface::SurfaceHandle,
 };
 use crate::event::BeforeUnloadReason;
 
@@ -39,12 +38,6 @@ use utils::{c_string_to_string, to_optional_cstring};
 /// Low-level IPC events emitted by the Chromium bridge.
 #[derive(Debug, Clone, PartialEq)]
 pub enum IpcEvent {
-    /// The rendering surface handle for a page was updated.
-    SurfaceHandleUpdated {
-        profile_id: String,
-        browsing_context_id: BrowsingContextId,
-        handle: SurfaceHandle,
-    },
     /// A new web page was created by the backend.
     WebPageCreated {
         profile_id: String,

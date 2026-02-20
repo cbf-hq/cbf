@@ -10,7 +10,7 @@ use crate::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
 use cbf::{
     data::{
         context_menu::{
-            self, ContextMenu, ContextMenuAccelerator, ContextMenuIcon, ContextMenuItem,
+            ContextMenu, ContextMenuAccelerator, ContextMenuIcon, ContextMenuItem,
             ContextMenuItemType,
         },
         drag::{DragData, DragImage, DragOperations, DragStartRequest, DragUrlInfo},
@@ -25,10 +25,11 @@ use cbf::{
             MouseButton, MouseEvent, MouseEventType, MouseWheelEvent, PointerType,
             ScrollGranularity,
         },
-        surface::SurfaceHandle,
     },
     event::BeforeUnloadReason,
 };
+
+use crate::surface::SurfaceHandle;
 
 use super::{utils::c_string_to_string, Error, IpcEvent};
 
@@ -267,7 +268,7 @@ fn parse_context_menu(menu: CbfContextMenu) -> ContextMenu {
         items: parse_context_menu_items(menu.items),
     };
 
-    context_menu::filter_supported(menu)
+    crate::context_menu::filter_supported(menu)
 }
 
 fn parse_context_menu_items(list: CbfContextMenuItemList) -> Vec<ContextMenuItem> {

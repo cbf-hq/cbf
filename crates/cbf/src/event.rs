@@ -7,7 +7,7 @@ use cursor_icon::CursorIcon;
 
 use crate::data::{
     context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId,
-    ime::ImeBoundsUpdate, profile::ProfileInfo, surface::SurfaceHandle,
+    ime::ImeBoundsUpdate, profile::ProfileInfo,
 };
 use crate::error::BackendErrorInfo;
 
@@ -110,9 +110,6 @@ pub enum BrowsingContextEvent {
 
     /// The web page was closed.
     Closed,
-
-    /// The rendering surface handle was updated.
-    SurfaceHandleUpdated { handle: SurfaceHandle },
 
     /// IME bounds information was updated.
     ///

@@ -8,7 +8,7 @@ use tracing::debug;
 use crate::{
     data::{
         context_menu::{
-            self, ContextMenu, ContextMenuAccelerator, ContextMenuIcon, ContextMenuItem,
+            ContextMenu, ContextMenuAccelerator, ContextMenuIcon, ContextMenuItem,
             ContextMenuItemType,
         },
         drag::{DragData, DragImage, DragOperations, DragStartRequest, DragUrlInfo},
@@ -23,7 +23,6 @@ use crate::{
             MouseButton, MouseEvent, MouseEventType, MouseWheelEvent, PointerType,
             ScrollGranularity,
         },
-        surface::SurfaceHandle,
     },
     event::BeforeUnloadReason,
 };
@@ -32,15 +31,6 @@ use super::{utils::c_string_to_string, Error, IpcEvent};
 
 pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
     match event.kind {
-        CBF_EVENT_SURFACE_HANDLE_UPDATED => {
-            let handle = parse_surface_handle(event.surface_handle)?;
-
-            Ok(IpcEvent::SurfaceHandleUpdated {
-                profile_id: c_string_to_string(event.profile_id),
-                browsing_context_id: BrowsingContextId::new(event.web_page_id),
-                handle,
-            })
-        }
         CBF_EVENT_WEB_PAGE_CREATED => Ok(IpcEvent::WebPageCreated {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: BrowsingContextId::new(event.web_page_id),
@@ -257,15 +247,13 @@ fn parse_browsing_context_ids(list: CbfWebPageIdList) -> Vec<BrowsingContextId> 
 }
 
 fn parse_context_menu(menu: CbfContextMenu) -> ContextMenu {
-    let menu = ContextMenu {
+    ContextMenu {
         menu_id: menu.menu_id,
         x: menu.x,
         y: menu.y,
         source_type: menu.source_type,
         items: parse_context_menu_items(menu.items),
-    };
-
-    context_menu::filter_supported(menu)
+    }
 }
 
 fn parse_context_menu_items(list: CbfContextMenuItemList) -> Vec<ContextMenuItem> {
@@ -392,18 +380,6 @@ fn cursor_icon_from_ffi(value: u8) -> CursorIcon {
         CBF_CURSOR_COL_RESIZE => CursorIcon::ColResize,
         CBF_CURSOR_ROW_RESIZE => CursorIcon::RowResize,
         _ => CursorIcon::Default,
-    }
-}
-
-fn parse_surface_handle(handle: CbfSurfaceHandle) -> Result<SurfaceHandle, Error> {
-    match handle.kind {
-        CBF_SURFACE_HANDLE_MAC_CA_CONTEXT_ID => {
-            Ok(SurfaceHandle::MacCaContextId(handle.ca_context_id))
-        }
-        CBF_SURFACE_HANDLE_WINDOWS_HWND => {
-            unimplemented!("Windows HWND surface handle parsing not implemented yet")
-        }
-        _ => Err(Error::InvalidEvent),
     }
 }
 
