@@ -16,6 +16,7 @@ pub mod auto_dialog_responder;
 pub mod error_guard;
 pub mod lifecycle;
 pub mod logging;
+pub mod resize_debounce;
 
 use crate::{
     delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision, NoopDelegate},

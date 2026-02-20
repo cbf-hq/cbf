@@ -1,5 +1,4 @@
 use std::{
-    collections::{HashMap, HashSet},
     thread,
     time::{Duration, Instant},
 };
@@ -8,7 +7,6 @@ use async_channel::{Receiver, Sender, TryRecvError};
 use cbf::{
     browser::{Backend, CommandSender, EventStream},
     command::BrowserCommand,
-    data::ids::BrowsingContextId,
     delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
     error::{ApiErrorKind, BackendErrorInfo, Error, Operation},
     event::{BackendStopReason, BrowserEvent},
@@ -49,11 +47,6 @@ impl ChromiumBackendOptions {
             retry_interval: Duration::from_millis(100),
         }
     }
-}
-
-struct CommunicationState {
-    resizes_in_flight: HashSet<BrowsingContextId>,
-    pending_resizes: HashMap<BrowsingContextId, (u32, u32)>,
 }
 
 #[derive(Debug)]
@@ -331,7 +324,6 @@ impl ChromiumBackend {
         command_rx: &Receiver<ChromeCommand>,
         client: &mut IpcClient,
         event_tx: &Sender<ChromeEvent>,
-        state: &mut CommunicationState,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> bool {
         dispatcher.on_idle();
@@ -345,13 +337,13 @@ impl ChromiumBackend {
         }
 
         if let Some(stop_reason) =
-            Self::process_command_queue(command_rx, client, event_tx, state, dispatcher)
+            Self::process_command_queue(command_rx, client, event_tx, dispatcher)
         {
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
         };
 
-        if let Some(stop_reason) = Self::process_event_queue(client, event_tx, state, dispatcher) {
+        if let Some(stop_reason) = Self::process_event_queue(client, event_tx, dispatcher) {
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
         };
@@ -380,20 +372,9 @@ impl ChromiumBackend {
             return;
         };
 
-        // Initialize communication state and enter the event loop.
-        let mut state = CommunicationState {
-            resizes_in_flight: HashSet::new(),
-            pending_resizes: HashMap::new(),
-        };
         const POLL_INTERVAL: Duration = Duration::from_millis(16);
 
-        while Self::poll_event(
-            &command_rx,
-            &mut client,
-            &event_tx,
-            &mut state,
-            &mut dispatcher,
-        ) {
+        while Self::poll_event(&command_rx, &mut client, &event_tx, &mut dispatcher) {
             thread::sleep(POLL_INTERVAL);
         }
     }
@@ -401,15 +382,12 @@ impl ChromiumBackend {
     fn process_event_queue(
         client: &mut IpcClient,
         event_tx: &Sender<ChromeEvent>,
-        state: &mut CommunicationState,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> Option<BackendStopReason> {
         while let Some(event) = client.poll_event() {
             match event {
                 Ok(event) => {
-                    if let Some(reason) =
-                        Self::handle_ipc_event(event, event_tx, client, state, dispatcher)
-                    {
+                    if let Some(reason) = Self::handle_ipc_event(event, event_tx, dispatcher) {
                         return Some(reason);
                     }
                 }
@@ -436,42 +414,8 @@ impl ChromiumBackend {
     fn handle_ipc_event(
         event: IpcEvent,
         event_tx: &Sender<ChromeEvent>,
-        client: &mut IpcClient,
-        state: &mut CommunicationState,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> Option<BackendStopReason> {
-        match &event {
-            IpcEvent::WebContentsResizeAcknowledged {
-                browsing_context_id,
-                ..
-            } => {
-                state.resizes_in_flight.remove(browsing_context_id);
-                if let Some((width, height)) = state.pending_resizes.remove(browsing_context_id) {
-                    state.resizes_in_flight.insert(*browsing_context_id);
-                    if let Some(reason) = Self::dispatch_raw_command(
-                        ChromeCommand::SetWebContentsSize {
-                            browsing_context_id: *browsing_context_id,
-                            width,
-                            height,
-                        },
-                        client,
-                        event_tx,
-                        dispatcher,
-                    ) {
-                        return Some(reason);
-                    }
-                }
-            }
-            IpcEvent::WebContentsClosed {
-                browsing_context_id,
-                ..
-            } => {
-                state.resizes_in_flight.remove(browsing_context_id);
-                state.pending_resizes.remove(browsing_context_id);
-            }
-            _ => {}
-        }
-
         Self::handle_raw_event_with_delegate_gate(
             dispatcher,
             event_tx,
@@ -483,73 +427,14 @@ impl ChromiumBackend {
         command_rx: &Receiver<ChromeCommand>,
         client: &mut IpcClient,
         event_tx: &Sender<ChromeEvent>,
-        state: &mut CommunicationState,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> Option<BackendStopReason> {
-        let mut pending_command: Option<ChromeCommand> = None;
-
         loop {
-            let command = match pending_command.take() {
-                Some(command) => command,
-                None => match command_rx.try_recv() {
-                    Ok(command) => command,
-                    Err(TryRecvError::Empty) => break None,
-                    Err(TryRecvError::Closed) => break Some(BackendStopReason::Disconnected),
-                },
+            let command = match command_rx.try_recv() {
+                Ok(command) => command,
+                Err(TryRecvError::Empty) => break None,
+                Err(TryRecvError::Closed) => break Some(BackendStopReason::Disconnected),
             };
-
-            if let ChromeCommand::SetWebContentsSize {
-                browsing_context_id,
-                width,
-                height,
-            } = command
-            {
-                let mut latest_resizes: HashMap<BrowsingContextId, (u32, u32)> = HashMap::new();
-                latest_resizes.insert(browsing_context_id, (width, height));
-
-                loop {
-                    match command_rx.try_recv() {
-                        Ok(ChromeCommand::SetWebContentsSize {
-                            browsing_context_id,
-                            width,
-                            height,
-                        }) => {
-                            latest_resizes.insert(browsing_context_id, (width, height));
-                        }
-                        Ok(other) => {
-                            pending_command = Some(other);
-                            break;
-                        }
-                        Err(TryRecvError::Empty) => break,
-                        Err(TryRecvError::Closed) => return Some(BackendStopReason::Disconnected),
-                    }
-                }
-
-                for (browsing_context_id, (width, height)) in latest_resizes {
-                    if state.resizes_in_flight.contains(&browsing_context_id) {
-                        state
-                            .pending_resizes
-                            .insert(browsing_context_id, (width, height));
-                        continue;
-                    }
-
-                    state.resizes_in_flight.insert(browsing_context_id);
-                    if let Some(reason) = Self::dispatch_raw_command(
-                        ChromeCommand::SetWebContentsSize {
-                            browsing_context_id,
-                            width,
-                            height,
-                        },
-                        client,
-                        event_tx,
-                        dispatcher,
-                    ) {
-                        return Some(reason);
-                    }
-                }
-
-                continue;
-            }
 
             if let Some(reason) = Self::dispatch_raw_command(command, client, event_tx, dispatcher)
             {
