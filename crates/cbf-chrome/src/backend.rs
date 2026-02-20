@@ -5,7 +5,6 @@ use std::{
 };
 
 use async_channel::{Receiver, Sender, TryRecvError};
-
 use cbf::{
     browser::{Backend, CommandSender, EventStream},
     command::BrowserCommand,

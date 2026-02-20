@@ -3,8 +3,8 @@
 //! This crate will host Chromium-focused command/event models and backend
 //! integration while keeping `cbf` browser-generic.
 
-pub mod chromium_backend;
-pub mod chromium_process;
+pub mod backend;
+pub mod process;
 pub mod command;
 pub mod context_menu;
 pub mod event;

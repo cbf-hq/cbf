@@ -8,7 +8,7 @@ use cbf::{
     error::Error,
 };
 
-use crate::chromium_backend::{ChromiumBackend, ChromiumBackendOptions};
+use crate::backend::{ChromiumBackend, ChromiumBackendOptions};
 
 /// Options for launching the Chromium process.
 #[derive(Debug, Clone)]
