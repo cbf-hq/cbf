@@ -14,8 +14,6 @@ use crate::{
     event::BrowserEvent,
 };
 
-pub use crate::browser_session::BrowserSession;
-
 /// A backend implementation that can drive a browser process.
 ///
 /// The `cbf` layer stays browser-generic. Backend-specific command/event
