@@ -44,7 +44,38 @@ pub trait Backend: Send + 'static {
 
 /// Channel sender used to push backend raw commands.
 pub struct CommandSender<B: Backend> {
-    tx: Sender<B::RawCommand>,
+    tx: Sender<CommandEnvelope<B>>,
+}
+
+/// Command payload sent to backend command queues.
+///
+/// Generic commands carry both the original [`BrowserCommand`] and the
+/// backend-native raw command generated at send time. Raw-only commands are
+/// sent through explicit raw APIs and do not carry a generic projection.
+pub enum CommandEnvelope<B: Backend> {
+    Generic {
+        command: BrowserCommand,
+        raw: B::RawCommand,
+    },
+    RawOnly {
+        raw: B::RawCommand,
+    },
+}
+
+impl<B: Backend> CommandEnvelope<B> {
+    pub fn as_generic(&self) -> Option<&BrowserCommand> {
+        match self {
+            Self::Generic { command, .. } => Some(command),
+            Self::RawOnly { .. } => None,
+        }
+    }
+
+    pub fn into_raw(self) -> B::RawCommand {
+        match self {
+            Self::Generic { raw, .. } => raw,
+            Self::RawOnly { raw } => raw,
+        }
+    }
 }
 
 impl<B: Backend> Clone for CommandSender<B> {
@@ -63,18 +94,18 @@ impl<B: Backend> std::fmt::Debug for CommandSender<B> {
 
 impl<B: Backend> CommandSender<B> {
     #[doc(hidden)]
-    pub fn from_raw_sender(tx: Sender<B::RawCommand>) -> Self {
+    pub fn from_raw_sender(tx: Sender<CommandEnvelope<B>>) -> Self {
         Self { tx }
     }
 
     /// Send a browser-generic command to the backend.
     pub fn send(&self, command: BrowserCommand) -> Result<(), Error> {
-        let raw = B::to_raw_command(command);
-        self.try_send_raw(raw)
+        let raw = B::to_raw_command(command.clone());
+        self.try_send_command_envelope(CommandEnvelope::Generic { command, raw })
     }
 
-    fn try_send_raw(&self, raw: B::RawCommand) -> Result<(), Error> {
-        match self.tx.try_send(raw) {
+    fn try_send_command_envelope(&self, envelope: CommandEnvelope<B>) -> Result<(), Error> {
+        match self.tx.try_send(envelope) {
             Ok(()) => Ok(()),
             Err(TrySendError::Closed(_)) => Err(Error::Disconnected),
             Err(TrySendError::Full(_)) => Err(Error::QueueFull),
@@ -84,12 +115,17 @@ impl<B: Backend> CommandSender<B> {
 
 /// Explicit raw command escape hatch.
 pub trait RawCommandSenderExt<B: Backend> {
+    /// Send a backend-native raw command directly.
+    ///
+    /// Raw commands sent through this method do not pass through the normal
+    /// [`crate::delegate::BackendDelegate::on_command`] path. Backends can
+    /// process these commands with backend-specific raw delegate hooks.
     fn send_raw(&self, raw: B::RawCommand) -> Result<(), Error>;
 }
 
 impl<B: Backend> RawCommandSenderExt<B> for CommandSender<B> {
     fn send_raw(&self, raw: B::RawCommand) -> Result<(), Error> {
-        self.try_send_raw(raw)
+        self.try_send_command_envelope(CommandEnvelope::RawOnly { raw })
     }
 }
 
@@ -444,7 +480,75 @@ impl<B: Backend> BrowserHandle<B> {
 }
 
 impl<B: Backend> RawCommandSenderExt<B> for BrowserHandle<B> {
+    /// Send a backend-native raw command directly.
+    ///
+    /// Raw commands sent through this method do not pass through the normal
+    /// [`crate::delegate::BackendDelegate::on_command`] path. Backends can
+    /// process these commands with backend-specific raw delegate hooks.
     fn send_raw(&self, raw: B::RawCommand) -> Result<(), Error> {
         self.command_tx.send_raw(raw)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use async_channel::unbounded;
+
+    use super::{Backend, CommandEnvelope, CommandSender, RawCommandSenderExt};
+    use crate::{command::BrowserCommand, error::Error, event::BrowserEvent};
+
+    struct MockBackend;
+
+    impl Backend for MockBackend {
+        type RawCommand = BrowserCommand;
+        type RawEvent = BrowserEvent;
+        type RawDelegate = ();
+
+        fn to_raw_command(command: BrowserCommand) -> Self::RawCommand {
+            command
+        }
+
+        fn to_generic_event(_raw: &Self::RawEvent) -> Option<BrowserEvent> {
+            None
+        }
+
+        fn connect<D: crate::delegate::BackendDelegate>(
+            self,
+            _delegate: D,
+            _raw_delegate: Option<Self::RawDelegate>,
+        ) -> Result<(CommandSender<Self>, super::EventStream<Self>), Error> {
+            unreachable!("connect is not needed in this test")
+        }
+    }
+
+    #[test]
+    fn send_wraps_generic_and_raw_command_together() {
+        let (tx, rx) = unbounded::<CommandEnvelope<MockBackend>>();
+        let sender = CommandSender::<MockBackend>::from_raw_sender(tx);
+
+        sender.send(BrowserCommand::ListProfiles).unwrap();
+
+        match rx.recv_blocking().unwrap() {
+            CommandEnvelope::Generic { command, raw } => {
+                assert!(matches!(command, BrowserCommand::ListProfiles));
+                assert!(matches!(raw, BrowserCommand::ListProfiles));
+            }
+            CommandEnvelope::RawOnly { .. } => panic!("expected generic envelope"),
+        }
+    }
+
+    #[test]
+    fn send_raw_wraps_raw_only_command() {
+        let (tx, rx) = unbounded::<CommandEnvelope<MockBackend>>();
+        let sender = CommandSender::<MockBackend>::from_raw_sender(tx);
+
+        sender.send_raw(BrowserCommand::ForceShutdown).unwrap();
+
+        match rx.recv_blocking().unwrap() {
+            CommandEnvelope::RawOnly { raw } => {
+                assert!(matches!(raw, BrowserCommand::ForceShutdown));
+            }
+            CommandEnvelope::Generic { .. } => panic!("expected raw-only envelope"),
+        }
     }
 }

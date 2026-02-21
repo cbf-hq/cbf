@@ -3,7 +3,7 @@ use std::{collections::HashMap, thread, time::Duration};
 use async_channel::{Receiver, Sender, TryRecvError};
 
 use crate::{
-    browser::{Backend, CommandSender, EventStream},
+    browser::{Backend, CommandEnvelope, CommandSender, EventStream},
     command::BrowserCommand,
     data::ids::BrowsingContextId,
     delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
@@ -44,7 +44,7 @@ impl Backend for DummyBackend {
         delegate: D,
         _raw_delegate: Option<Self::RawDelegate>,
     ) -> Result<(CommandSender<Self>, EventStream<Self>), Error> {
-        let (command_tx, command_rx) = async_channel::unbounded::<BrowserCommand>();
+        let (command_tx, command_rx) = async_channel::unbounded::<CommandEnvelope<Self>>();
         let (event_tx, event_rx) = async_channel::unbounded::<BrowserEvent>();
 
         let next_id = self.next_browsing_context_id;
@@ -145,7 +145,7 @@ impl DummyBackend {
     }
 
     fn run_communication(
-        command_rx: Receiver<BrowserCommand>,
+        command_rx: Receiver<CommandEnvelope<Self>>,
         event_tx: Sender<BrowserEvent>,
         mut next_id: u64,
         delegate: impl BackendDelegate,
@@ -176,8 +176,8 @@ impl DummyBackend {
                 return;
             }
 
-            let command = match command_rx.try_recv() {
-                Ok(command) => command,
+            let envelope = match command_rx.try_recv() {
+                Ok(envelope) => envelope,
                 Err(TryRecvError::Empty) => {
                     thread::sleep(POLL_INTERVAL);
                     continue;
@@ -194,15 +194,52 @@ impl DummyBackend {
                 }
             };
 
-            if let Some(reason) = Self::run_generic_command_with_delegate(
-                command,
-                &event_tx,
-                &mut dispatcher,
-                &mut pages,
-                &mut next_id,
-            ) {
-                Self::stop_backend(reason, &event_tx, &mut dispatcher, &mut pages, &mut next_id);
-                return;
+            match envelope {
+                CommandEnvelope::Generic { command, .. } => {
+                    if let Some(reason) = Self::run_generic_command_with_delegate(
+                        command,
+                        &event_tx,
+                        &mut dispatcher,
+                        &mut pages,
+                        &mut next_id,
+                    ) {
+                        Self::stop_backend(
+                            reason,
+                            &event_tx,
+                            &mut dispatcher,
+                            &mut pages,
+                            &mut next_id,
+                        );
+                        return;
+                    }
+                }
+                CommandEnvelope::RawOnly { raw } => {
+                    let (reason, events) = Self::execute_command(raw, &mut pages, &mut next_id);
+                    for event in events {
+                        if let Some(reason) =
+                            Self::dispatch_generic_event(event, &event_tx, &mut dispatcher)
+                        {
+                            Self::stop_backend(
+                                reason,
+                                &event_tx,
+                                &mut dispatcher,
+                                &mut pages,
+                                &mut next_id,
+                            );
+                            return;
+                        }
+                    }
+                    if let Some(reason) = reason {
+                        Self::stop_backend(
+                            reason,
+                            &event_tx,
+                            &mut dispatcher,
+                            &mut pages,
+                            &mut next_id,
+                        );
+                        return;
+                    }
+                }
             }
 
             let queued_commands = dispatcher.flush();

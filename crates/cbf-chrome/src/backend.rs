@@ -5,7 +5,7 @@ use std::{
 
 use async_channel::{Receiver, Sender, TryRecvError};
 use cbf::{
-    browser::{Backend, CommandSender, EventStream},
+    browser::{Backend, CommandEnvelope, CommandSender, EventStream},
     command::BrowserCommand,
     delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
     error::{ApiErrorKind, BackendErrorInfo, Error, Operation},
@@ -116,10 +116,34 @@ fn backend_error_terminal_hint(kind: ApiErrorKind) -> bool {
     )
 }
 
+/// Decision returned from [`ChromeRawDelegate::on_raw_command`].
+#[derive(Debug)]
+pub enum RawCommandDecision {
+    /// Forward the raw command to Chromium transport.
+    Forward,
+    /// Drop the raw command and continue processing.
+    Drop,
+    /// Stop backend processing with the given reason.
+    Stop(BackendStopReason),
+}
+
+/// Hook-based interface for mediating Chromium raw command flow.
+pub trait ChromeRawDelegate: Send + 'static {
+    /// Called for each raw command sent through `send_raw`.
+    fn on_raw_command(&mut self, _command: &ChromeCommand) -> RawCommandDecision {
+        RawCommandDecision::Forward
+    }
+}
+
+#[derive(Debug, Default)]
+struct NoopRawDelegate;
+
+impl ChromeRawDelegate for NoopRawDelegate {}
+
 impl Backend for ChromiumBackend {
     type RawCommand = ChromeCommand;
     type RawEvent = ChromeEvent;
-    type RawDelegate = ();
+    type RawDelegate = Box<dyn ChromeRawDelegate>;
 
     fn to_raw_command(command: BrowserCommand) -> Self::RawCommand {
         command.into()
@@ -132,13 +156,16 @@ impl Backend for ChromiumBackend {
     fn connect<D: BackendDelegate>(
         self,
         delegate: D,
-        _raw_delegate: Option<Self::RawDelegate>,
+        raw_delegate: Option<Self::RawDelegate>,
     ) -> Result<(CommandSender<Self>, EventStream<Self>), Error> {
-        let (command_tx, command_rx) = async_channel::unbounded::<ChromeCommand>();
+        let (command_tx, command_rx) = async_channel::unbounded::<CommandEnvelope<Self>>();
         let (event_tx, event_rx) = async_channel::unbounded::<ChromeEvent>();
         let options = self.options;
+        let raw_delegate = raw_delegate.unwrap_or_else(|| Box::<NoopRawDelegate>::default());
 
-        thread::spawn(move || Self::run_communication(options, command_rx, event_tx, delegate));
+        thread::spawn(move || {
+            Self::run_communication(options, command_rx, event_tx, delegate, raw_delegate)
+        });
 
         Ok((
             CommandSender::from_raw_sender(command_tx),
@@ -153,111 +180,31 @@ impl ChromiumBackend {
         Self { options }
     }
 
-    fn emit_raw_event(event_tx: &Sender<ChromeEvent>, event: ChromeEvent) {
-        _ = event_tx.send_blocking(event);
-    }
-
-    fn handle_raw_event_with_delegate_gate(
-        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
-        event_tx: &Sender<ChromeEvent>,
-        event: ChromeEvent,
-    ) -> Option<BackendStopReason> {
-        if let Some(generic_event) = Self::to_generic_event(&event) {
-            match dispatcher.dispatch_event(&generic_event) {
-                EventDecision::Forward => {
-                    Self::emit_raw_event(event_tx, event);
-                    None
-                }
-                EventDecision::Stop(reason) => Some(reason),
-            }
-        } else {
-            Self::emit_raw_event(event_tx, event);
-            None
-        }
-    }
-
-    fn run_generic_command_with_delegate(
-        command: BrowserCommand,
-        client: &mut IpcClient,
-        event_tx: &Sender<ChromeEvent>,
-        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
-    ) -> Option<BackendStopReason> {
-        match dispatcher.dispatch_command(&command) {
-            CommandDecision::Forward => {
-                let raw_command = Self::to_raw_command(command);
-                let (reason, events) = Self::execute_raw_command(raw_command, client);
-                for event in events {
-                    if let Some(reason) =
-                        Self::handle_raw_event_with_delegate_gate(dispatcher, event_tx, event)
-                    {
-                        return Some(reason);
-                    }
-                }
-                reason
-            }
-            CommandDecision::Drop => None,
-            CommandDecision::Stop(reason) => Some(reason),
-        }
-    }
-
-    fn run_raw_command(
-        command: ChromeCommand,
-        client: &mut IpcClient,
-        event_tx: &Sender<ChromeEvent>,
-        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
-    ) -> Option<BackendStopReason> {
-        let (reason, events) = Self::execute_raw_command(command, client);
-        for event in events {
-            if let Some(reason) =
-                Self::handle_raw_event_with_delegate_gate(dispatcher, event_tx, event)
-            {
-                return Some(reason);
-            }
-        }
-        reason
-    }
-
-    fn drain_delegate_queue(
-        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
-        client: &mut IpcClient,
-        event_tx: &Sender<ChromeEvent>,
-        mut pending_commands: Vec<BrowserCommand>,
-    ) -> Option<BackendStopReason> {
-        loop {
-            for command in pending_commands {
-                if let Some(reason) =
-                    Self::run_generic_command_with_delegate(command, client, event_tx, dispatcher)
-                {
-                    return Some(reason);
-                }
-            }
-
-            pending_commands = dispatcher.flush();
-            if pending_commands.is_empty() {
-                return None;
-            }
-        }
-    }
-
-    fn stop_backend(
-        reason: BackendStopReason,
-        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
-        client: Option<&mut IpcClient>,
-        event_tx: &Sender<ChromeEvent>,
+    fn run_communication(
+        options: ChromiumBackendOptions,
+        command_rx: Receiver<CommandEnvelope<Self>>,
+        event_tx: Sender<ChromeEvent>,
+        delegate: impl BackendDelegate,
+        mut raw_delegate: Box<dyn ChromeRawDelegate>,
     ) {
-        let (mut final_reason, queued_commands) = dispatcher.stop(reason);
-        if let Some(client) = client
-            && let Some(reason) =
-                Self::drain_delegate_queue(dispatcher, client, event_tx, queued_commands)
-        {
-            final_reason = reason;
+        let mut dispatcher = DelegateDispatcher::new(delegate);
+
+        // Start the connection and get the IPC client.
+        let Some(mut client) = Self::start_connection(&event_tx, &mut dispatcher, &options) else {
+            return;
+        };
+
+        const POLL_INTERVAL: Duration = Duration::from_millis(16);
+
+        while Self::poll_event(
+            &command_rx,
+            &mut client,
+            &event_tx,
+            &mut dispatcher,
+            raw_delegate.as_mut(),
+        ) {
+            thread::sleep(POLL_INTERVAL);
         }
-        Self::emit_raw_event(
-            event_tx,
-            ChromeEvent::BackendStopped {
-                reason: final_reason,
-            },
-        );
     }
 
     fn start_connection(
@@ -307,24 +254,12 @@ impl ChromiumBackend {
         Some(client)
     }
 
-    fn dispatch_raw_command(
-        command: ChromeCommand,
-        client: &mut IpcClient,
-        event_tx: &Sender<ChromeEvent>,
-        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
-    ) -> Option<BackendStopReason> {
-        if let Some(command) = command.to_browser_command() {
-            return Self::run_generic_command_with_delegate(command, client, event_tx, dispatcher);
-        }
-
-        Self::run_raw_command(command, client, event_tx, dispatcher)
-    }
-
     fn poll_event(
-        command_rx: &Receiver<ChromeCommand>,
+        command_rx: &Receiver<CommandEnvelope<Self>>,
         client: &mut IpcClient,
         event_tx: &Sender<ChromeEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        raw_delegate: &mut dyn ChromeRawDelegate,
     ) -> bool {
         dispatcher.on_idle();
 
@@ -337,7 +272,7 @@ impl ChromiumBackend {
         }
 
         if let Some(stop_reason) =
-            Self::process_command_queue(command_rx, client, event_tx, dispatcher)
+            Self::process_command_queue(command_rx, client, event_tx, dispatcher, raw_delegate)
         {
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
@@ -359,24 +294,153 @@ impl ChromiumBackend {
         true
     }
 
-    fn run_communication(
-        options: ChromiumBackendOptions,
-        command_rx: Receiver<ChromeCommand>,
-        event_tx: Sender<ChromeEvent>,
-        delegate: impl BackendDelegate,
-    ) {
-        let mut dispatcher = DelegateDispatcher::new(delegate);
+    fn emit_raw_event(event_tx: &Sender<ChromeEvent>, event: ChromeEvent) {
+        _ = event_tx.send_blocking(event);
+    }
 
-        // Start the connection and get the IPC client.
-        let Some(mut client) = Self::start_connection(&event_tx, &mut dispatcher, &options) else {
-            return;
-        };
-
-        const POLL_INTERVAL: Duration = Duration::from_millis(16);
-
-        while Self::poll_event(&command_rx, &mut client, &event_tx, &mut dispatcher) {
-            thread::sleep(POLL_INTERVAL);
+    fn handle_raw_event_with_delegate_gate(
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        event_tx: &Sender<ChromeEvent>,
+        event: ChromeEvent,
+    ) -> Option<BackendStopReason> {
+        if let Some(generic_event) = Self::to_generic_event(&event) {
+            match dispatcher.dispatch_event(&generic_event) {
+                EventDecision::Forward => {
+                    Self::emit_raw_event(event_tx, event);
+                    None
+                }
+                EventDecision::Stop(reason) => Some(reason),
+            }
+        } else {
+            Self::emit_raw_event(event_tx, event);
+            None
         }
+    }
+
+    fn run_generic_command_with_delegate(
+        command: BrowserCommand,
+        raw_command: ChromeCommand,
+        client: &mut IpcClient,
+        event_tx: &Sender<ChromeEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+    ) -> Option<BackendStopReason> {
+        match dispatcher.dispatch_command(&command) {
+            CommandDecision::Forward => {
+                let (reason, events) = Self::execute_raw_command(raw_command, client);
+                for event in events {
+                    if let Some(reason) =
+                        Self::handle_raw_event_with_delegate_gate(dispatcher, event_tx, event)
+                    {
+                        return Some(reason);
+                    }
+                }
+                reason
+            }
+            CommandDecision::Drop => None,
+            CommandDecision::Stop(reason) => Some(reason),
+        }
+    }
+
+    fn run_raw_command(
+        command: ChromeCommand,
+        client: &mut IpcClient,
+        event_tx: &Sender<ChromeEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+    ) -> Option<BackendStopReason> {
+        let (reason, events) = Self::execute_raw_command(command, client);
+        for event in events {
+            if let Some(reason) =
+                Self::handle_raw_event_with_delegate_gate(dispatcher, event_tx, event)
+            {
+                return Some(reason);
+            }
+        }
+        reason
+    }
+
+    fn run_raw_command_with_raw_delegate(
+        command: ChromeCommand,
+        client: &mut IpcClient,
+        event_tx: &Sender<ChromeEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        raw_delegate: &mut dyn ChromeRawDelegate,
+    ) -> Option<BackendStopReason> {
+        match raw_delegate.on_raw_command(&command) {
+            RawCommandDecision::Forward => {
+                Self::run_raw_command(command, client, event_tx, dispatcher)
+            }
+            RawCommandDecision::Drop => None,
+            RawCommandDecision::Stop(reason) => Some(reason),
+        }
+    }
+
+    fn dispatch_command_envelope(
+        envelope: CommandEnvelope<Self>,
+        client: &mut IpcClient,
+        event_tx: &Sender<ChromeEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        raw_delegate: &mut dyn ChromeRawDelegate,
+    ) -> Option<BackendStopReason> {
+        match envelope {
+            CommandEnvelope::Generic { command, raw } => {
+                Self::run_generic_command_with_delegate(command, raw, client, event_tx, dispatcher)
+            }
+            CommandEnvelope::RawOnly { raw } => Self::run_raw_command_with_raw_delegate(
+                raw,
+                client,
+                event_tx,
+                dispatcher,
+                raw_delegate,
+            ),
+        }
+    }
+
+    fn drain_delegate_queue(
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        client: &mut IpcClient,
+        event_tx: &Sender<ChromeEvent>,
+        mut pending_commands: Vec<BrowserCommand>,
+    ) -> Option<BackendStopReason> {
+        loop {
+            for command in pending_commands {
+                let raw_command = Self::to_raw_command(command.clone());
+                if let Some(reason) = Self::run_generic_command_with_delegate(
+                    command,
+                    raw_command,
+                    client,
+                    event_tx,
+                    dispatcher,
+                ) {
+                    return Some(reason);
+                }
+            }
+
+            pending_commands = dispatcher.flush();
+            if pending_commands.is_empty() {
+                return None;
+            }
+        }
+    }
+
+    fn stop_backend(
+        reason: BackendStopReason,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        client: Option<&mut IpcClient>,
+        event_tx: &Sender<ChromeEvent>,
+    ) {
+        let (mut final_reason, queued_commands) = dispatcher.stop(reason);
+        if let Some(client) = client
+            && let Some(reason) =
+                Self::drain_delegate_queue(dispatcher, client, event_tx, queued_commands)
+        {
+            final_reason = reason;
+        }
+        Self::emit_raw_event(
+            event_tx,
+            ChromeEvent::BackendStopped {
+                reason: final_reason,
+            },
+        );
     }
 
     fn process_event_queue(
@@ -424,20 +488,26 @@ impl ChromiumBackend {
     }
 
     fn process_command_queue(
-        command_rx: &Receiver<ChromeCommand>,
+        command_rx: &Receiver<CommandEnvelope<Self>>,
         client: &mut IpcClient,
         event_tx: &Sender<ChromeEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        raw_delegate: &mut dyn ChromeRawDelegate,
     ) -> Option<BackendStopReason> {
         loop {
-            let command = match command_rx.try_recv() {
-                Ok(command) => command,
+            let envelope = match command_rx.try_recv() {
+                Ok(envelope) => envelope,
                 Err(TryRecvError::Empty) => break None,
                 Err(TryRecvError::Closed) => break Some(BackendStopReason::Disconnected),
             };
 
-            if let Some(reason) = Self::dispatch_raw_command(command, client, event_tx, dispatcher)
-            {
+            if let Some(reason) = Self::dispatch_command_envelope(
+                envelope,
+                client,
+                event_tx,
+                dispatcher,
+                raw_delegate,
+            ) {
                 return Some(reason);
             }
         }
