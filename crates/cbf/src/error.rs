@@ -1,4 +1,4 @@
-use crate::command::BrowserCommand;
+use crate::command::BrowserOperation;
 
 /// Errors returned by the `cbf` public API.
 #[derive(Debug, thiserror::Error)]
@@ -21,105 +21,6 @@ pub enum Error {
     /// A backend failure surfaced to the public API.
     #[error("cbf backend failure: {0}")]
     BackendFailure(BackendErrorInfo),
-}
-
-/// Browser operation associated with an execution path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Operation {
-    Shutdown,
-    ConfirmShutdown,
-    ForceShutdown,
-    ConfirmBeforeUnload,
-    ConfirmPermission,
-    CreateBrowsingContext,
-    ListProfiles,
-    RequestCloseBrowsingContext,
-    ResizeBrowsingContext,
-    Navigate,
-    GoBack,
-    GoForward,
-    Reload,
-    GetBrowsingContextDomHtml,
-    SetBrowsingContextFocus,
-    SendKeyEvent,
-    SendMouseEvent,
-    SendMouseWheelEvent,
-    SendDragUpdate,
-    SendDragDrop,
-    SendDragCancel,
-    SetComposition,
-    CommitText,
-    FinishComposingText,
-    ExecuteContextMenuCommand,
-    DismissContextMenu,
-}
-
-impl Operation {
-    pub fn from_command(command: &BrowserCommand) -> Self {
-        match command {
-            BrowserCommand::Shutdown { .. } => Self::Shutdown,
-            BrowserCommand::ConfirmShutdown { .. } => Self::ConfirmShutdown,
-            BrowserCommand::ForceShutdown => Self::ForceShutdown,
-            BrowserCommand::ConfirmBeforeUnload { .. } => Self::ConfirmBeforeUnload,
-            BrowserCommand::ConfirmPermission { .. } => Self::ConfirmPermission,
-            BrowserCommand::CreateBrowsingContext { .. } => Self::CreateBrowsingContext,
-            BrowserCommand::ListProfiles => Self::ListProfiles,
-            BrowserCommand::RequestCloseBrowsingContext { .. } => Self::RequestCloseBrowsingContext,
-            BrowserCommand::ResizeBrowsingContext { .. } => Self::ResizeBrowsingContext,
-            BrowserCommand::Navigate { .. } => Self::Navigate,
-            BrowserCommand::GoBack { .. } => Self::GoBack,
-            BrowserCommand::GoForward { .. } => Self::GoForward,
-            BrowserCommand::Reload { .. } => Self::Reload,
-            BrowserCommand::GetBrowsingContextDomHtml { .. } => Self::GetBrowsingContextDomHtml,
-            BrowserCommand::SetBrowsingContextFocus { .. } => Self::SetBrowsingContextFocus,
-            BrowserCommand::SendKeyEvent { .. } => Self::SendKeyEvent,
-            BrowserCommand::SendMouseEvent { .. } => Self::SendMouseEvent,
-            BrowserCommand::SendMouseWheelEvent { .. } => Self::SendMouseWheelEvent,
-            BrowserCommand::SendDragUpdate { .. } => Self::SendDragUpdate,
-            BrowserCommand::SendDragDrop { .. } => Self::SendDragDrop,
-            BrowserCommand::SendDragCancel { .. } => Self::SendDragCancel,
-            BrowserCommand::SetComposition { .. } => Self::SetComposition,
-            BrowserCommand::CommitText { .. } => Self::CommitText,
-            BrowserCommand::FinishComposingText { .. } => Self::FinishComposingText,
-            BrowserCommand::ExecuteContextMenuCommand { .. } => Self::ExecuteContextMenuCommand,
-            BrowserCommand::DismissContextMenu { .. } => Self::DismissContextMenu,
-        }
-    }
-}
-
-impl std::fmt::Display for Operation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let operation = match self {
-            Self::Shutdown => "shutdown",
-            Self::ConfirmShutdown => "confirm_shutdown",
-            Self::ForceShutdown => "force_shutdown",
-            Self::ConfirmBeforeUnload => "confirm_beforeunload",
-            Self::ConfirmPermission => "confirm_permission",
-            Self::CreateBrowsingContext => "create_browsing_context",
-            Self::ListProfiles => "list_profiles",
-            Self::RequestCloseBrowsingContext => "request_close_browsing_context",
-            Self::ResizeBrowsingContext => "resize_browsing_context",
-            Self::Navigate => "navigate",
-            Self::GoBack => "go_back",
-            Self::GoForward => "go_forward",
-            Self::Reload => "reload",
-            Self::GetBrowsingContextDomHtml => "get_browsing_context_dom_html",
-            Self::SetBrowsingContextFocus => "set_browsing_context_focus",
-            Self::SendKeyEvent => "send_key_event",
-            Self::SendMouseEvent => "send_mouse_event",
-            Self::SendMouseWheelEvent => "send_mouse_wheel_event",
-            Self::SendDragUpdate => "send_drag_update",
-            Self::SendDragDrop => "send_drag_drop",
-            Self::SendDragCancel => "send_drag_cancel",
-            Self::SetComposition => "set_composition",
-            Self::CommitText => "commit_text",
-            Self::FinishComposingText => "finish_composing_text",
-            Self::ExecuteContextMenuCommand => "execute_context_menu_command",
-            Self::DismissContextMenu => "dismiss_context_menu",
-        };
-
-        f.write_str(operation)
-    }
 }
 
 /// Stable categories for backend failures.
@@ -159,7 +60,7 @@ pub enum InvalidConfiguration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendErrorInfo {
     pub kind: ApiErrorKind,
-    pub operation: Option<Operation>,
+    pub operation: Option<BrowserOperation>,
     pub detail: Option<String>,
 }
 
@@ -183,23 +84,12 @@ impl std::fmt::Display for BackendErrorInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{command::BrowserCommand, data::ids::BrowsingContextId};
-
-    #[test]
-    fn operation_from_command_maps_to_expected_variant() {
-        let command = BrowserCommand::Navigate {
-            browsing_context_id: BrowsingContextId::new(1),
-            url: "https://example.com".to_string(),
-        };
-
-        assert_eq!(Operation::from_command(&command), Operation::Navigate);
-    }
 
     #[test]
     fn backend_error_info_display_contains_structured_fields() {
         let info = BackendErrorInfo {
             kind: ApiErrorKind::CommandDispatchFailed,
-            operation: Some(Operation::SendMouseEvent),
+            operation: Some(BrowserOperation::SendMouseEvent),
             detail: Some("ConnectionFailed".to_string()),
         };
 
@@ -207,19 +97,5 @@ mod tests {
         assert!(rendered.contains("kind=command_dispatch_failed"));
         assert!(rendered.contains("operation=send_mouse_event"));
         assert!(rendered.contains("detail=ConnectionFailed"));
-    }
-
-    #[test]
-    fn operation_from_command_covers_profile_command() {
-        let command = BrowserCommand::CreateBrowsingContext {
-            request_id: 42,
-            initial_url: None,
-            profile_id: Some("default".to_string()),
-        };
-
-        assert_eq!(
-            Operation::from_command(&command),
-            Operation::CreateBrowsingContext
-        );
     }
 }

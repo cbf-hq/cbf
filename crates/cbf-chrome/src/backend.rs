@@ -6,9 +6,9 @@ use std::{
 use async_channel::{Receiver, Sender, TryRecvError};
 use cbf::{
     browser::{Backend, CommandEnvelope, CommandSender, EventStream},
-    command::BrowserCommand,
+    command::{BrowserCommand, BrowserOperation},
     delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
-    error::{ApiErrorKind, BackendErrorInfo, Error, Operation},
+    error::{ApiErrorKind, BackendErrorInfo, Error},
     event::{BackendStopReason, BrowserEvent},
 };
 
@@ -52,13 +52,13 @@ impl ChromiumBackendOptions {
 #[derive(Debug)]
 enum CommandExecutionError {
     IpcCall {
-        operation: Option<Operation>,
+        operation: Option<BrowserOperation>,
         source: IpcError,
     },
 }
 
 impl CommandExecutionError {
-    fn from_ipc_call(operation: Option<Operation>, source: IpcError) -> Self {
+    fn from_ipc_call(operation: Option<BrowserOperation>, source: IpcError) -> Self {
         Self::IpcCall { operation, source }
     }
 
@@ -316,7 +316,7 @@ impl ChromiumBackend {
     ) -> Option<BackendStopReason> {
         match dispatcher.dispatch_command(&command) {
             CommandDecision::Forward => {
-                let operation = Some(Operation::from_command(&command));
+                let operation = Some(BrowserOperation::from_command(&command));
                 let (reason, events) = Self::execute_raw_command(raw_command, operation, client);
                 for event in events {
                     if let Some(reason) =
@@ -334,7 +334,7 @@ impl ChromiumBackend {
 
     fn run_raw_command(
         command: ChromeCommand,
-        operation: Option<Operation>,
+        operation: Option<BrowserOperation>,
         client: &mut IpcClient,
         event_tx: &Sender<ChromeEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
@@ -507,7 +507,7 @@ impl ChromiumBackend {
 
     fn execute_raw_command(
         command: ChromeCommand,
-        operation: Option<Operation>,
+        operation: Option<BrowserOperation>,
         client: &mut IpcClient,
     ) -> (Option<BackendStopReason>, Vec<ChromeEvent>) {
         match Self::handle_command(command, operation, client) {
@@ -528,7 +528,7 @@ impl ChromiumBackend {
 
     fn handle_command(
         command: ChromeCommand,
-        operation: Option<Operation>,
+        operation: Option<BrowserOperation>,
         client: &mut IpcClient,
     ) -> Result<(Option<BackendStopReason>, Vec<ChromeEvent>), CommandExecutionError> {
         let result = match &command {
