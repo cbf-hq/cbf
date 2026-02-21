@@ -8,7 +8,6 @@
 //! documentation under `docs/`.
 
 pub mod browser;
-pub mod browser_session;
 pub mod command;
 pub mod data;
 pub mod delegate;

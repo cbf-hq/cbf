@@ -1,3 +1,5 @@
+//! Error types for the `cbf` public API.
+
 use crate::command::BrowserOperation;
 
 /// Errors returned by the `cbf` public API.

@@ -1,3 +1,5 @@
+//! A dummy in-memory backend implementation for development and API shaping.
+
 use std::{collections::HashMap, thread, time::Duration};
 
 use async_channel::{Receiver, Sender, TryRecvError};
