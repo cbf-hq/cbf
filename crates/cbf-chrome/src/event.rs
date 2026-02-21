@@ -28,6 +28,10 @@ pub enum ChromeEvent {
 }
 
 /// Maps Chromium raw events into browser-generic events when possible.
+///
+/// Some Chrome-specific events are implementation details that do not map to
+/// generic browser events. See each event variant's documentation for conversion
+/// behavior.
 pub fn to_generic_event(event: &ChromeEvent) -> Option<BrowserEvent> {
     match event {
         ChromeEvent::Ipc(raw) => map_ipc_event_to_generic(raw),
@@ -49,6 +53,10 @@ pub fn to_generic_event(event: &ChromeEvent) -> Option<BrowserEvent> {
 }
 
 /// Maps IPC events into browser-generic events when possible.
+///
+/// Some IPC events are Chrome-specific implementation details and do not map
+/// to generic browser events. See each [`IpcEvent`] variant's documentation for
+/// conversion behavior.
 pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
     match event {
         IpcEvent::SurfaceHandleUpdated { .. } => None,

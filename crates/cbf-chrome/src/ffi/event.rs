@@ -11,30 +11,42 @@ use crate::data::surface::SurfaceHandle;
 #[derive(Debug, Clone, PartialEq)]
 pub enum IpcEvent {
     /// The rendering surface handle for a page was updated.
+    ///
+    /// **Note**: This event does not map to `BrowserEvent` because surface handles
+    /// are a Chrome-specific rendering implementation detail. Applications needing
+    /// this information should subscribe to the raw `ChromeEvent` stream.
     SurfaceHandleUpdated {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
         handle: SurfaceHandle,
     },
     /// A new web page was created by the backend.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::Created`.
     WebContentsCreated {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
         request_id: u64,
     },
     /// IME bounds information changed.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::ImeBoundsUpdated`.
     ImeBoundsUpdated {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
         update: ImeBoundsUpdate,
     },
     /// The backend requested a context menu.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::ContextMenuRequested`.
     ContextMenuRequested {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
         menu: ContextMenu,
     },
     /// The backend requested opening a new page.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::NewBrowsingContextRequested`.
     NewWebContentsRequested {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
@@ -42,6 +54,8 @@ pub enum IpcEvent {
         is_popup: bool,
     },
     /// Navigation state changed for a page.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::NavigationStateChanged`.
     NavigationStateChanged {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
@@ -51,24 +65,33 @@ pub enum IpcEvent {
         is_loading: bool,
     },
     /// Cursor appearance changed for a page.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::CursorChanged`.
     CursorChanged {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
         cursor_type: CursorIcon,
     },
     /// The page title changed for a page.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::TitleUpdated`.
     TitleUpdated {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
         title: String,
     },
     /// The page favicon URL changed for a page.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::FaviconUrlUpdated`.
     FaviconUrlUpdated {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
         url: String,
     },
     /// A beforeunload dialog was requested.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::JavaScriptDialogRequested`
+    /// with `DialogType::BeforeUnload`.
     BeforeUnloadDialogRequested {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
@@ -76,16 +99,23 @@ pub enum IpcEvent {
         reason: BeforeUnloadReason,
     },
     /// A web page closed event was observed.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::Closed`.
     WebContentsClosed {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
     },
     /// A resize acknowledgement was received for a page.
+    ///
+    /// **Note**: This event does not map to `BrowserEvent` because it is an internal
+    /// acknowledgement with no semantic value for browser-generic consumers.
     WebContentsResizeAcknowledged {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
     },
     /// The DOM HTML was read for a page.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::DomHtmlRead`.
     WebContentsDomHtmlRead {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
@@ -93,18 +123,26 @@ pub enum IpcEvent {
         html: String,
     },
     /// Host-owned drag start request from renderer.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::DragStartRequested`.
     DragStartRequested {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
         request: DragStartRequest,
     },
     /// Shutdown is blocked by dirty pages.
+    ///
+    /// Maps to `BrowserEvent::ShutdownBlocked`.
     ShutdownBlocked {
         request_id: u64,
         dirty_browsing_context_ids: Vec<BrowsingContextId>,
     },
     /// Shutdown has started.
+    ///
+    /// Maps to `BrowserEvent::ShutdownProceeding`.
     ShutdownProceeding { request_id: u64 },
     /// Shutdown was cancelled.
+    ///
+    /// Maps to `BrowserEvent::ShutdownCancelled`.
     ShutdownCancelled { request_id: u64 },
 }
