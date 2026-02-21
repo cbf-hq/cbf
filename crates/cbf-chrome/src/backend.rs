@@ -58,11 +58,8 @@ enum CommandExecutionError {
 }
 
 impl CommandExecutionError {
-    fn from_ipc_call(command: &ChromeCommand, source: IpcError) -> Self {
-        Self::IpcCall {
-            operation: operation_from_raw_command(command),
-            source,
-        }
+    fn from_ipc_call(operation: Option<Operation>, source: IpcError) -> Self {
+        Self::IpcCall { operation, source }
     }
 
     fn into_backend_error_info(self) -> BackendErrorInfo {
@@ -78,13 +75,6 @@ impl CommandExecutionError {
             },
         }
     }
-}
-
-fn operation_from_raw_command(command: &ChromeCommand) -> Option<Operation> {
-    command
-        .to_browser_command()
-        .as_ref()
-        .map(Operation::from_command)
 }
 
 fn backend_error_connect_timeout(source: IpcError) -> BackendErrorInfo {
@@ -326,7 +316,8 @@ impl ChromiumBackend {
     ) -> Option<BackendStopReason> {
         match dispatcher.dispatch_command(&command) {
             CommandDecision::Forward => {
-                let (reason, events) = Self::execute_raw_command(raw_command, client);
+                let operation = Some(Operation::from_command(&command));
+                let (reason, events) = Self::execute_raw_command(raw_command, operation, client);
                 for event in events {
                     if let Some(reason) =
                         Self::handle_raw_event_with_delegate_gate(dispatcher, event_tx, event)
@@ -343,11 +334,12 @@ impl ChromiumBackend {
 
     fn run_raw_command(
         command: ChromeCommand,
+        operation: Option<Operation>,
         client: &mut IpcClient,
         event_tx: &Sender<ChromeEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> Option<BackendStopReason> {
-        let (reason, events) = Self::execute_raw_command(command, client);
+        let (reason, events) = Self::execute_raw_command(command, operation, client);
         for event in events {
             if let Some(reason) =
                 Self::handle_raw_event_with_delegate_gate(dispatcher, event_tx, event)
@@ -367,7 +359,7 @@ impl ChromiumBackend {
     ) -> Option<BackendStopReason> {
         match raw_delegate.on_raw_command(&command) {
             RawCommandDecision::Forward => {
-                Self::run_raw_command(command, client, event_tx, dispatcher)
+                Self::run_raw_command(command, None, client, event_tx, dispatcher)
             }
             RawCommandDecision::Drop => None,
             RawCommandDecision::Stop(reason) => Some(reason),
@@ -515,9 +507,10 @@ impl ChromiumBackend {
 
     fn execute_raw_command(
         command: ChromeCommand,
+        operation: Option<Operation>,
         client: &mut IpcClient,
     ) -> (Option<BackendStopReason>, Vec<ChromeEvent>) {
-        match Self::handle_command(command, client) {
+        match Self::handle_command(command, operation, client) {
             Ok((reason, events)) => (reason, events),
             Err(err) => {
                 let info = err.into_backend_error_info();
@@ -535,6 +528,7 @@ impl ChromiumBackend {
 
     fn handle_command(
         command: ChromeCommand,
+        operation: Option<Operation>,
         client: &mut IpcClient,
     ) -> Result<(Option<BackendStopReason>, Vec<ChromeEvent>), CommandExecutionError> {
         let result = match &command {
@@ -674,6 +668,6 @@ impl ChromiumBackend {
                 .map(|_| (None, Vec::new())),
         };
 
-        result.map_err(|source| CommandExecutionError::from_ipc_call(&command, source))
+        result.map_err(|source| CommandExecutionError::from_ipc_call(operation, source))
     }
 }
