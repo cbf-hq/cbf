@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "crates/cbf-cli",
   "crates/cbf",
   "crates/cbf-chrome",
   "crates/cbf-chrome-sys",

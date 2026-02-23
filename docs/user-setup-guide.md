@@ -93,3 +93,27 @@ Important:
 
 - Symptom: process spawn errors from `start_chromium`.
 - Action: verify `ChromiumProcessOptions.executable_path` is correct and executable.
+
+## 6. Bundle as macOS .app (MVP)
+
+You can package an existing CBF app binary using `cbf-cli`:
+
+```bash
+cargo run -p cbf-cli -- bundle macos \
+  --bin-path /path/to/your/app/binary \
+  --chromium-app /path/to/Chromium.app \
+  --bridge-lib-dir /path/to/cbf_bridge/libdir
+```
+
+Environment variable alternatives:
+
+- `CBF_CHROMIUM_APP` for `--chromium-app`
+- `CBF_BRIDGE_LIB_DIR` for `--bridge-lib-dir`
+
+The generated bundle layout includes:
+
+- `Contents/MacOS/<your executable>`
+- `Contents/Frameworks/libcbf_bridge.dylib`
+- `Contents/Frameworks/Chromium.app`
+
+`cbf-cli` also verifies/adds `@executable_path/../Frameworks` as runtime search path (`rpath`) on the bundled executable.

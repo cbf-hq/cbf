@@ -107,3 +107,31 @@ You can also set `CBF_CHROMIUM_EXECUTABLE` and omit `--chromium-executable`.
 - Chromium/third-party components: follow each upstream license and notice requirements
 
 See `docs/licensing.md` for policy details.
+
+## CLI (MVP)
+
+This repository now includes `cbf-cli` (`cbf` binary) for packaging CBF apps on macOS.
+
+Create a macOS app bundle:
+
+```bash
+cargo run -p cbf-cli -- bundle macos \
+  --bin-path /path/to/your/app/binary \
+  --chromium-app /path/to/Chromium.app \
+  --bridge-lib-dir /path/to/cbf_bridge/libdir
+```
+
+The command creates `<out-dir>/<AppName>.app` (default `dist/`) and bundles:
+
+- app executable (`Contents/MacOS`)
+- `libcbf_bridge.dylib` (`Contents/Frameworks`)
+- `Chromium.app` (`Contents/Frameworks`)
+
+Optional metadata can be configured in your app `Cargo.toml`:
+
+```toml
+[package.metadata.cbf.macos-bundle]
+app-name = "MyApp"
+bundle-identifier = "com.example.myapp"
+icon = "assets/icon.icns"
+```
