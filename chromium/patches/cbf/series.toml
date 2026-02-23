@@ -6,3 +6,17 @@ base_commit = "278d5a3e94b22f47c84cfeb9a8a9851e8e68fa3d"
 
 # Relative to chromium/src
 out_dir = "out/Default"
+
+# Patch order is lexical by filename (0001, 0002, ...).
+# Keep each patch buildable and responsibility-focused.
+#
+# 0001-CBF-bridge-series.patch
+#   Initial CBF bridge integration baseline in Chromium fork.
+# 0002-refactor-chrome-split-profile-service-into-focused-c.patch
+#   Split cbf_profile_service into focused controllers and move Mojo converters.
+# 0003-refactor-bridge-add-devtools-bridge-commands-and-eve.patch
+#   Add DevTools bridge commands/events across bridge and mojom mapping.
+# 0004-chore-chrome-add-devtools-ui-bindings-diagnostics.patch
+#   Add temporary diagnostics for DevTools UI bindings lifecycle.
+# 0005-test-chrome-add-browser-and-unit-tests-for-profile-c.patch
+#   Add browser/unit test coverage for refactored profile controllers.

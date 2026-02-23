@@ -1,0 +1,4536 @@
+From 23979acb1c1867c325d9434f2d50c7ac47f6ed27 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Sat, 21 Feb 2026 17:31:42 +0900
+Subject: [PATCH 2/5] refactor(chrome): split profile service into focused
+ controllers
+
+---
+ chrome/browser/cbf/BUILD.gn                   |   21 +
+ chrome/browser/cbf/cbf_profile_service.cc     | 1421 ++---------------
+ chrome/browser/cbf/cbf_profile_service.h      |   94 +-
+ .../browser/cbf/mojo/cbf_mojom_converters.cc  |  415 +++++
+ .../browser/cbf/mojo/cbf_mojom_converters.h   |   44 +
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |    3 +
+ .../cbf_profile_context_menu_controller.cc    |  166 ++
+ .../cbf_profile_context_menu_controller.h     |   57 +
+ .../cbf_profile_devtools_controller.cc        |  335 ++++
+ .../profile/cbf_profile_devtools_controller.h |   54 +
+ .../profile/cbf_profile_drag_controller.cc    |  248 +++
+ .../cbf/profile/cbf_profile_drag_controller.h |   78 +
+ .../cbf/profile/cbf_profile_ime_controller.cc |  231 +++
+ .../cbf/profile/cbf_profile_ime_controller.h  |   57 +
+ .../profile/cbf_profile_input_controller.cc   |  344 ++++
+ .../profile/cbf_profile_input_controller.h    |   54 +
+ .../cbf_profile_navigation_controller.cc      |  125 ++
+ .../cbf_profile_navigation_controller.h       |   33 +
+ .../profile/cbf_profile_page_controller.cc    |   52 +
+ .../cbf/profile/cbf_profile_page_controller.h |   44 +
+ .../profile/cbf_profile_popup_controller.cc   |   83 +
+ .../profile/cbf_profile_popup_controller.h    |   44 +
+ .../profile/cbf_profile_service_context.cc    |   31 +
+ .../cbf/profile/cbf_profile_service_context.h |   36 +
+ 24 files changed, 2691 insertions(+), 1379 deletions(-)
+ create mode 100644 chrome/browser/cbf/mojo/cbf_mojom_converters.cc
+ create mode 100644 chrome/browser/cbf/mojo/cbf_mojom_converters.h
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_drag_controller.h
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_ime_controller.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_ime_controller.h
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_input_controller.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_input_controller.h
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_page_controller.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_page_controller.h
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_popup_controller.h
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_service_context.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_service_context.h
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index 0f455322b5cb2..c1881f8606098 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -24,6 +24,26 @@ source_set("cbf") {
+     "cbf_tab_manager.h",
+     "cbf_web_contents_delegate.cc",
+     "cbf_web_contents_delegate.h",
++    "mojo/cbf_mojom_converters.cc",
++    "mojo/cbf_mojom_converters.h",
++    "profile/cbf_profile_context_menu_controller.cc",
++    "profile/cbf_profile_context_menu_controller.h",
++    "profile/cbf_profile_devtools_controller.cc",
++    "profile/cbf_profile_devtools_controller.h",
++    "profile/cbf_profile_drag_controller.cc",
++    "profile/cbf_profile_drag_controller.h",
++    "profile/cbf_profile_ime_controller.cc",
++    "profile/cbf_profile_ime_controller.h",
++    "profile/cbf_profile_input_controller.cc",
++    "profile/cbf_profile_input_controller.h",
++    "profile/cbf_profile_navigation_controller.cc",
++    "profile/cbf_profile_navigation_controller.h",
++    "profile/cbf_profile_page_controller.cc",
++    "profile/cbf_profile_page_controller.h",
++    "profile/cbf_profile_popup_controller.cc",
++    "profile/cbf_profile_popup_controller.h",
++    "profile/cbf_profile_service_context.cc",
++    "profile/cbf_profile_service_context.h",
+   ]
+ 
+   public_deps = [ "//chrome/browser:browser_public_dependencies" ]
+@@ -46,6 +66,7 @@ source_set("cbf") {
+     "//chrome/app:command_ids",
+     "//chrome/browser:global_features",
+     "//chrome/browser:browser_process",
++    "//chrome/browser/devtools:devtools",
+     "//chrome/browser/profiles:profile",
+     "//chrome/browser/profiles:profile_util",
+     "//chrome/browser/themes:themes",
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index bd2ef698284c8..bcc78e16d2c88 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -1,587 +1,30 @@
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ 
+-#include <algorithm>
+-#include <array>
+ #include <optional>
+ #include <utility>
+ #include <vector>
+ 
+-#include "build/build_config.h"
+ #include "base/logging.h"
+ #include "base/strings/utf_string_conversions.h"
+-#include "base/threading/platform_thread.h"
+-#include "base/time/time.h"
+ #include "base/functional/bind.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/values.h"
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+-#include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
+-#include "chrome/app/chrome_command_ids.h" 
+-#include "content/public/browser/reload_type.h"
+-#include "chrome/browser/themes/theme_service.h"
+-#include "chrome/browser/themes/theme_service_factory.h"
+-#include "chrome/browser/ui/tab_contents/chrome_web_contents_menu_helper.h"
+-#include "chrome/browser/profiles/profile.h"
+-#include "components/input/render_widget_host_input_event_router.h"
+-#include "content/browser/renderer_host/render_widget_host_impl.h"
+-#include "content/browser/renderer_host/render_widget_host_view_base.h"
+-#include "content/browser/web_contents/web_contents_impl.h"
++#include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
++#include "chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_devtools_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_drag_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_ime_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_input_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_navigation_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_page_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_popup_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/navigation_controller.h"
+-#include "content/public/browser/render_widget_host.h"
+-#include "content/public/browser/render_widget_host_view.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/isolated_world_ids.h"
+-#include "third_party/blink/public/mojom/input/input_handler.mojom.h"
+-#include "third_party/blink/public/common/input/web_mouse_event.h"
+-#include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
+-#include "ui/base/ime/ime_text_span.h"
+-#include "ui/base/accelerators/accelerator.h"
+-#include "ui/base/models/image_model.h"
+-#include "ui/base/models/menu_model.h"
+-#include "ui/events/keycodes/dom/keycode_converter.h"
+-#include "ui/events/event_constants.h"
+-#include "ui/events/types/scroll_types.h"
+-#include "ui/gfx/codec/png_codec.h"
+-#include "ui/gfx/geometry/rect.h"
+-#include "ui/gfx/image/image_skia.h"
+-#include "ui/gfx/range/range.h"
+-#include "ui/latency/latency_info.h"
+ #include "url/gurl.h"
+-#include "url/origin.h"
+-
+-#if BUILDFLAG(IS_MAC)
+-#include "chrome/browser/cbf/cbf_context_menu_mac.h"
+-#endif
+-
+-namespace cbf {
+-
+-class CbfRenderViewContextMenu final : public RenderViewContextMenu {
+- public:
+-  CbfRenderViewContextMenu(content::RenderFrameHost& render_frame_host,
+-                           const content::ContextMenuParams& params)
+-      : RenderViewContextMenu(render_frame_host, params) {}
+-
+-  void Show() override {}
+-
+-  void ExecuteCommand(int id, int event_flags) override { 
+-    // CBF Chromium does not use standard Browser instances for tab management, 
+-    // so GetBrowser() returns nullptr. Default ExecuteCommand for IDC_RELOAD 
+-    // crashes when Browser is null, so we handle it manually here. 
+-
+-    if (id == IDC_RELOAD) { 
+-      DCHECK(GetRenderFrameHost());
+-      if (content::RenderFrameHost* rfh = GetRenderFrameHost()) { 
+-        DCHECK(content::WebContents::FromRenderFrameHost(rfh));
+-        if (content::WebContents* wc = content::WebContents::FromRenderFrameHost(rfh)) { 
+-          wc->GetController().Reload(content::ReloadType::NORMAL, true); 
+-        } 
+-      } 
+-      return; 
+-    } 
+-    RenderViewContextMenu::ExecuteCommand(id, event_flags); 
+-  }
+-
+-  ui::SimpleMenuModel* menu_model_mutable() {
+-    return const_cast<ui::SimpleMenuModel*>(&menu_model());
+-  }
+-};
+-
+-}  // namespace cbf
+-
+-namespace {
+-
+-constexpr base::TimeDelta kSyntheticWheelPhaseGap = base::Milliseconds(120);
+-
+-cbf::mojom::CbfMenuItemType ToCbfMenuItemType(ui::MenuModel::ItemType type) {
+-  switch (type) {
+-    case ui::MenuModel::TYPE_COMMAND:
+-      return cbf::mojom::CbfMenuItemType::kCommand;
+-    case ui::MenuModel::TYPE_CHECK:
+-      return cbf::mojom::CbfMenuItemType::kCheck;
+-    case ui::MenuModel::TYPE_RADIO:
+-      return cbf::mojom::CbfMenuItemType::kRadio;
+-    case ui::MenuModel::TYPE_SEPARATOR:
+-      return cbf::mojom::CbfMenuItemType::kSeparator;
+-    case ui::MenuModel::TYPE_BUTTON_ITEM:
+-      return cbf::mojom::CbfMenuItemType::kButtonItem;
+-    case ui::MenuModel::TYPE_SUBMENU:
+-      return cbf::mojom::CbfMenuItemType::kSubmenu;
+-    case ui::MenuModel::TYPE_ACTIONABLE_SUBMENU:
+-      return cbf::mojom::CbfMenuItemType::kActionableSubmenu;
+-    case ui::MenuModel::TYPE_HIGHLIGHTED:
+-      return cbf::mojom::CbfMenuItemType::kHighlighted;
+-    case ui::MenuModel::TYPE_TITLE:
+-      return cbf::mojom::CbfMenuItemType::kTitle;
+-  }
+-}
+-
+-cbf::mojom::CbfCursorType ToCbfCursorType(ui::mojom::CursorType cursor_type) {
+-  switch (cursor_type) {
+-    case ui::mojom::CursorType::kCross:
+-      return cbf::mojom::CbfCursorType::kCrosshair;
+-    case ui::mojom::CursorType::kHand:
+-      return cbf::mojom::CbfCursorType::kPointer;
+-    case ui::mojom::CursorType::kMove:
+-      return cbf::mojom::CbfCursorType::kMove;
+-    case ui::mojom::CursorType::kIBeam:
+-      return cbf::mojom::CbfCursorType::kText;
+-    case ui::mojom::CursorType::kWait:
+-      return cbf::mojom::CbfCursorType::kWait;
+-    case ui::mojom::CursorType::kHelp:
+-      return cbf::mojom::CbfCursorType::kHelp;
+-    case ui::mojom::CursorType::kProgress:
+-      return cbf::mojom::CbfCursorType::kProgress;
+-    case ui::mojom::CursorType::kNoDrop:
+-      return cbf::mojom::CbfCursorType::kNoDrop;
+-    case ui::mojom::CursorType::kNotAllowed:
+-      return cbf::mojom::CbfCursorType::kNotAllowed;
+-    case ui::mojom::CursorType::kContextMenu:
+-      return cbf::mojom::CbfCursorType::kContextMenu;
+-    case ui::mojom::CursorType::kCell:
+-      return cbf::mojom::CbfCursorType::kCell;
+-    case ui::mojom::CursorType::kVerticalText:
+-      return cbf::mojom::CbfCursorType::kVerticalText;
+-    case ui::mojom::CursorType::kAlias:
+-    case ui::mojom::CursorType::kDndLink:
+-      return cbf::mojom::CbfCursorType::kAlias;
+-    case ui::mojom::CursorType::kCopy:
+-    case ui::mojom::CursorType::kDndCopy:
+-      return cbf::mojom::CbfCursorType::kCopy;
+-    case ui::mojom::CursorType::kGrab:
+-      return cbf::mojom::CbfCursorType::kGrab;
+-    case ui::mojom::CursorType::kGrabbing:
+-      return cbf::mojom::CbfCursorType::kGrabbing;
+-    case ui::mojom::CursorType::kMiddlePanning:
+-      return cbf::mojom::CbfCursorType::kAllScroll;
+-    case ui::mojom::CursorType::kZoomIn:
+-      return cbf::mojom::CbfCursorType::kZoomIn;
+-    case ui::mojom::CursorType::kZoomOut:
+-      return cbf::mojom::CbfCursorType::kZoomOut;
+-    case ui::mojom::CursorType::kEastResize:
+-      return cbf::mojom::CbfCursorType::kEResize;
+-    case ui::mojom::CursorType::kNorthResize:
+-      return cbf::mojom::CbfCursorType::kNResize;
+-    case ui::mojom::CursorType::kNorthEastResize:
+-      return cbf::mojom::CbfCursorType::kNeResize;
+-    case ui::mojom::CursorType::kNorthWestResize:
+-      return cbf::mojom::CbfCursorType::kNwResize;
+-    case ui::mojom::CursorType::kSouthResize:
+-      return cbf::mojom::CbfCursorType::kSResize;
+-    case ui::mojom::CursorType::kSouthEastResize:
+-      return cbf::mojom::CbfCursorType::kSeResize;
+-    case ui::mojom::CursorType::kSouthWestResize:
+-      return cbf::mojom::CbfCursorType::kSwResize;
+-    case ui::mojom::CursorType::kWestResize:
+-      return cbf::mojom::CbfCursorType::kWResize;
+-    case ui::mojom::CursorType::kEastWestResize:
+-    case ui::mojom::CursorType::kEastWestNoResize:
+-      return cbf::mojom::CbfCursorType::kEwResize;
+-    case ui::mojom::CursorType::kNorthSouthResize:
+-    case ui::mojom::CursorType::kNorthSouthNoResize:
+-      return cbf::mojom::CbfCursorType::kNsResize;
+-    case ui::mojom::CursorType::kNorthEastSouthWestResize:
+-    case ui::mojom::CursorType::kNorthEastSouthWestNoResize:
+-      return cbf::mojom::CbfCursorType::kNeswResize;
+-    case ui::mojom::CursorType::kNorthWestSouthEastResize:
+-    case ui::mojom::CursorType::kNorthWestSouthEastNoResize:
+-      return cbf::mojom::CbfCursorType::kNwseResize;
+-    case ui::mojom::CursorType::kColumnResize:
+-      return cbf::mojom::CbfCursorType::kColResize;
+-    case ui::mojom::CursorType::kRowResize:
+-      return cbf::mojom::CbfCursorType::kRowResize;
+-    case ui::mojom::CursorType::kPointer:
+-    case ui::mojom::CursorType::kNull:
+-    case ui::mojom::CursorType::kCustom:
+-    case ui::mojom::CursorType::kNone:
+-    case ui::mojom::CursorType::kMiddlePanningVertical:
+-    case ui::mojom::CursorType::kMiddlePanningHorizontal:
+-    case ui::mojom::CursorType::kEastPanning:
+-    case ui::mojom::CursorType::kNorthPanning:
+-    case ui::mojom::CursorType::kNorthEastPanning:
+-    case ui::mojom::CursorType::kNorthWestPanning:
+-    case ui::mojom::CursorType::kSouthPanning:
+-    case ui::mojom::CursorType::kSouthEastPanning:
+-    case ui::mojom::CursorType::kSouthWestPanning:
+-    case ui::mojom::CursorType::kWestPanning:
+-    case ui::mojom::CursorType::kDndNone:
+-    case ui::mojom::CursorType::kDndMove:
+-      return cbf::mojom::CbfCursorType::kDefault;
+-  }
+-}
+-
+-cbf::mojom::CbfMenuIconPtr BuildMenuIcon(const ui::ImageModel& icon,
+-                                        Profile* profile) {
+-  if (icon.IsEmpty() || !profile) {
+-    return nullptr;
+-  }
+-
+-  auto* theme_service = ThemeServiceFactory::GetForProfile(profile);
+-  if (!theme_service) {
+-    return nullptr;
+-  }
+-
+-  ui::ColorProvider* color_provider = theme_service->GetColorProvider();
+-  if (!color_provider) {
+-    return nullptr;
+-  }
+-
+-  gfx::ImageSkia image = icon.Rasterize(color_provider);
+-  if (image.isNull()) {
+-    return nullptr;
+-  }
+-
+-  const SkBitmap* bitmap = image.bitmap();
+-  if (!bitmap || bitmap->drawsNothing()) {
+-    return nullptr;
+-  }
+-
+-  auto encoded =
+-      gfx::PNGCodec::EncodeBGRASkBitmap(*bitmap, /*discard_transparency=*/false);
+-  if (!encoded.has_value()) {
+-    return nullptr;
+-  }
+-
+-  auto out = cbf::mojom::CbfMenuIcon::New();
+-  out->width = bitmap->width();
+-  out->height = bitmap->height();
+-  out->png_bytes = std::move(*encoded);
+-  return out;
+-}
+-
+-cbf::mojom::CbfMenuAcceleratorPtr BuildMenuAccelerator(
+-    const ui::MenuModel* model,
+-    size_t index) {
+-  ui::Accelerator accelerator;
+-  if (!model->GetAcceleratorAt(index, &accelerator)) {
+-    return nullptr;
+-  }
+-
+-#if BUILDFLAG(IS_MAC)
+-  std::string key_equivalent;
+-  uint32_t modifier_mask = 0;
+-  if (!cbf::GetCocoaKeyEquivalentForAccelerator(accelerator, &key_equivalent,
+-                                                &modifier_mask)) {
+-    return nullptr;
+-  }
+-
+-  auto out = cbf::mojom::CbfMenuAccelerator::New();
+-  out->key_equivalent = std::move(key_equivalent);
+-  out->modifier_mask = modifier_mask;
+-  return out;
+-#else
+-  return nullptr;
+-#endif
+-}
+-
+-std::vector<cbf::mojom::CbfMenuItemPtr> BuildMenuItems(
+-    const ui::MenuModel* model,
+-    Profile* profile) {
+-  std::vector<cbf::mojom::CbfMenuItemPtr> items;
+-  if (!model) {
+-    return items;
+-  }
+-
+-  const size_t count = model->GetItemCount();
+-  items.reserve(count);
+-
+-  for (size_t i = 0; i < count; ++i) {
+-    if (!model->IsVisibleAt(i)) {
+-      continue;
+-    }
+-
+-    auto item = cbf::mojom::CbfMenuItem::New();
+-    item->type = ToCbfMenuItemType(model->GetTypeAt(i));
+-    item->command_id = model->GetCommandIdAt(i);
+-    item->label = base::UTF16ToUTF8(model->GetLabelAt(i));
+-    item->secondary_label =
+-        base::UTF16ToUTF8(model->GetSecondaryLabelAt(i));
+-    item->minor_text = base::UTF16ToUTF8(model->GetMinorTextAt(i));
+-    item->enabled = model->IsEnabledAt(i);
+-    item->visible = true;
+-    item->checked = model->IsItemCheckedAt(i);
+-    item->group_id = model->GetGroupIdAt(i);
+-    item->is_new_feature = model->IsNewFeatureAt(i);
+-    item->is_alerted = model->IsAlertedAt(i);
+-    item->may_have_mnemonics = model->MayHaveMnemonicsAt(i);
+-    item->accessible_name =
+-        base::UTF16ToUTF8(model->GetAccessibleNameAt(i));
+-    item->icon = BuildMenuIcon(model->GetIconAt(i), profile);
+-    item->minor_icon = BuildMenuIcon(model->GetMinorIconAt(i), profile);
+-    item->accelerator = BuildMenuAccelerator(model, i);
+-
+-    if (auto* submenu = model->GetSubmenuModelAt(i)) {
+-      item->submenu = BuildMenuItems(submenu, profile);
+-    }
+-
+-    items.push_back(std::move(item));
+-  }
+-
+-  return items;
+-}
+-
+-blink::WebInputEvent::Type ToWebInputEventType(
+-    cbf::mojom::CbfKeyEventType type) {
+-  switch (type) {
+-    case cbf::mojom::CbfKeyEventType::kRawKeyDown:
+-      return blink::WebInputEvent::Type::kRawKeyDown;
+-    case cbf::mojom::CbfKeyEventType::kKeyDown:
+-      return blink::WebInputEvent::Type::kKeyDown;
+-    case cbf::mojom::CbfKeyEventType::kKeyUp:
+-      return blink::WebInputEvent::Type::kKeyUp;
+-    case cbf::mojom::CbfKeyEventType::kChar:
+-      return blink::WebInputEvent::Type::kChar;
+-  }
+-  return blink::WebInputEvent::Type::kRawKeyDown;
+-}
+-
+-blink::WebInputEvent::Type ToWebInputEventType(
+-    cbf::mojom::CbfMouseEventType type) {
+-  switch (type) {
+-    case cbf::mojom::CbfMouseEventType::kMouseDown:
+-      return blink::WebInputEvent::Type::kMouseDown;
+-    case cbf::mojom::CbfMouseEventType::kMouseUp:
+-      return blink::WebInputEvent::Type::kMouseUp;
+-    case cbf::mojom::CbfMouseEventType::kMouseMove:
+-      return blink::WebInputEvent::Type::kMouseMove;
+-    case cbf::mojom::CbfMouseEventType::kMouseEnter:
+-      return blink::WebInputEvent::Type::kMouseEnter;
+-    case cbf::mojom::CbfMouseEventType::kMouseLeave:
+-      return blink::WebInputEvent::Type::kMouseLeave;
+-  }
+-  return blink::WebInputEvent::Type::kMouseMove;
+-}
+-
+-blink::WebMouseEvent::Button ToWebMouseButton(
+-    cbf::mojom::CbfMouseButton button) {
+-  switch (button) {
+-    case cbf::mojom::CbfMouseButton::kLeft:
+-      return blink::WebMouseEvent::Button::kLeft;
+-    case cbf::mojom::CbfMouseButton::kMiddle:
+-      return blink::WebMouseEvent::Button::kMiddle;
+-    case cbf::mojom::CbfMouseButton::kRight:
+-      return blink::WebMouseEvent::Button::kRight;
+-    case cbf::mojom::CbfMouseButton::kBack:
+-      return blink::WebMouseEvent::Button::kBack;
+-    case cbf::mojom::CbfMouseButton::kForward:
+-      return blink::WebMouseEvent::Button::kForward;
+-    case cbf::mojom::CbfMouseButton::kNoButton:
+-    default:
+-      return blink::WebMouseEvent::Button::kNoButton;
+-  }
+-}
+-
+-blink::WebPointerProperties::PointerType ToWebPointerType(
+-    cbf::mojom::CbfPointerType type) {
+-  switch (type) {
+-    case cbf::mojom::CbfPointerType::kPointerMouse:
+-      return blink::WebPointerProperties::PointerType::kMouse;
+-    case cbf::mojom::CbfPointerType::kPointerPen:
+-      return blink::WebPointerProperties::PointerType::kPen;
+-    case cbf::mojom::CbfPointerType::kPointerTouch:
+-      return blink::WebPointerProperties::PointerType::kTouch;
+-    case cbf::mojom::CbfPointerType::kPointerEraser:
+-      return blink::WebPointerProperties::PointerType::kEraser;
+-    case cbf::mojom::CbfPointerType::kPointerUnknown:
+-    default:
+-      return blink::WebPointerProperties::PointerType::kUnknown;
+-  }
+-}
+-
+-ui::ScrollGranularity ToScrollGranularity(
+-    cbf::mojom::CbfScrollGranularity value) {
+-  switch (value) {
+-    case cbf::mojom::CbfScrollGranularity::kScrollByPrecisePixel:
+-      return ui::ScrollGranularity::kScrollByPrecisePixel;
+-    case cbf::mojom::CbfScrollGranularity::kScrollByPixel:
+-      return ui::ScrollGranularity::kScrollByPixel;
+-    case cbf::mojom::CbfScrollGranularity::kScrollByLine:
+-      return ui::ScrollGranularity::kScrollByLine;
+-    case cbf::mojom::CbfScrollGranularity::kScrollByPage:
+-      return ui::ScrollGranularity::kScrollByPage;
+-    case cbf::mojom::CbfScrollGranularity::kScrollByDocument:
+-      return ui::ScrollGranularity::kScrollByDocument;
+-  }
+-  return ui::ScrollGranularity::kScrollByPixel;
+-}
+-
+-bool HasWheelPhase(const blink::WebMouseWheelEvent& event) {
+-  return event.phase != blink::WebMouseWheelEvent::kPhaseNone ||
+-         event.momentum_phase != blink::WebMouseWheelEvent::kPhaseNone;
+-}
+-
+-void FillText(std::array<char16_t, blink::WebKeyboardEvent::kTextLengthCap>& out,
+-              const std::string& text_utf8) {
+-  if (text_utf8.empty()) {
+-    return;
+-  }
+-  const std::u16string text16 = base::UTF8ToUTF16(text_utf8);
+-  const size_t copy_len = std::min(text16.size(), out.size());
+-  for (size_t i = 0; i < copy_len; ++i) {
+-    out[i] = text16[i];
+-  }
+-}
+-
+-ui::ImeTextSpan::Type ToImeTextSpanType(cbf::mojom::CbfImeTextSpanType type) {
+-  switch (type) {
+-    case cbf::mojom::CbfImeTextSpanType::kComposition:
+-      return ui::ImeTextSpan::Type::kComposition;
+-    case cbf::mojom::CbfImeTextSpanType::kSuggestion:
+-      return ui::ImeTextSpan::Type::kSuggestion;
+-    case cbf::mojom::CbfImeTextSpanType::kMisspellingSuggestion:
+-      return ui::ImeTextSpan::Type::kMisspellingSuggestion;
+-    case cbf::mojom::CbfImeTextSpanType::kAutocorrect:
+-      return ui::ImeTextSpan::Type::kAutocorrect;
+-    case cbf::mojom::CbfImeTextSpanType::kGrammarSuggestion:
+-      return ui::ImeTextSpan::Type::kGrammarSuggestion;
+-  }
+-  return ui::ImeTextSpan::Type::kComposition;
+-}
+-
+-ui::ImeTextSpan::Thickness ToImeTextSpanThickness(
+-    cbf::mojom::CbfImeTextSpanThickness thickness) {
+-  switch (thickness) {
+-    case cbf::mojom::CbfImeTextSpanThickness::kNone:
+-      return ui::ImeTextSpan::Thickness::kNone;
+-    case cbf::mojom::CbfImeTextSpanThickness::kThin:
+-      return ui::ImeTextSpan::Thickness::kThin;
+-    case cbf::mojom::CbfImeTextSpanThickness::kThick:
+-      return ui::ImeTextSpan::Thickness::kThick;
+-  }
+-  return ui::ImeTextSpan::Thickness::kThin;
+-}
+-
+-ui::ImeTextSpan::UnderlineStyle ToImeTextSpanUnderlineStyle(
+-    cbf::mojom::CbfImeTextSpanUnderlineStyle style) {
+-  switch (style) {
+-    case cbf::mojom::CbfImeTextSpanUnderlineStyle::kNone:
+-      return ui::ImeTextSpan::UnderlineStyle::kNone;
+-    case cbf::mojom::CbfImeTextSpanUnderlineStyle::kSolid:
+-      return ui::ImeTextSpan::UnderlineStyle::kSolid;
+-    case cbf::mojom::CbfImeTextSpanUnderlineStyle::kDot:
+-      return ui::ImeTextSpan::UnderlineStyle::kDot;
+-    case cbf::mojom::CbfImeTextSpanUnderlineStyle::kDash:
+-      return ui::ImeTextSpan::UnderlineStyle::kDash;
+-    case cbf::mojom::CbfImeTextSpanUnderlineStyle::kSquiggle:
+-      return ui::ImeTextSpan::UnderlineStyle::kSquiggle;
+-  }
+-  return ui::ImeTextSpan::UnderlineStyle::kSolid;
+-}
+-
+-std::vector<ui::ImeTextSpan> ToImeTextSpans(
+-    const std::vector<cbf::mojom::CbfImeTextSpanPtr>& spans) {
+-  std::vector<ui::ImeTextSpan> result;
+-  result.reserve(spans.size());
+-  for (const auto& span : spans) {
+-    ui::ImeTextSpan converted(
+-        ToImeTextSpanType(span->type), span->start_offset, span->end_offset,
+-        ToImeTextSpanThickness(span->thickness),
+-        ToImeTextSpanUnderlineStyle(span->underline_style),
+-        static_cast<SkColor>(span->background_color),
+-        static_cast<SkColor>(span->suggestion_highlight_color), {},
+-        static_cast<SkColor>(span->text_color),
+-        span->should_hide_suggestion_menu);
+-    converted.underline_color = static_cast<SkColor>(span->underline_color);
+-    converted.remove_on_finish_composing = span->remove_on_finish_composing;
+-    converted.interim_char_selection = span->interim_char_selection;
+-    result.push_back(std::move(converted));
+-  }
+-  return result;
+-}
+-
+-gfx::Range ToReplacementRange(int32_t start, int32_t end) {
+-  // (-1, -1) means "no replacement range".
+-  if (start < 0 || end < 0) {
+-    return gfx::Range::InvalidRange();
+-  }
+-  return gfx::Range(start, end);
+-}
+-
+-content::RenderWidgetHost* ResolveInputRenderWidgetHost(
+-    content::WebContents* web_contents) {
+-  if (!web_contents) {
+-    return nullptr;
+-  }
+-
+-  // Prefer the focused frame when available.
+-  if (content::RenderFrameHost* focused_frame =
+-          web_contents->GetFocusedFrame()) {
+-    if (content::RenderWidgetHost* widget_host =
+-            focused_frame->GetRenderWidgetHost()) {
+-      return widget_host;
+-    }
+-  }
+-
+-  // Fall back to the primary frame to keep routing stable after focus changes.
+-  if (content::RenderFrameHost* primary_frame =
+-          web_contents->GetPrimaryMainFrame()) {
+-    if (content::RenderWidgetHost* widget_host =
+-            primary_frame->GetRenderWidgetHost()) {
+-      return widget_host;
+-    }
+-  }
+-
+-  // Last-resort fallback for cases where frame information is temporarily unset.
+-  content::RenderWidgetHostView* view =
+-      web_contents->GetRenderWidgetHostView();
+-  return view ? view->GetRenderWidgetHost() : nullptr;
+-}
+-
+-content::RenderWidgetHostViewBase* ResolveInputRootView(
+-    content::WebContents* web_contents) {
+-  if (!web_contents) {
+-    return nullptr;
+-  }
+-  content::RenderWidgetHostView* view = web_contents->GetRenderWidgetHostView();
+-  if (!view) {
+-    return nullptr;
+-  }
+-  return static_cast<content::RenderWidgetHostViewBase*>(view);
+-}
+-
+-input::RenderWidgetHostInputEventRouter* ResolveInputEventRouter(
+-    content::WebContents* web_contents) {
+-  if (!web_contents) {
+-    return nullptr;
+-  }
+-  auto* web_contents_impl = static_cast<content::WebContentsImpl*>(web_contents);
+-  return web_contents_impl->GetInputEventRouter();
+-}
+-
+-bool RouteMouseEventViaInputRouter(content::WebContents* web_contents,
+-                                   blink::WebMouseEvent* event,
+-                                   const ui::LatencyInfo& latency_info) {
+-  auto* router = ResolveInputEventRouter(web_contents);
+-  auto* root_view = ResolveInputRootView(web_contents);
+-  if (!router || !root_view) {
+-    return false;
+-  }
+-  router->RouteMouseEvent(root_view, event, latency_info);
+-  return true;
+-}
+-
+-bool RouteMouseWheelEventViaInputRouter(content::WebContents* web_contents,
+-                                        blink::WebMouseWheelEvent* event,
+-                                        const ui::LatencyInfo& latency_info) {
+-  auto* router = ResolveInputEventRouter(web_contents);
+-  auto* root_view = ResolveInputRootView(web_contents);
+-  if (!router || !root_view) {
+-    return false;
+-  }
+-  router->RouteMouseWheelEvent(root_view, event, latency_info);
+-  return true;
+-}
+-
+-cbf::mojom::CbfRectPtr ToCbfRect(const gfx::Rect& rect) {
+-  auto out = cbf::mojom::CbfRect::New();
+-  out->x = rect.x();
+-  out->y = rect.y();
+-  out->width = rect.width();
+-  out->height = rect.height();
+-  return out;
+-}
+-
+-}  // namespace
+ 
+ namespace cbf {
+ 
+@@ -590,27 +33,49 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+     : browser_service_(browser_service),
+       dialog_manager_(this),
+       web_contents_delegate_(this, &dialog_manager_),
+-      tab_manager_(profile, this) {}
+-
+-CbfProfileService::ContextMenuEntry::ContextMenuEntry() = default;
+-CbfProfileService::ContextMenuEntry::~ContextMenuEntry() = default;
+-CbfProfileService::DragSessionState::DragSessionState() = default;
+-CbfProfileService::DragSessionState::DragSessionState(
+-    const DragSessionState&) = default;
+-CbfProfileService::DragSessionState& CbfProfileService::DragSessionState::
+-operator=(const DragSessionState&) = default;
+-CbfProfileService::DragSessionState::DragSessionState(
+-    DragSessionState&&) = default;
+-CbfProfileService::DragSessionState& CbfProfileService::DragSessionState::
+-operator=(DragSessionState&&) = default;
+-CbfProfileService::DragSessionState::~DragSessionState() = default;
+-CbfProfileService::WheelPhaseState::WheelPhaseState() = default;
+-CbfProfileService::WheelPhaseState::~WheelPhaseState() = default;
+-
+-CbfProfileService::~CbfProfileService() {
+-  text_input_observations_.RemoveAllObservations();
+-  text_input_map_.clear();
+-}
++      tab_manager_(profile, this),
++      service_context_(std::make_unique<CbfProfileServiceContext>(
++          &tab_manager_,
++          &dialog_manager_,
++          &observer_)),
++      page_controller_(std::make_unique<CbfProfilePageController>(
++          service_context_.get())),
++      navigation_controller_(std::make_unique<CbfProfileNavigationController>(
++          service_context_.get())),
++      popup_controller_(std::make_unique<CbfProfilePopupController>(
++          service_context_.get())),
++      context_menu_controller_(
++          std::make_unique<CbfProfileContextMenuController>(
++              service_context_.get())),
++      input_controller_(std::make_unique<CbfProfileInputController>(
++          service_context_.get())),
++      ime_controller_(std::make_unique<CbfProfileImeController>(
++          service_context_.get())),
++      drag_controller_(std::make_unique<CbfProfileDragController>(
++          service_context_.get())),
++      devtools_controller_(std::make_unique<CbfProfileDevToolsController>(
++          service_context_.get())) {
++  context_menu_controller_->SetInspectElementHandler(base::BindRepeating(
++      [](base::WeakPtr<CbfProfileService> self, WebPageId web_page_id,
++         int32_t x, int32_t y) {
++        if (!self) {
++          return;
++        }
++        self->InspectElement(web_page_id, x, y);
++      },
++      weak_factory_.GetWeakPtr()));
++  devtools_controller_->SetRegisterImeHandler(base::BindRepeating(
++      [](base::WeakPtr<CbfProfileService> self, WebPageId web_page_id,
++         content::WebContents* web_contents) {
++        if (!self) {
++          return;
++        }
++        self->ime_controller_->RegisterWebContents(web_page_id, web_contents);
++      },
++      weak_factory_.GetWeakPtr()));
++}
++
++CbfProfileService::~CbfProfileService() = default;
+ 
+ void CbfProfileService::BindReceiver(
+     mojo::PendingReceiver<mojom::CbfProfileService> receiver) {
+@@ -619,91 +84,18 @@ void CbfProfileService::BindReceiver(
+ 
+ void CbfProfileService::SetObserver(
+     mojo::PendingRemote<mojom::CbfProfileObserver> observer) {
+-  if (observer_.is_bound()) { observer_.reset(); } observer_.Bind(std::move(observer));
+-}
+-
+-void CbfProfileService::RegisterTextInputManager(
+-    content::WebContents* web_contents,
+-    WebPageId web_page_id) {
+-  if (!web_contents) {
+-    return;
+-  }
+-  auto* web_contents_impl =
+-      static_cast<content::WebContentsImpl*>(web_contents);
+-  content::TextInputManager* text_input_manager =
+-      web_contents_impl->GetTextInputManager();
+-  if (!text_input_manager) {
+-    return;
+-  }
+-  if (text_input_map_.find(text_input_manager) == text_input_map_.end()) {
+-    text_input_observations_.AddObservation(text_input_manager);
+-  }
+-  text_input_map_[text_input_manager] = web_page_id;
+-}
+-
+-void CbfProfileService::NotifyImeBoundsUpdated(
+-    content::TextInputManager* text_input_manager,
+-    bool include_composition,
+-    bool include_selection) {
+-  if (!observer_ || !text_input_manager) {
+-    return;
+-  }
+-  const auto it = text_input_map_.find(text_input_manager);
+-  if (it == text_input_map_.end()) {
+-    return;
++  if (observer_.is_bound()) {
++    observer_.reset();
+   }
+-
+-  auto update = cbf::mojom::CbfImeBoundsUpdate::New();
+-  update->web_page_id = it->second;
+-
+-  if (include_composition) {
+-    const auto* composition_info =
+-        text_input_manager->GetCompositionRangeInfo();
+-    auto composition = cbf::mojom::CbfImeCompositionBounds::New();
+-    if (!composition_info || composition_info->character_bounds.empty()) {
+-      composition->range_start = -1;
+-      composition->range_end = -1;
+-    } else {
+-      composition->range_start = composition_info->range.start();
+-      composition->range_end = composition_info->range.end();
+-      composition->character_bounds.reserve(
+-          composition_info->character_bounds.size());
+-      for (const auto& rect : composition_info->character_bounds) {
+-        composition->character_bounds.push_back(ToCbfRect(rect));
+-      }
+-    }
+-    update->composition = std::move(composition);
+-  }
+-
+-  if (include_selection) {
+-    const auto* selection_region = text_input_manager->GetSelectionRegion();
+-    const auto* text_selection = text_input_manager->GetTextSelection();
+-    auto selection = cbf::mojom::CbfTextSelectionBounds::New();
+-    if (!selection_region || !text_selection) {
+-      selection->range_start = -1;
+-      selection->range_end = -1;
+-      selection->caret_rect = ToCbfRect(gfx::Rect());
+-      selection->first_selection_rect = ToCbfRect(gfx::Rect());
+-    } else {
+-      selection->range_start = text_selection->range().start();
+-      selection->range_end = text_selection->range().end();
+-      selection->caret_rect = ToCbfRect(selection_region->caret_rect);
+-      selection->first_selection_rect =
+-          ToCbfRect(selection_region->first_selection_rect);
+-    }
+-    update->selection = std::move(selection);
+-  }
+-
+-  observer_->OnImeBoundsUpdated(std::move(update));
++  observer_.Bind(std::move(observer));
+ }
+ 
+ void CbfProfileService::CreateWebPage(const std::string& initial_url,
+                                       uint64_t request_id,
+                                       CreateWebPageCallback callback) {
+-  const GURL url(initial_url);
+-  const WebPageId web_page_id = tab_manager_.CreateWebPage(url);
+-  RegisterTextInputManager(tab_manager_.GetWebContents(web_page_id),
+-                           web_page_id);
++  const WebPageId web_page_id = page_controller_->CreateWebPage(initial_url);
++  ime_controller_->RegisterWebContents(
++      web_page_id, tab_manager_.GetWebContents(web_page_id));
+   if (observer_ && web_page_id != kInvalidWebPageId) {
+     observer_->OnWebPageCreated(web_page_id, request_id);
+   }
+@@ -715,9 +107,8 @@ void CbfProfileService::RequestCloseWebPage(WebPageId web_page_id) {
+   if (!web_contents) {
+     return;
+   }
+-  beforeunload_reasons_[web_contents] =
+-      mojom::CbfBeforeUnloadReason::kCloseWebPage;
+-  tab_manager_.RequestCloseWebPage(web_page_id);
++  popup_controller_->MarkCloseWebPageBeforeUnloadReason(web_contents);
++  page_controller_->RequestCloseWebPage(web_page_id);
+ }
+ 
+ void CbfProfileService::SetWebPageSize(const WebPageId web_page_id,
+@@ -740,435 +131,54 @@ void CbfProfileService::SetWebPageSize(const WebPageId web_page_id,
+ void CbfProfileService::SendKeyEvent(
+     mojom::CbfKeyEventPtr event,
+     const std::optional<std::vector<std::string>>& commands) {
+-  content::WebContents* web_contents =
+-      tab_manager_.GetWebContents(event->web_page_id);
+-  if (!web_contents) {
+-    return;
+-  }
+-  content::RenderWidgetHost* widget_host =
+-      ResolveInputRenderWidgetHost(web_contents);
+-  if (!widget_host) {
+-    DVLOG(1) << "SendKeyEvent dropped: no input widget host for web_page_id="
+-             << event->web_page_id;
+-    return;
+-  }
+-  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
+-  if (!widget_impl) {
+-    return;
+-  }
+-
+-  input::NativeWebKeyboardEvent key_event(
+-      ToWebInputEventType(event->type), static_cast<int>(event->modifiers),
+-      base::TimeTicks::Now());
+-  key_event.windows_key_code = event->windows_key_code;
+-  key_event.native_key_code = event->native_key_code;
+-  key_event.is_system_key = event->is_system_key;
+-  // Let browser pre-handlers run unless we explicitly lock the key.
+-  key_event.skip_if_unhandled = false;
+-
+-  if (!event->dom_code.empty()) {
+-    key_event.dom_code = static_cast<int>(
+-        ui::KeycodeConverter::CodeStringToDomCode(event->dom_code));
+-  }
+-  if (!event->dom_key.empty()) {
+-    key_event.dom_key =
+-        static_cast<uint32_t>(ui::KeycodeConverter::KeyStringToDomKey(
+-            event->dom_key));
+-  }
+-
+-  FillText(key_event.text, event->text);
+-  FillText(key_event.unmodified_text, event->unmodified_text);
+-
+-  std::vector<blink::mojom::EditCommandPtr> edit_commands;
+-  if (commands.has_value()) {
+-    edit_commands.reserve(commands->size());
+-    for (const auto& command : *commands) {
+-      edit_commands.push_back(
+-          blink::mojom::EditCommand::New(command, ""));
+-    }
+-  }
+-
+-  widget_host->ForwardKeyboardEventWithCommands(
+-      key_event, ui::LatencyInfo(), std::move(edit_commands));
++  input_controller_->SendKeyEvent(std::move(event), commands);
+ }
+ 
+ void CbfProfileService::SendMouseEvent(mojom::CbfMouseEventPtr event) {
+-  content::WebContents* web_contents =
+-      tab_manager_.GetWebContents(event->web_page_id);
+-  if (!web_contents) {
+-    return;
+-  }
+-
+-  blink::WebMouseEvent mouse_event(
+-      ToWebInputEventType(event->type),
+-      gfx::PointF(event->position_in_widget_x, event->position_in_widget_y),
+-      gfx::PointF(event->position_in_screen_x, event->position_in_screen_y),
+-      ToWebMouseButton(event->button),
+-      event->click_count,
+-      static_cast<int>(event->modifiers),
+-      base::TimeTicks::Now());
+-  mouse_event.movement_x = static_cast<int>(event->movement_x);
+-  mouse_event.movement_y = static_cast<int>(event->movement_y);
+-  mouse_event.is_raw_movement_event = event->is_raw_movement_event;
+-  mouse_event.pointer_type = ToWebPointerType(event->pointer_type);
+-
+-  ui::LatencyInfo latency_info;
+-  if (RouteMouseEventViaInputRouter(web_contents, &mouse_event, latency_info)) {
+-    return;
+-  }
+-
+-  content::RenderWidgetHost* widget_host =
+-      ResolveInputRenderWidgetHost(web_contents);
+-  if (!widget_host) {
+-    DVLOG(1) << "SendMouseEvent dropped: no input widget host for web_page_id="
+-             << event->web_page_id;
+-    return;
+-  }
+-  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
+-  if (!widget_impl) {
+-    return;
+-  }
+-  widget_impl->ForwardMouseEventWithLatencyInfo(mouse_event, latency_info);
++  input_controller_->SendMouseEvent(std::move(event));
+ }
+ 
+ void CbfProfileService::SendMouseWheelEvent(
+     mojom::CbfMouseWheelEventPtr event) {
+-  content::WebContents* web_contents =
+-      tab_manager_.GetWebContents(event->web_page_id);
+-  if (!web_contents) {
+-    return;
+-  }
+-
+-  blink::WebMouseWheelEvent wheel_event(
+-      blink::WebInputEvent::Type::kMouseWheel,
+-      static_cast<int>(event->modifiers),
+-      base::TimeTicks::Now());
+-  wheel_event.SetPositionInWidget(event->position_in_widget_x,
+-                                  event->position_in_widget_y);
+-  wheel_event.SetPositionInScreen(event->position_in_screen_x,
+-                                  event->position_in_screen_y);
+-  wheel_event.movement_x = static_cast<int>(event->movement_x);
+-  wheel_event.movement_y = static_cast<int>(event->movement_y);
+-  wheel_event.is_raw_movement_event = event->is_raw_movement_event;
+-  wheel_event.delta_x = event->delta_x;
+-  wheel_event.delta_y = event->delta_y;
+-  wheel_event.wheel_ticks_x = event->wheel_ticks_x;
+-  wheel_event.wheel_ticks_y = event->wheel_ticks_y;
+-  wheel_event.phase = static_cast<blink::WebMouseWheelEvent::Phase>(
+-      event->phase);
+-  wheel_event.momentum_phase = static_cast<blink::WebMouseWheelEvent::Phase>(
+-      event->momentum_phase);
+-  wheel_event.delta_units = ToScrollGranularity(event->delta_units);
+-  if (!HasWheelPhase(wheel_event)) {
+-    auto& phase_state_ptr = wheel_phase_states_[event->web_page_id];
+-    if (!phase_state_ptr) {
+-      phase_state_ptr = std::make_unique<WheelPhaseState>();
+-    }
+-    WheelPhaseState& phase_state = *phase_state_ptr;
+-
+-    if (!phase_state.in_progress) {
+-      wheel_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
+-      phase_state.in_progress = true;
+-    } else {
+-      wheel_event.phase = blink::WebMouseWheelEvent::kPhaseChanged;
+-    }
+-    wheel_event.momentum_phase = blink::WebMouseWheelEvent::kPhaseNone;
+-    phase_state.last_event = wheel_event;
+-    phase_state.end_timer.Start(
+-        FROM_HERE, kSyntheticWheelPhaseGap,
+-        base::BindOnce(&CbfProfileService::SendSyntheticWheelEndedEvent,
+-                       weak_factory_.GetWeakPtr(), event->web_page_id));
+-  } else {
+-    wheel_phase_states_.erase(event->web_page_id);
+-  }
+-
+-  ui::LatencyInfo latency_info;
+-  if (RouteMouseWheelEventViaInputRouter(web_contents, &wheel_event,
+-                                         latency_info)) {
+-    return;
+-  }
+-
+-  content::RenderWidgetHost* widget_host =
+-      ResolveInputRenderWidgetHost(web_contents);
+-  if (!widget_host) {
+-    DVLOG(1)
+-        << "SendMouseWheelEvent dropped: no input widget host for web_page_id="
+-        << event->web_page_id;
+-    return;
+-  }
+-  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
+-  if (!widget_impl) {
+-    return;
+-  }
+-  widget_impl->ForwardWheelEventWithLatencyInfo(wheel_event, latency_info);
+-}
+-
+-void CbfProfileService::SendSyntheticWheelEndedEvent(WebPageId web_page_id) {
+-  const auto state_it = wheel_phase_states_.find(web_page_id);
+-  if (state_it == wheel_phase_states_.end()) {
+-    return;
+-  }
+-
+-  WheelPhaseState& phase_state = *state_it->second;
+-  if (!phase_state.in_progress || !phase_state.last_event.has_value()) {
+-    wheel_phase_states_.erase(state_it);
+-    return;
+-  }
+-
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-  if (!web_contents) {
+-    wheel_phase_states_.erase(state_it);
+-    return;
+-  }
+-
+-  blink::WebMouseWheelEvent ended_event = *phase_state.last_event;
+-  ended_event.SetTimeStamp(base::TimeTicks::Now());
+-  ended_event.delta_x = 0;
+-  ended_event.delta_y = 0;
+-  ended_event.wheel_ticks_x = 0;
+-  ended_event.wheel_ticks_y = 0;
+-  ended_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
+-  ended_event.momentum_phase = blink::WebMouseWheelEvent::kPhaseNone;
+-
+-  ui::LatencyInfo latency_info;
+-  if (!RouteMouseWheelEventViaInputRouter(web_contents, &ended_event,
+-                                          latency_info)) {
+-    content::RenderWidgetHost* widget_host =
+-        ResolveInputRenderWidgetHost(web_contents);
+-    if (!widget_host) {
+-      wheel_phase_states_.erase(state_it);
+-      return;
+-    }
+-    auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
+-    if (!widget_impl) {
+-      wheel_phase_states_.erase(state_it);
+-      return;
+-    }
+-    widget_impl->ForwardWheelEventWithLatencyInfo(ended_event, latency_info);
+-  }
+-  wheel_phase_states_.erase(state_it);
++  input_controller_->SendMouseWheelEvent(std::move(event));
+ }
+ 
+ void CbfProfileService::SendDragUpdate(mojom::CbfDragUpdatePtr update) {
+-  const auto it = drag_sessions_.find(update->session_id);
+-  if (it == drag_sessions_.end()) {
+-    return;
+-  }
+-
+-  DragSessionState& session = it->second;
+-  if (session.web_page_id != update->web_page_id || !session.source_rwh) {
+-    return;
+-  }
+-
+-  gfx::PointF client_point(update->position_in_widget_x,
+-                           update->position_in_widget_y);
+-  gfx::PointF screen_point(update->position_in_screen_x,
+-                           update->position_in_screen_y);
+-  const int modifiers = static_cast<int>(update->modifiers);
+-  const blink::DragOperationsMask allowed_ops =
+-      static_cast<blink::DragOperationsMask>(update->allowed_operations);
+-
+-  if (!session.entered) {
+-    session.source_rwh->DragTargetDragEnter(
+-        session.drop_data, client_point, screen_point, allowed_ops, modifiers,
+-        base::BindOnce(
+-            [](base::WeakPtr<CbfProfileService> self, uint64_t session_id,
+-               ui::mojom::DragOperation operation,
+-               bool document_is_handling_drag) {
+-              if (!self) {
+-                return;
+-              }
+-              auto session_it = self->drag_sessions_.find(session_id);
+-              if (session_it == self->drag_sessions_.end()) {
+-                return;
+-              }
+-              session_it->second.last_operation = operation;
+-              session_it->second.document_is_handling_drag =
+-                  document_is_handling_drag;
+-            },
+-            weak_factory_.GetWeakPtr(), update->session_id));
+-    session.entered = true;
+-    return;
+-  }
+-
+-  session.source_rwh->DragTargetDragOver(
+-      client_point, screen_point, allowed_ops, modifiers,
+-      base::BindOnce(
+-          [](base::WeakPtr<CbfProfileService> self, uint64_t session_id,
+-             ui::mojom::DragOperation operation,
+-             bool document_is_handling_drag) {
+-            if (!self) {
+-              return;
+-            }
+-            auto session_it = self->drag_sessions_.find(session_id);
+-            if (session_it == self->drag_sessions_.end()) {
+-              return;
+-            }
+-            session_it->second.last_operation = operation;
+-            session_it->second.document_is_handling_drag =
+-                document_is_handling_drag;
+-          },
+-          weak_factory_.GetWeakPtr(), update->session_id));
++  drag_controller_->SendDragUpdate(std::move(update));
+ }
+ 
+ void CbfProfileService::SendDragDrop(mojom::CbfDragDropPtr drop) {
+-  const auto it = drag_sessions_.find(drop->session_id);
+-  if (it == drag_sessions_.end()) {
+-    return;
+-  }
+-
+-  DragSessionState session = std::move(it->second);
+-  drag_sessions_.erase(it);
+-
+-  if (session.web_page_id != drop->web_page_id || !session.source_rwh) {
+-    return;
+-  }
+-
+-  gfx::PointF client_point(drop->position_in_widget_x, drop->position_in_widget_y);
+-  gfx::PointF screen_point(drop->position_in_screen_x, drop->position_in_screen_y);
+-  const int modifiers = static_cast<int>(drop->modifiers);
+-  session.drop_data.document_is_handling_drag =
+-      session.document_is_handling_drag;
+-
+-  session.source_rwh->DragTargetDrop(session.drop_data, client_point, screen_point,
+-                                     modifiers, base::DoNothing());
+-  session.source_rwh->DragSourceEndedAt(client_point, screen_point,
+-                                        session.last_operation, base::DoNothing());
+-  session.source_rwh->DragSourceSystemDragEnded();
++  drag_controller_->SendDragDrop(std::move(drop));
+ }
+ 
+ void CbfProfileService::SendDragCancel(uint64_t session_id, uint64_t web_page_id) {
+-  const auto it = drag_sessions_.find(session_id);
+-  if (it == drag_sessions_.end()) {
+-    return;
+-  }
+-
+-  DragSessionState session = std::move(it->second);
+-  drag_sessions_.erase(it);
+-
+-  if (session.web_page_id != web_page_id || !session.source_rwh) {
+-    return;
+-  }
+-
+-  const gfx::PointF zero_point;
+-  if (session.entered) {
+-    session.source_rwh->DragTargetDragLeave(zero_point, zero_point);
+-  }
+-  session.source_rwh->DragSourceEndedAt(zero_point, zero_point,
+-                                        ui::mojom::DragOperation::kNone,
+-                                        base::DoNothing());
+-  session.source_rwh->DragSourceSystemDragEnded();
++  drag_controller_->SendDragCancel(session_id, web_page_id);
+ }
+ 
+ void CbfProfileService::SetComposition(
+     mojom::CbfImeCompositionPtr composition) {
+-  content::WebContents* web_contents =
+-      tab_manager_.GetWebContents(composition->web_page_id);
+-  if (!web_contents) {
+-    return;
+-  }
+-  content::RenderWidgetHost* widget_host =
+-      ResolveInputRenderWidgetHost(web_contents);
+-  if (!widget_host) {
+-    DVLOG(1) << "SetComposition dropped: no input widget host for web_page_id="
+-             << composition->web_page_id;
+-    return;
+-  }
+-  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
+-  if (!widget_impl) {
+-    return;
+-  }
+-
+-  const std::u16string text16 = base::UTF8ToUTF16(composition->text);
+-  const gfx::Range replacement_range = ToReplacementRange(
+-      composition->replacement_range_start, composition->replacement_range_end);
+-  widget_impl->ImeSetComposition(text16, ToImeTextSpans(composition->spans),
+-                                 replacement_range,
+-                                 composition->selection_start,
+-                                 composition->selection_end);
++  ime_controller_->SetComposition(std::move(composition));
+ }
+ 
+ void CbfProfileService::CommitText(mojom::CbfImeCommitTextPtr commit) {
+-  content::WebContents* web_contents =
+-      tab_manager_.GetWebContents(commit->web_page_id);
+-  if (!web_contents) {
+-    return;
+-  }
+-  content::RenderWidgetHost* widget_host =
+-      ResolveInputRenderWidgetHost(web_contents);
+-  if (!widget_host) {
+-    DVLOG(1) << "CommitText dropped: no input widget host for web_page_id="
+-             << commit->web_page_id;
+-    return;
+-  }
+-  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
+-  if (!widget_impl) {
+-    return;
+-  }
+-
+-  const std::u16string text16 = base::UTF8ToUTF16(commit->text);
+-  const gfx::Range replacement_range = ToReplacementRange(
+-      commit->replacement_range_start, commit->replacement_range_end);
+-
+-  widget_impl->ImeCommitText(text16, ToImeTextSpans(commit->spans),
+-                             replacement_range,
+-                             commit->relative_caret_position);
++  ime_controller_->CommitText(std::move(commit));
+ }
+ 
+ void CbfProfileService::FinishComposingText(
+     uint64_t web_page_id,
+     mojom::CbfConfirmCompositionBehavior behavior) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-  if (!web_contents) {
+-    return;
+-  }
+-  content::RenderWidgetHost* widget_host =
+-      ResolveInputRenderWidgetHost(web_contents);
+-  if (!widget_host) {
+-    DVLOG(1)
+-        << "FinishComposingText dropped: no input widget host for web_page_id="
+-        << web_page_id;
+-    return;
+-  }
+-  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
+-  if (!widget_impl) {
+-    return;
+-  }
+-
+-  const bool keep_selection =
+-      behavior == mojom::CbfConfirmCompositionBehavior::kKeepSelection;
+-  widget_impl->ImeFinishComposingText(keep_selection);
++  ime_controller_->FinishComposingText(web_page_id, behavior);
+ }
+ 
+ void CbfProfileService::ExecuteContextMenuCommand(uint64_t menu_id,
+                                                   int32_t command_id,
+                                                   int32_t event_flags) {
+-  auto it = context_menus_.find(menu_id);
+-  if (it == context_menus_.end()) {
+-    return;
+-  }
+-
+-  auto& entry = it->second;
+-  if (entry->menu) {
+-    entry->menu->ExecuteCommand(command_id, event_flags);
+-    entry->menu->MenuClosed(entry->menu->menu_model_mutable());
+-  }
+-
+-  context_menus_.erase(it);
++  context_menu_controller_->ExecuteContextMenuCommand(menu_id, command_id,
++                                                      event_flags);
+ }
+ 
+ void CbfProfileService::DismissContextMenu(uint64_t menu_id) {
+-  auto it = context_menus_.find(menu_id);
+-  if (it == context_menus_.end()) {
+-    return;
+-  }
+-
+-  auto& entry = it->second;
+-  if (entry->menu) {
+-    entry->menu->MenuClosed(entry->menu->menu_model_mutable());
+-  }
+-
+-  context_menus_.erase(it);
++  context_menu_controller_->DismissContextMenu(menu_id);
+ }
+ 
+ void CbfProfileService::ConfirmBeforeUnload(uint64_t request_id, bool proceed) {
+@@ -1176,65 +186,31 @@ void CbfProfileService::ConfirmBeforeUnload(uint64_t request_id, bool proceed) {
+ }
+ 
+ void CbfProfileService::Navigate(uint64_t web_page_id, const std::string& url) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-  if (!web_contents) {
+-    return;
+-  }
+-  const GURL gurl(url);
+-  if (!gurl.is_valid()) {
+-    return;
+-  }
+-  web_contents->GetController().LoadURL(
+-      gurl, content::Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
++  navigation_controller_->Navigate(web_page_id, url);
+ }
+ 
+ void CbfProfileService::GoBack(uint64_t web_page_id) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-  if (web_contents && web_contents->GetController().CanGoBack()) {
+-    web_contents->GetController().GoBack();
+-  }
++  navigation_controller_->GoBack(web_page_id);
+ }
+ 
+ void CbfProfileService::GoForward(uint64_t web_page_id) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-  if (web_contents && web_contents->GetController().CanGoForward()) {
+-    web_contents->GetController().GoForward();
+-  }
++  navigation_controller_->GoForward(web_page_id);
+ }
+ 
+ void CbfProfileService::Reload(uint64_t web_page_id, bool ignore_cache) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-  if (!web_contents) {
+-    return;
+-  }
+-  const content::ReloadType type = ignore_cache
+-                                       ? content::ReloadType::BYPASSING_CACHE
+-                                       : content::ReloadType::NORMAL;
+-  web_contents->GetController().Reload(type, true);
++  navigation_controller_->Reload(web_page_id, ignore_cache);
+ }
+ 
+-void CbfProfileService::SetWebPageFocus(uint64_t web_page_id, bool focused) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-  if (!web_contents) {
+-    return;
+-  }
+-
+-  auto* widget_impl = content::RenderWidgetHostImpl::From(
+-      ResolveInputRenderWidgetHost(web_contents));
++void CbfProfileService::OpenDevTools(uint64_t web_page_id) {
++  devtools_controller_->OpenDevTools(web_page_id);
++}
+ 
+-  if (focused) {
+-    if (widget_impl) {
+-      widget_impl->SetPageFocus(true);
+-    }
+-    web_contents->Focus();
+-    web_contents->RestoreFocus();
+-    return;
+-  }
++void CbfProfileService::InspectElement(uint64_t web_page_id, int32_t x, int32_t y) {
++  devtools_controller_->InspectElement(web_page_id, x, y);
++}
+ 
+-  web_contents->StoreFocus();
+-  if (widget_impl) {
+-    widget_impl->SetPageFocus(false);
+-  }
++void CbfProfileService::SetWebPageFocus(uint64_t web_page_id, bool focused) {
++  navigation_controller_->SetWebPageFocus(web_page_id, focused);
+ }
+ 
+ void CbfProfileService::GetWebPageDomHtml(uint64_t web_page_id,
+@@ -1279,7 +255,7 @@ bool CbfProfileService::IsShutdownRequested() const {
+ }
+ 
+ void CbfProfileService::DispatchBeforeUnloadForShutdown() {
+-  tab_manager_.DispatchBeforeUnloadForAll();
++  page_controller_->DispatchBeforeUnloadForShutdown();
+ }
+ 
+ void CbfProfileService::ResolveBeforeUnloadForShutdown(bool proceed) {
+@@ -1287,34 +263,25 @@ void CbfProfileService::ResolveBeforeUnloadForShutdown(bool proceed) {
+ }
+ 
+ std::vector<WebPageId> CbfProfileService::GetDirtyWebPageIds() const {
+-  return tab_manager_.GetDirtyWebPageIds();
++  return page_controller_->GetDirtyWebPageIds();
+ }
+ 
+ std::vector<WebPageId> CbfProfileService::GetAllWebPageIds() const {
+-  return tab_manager_.GetAllWebPageIds();
++  return page_controller_->GetAllWebPageIds();
+ }
+ 
+ size_t CbfProfileService::GetWebPageCount() const {
+-  return tab_manager_.GetWebPageCount();
++  return page_controller_->GetWebPageCount();
+ }
+ 
+ void CbfProfileService::CloseAllWebPages() {
+-  tab_manager_.CloseAllWebPages();
++  page_controller_->CloseAllWebPages();
+ }
+ 
+ void CbfProfileService::CloseWebContents(content::WebContents* web_contents) {
+-  beforeunload_reasons_.erase(web_contents);
+-  const WebPageId web_page_id =
+-      tab_manager_.GetWebPageIdForWebContents(web_contents);
+-  if (web_page_id != kInvalidWebPageId) {
+-    for (auto it = drag_sessions_.begin(); it != drag_sessions_.end();) {
+-      if (it->second.web_page_id == web_page_id) {
+-        it = drag_sessions_.erase(it);
+-      } else {
+-        ++it;
+-      }
+-    }
+-  }
++  popup_controller_->ClearBeforeUnloadReason(web_contents);
++  const WebPageId web_page_id = page_controller_->GetWebPageIdForWebContents(
++      web_contents);
+ 
+   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+       FROM_HERE,
+@@ -1324,7 +291,7 @@ void CbfProfileService::CloseWebContents(content::WebContents* web_contents) {
+               return;
+             }
+             if (web_page_id != kInvalidWebPageId) {
+-              self->tab_manager_.CloseWebPage(web_page_id);
++              self->page_controller_->CloseWebPage(web_page_id);
+             }
+             if (self->browser_service_) {
+               self->browser_service_->NotifyWebPageClosed();
+@@ -1348,81 +315,28 @@ WebPageId CbfProfileService::GetWebPageIdForWebContents(
+ bool CbfProfileService::HandleContextMenu(
+     content::RenderFrameHost& render_frame_host,
+     const content::ContextMenuParams& params) {
+-  content::WebContents* web_contents =
+-      content::WebContents::FromRenderFrameHost(&render_frame_host);
+-  if (!web_contents) {
+-    return true;
+-  }
+-
+-  if (!observer_) {
+-    return true;
+-  }
+-
+-  const WebPageId web_page_id =
+-      tab_manager_.GetWebPageIdForWebContents(web_contents);
+-  if (web_page_id == kInvalidWebPageId) {
+-    return true;
+-  }
+-
+-  const content::ContextMenuParams enriched_params =
+-      AddContextMenuParamsPropertiesFromPreferences(web_contents, params);
+-
+-  auto menu = std::make_unique<CbfRenderViewContextMenu>(render_frame_host,
+-                                                         enriched_params);
+-  menu->Init();
+-  menu->menu_model_mutable()->MenuWillShow();
+-
+-  Profile* profile =
+-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+-
+-  auto menu_payload = cbf::mojom::CbfContextMenu::New();
+-  const std::uint64_t menu_id = next_context_menu_id_++;
+-  menu_payload->menu_id = menu_id;
+-  menu_payload->x = enriched_params.x;
+-  menu_payload->y = enriched_params.y;
+-  menu_payload->source_type =
+-      static_cast<uint32_t>(enriched_params.source_type);
+-  menu_payload->items = BuildMenuItems(menu->menu_model_mutable(), profile);
+-
+-  auto entry = std::make_unique<ContextMenuEntry>();
+-  entry->web_page_id = web_page_id;
+-  entry->menu = std::move(menu);
+-  context_menus_[menu_id] = std::move(entry);
+-
+-  observer_->OnContextMenuRequested(web_page_id, std::move(menu_payload));
+-  return true;
++  return context_menu_controller_->HandleContextMenu(render_frame_host, params);
+ }
+ 
+ void CbfProfileService::NotifyNewWebPageRequested(
+     content::WebContents* source,
+     const GURL& target_url,
+     WindowOpenDisposition disposition) {
+-  if (!observer_ || !source) {
+-    return;
+-  }
+-
+-  const WebPageId web_page_id =
+-      tab_manager_.GetWebPageIdForWebContents(source);
+-  if (web_page_id == kInvalidWebPageId) {
+-    return;
+-  }
+-
+-  const bool is_popup = disposition == WindowOpenDisposition::NEW_POPUP;
+-  observer_->OnNewWebPageRequested(web_page_id, target_url.spec(), is_popup);
++  popup_controller_->NotifyNewWebPageRequested(source, target_url, disposition);
+ }
+ 
+ void CbfProfileService::NotifyWebPageClosed(WebPageId web_page_id) {
+-  wheel_phase_states_.erase(web_page_id);
++  if (web_page_id != kInvalidWebPageId) {
++    context_menu_controller_->OnWebPageClosed(web_page_id);
++    input_controller_->OnWebPageClosed(web_page_id);
++    ime_controller_->OnWebPageClosed(web_page_id);
++    drag_controller_->OnWebPageClosed(web_page_id);
++    devtools_controller_->OnWebPageClosed(web_page_id);
++  }
++
+   if (!observer_ || web_page_id == kInvalidWebPageId) {
+     return;
+   }
+-  for (auto it = drag_sessions_.begin(); it != drag_sessions_.end();) {
+-    if (it->second.web_page_id == web_page_id) {
+-      it = drag_sessions_.erase(it);
+-    } else {
+-      ++it;
+-    }
+-  }
+   observer_->OnWebPageClosed(web_page_id);
+ }
+ 
+@@ -1451,13 +365,8 @@ void CbfProfileService::OnBeforeUnloadFired(
+     return;
+   }
+ 
+-  auto it = beforeunload_reasons_.find(web_contents);
+-  bool is_close_request = false;
+-  if (it != beforeunload_reasons_.end()) {
+-    is_close_request =
+-        (it->second == mojom::CbfBeforeUnloadReason::kCloseWebPage);
+-    beforeunload_reasons_.erase(it);
+-  }
++  const bool is_close_request =
++      popup_controller_->ConsumeCloseWebPageBeforeUnloadReason(web_contents);
+ 
+   browser_service_->NotifyBeforeUnloadFired(web_page_id, proceed);
+ 
+@@ -1498,34 +407,7 @@ void CbfProfileService::NotifyBeforeUnloadDialogRequested(
+ mojom::CbfBeforeUnloadReason CbfProfileService::ResolveBeforeUnloadReason(
+     content::WebContents* web_contents,
+     bool is_reload) {
+-  if (is_reload) {
+-    return mojom::CbfBeforeUnloadReason::kReload;
+-  }
+-  if (!web_contents) {
+-    return mojom::CbfBeforeUnloadReason::kUnknown;
+-  }
+-  const auto it = beforeunload_reasons_.find(web_contents);
+-  if (it == beforeunload_reasons_.end()) {
+-    return mojom::CbfBeforeUnloadReason::kUnknown;
+-  }
+-  const auto reason = it->second;
+-  return reason;
+-}
+-
+-void CbfProfileService::OnSelectionBoundsChanged(
+-    content::TextInputManager* text_input_manager,
+-    content::RenderWidgetHostViewBase* updated_view) {
+-  (void)updated_view;
+-  NotifyImeBoundsUpdated(text_input_manager, false, true);
+-}
+-
+-void CbfProfileService::OnImeCompositionRangeChanged(
+-    content::TextInputManager* text_input_manager,
+-    content::RenderWidgetHostViewBase* updated_view,
+-    bool character_bounds_changed) {
+-  (void)updated_view;
+-  (void)character_bounds_changed;
+-  NotifyImeBoundsUpdated(text_input_manager, true, false);
++  return popup_controller_->ResolveBeforeUnloadReason(web_contents, is_reload);
+ }
+ 
+ void CbfProfileService::NotifySurfaceHandleUpdated(
+@@ -1552,7 +434,8 @@ void CbfProfileService::NotifyCursorChanged(
+     return;
+   }
+ 
+-  observer_->OnCursorChanged(web_page_id, ToCbfCursorType(cursor_type));
++  observer_->OnCursorChanged(
++      web_page_id, mojo_converters::ToCbfCursorType(cursor_type));
+ }
+ 
+ void CbfProfileService::NotifyNavigationStateChanged(
+@@ -1614,89 +497,9 @@ void CbfProfileService::NotifyDragStartRequested(
+     const gfx::Rect& drag_obj_rect_in_dip,
+     const blink::mojom::DragEventSourceInfo& event_info,
+     content::RenderWidgetHost* source_rwh) {
+-  if (!observer_ || !web_contents || !source_rwh) {
+-    return;
+-  }
+-
+-  auto* source_rwh_impl = content::RenderWidgetHostImpl::From(source_rwh);
+-  if (!source_rwh_impl) {
+-    return;
+-  }
+-
+-  const WebPageId web_page_id =
+-      tab_manager_.GetWebPageIdForWebContents(web_contents);
+-  if (web_page_id == kInvalidWebPageId) {
+-    return;
+-  }
+-
+-  const uint64_t session_id = next_drag_session_id_++;
+-  DragSessionState session;
+-  session.web_page_id = web_page_id;
+-  session.source_rwh = source_rwh_impl->GetWeakPtr();
+-  session.drop_data = drop_data;
+-  // Match Chromium's native drag path: set view_id and sanitize drop payload
+-  // before any DragTarget* call, otherwise DragTargetDrop checks can fail.
+-  source_rwh_impl->FilterDropData(&session.drop_data);
+-  drag_sessions_[session_id] = std::move(session);
+-
+-  auto request = mojom::CbfDragStartRequest::New();
+-  request->session_id = session_id;
+-  request->web_page_id = web_page_id;
+-  request->allowed_operations = static_cast<uint32_t>(allowed_ops);
+-  request->source_origin = source_origin.Serialize();
+-
+-  auto data = mojom::CbfDragData::New();
+-  data->text = base::UTF16ToUTF8(drop_data.text.value_or(std::u16string()));
+-  data->html = base::UTF16ToUTF8(drop_data.html.value_or(std::u16string()));
+-  data->html_base_url = drop_data.html_base_url.spec();
+-  data->url_infos.reserve(drop_data.url_infos.size());
+-  for (const auto& url_info : drop_data.url_infos) {
+-    auto info = mojom::CbfDragUrlInfo::New();
+-    info->url = url_info.url.spec();
+-    info->title = base::UTF16ToUTF8(url_info.title);
+-    data->url_infos.push_back(std::move(info));
+-  }
+-  data->filenames.reserve(drop_data.filenames.size());
+-  for (const auto& file_info : drop_data.filenames) {
+-    data->filenames.push_back(file_info.path.AsUTF8Unsafe());
+-  }
+-  data->file_mime_types.reserve(drop_data.file_mime_types.size());
+-  for (const auto& mime_type : drop_data.file_mime_types) {
+-    data->file_mime_types.push_back(base::UTF16ToUTF8(mime_type));
+-  }
+-  data->custom_data.reserve(drop_data.custom_data.size());
+-  for (const auto& [key, value] : drop_data.custom_data) {
+-    auto pair = mojom::CbfStringPair::New();
+-    pair->key = base::UTF16ToUTF8(key);
+-    pair->value = base::UTF16ToUTF8(value);
+-    data->custom_data.push_back(std::move(pair));
+-  }
+-  request->data = std::move(data);
+-
+-  if (!drag_image.drawsNothing()) {
+-    std::optional<std::vector<uint8_t>> png_bytes =
+-        gfx::PNGCodec::EncodeBGRASkBitmap(drag_image,
+-                                          /*discard_transparency=*/false);
+-    if (png_bytes.has_value()) {
+-      auto image = mojom::CbfDragImage::New();
+-      image->png_bytes = std::move(*png_bytes);
+-      image->pixel_width = static_cast<uint32_t>(drag_image.width());
+-      image->pixel_height = static_cast<uint32_t>(drag_image.height());
+-      if (drag_image.width() > 0 && drag_obj_rect_in_dip.width() > 0) {
+-        // Keep scale as pixel-per-DIP (device scale factor equivalent) so that
+-        // host side can derive point size via `pixel_size / scale`.
+-        image->scale = static_cast<float>(drag_image.width()) /
+-                       static_cast<float>(drag_obj_rect_in_dip.width());
+-      } else {
+-        image->scale = 1.0f;
+-      }
+-      image->cursor_offset_x = cursor_offset_in_dip.x();
+-      image->cursor_offset_y = cursor_offset_in_dip.y();
+-      request->image = std::move(image);
+-    }
+-  }
+-
+-  observer_->OnDragStartRequested(std::move(request));
++  drag_controller_->NotifyDragStartRequested(
++      web_contents, drop_data, source_origin, allowed_ops, drag_image,
++      cursor_offset_in_dip, drag_obj_rect_in_dip, event_info, source_rwh);
+ }
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 56967234332b1..649b8424ae54c 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -8,47 +8,47 @@
+ #include <string>
+ #include <vector>
+ 
+-#include "base/containers/flat_map.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+-#include "base/scoped_multi_source_observation.h"
+-#include "base/timer/timer.h"
+ #include "chrome/browser/cbf/cbf_java_script_dialog_manager.h"
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
+ #include "chrome/browser/cbf/cbf_web_contents_delegate.h"
+ #include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
+-#include "content/browser/renderer_host/text_input_manager.h"
+ #include "content/public/browser/context_menu_params.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/common/drop_data.h"
+ #include "mojo/public/cpp/bindings/receiver_set.h"
+ #include "mojo/public/cpp/bindings/remote.h"
+ #include "third_party/blink/public/common/page/drag_operation.h"
+-#include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
+ #include "third_party/blink/public/mojom/drag/drag.mojom-forward.h"
+ #include "third_party/skia/include/core/SkBitmap.h"
+-#include "ui/gfx/geometry/rect.h"
+-#include "ui/gfx/geometry/vector2d.h"
+-#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-shared.h"
+ #include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
+ #include "ui/base/window_open_disposition.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/vector2d.h"
+ 
+ class Profile;
+ class GURL;
+ 
+ namespace content {
+ class RenderWidgetHost;
+-class RenderWidgetHostImpl;
+ class WebContents;
+ }  // namespace content
+ 
+ namespace cbf {
+ 
+ class CbfBrowserService;
+-class CbfRenderViewContextMenu;
+-
+-class CbfProfileService : public mojom::CbfProfileService,
+-                          public content::TextInputManager::Observer {
++class CbfProfileContextMenuController;
++class CbfProfileDevToolsController;
++class CbfProfileDragController;
++class CbfProfileImeController;
++class CbfProfileInputController;
++class CbfProfileNavigationController;
++class CbfProfilePageController;
++class CbfProfilePopupController;
++class CbfProfileServiceContext;
++
++class CbfProfileService : public mojom::CbfProfileService {
+  public:
+   CbfProfileService(::Profile* profile, CbfBrowserService* browser_service);
+   CbfProfileService(const CbfProfileService&) = delete;
+@@ -90,6 +90,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void GoBack(uint64_t web_page_id) override;
+   void GoForward(uint64_t web_page_id) override;
+   void Reload(uint64_t web_page_id, bool ignore_cache) override;
++  void OpenDevTools(uint64_t web_page_id) override;
++  void InspectElement(uint64_t web_page_id, int32_t x, int32_t y) override;
+   void SetWebPageFocus(uint64_t web_page_id, bool focused) override;
+ 
+   void GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id) override;
+@@ -142,69 +144,21 @@ class CbfProfileService : public mojom::CbfProfileService,
+                                 content::RenderWidgetHost* source_rwh);
+ 
+  private:
+-  struct ContextMenuEntry {
+-    WebPageId web_page_id = kInvalidWebPageId;
+-    std::unique_ptr<CbfRenderViewContextMenu> menu;
+-    ContextMenuEntry();
+-    ~ContextMenuEntry();
+-  };
+-
+-  struct DragSessionState {
+-    DragSessionState();
+-    DragSessionState(const DragSessionState&);
+-    DragSessionState& operator=(const DragSessionState&);
+-    DragSessionState(DragSessionState&&);
+-    DragSessionState& operator=(DragSessionState&&);
+-    ~DragSessionState();
+-
+-    WebPageId web_page_id = kInvalidWebPageId;
+-    base::WeakPtr<content::RenderWidgetHostImpl> source_rwh;
+-    content::DropData drop_data;
+-    bool entered = false;
+-    bool document_is_handling_drag = false;
+-    ui::mojom::DragOperation last_operation = ui::mojom::DragOperation::kNone;
+-  };
+-
+-  struct WheelPhaseState {
+-    WheelPhaseState();
+-    ~WheelPhaseState();
+-
+-    base::OneShotTimer end_timer;
+-    std::optional<blink::WebMouseWheelEvent> last_event;
+-    bool in_progress = false;
+-  };
+-
+-  void RegisterTextInputManager(content::WebContents* web_contents,
+-                                WebPageId web_page_id);
+-  void NotifyImeBoundsUpdated(content::TextInputManager* text_input_manager,
+-                              bool include_composition,
+-                              bool include_selection);
+-  void SendSyntheticWheelEndedEvent(WebPageId web_page_id);
+-
+-  void OnSelectionBoundsChanged(content::TextInputManager* text_input_manager,
+-                                content::RenderWidgetHostViewBase* updated_view) override;
+-  void OnImeCompositionRangeChanged(content::TextInputManager* text_input_manager,
+-                                    content::RenderWidgetHostViewBase* updated_view,
+-                                    bool character_bounds_changed) override;
+-
+   raw_ptr<CbfBrowserService> browser_service_;
+   mojo::Remote<mojom::CbfProfileObserver> observer_;
+   CbfJavaScriptDialogManager dialog_manager_;
+   CbfWebContentsDelegate web_contents_delegate_;
+   CbfTabManager tab_manager_;
++  std::unique_ptr<CbfProfileServiceContext> service_context_;
++  std::unique_ptr<CbfProfilePageController> page_controller_;
++  std::unique_ptr<CbfProfileNavigationController> navigation_controller_;
++  std::unique_ptr<CbfProfilePopupController> popup_controller_;
++  std::unique_ptr<CbfProfileContextMenuController> context_menu_controller_;
++  std::unique_ptr<CbfProfileInputController> input_controller_;
++  std::unique_ptr<CbfProfileImeController> ime_controller_;
++  std::unique_ptr<CbfProfileDragController> drag_controller_;
++  std::unique_ptr<CbfProfileDevToolsController> devtools_controller_;
+   mojo::ReceiverSet<mojom::CbfProfileService> receivers_;
+-  base::ScopedMultiSourceObservation<content::TextInputManager,
+-                                     content::TextInputManager::Observer>
+-      text_input_observations_{this};
+-  base::flat_map<raw_ptr<content::TextInputManager>, WebPageId> text_input_map_;
+-  std::uint64_t next_context_menu_id_ = 1;
+-  base::flat_map<std::uint64_t, std::unique_ptr<ContextMenuEntry>>
+-      context_menus_;
+-  base::flat_map<raw_ptr<content::WebContents>, mojom::CbfBeforeUnloadReason>
+-      beforeunload_reasons_;
+-  uint64_t next_drag_session_id_ = 1;
+-  base::flat_map<uint64_t, DragSessionState> drag_sessions_;
+-  base::flat_map<WebPageId, std::unique_ptr<WheelPhaseState>> wheel_phase_states_;
+ 
+   base::WeakPtrFactory<CbfProfileService> weak_factory_{this};
+ };
+diff --git a/chrome/browser/cbf/mojo/cbf_mojom_converters.cc b/chrome/browser/cbf/mojo/cbf_mojom_converters.cc
+new file mode 100644
+index 0000000000000..613a135e3e154
+--- /dev/null
++++ b/chrome/browser/cbf/mojo/cbf_mojom_converters.cc
+@@ -0,0 +1,415 @@
++#include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
++
++#include "build/build_config.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/themes/theme_service.h"
++#include "chrome/browser/themes/theme_service_factory.h"
++#include "ui/base/accelerators/accelerator.h"
++#include "ui/base/models/image_model.h"
++#include "ui/gfx/codec/png_codec.h"
++#include "ui/gfx/image/image_skia.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/cbf/cbf_context_menu_mac.h"
++#endif
++
++namespace cbf::mojo_converters {
++
++namespace {
++
++cbf::mojom::CbfMenuIconPtr BuildMenuIcon(const ui::ImageModel& icon,
++                                         Profile* profile) {
++  if (icon.IsEmpty() || !profile) {
++    return nullptr;
++  }
++
++  auto* theme_service = ThemeServiceFactory::GetForProfile(profile);
++  if (!theme_service) {
++    return nullptr;
++  }
++
++  ui::ColorProvider* color_provider = theme_service->GetColorProvider();
++  if (!color_provider) {
++    return nullptr;
++  }
++
++  gfx::ImageSkia image = icon.Rasterize(color_provider);
++  if (image.isNull()) {
++    return nullptr;
++  }
++
++  const SkBitmap* bitmap = image.bitmap();
++  if (!bitmap || bitmap->drawsNothing()) {
++    return nullptr;
++  }
++
++  auto encoded =
++      gfx::PNGCodec::EncodeBGRASkBitmap(*bitmap, /*discard_transparency=*/false);
++  if (!encoded.has_value()) {
++    return nullptr;
++  }
++
++  auto out = cbf::mojom::CbfMenuIcon::New();
++  out->width = bitmap->width();
++  out->height = bitmap->height();
++  out->png_bytes = std::move(*encoded);
++  return out;
++}
++
++cbf::mojom::CbfMenuAcceleratorPtr BuildMenuAccelerator(
++    const ui::MenuModel* model,
++    size_t index) {
++  ui::Accelerator accelerator;
++  if (!model->GetAcceleratorAt(index, &accelerator)) {
++    return nullptr;
++  }
++
++#if BUILDFLAG(IS_MAC)
++  std::string key_equivalent;
++  uint32_t modifier_mask = 0;
++  if (!cbf::GetCocoaKeyEquivalentForAccelerator(accelerator, &key_equivalent,
++                                                &modifier_mask)) {
++    return nullptr;
++  }
++
++  auto out = cbf::mojom::CbfMenuAccelerator::New();
++  out->key_equivalent = std::move(key_equivalent);
++  out->modifier_mask = modifier_mask;
++  return out;
++#else
++  return nullptr;
++#endif
++}
++
++ui::ImeTextSpan::Type ToImeTextSpanType(cbf::mojom::CbfImeTextSpanType type) {
++  switch (type) {
++    case cbf::mojom::CbfImeTextSpanType::kComposition:
++      return ui::ImeTextSpan::Type::kComposition;
++    case cbf::mojom::CbfImeTextSpanType::kSuggestion:
++      return ui::ImeTextSpan::Type::kSuggestion;
++    case cbf::mojom::CbfImeTextSpanType::kMisspellingSuggestion:
++      return ui::ImeTextSpan::Type::kMisspellingSuggestion;
++    case cbf::mojom::CbfImeTextSpanType::kAutocorrect:
++      return ui::ImeTextSpan::Type::kAutocorrect;
++    case cbf::mojom::CbfImeTextSpanType::kGrammarSuggestion:
++      return ui::ImeTextSpan::Type::kGrammarSuggestion;
++  }
++  return ui::ImeTextSpan::Type::kComposition;
++}
++
++ui::ImeTextSpan::Thickness ToImeTextSpanThickness(
++    cbf::mojom::CbfImeTextSpanThickness thickness) {
++  switch (thickness) {
++    case cbf::mojom::CbfImeTextSpanThickness::kNone:
++      return ui::ImeTextSpan::Thickness::kNone;
++    case cbf::mojom::CbfImeTextSpanThickness::kThin:
++      return ui::ImeTextSpan::Thickness::kThin;
++    case cbf::mojom::CbfImeTextSpanThickness::kThick:
++      return ui::ImeTextSpan::Thickness::kThick;
++  }
++  return ui::ImeTextSpan::Thickness::kThin;
++}
++
++ui::ImeTextSpan::UnderlineStyle ToImeTextSpanUnderlineStyle(
++    cbf::mojom::CbfImeTextSpanUnderlineStyle style) {
++  switch (style) {
++    case cbf::mojom::CbfImeTextSpanUnderlineStyle::kNone:
++      return ui::ImeTextSpan::UnderlineStyle::kNone;
++    case cbf::mojom::CbfImeTextSpanUnderlineStyle::kSolid:
++      return ui::ImeTextSpan::UnderlineStyle::kSolid;
++    case cbf::mojom::CbfImeTextSpanUnderlineStyle::kDot:
++      return ui::ImeTextSpan::UnderlineStyle::kDot;
++    case cbf::mojom::CbfImeTextSpanUnderlineStyle::kDash:
++      return ui::ImeTextSpan::UnderlineStyle::kDash;
++    case cbf::mojom::CbfImeTextSpanUnderlineStyle::kSquiggle:
++      return ui::ImeTextSpan::UnderlineStyle::kSquiggle;
++  }
++  return ui::ImeTextSpan::UnderlineStyle::kSolid;
++}
++
++}  // namespace
++
++cbf::mojom::CbfMenuItemType ToCbfMenuItemType(ui::MenuModel::ItemType type) {
++  switch (type) {
++    case ui::MenuModel::TYPE_COMMAND:
++      return cbf::mojom::CbfMenuItemType::kCommand;
++    case ui::MenuModel::TYPE_CHECK:
++      return cbf::mojom::CbfMenuItemType::kCheck;
++    case ui::MenuModel::TYPE_RADIO:
++      return cbf::mojom::CbfMenuItemType::kRadio;
++    case ui::MenuModel::TYPE_SEPARATOR:
++      return cbf::mojom::CbfMenuItemType::kSeparator;
++    case ui::MenuModel::TYPE_BUTTON_ITEM:
++      return cbf::mojom::CbfMenuItemType::kButtonItem;
++    case ui::MenuModel::TYPE_SUBMENU:
++      return cbf::mojom::CbfMenuItemType::kSubmenu;
++    case ui::MenuModel::TYPE_ACTIONABLE_SUBMENU:
++      return cbf::mojom::CbfMenuItemType::kActionableSubmenu;
++    case ui::MenuModel::TYPE_HIGHLIGHTED:
++      return cbf::mojom::CbfMenuItemType::kHighlighted;
++    case ui::MenuModel::TYPE_TITLE:
++      return cbf::mojom::CbfMenuItemType::kTitle;
++  }
++}
++
++cbf::mojom::CbfCursorType ToCbfCursorType(ui::mojom::CursorType cursor_type) {
++  switch (cursor_type) {
++    case ui::mojom::CursorType::kCross:
++      return cbf::mojom::CbfCursorType::kCrosshair;
++    case ui::mojom::CursorType::kHand:
++      return cbf::mojom::CbfCursorType::kPointer;
++    case ui::mojom::CursorType::kMove:
++      return cbf::mojom::CbfCursorType::kMove;
++    case ui::mojom::CursorType::kIBeam:
++      return cbf::mojom::CbfCursorType::kText;
++    case ui::mojom::CursorType::kWait:
++      return cbf::mojom::CbfCursorType::kWait;
++    case ui::mojom::CursorType::kHelp:
++      return cbf::mojom::CbfCursorType::kHelp;
++    case ui::mojom::CursorType::kProgress:
++      return cbf::mojom::CbfCursorType::kProgress;
++    case ui::mojom::CursorType::kNoDrop:
++      return cbf::mojom::CbfCursorType::kNoDrop;
++    case ui::mojom::CursorType::kNotAllowed:
++      return cbf::mojom::CbfCursorType::kNotAllowed;
++    case ui::mojom::CursorType::kContextMenu:
++      return cbf::mojom::CbfCursorType::kContextMenu;
++    case ui::mojom::CursorType::kCell:
++      return cbf::mojom::CbfCursorType::kCell;
++    case ui::mojom::CursorType::kVerticalText:
++      return cbf::mojom::CbfCursorType::kVerticalText;
++    case ui::mojom::CursorType::kAlias:
++    case ui::mojom::CursorType::kDndLink:
++      return cbf::mojom::CbfCursorType::kAlias;
++    case ui::mojom::CursorType::kCopy:
++    case ui::mojom::CursorType::kDndCopy:
++      return cbf::mojom::CbfCursorType::kCopy;
++    case ui::mojom::CursorType::kGrab:
++      return cbf::mojom::CbfCursorType::kGrab;
++    case ui::mojom::CursorType::kGrabbing:
++      return cbf::mojom::CbfCursorType::kGrabbing;
++    case ui::mojom::CursorType::kMiddlePanning:
++      return cbf::mojom::CbfCursorType::kAllScroll;
++    case ui::mojom::CursorType::kZoomIn:
++      return cbf::mojom::CbfCursorType::kZoomIn;
++    case ui::mojom::CursorType::kZoomOut:
++      return cbf::mojom::CbfCursorType::kZoomOut;
++    case ui::mojom::CursorType::kEastResize:
++      return cbf::mojom::CbfCursorType::kEResize;
++    case ui::mojom::CursorType::kNorthResize:
++      return cbf::mojom::CbfCursorType::kNResize;
++    case ui::mojom::CursorType::kNorthEastResize:
++      return cbf::mojom::CbfCursorType::kNeResize;
++    case ui::mojom::CursorType::kNorthWestResize:
++      return cbf::mojom::CbfCursorType::kNwResize;
++    case ui::mojom::CursorType::kSouthResize:
++      return cbf::mojom::CbfCursorType::kSResize;
++    case ui::mojom::CursorType::kSouthEastResize:
++      return cbf::mojom::CbfCursorType::kSeResize;
++    case ui::mojom::CursorType::kSouthWestResize:
++      return cbf::mojom::CbfCursorType::kSwResize;
++    case ui::mojom::CursorType::kWestResize:
++      return cbf::mojom::CbfCursorType::kWResize;
++    case ui::mojom::CursorType::kEastWestResize:
++    case ui::mojom::CursorType::kEastWestNoResize:
++      return cbf::mojom::CbfCursorType::kEwResize;
++    case ui::mojom::CursorType::kNorthSouthResize:
++    case ui::mojom::CursorType::kNorthSouthNoResize:
++      return cbf::mojom::CbfCursorType::kNsResize;
++    case ui::mojom::CursorType::kNorthEastSouthWestResize:
++    case ui::mojom::CursorType::kNorthEastSouthWestNoResize:
++      return cbf::mojom::CbfCursorType::kNeswResize;
++    case ui::mojom::CursorType::kNorthWestSouthEastResize:
++    case ui::mojom::CursorType::kNorthWestSouthEastNoResize:
++      return cbf::mojom::CbfCursorType::kNwseResize;
++    case ui::mojom::CursorType::kColumnResize:
++      return cbf::mojom::CbfCursorType::kColResize;
++    case ui::mojom::CursorType::kRowResize:
++      return cbf::mojom::CbfCursorType::kRowResize;
++    case ui::mojom::CursorType::kPointer:
++    case ui::mojom::CursorType::kNull:
++    case ui::mojom::CursorType::kCustom:
++    case ui::mojom::CursorType::kNone:
++    case ui::mojom::CursorType::kMiddlePanningVertical:
++    case ui::mojom::CursorType::kMiddlePanningHorizontal:
++    case ui::mojom::CursorType::kEastPanning:
++    case ui::mojom::CursorType::kNorthPanning:
++    case ui::mojom::CursorType::kNorthEastPanning:
++    case ui::mojom::CursorType::kNorthWestPanning:
++    case ui::mojom::CursorType::kSouthPanning:
++    case ui::mojom::CursorType::kSouthEastPanning:
++    case ui::mojom::CursorType::kSouthWestPanning:
++    case ui::mojom::CursorType::kWestPanning:
++    case ui::mojom::CursorType::kDndNone:
++    case ui::mojom::CursorType::kDndMove:
++      return cbf::mojom::CbfCursorType::kDefault;
++  }
++}
++
++std::vector<cbf::mojom::CbfMenuItemPtr> BuildMenuItems(
++    const ui::MenuModel* model,
++    Profile* profile) {
++  std::vector<cbf::mojom::CbfMenuItemPtr> items;
++  if (!model) {
++    return items;
++  }
++
++  const size_t count = model->GetItemCount();
++  items.reserve(count);
++
++  for (size_t i = 0; i < count; ++i) {
++    if (!model->IsVisibleAt(i)) {
++      continue;
++    }
++
++    auto item = cbf::mojom::CbfMenuItem::New();
++    item->type = ToCbfMenuItemType(model->GetTypeAt(i));
++    item->command_id = model->GetCommandIdAt(i);
++    item->label = base::UTF16ToUTF8(model->GetLabelAt(i));
++    item->secondary_label = base::UTF16ToUTF8(model->GetSecondaryLabelAt(i));
++    item->minor_text = base::UTF16ToUTF8(model->GetMinorTextAt(i));
++    item->enabled = model->IsEnabledAt(i);
++    item->visible = true;
++    item->checked = model->IsItemCheckedAt(i);
++    item->group_id = model->GetGroupIdAt(i);
++    item->is_new_feature = model->IsNewFeatureAt(i);
++    item->is_alerted = model->IsAlertedAt(i);
++    item->may_have_mnemonics = model->MayHaveMnemonicsAt(i);
++    item->accessible_name = base::UTF16ToUTF8(model->GetAccessibleNameAt(i));
++    item->icon = BuildMenuIcon(model->GetIconAt(i), profile);
++    item->minor_icon = BuildMenuIcon(model->GetMinorIconAt(i), profile);
++    item->accelerator = BuildMenuAccelerator(model, i);
++
++    if (auto* submenu = model->GetSubmenuModelAt(i)) {
++      item->submenu = BuildMenuItems(submenu, profile);
++    }
++
++    items.push_back(std::move(item));
++  }
++
++  return items;
++}
++
++blink::WebInputEvent::Type ToWebInputEventType(cbf::mojom::CbfKeyEventType type) {
++  switch (type) {
++    case cbf::mojom::CbfKeyEventType::kRawKeyDown:
++      return blink::WebInputEvent::Type::kRawKeyDown;
++    case cbf::mojom::CbfKeyEventType::kKeyDown:
++      return blink::WebInputEvent::Type::kKeyDown;
++    case cbf::mojom::CbfKeyEventType::kKeyUp:
++      return blink::WebInputEvent::Type::kKeyUp;
++    case cbf::mojom::CbfKeyEventType::kChar:
++      return blink::WebInputEvent::Type::kChar;
++  }
++  return blink::WebInputEvent::Type::kRawKeyDown;
++}
++
++blink::WebInputEvent::Type ToWebInputEventType(
++    cbf::mojom::CbfMouseEventType type) {
++  switch (type) {
++    case cbf::mojom::CbfMouseEventType::kMouseDown:
++      return blink::WebInputEvent::Type::kMouseDown;
++    case cbf::mojom::CbfMouseEventType::kMouseUp:
++      return blink::WebInputEvent::Type::kMouseUp;
++    case cbf::mojom::CbfMouseEventType::kMouseMove:
++      return blink::WebInputEvent::Type::kMouseMove;
++    case cbf::mojom::CbfMouseEventType::kMouseEnter:
++      return blink::WebInputEvent::Type::kMouseEnter;
++    case cbf::mojom::CbfMouseEventType::kMouseLeave:
++      return blink::WebInputEvent::Type::kMouseLeave;
++  }
++  return blink::WebInputEvent::Type::kMouseMove;
++}
++
++blink::WebMouseEvent::Button ToWebMouseButton(cbf::mojom::CbfMouseButton button) {
++  switch (button) {
++    case cbf::mojom::CbfMouseButton::kLeft:
++      return blink::WebMouseEvent::Button::kLeft;
++    case cbf::mojom::CbfMouseButton::kMiddle:
++      return blink::WebMouseEvent::Button::kMiddle;
++    case cbf::mojom::CbfMouseButton::kRight:
++      return blink::WebMouseEvent::Button::kRight;
++    case cbf::mojom::CbfMouseButton::kBack:
++      return blink::WebMouseEvent::Button::kBack;
++    case cbf::mojom::CbfMouseButton::kForward:
++      return blink::WebMouseEvent::Button::kForward;
++    case cbf::mojom::CbfMouseButton::kNoButton:
++    default:
++      return blink::WebMouseEvent::Button::kNoButton;
++  }
++}
++
++blink::WebPointerProperties::PointerType ToWebPointerType(
++    cbf::mojom::CbfPointerType type) {
++  switch (type) {
++    case cbf::mojom::CbfPointerType::kPointerMouse:
++      return blink::WebPointerProperties::PointerType::kMouse;
++    case cbf::mojom::CbfPointerType::kPointerPen:
++      return blink::WebPointerProperties::PointerType::kPen;
++    case cbf::mojom::CbfPointerType::kPointerTouch:
++      return blink::WebPointerProperties::PointerType::kTouch;
++    case cbf::mojom::CbfPointerType::kPointerEraser:
++      return blink::WebPointerProperties::PointerType::kEraser;
++    case cbf::mojom::CbfPointerType::kPointerUnknown:
++    default:
++      return blink::WebPointerProperties::PointerType::kUnknown;
++  }
++}
++
++ui::ScrollGranularity ToScrollGranularity(
++    cbf::mojom::CbfScrollGranularity value) {
++  switch (value) {
++    case cbf::mojom::CbfScrollGranularity::kScrollByPrecisePixel:
++      return ui::ScrollGranularity::kScrollByPrecisePixel;
++    case cbf::mojom::CbfScrollGranularity::kScrollByPixel:
++      return ui::ScrollGranularity::kScrollByPixel;
++    case cbf::mojom::CbfScrollGranularity::kScrollByLine:
++      return ui::ScrollGranularity::kScrollByLine;
++    case cbf::mojom::CbfScrollGranularity::kScrollByPage:
++      return ui::ScrollGranularity::kScrollByPage;
++    case cbf::mojom::CbfScrollGranularity::kScrollByDocument:
++      return ui::ScrollGranularity::kScrollByDocument;
++  }
++  return ui::ScrollGranularity::kScrollByPixel;
++}
++
++std::vector<ui::ImeTextSpan> ToImeTextSpans(
++    const std::vector<cbf::mojom::CbfImeTextSpanPtr>& spans) {
++  std::vector<ui::ImeTextSpan> result;
++  result.reserve(spans.size());
++  for (const auto& span : spans) {
++    ui::ImeTextSpan converted(
++        ToImeTextSpanType(span->type), span->start_offset, span->end_offset,
++        ToImeTextSpanThickness(span->thickness),
++        ToImeTextSpanUnderlineStyle(span->underline_style),
++        static_cast<SkColor>(span->background_color),
++        static_cast<SkColor>(span->suggestion_highlight_color), {},
++        static_cast<SkColor>(span->text_color),
++        span->should_hide_suggestion_menu);
++    converted.underline_color = static_cast<SkColor>(span->underline_color);
++    converted.remove_on_finish_composing = span->remove_on_finish_composing;
++    converted.interim_char_selection = span->interim_char_selection;
++    result.push_back(std::move(converted));
++  }
++  return result;
++}
++
++gfx::Range ToReplacementRange(int32_t start, int32_t end) {
++  if (start < 0 || end < 0) {
++    return gfx::Range::InvalidRange();
++  }
++  return gfx::Range(start, end);
++}
++
++cbf::mojom::CbfRectPtr ToCbfRect(const gfx::Rect& rect) {
++  auto out = cbf::mojom::CbfRect::New();
++  out->x = rect.x();
++  out->y = rect.y();
++  out->width = rect.width();
++  out->height = rect.height();
++  return out;
++}
++
++}  // namespace cbf::mojo_converters
+diff --git a/chrome/browser/cbf/mojo/cbf_mojom_converters.h b/chrome/browser/cbf/mojo/cbf_mojom_converters.h
+new file mode 100644
+index 0000000000000..fea49f3bf019b
+--- /dev/null
++++ b/chrome/browser/cbf/mojo/cbf_mojom_converters.h
+@@ -0,0 +1,44 @@
++#ifndef CHROME_BROWSER_CBF_MOJO_CBF_MOJOM_CONVERTERS_H_
++#define CHROME_BROWSER_CBF_MOJO_CBF_MOJOM_CONVERTERS_H_
++
++#include <cstdint>
++#include <vector>
++
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "third_party/blink/public/common/input/web_input_event.h"
++#include "third_party/blink/public/common/input/web_mouse_event.h"
++#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
++#include "ui/base/ime/ime_text_span.h"
++#include "ui/base/models/menu_model.h"
++#include "ui/events/types/scroll_types.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/range/range.h"
++
++class Profile;
++
++namespace cbf::mojo_converters {
++
++cbf::mojom::CbfMenuItemType ToCbfMenuItemType(ui::MenuModel::ItemType type);
++cbf::mojom::CbfCursorType ToCbfCursorType(ui::mojom::CursorType cursor_type);
++std::vector<cbf::mojom::CbfMenuItemPtr> BuildMenuItems(
++    const ui::MenuModel* model,
++    Profile* profile);
++
++blink::WebInputEvent::Type ToWebInputEventType(cbf::mojom::CbfKeyEventType type);
++blink::WebInputEvent::Type ToWebInputEventType(
++    cbf::mojom::CbfMouseEventType type);
++blink::WebMouseEvent::Button ToWebMouseButton(cbf::mojom::CbfMouseButton button);
++blink::WebPointerProperties::PointerType ToWebPointerType(
++    cbf::mojom::CbfPointerType type);
++ui::ScrollGranularity ToScrollGranularity(
++    cbf::mojom::CbfScrollGranularity value);
++
++std::vector<ui::ImeTextSpan> ToImeTextSpans(
++    const std::vector<cbf::mojom::CbfImeTextSpanPtr>& spans);
++gfx::Range ToReplacementRange(int32_t start, int32_t end);
++
++cbf::mojom::CbfRectPtr ToCbfRect(const gfx::Rect& rect);
++
++}  // namespace cbf::mojo_converters
++
++#endif  // CHROME_BROWSER_CBF_MOJO_CBF_MOJOM_CONVERTERS_H_
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index fc2fe244d885f..55ec2f8e02c2c 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -365,6 +365,7 @@ interface CbfBrowserObserver {
+ interface CbfProfileObserver {
+   OnSurfaceHandleUpdated(uint64 web_page_id, uint32 ca_context_id);
+   OnWebPageCreated(uint64 web_page_id, uint64 request_id);
++  OnDevToolsOpened(uint64 web_page_id, uint64 devtools_web_page_id);
+   OnWebPageClosed(uint64 web_page_id);
+   OnWebPageResizeAcknowledged(uint64 web_page_id);
+   OnImeBoundsUpdated(CbfImeBoundsUpdate update);
+@@ -407,6 +408,8 @@ interface CbfProfileService {
+   GoBack(uint64 web_page_id);
+   GoForward(uint64 web_page_id);
+   Reload(uint64 web_page_id, bool ignore_cache);
++  OpenDevTools(uint64 web_page_id);
++  InspectElement(uint64 web_page_id, int32 x, int32 y);
+   SetWebPageFocus(uint64 web_page_id, bool focused);
+ 
+   GetWebPageDomHtml(uint64 web_page_id, uint64 request_id);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
+new file mode 100644
+index 0000000000000..674e40ad0d769
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
+@@ -0,0 +1,166 @@
++#include "chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h"
++
++#include <memory>
++#include <utility>
++
++#include "base/logging.h"
++#include "chrome/app/chrome_command_ids.h"
++#include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
++#include "chrome/browser/ui/tab_contents/chrome_web_contents_menu_helper.h"
++#include "chrome/browser/profiles/profile.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/reload_type.h"
++#include "content/public/browser/web_contents.h"
++
++namespace cbf {
++
++class CbfRenderViewContextMenu final : public RenderViewContextMenu {
++ public:
++  CbfRenderViewContextMenu(content::RenderFrameHost& render_frame_host,
++                           const content::ContextMenuParams& params)
++      : RenderViewContextMenu(render_frame_host, params) {}
++
++  void Show() override {}
++
++  void ExecuteCommand(int id, int event_flags) override {
++    // CBF Chromium does not use Browser-owned tab management.
++    if (id == IDC_RELOAD) {
++      DCHECK(GetRenderFrameHost());
++      if (content::RenderFrameHost* rfh = GetRenderFrameHost()) {
++        DCHECK(content::WebContents::FromRenderFrameHost(rfh));
++        if (content::WebContents* wc =
++                content::WebContents::FromRenderFrameHost(rfh)) {
++          wc->GetController().Reload(content::ReloadType::NORMAL, true);
++        }
++      }
++      return;
++    }
++    RenderViewContextMenu::ExecuteCommand(id, event_flags);
++  }
++
++  ui::SimpleMenuModel* menu_model_mutable() {
++    return const_cast<ui::SimpleMenuModel*>(&menu_model());
++  }
++};
++
++CbfProfileContextMenuController::ContextMenuEntry::ContextMenuEntry() = default;
++CbfProfileContextMenuController::ContextMenuEntry::~ContextMenuEntry() = default;
++
++CbfProfileContextMenuController::CbfProfileContextMenuController(CbfProfileServiceContext* context)
++    : context_(context) {}
++
++CbfProfileContextMenuController::~CbfProfileContextMenuController() = default;
++
++void CbfProfileContextMenuController::SetInspectElementHandler(
++    base::RepeatingCallback<void(WebPageId, int32_t, int32_t)>
++        inspect_element_handler) {
++  inspect_element_handler_ = std::move(inspect_element_handler);
++}
++
++bool CbfProfileContextMenuController::HandleContextMenu(
++    content::RenderFrameHost& render_frame_host,
++    const content::ContextMenuParams& params) {
++  content::WebContents* web_contents =
++      content::WebContents::FromRenderFrameHost(&render_frame_host);
++  if (!web_contents) {
++    return true;
++  }
++
++  auto& observer = context_->observer_remote();
++  if (!observer.is_bound()) {
++    return true;
++  }
++
++  const WebPageId web_page_id =
++      context_->tab_manager().GetWebPageIdForWebContents(web_contents);
++  if (web_page_id == kInvalidWebPageId) {
++    return true;
++  }
++
++  const content::ContextMenuParams enriched_params =
++      AddContextMenuParamsPropertiesFromPreferences(web_contents, params);
++
++  auto menu = std::make_unique<CbfRenderViewContextMenu>(render_frame_host,
++                                                         enriched_params);
++  menu->Init();
++  menu->menu_model_mutable()->MenuWillShow();
++
++  Profile* profile =
++      Profile::FromBrowserContext(web_contents->GetBrowserContext());
++
++  auto menu_payload = cbf::mojom::CbfContextMenu::New();
++  const std::uint64_t menu_id = next_context_menu_id_++;
++  menu_payload->menu_id = menu_id;
++  menu_payload->x = enriched_params.x;
++  menu_payload->y = enriched_params.y;
++  menu_payload->source_type =
++      static_cast<uint32_t>(enriched_params.source_type);
++  menu_payload->items =
++      mojo_converters::BuildMenuItems(menu->menu_model_mutable(), profile);
++
++  auto entry = std::make_unique<ContextMenuEntry>();
++  entry->web_page_id = web_page_id;
++  entry->x = enriched_params.x;
++  entry->y = enriched_params.y;
++  entry->menu = std::move(menu);
++  context_menus_[menu_id] = std::move(entry);
++
++  observer->OnContextMenuRequested(web_page_id, std::move(menu_payload));
++  return true;
++}
++
++void CbfProfileContextMenuController::ExecuteContextMenuCommand(
++    uint64_t menu_id,
++    int32_t command_id,
++    int32_t event_flags) {
++  auto it = context_menus_.find(menu_id);
++  if (it == context_menus_.end()) {
++    return;
++  }
++
++  auto& entry = it->second;
++  if (entry->menu) {
++    if (command_id == IDC_CONTENT_CONTEXT_INSPECTELEMENT ||
++        command_id == IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS) {
++      if (inspect_element_handler_) {
++        inspect_element_handler_.Run(entry->web_page_id, entry->x, entry->y);
++      }
++    } else {
++      entry->menu->ExecuteCommand(command_id, event_flags);
++    }
++    entry->menu->MenuClosed(entry->menu->menu_model_mutable());
++  }
++
++  context_menus_.erase(it);
++}
++
++void CbfProfileContextMenuController::DismissContextMenu(uint64_t menu_id) {
++  auto it = context_menus_.find(menu_id);
++  if (it == context_menus_.end()) {
++    return;
++  }
++
++  auto& entry = it->second;
++  if (entry->menu) {
++    entry->menu->MenuClosed(entry->menu->menu_model_mutable());
++  }
++
++  context_menus_.erase(it);
++}
++
++void CbfProfileContextMenuController::OnWebPageClosed(WebPageId web_page_id) {
++  for (auto it = context_menus_.begin(); it != context_menus_.end();) {
++    if (it->second && it->second->web_page_id == web_page_id) {
++      if (it->second->menu) {
++        it->second->menu->MenuClosed(it->second->menu->menu_model_mutable());
++      }
++      it = context_menus_.erase(it);
++      continue;
++    }
++    ++it;
++  }
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
+new file mode 100644
+index 0000000000000..969c9384b7cd1
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
+@@ -0,0 +1,57 @@
++#ifndef CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_CONTEXT_MENU_CONTROLLER_H_
++#define CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_CONTEXT_MENU_CONTROLLER_H_
++
++#include <cstdint>
++#include <memory>
++
++#include "base/containers/flat_map.h"
++#include "base/functional/callback_forward.h"
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "content/public/browser/context_menu_params.h"
++#include "content/public/browser/render_frame_host.h"
++
++namespace cbf {
++
++class CbfProfileServiceContext;
++class CbfRenderViewContextMenu;
++
++class CbfProfileContextMenuController {
++ public:
++  explicit CbfProfileContextMenuController(CbfProfileServiceContext* context);
++  CbfProfileContextMenuController(const CbfProfileContextMenuController&) = delete;
++  CbfProfileContextMenuController& operator=(const CbfProfileContextMenuController&) = delete;
++  ~CbfProfileContextMenuController();
++
++  void SetInspectElementHandler(
++      base::RepeatingCallback<void(WebPageId, int32_t, int32_t)>
++          inspect_element_handler);
++  bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
++                         const content::ContextMenuParams& params);
++  void ExecuteContextMenuCommand(uint64_t menu_id,
++                                 int32_t command_id,
++                                 int32_t event_flags);
++  void DismissContextMenu(uint64_t menu_id);
++  void OnWebPageClosed(WebPageId web_page_id);
++
++ private:
++  struct ContextMenuEntry {
++    WebPageId web_page_id = kInvalidWebPageId;
++    int32_t x = 0;
++    int32_t y = 0;
++    std::unique_ptr<CbfRenderViewContextMenu> menu;
++    ContextMenuEntry();
++    ~ContextMenuEntry();
++  };
++
++  std::uint64_t next_context_menu_id_ = 1;
++  base::flat_map<std::uint64_t, std::unique_ptr<ContextMenuEntry>>
++      context_menus_;
++  base::RepeatingCallback<void(WebPageId, int32_t, int32_t)>
++      inspect_element_handler_;
++  raw_ptr<CbfProfileServiceContext> context_;
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_CONTEXT_MENU_CONTROLLER_H_
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+new file mode 100644
+index 0000000000000..10af4e385ddaa
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+@@ -0,0 +1,335 @@
++#include "chrome/browser/cbf/profile/cbf_profile_devtools_controller.h"
++
++#include <string>
++#include <utility>
++
++#include "base/command_line.h"
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/task/single_thread_task_runner.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "chrome/browser/devtools/devtools_ui_bindings.h"
++#include "chrome/browser/ui/webui/devtools/devtools_ui.h"
++#include "chrome/common/chrome_switches.h"
++#include "content/public/browser/devtools_agent_host.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_contents_delegate.h"
++#include "content/public/common/referrer.h"
++#include "ui/base/page_transition_types.h"
++#include "ui/gfx/geometry/rect.h"
++#include "url/gurl.h"
++
++namespace {
++
++constexpr char kDevToolsFrontendBaseUrl[] =
++    "devtools://devtools/bundled/devtools_app.html";
++
++GURL BuildDevToolsFrontendUrl() {
++  std::string url = std::string(kDevToolsFrontendBaseUrl) +
++                    "?remoteBase=" + DevToolsUI::GetRemoteBaseURL().spec() +
++                    "&targetType=tab";
++
++  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
++  if (command_line->HasSwitch(switches::kDevToolsFlags)) {
++    url += "&" + command_line->GetSwitchValueASCII(switches::kDevToolsFlags);
++  }
++  if (command_line->HasSwitch(switches::kCustomDevtoolsFrontend)) {
++    url += "&debugFrontend=true";
++  }
++
++  return DevToolsUIBindings::SanitizeFrontendURL(GURL(url));
++}
++
++class CbfDevToolsUIDelegate final : public DevToolsUIBindings::Delegate {
++ public:
++  CbfDevToolsUIDelegate(content::WebContents* frontend_contents,
++                        content::WebContents* inspected_contents)
++      : frontend_contents_(frontend_contents),
++        inspected_contents_(inspected_contents) {}
++  ~CbfDevToolsUIDelegate() override = default;
++
++  content::WebContents* GetInspectedWebContents() override {
++    return inspected_contents_;
++  }
++
++  void ActivateWindow() override {
++    if (!frontend_contents_) {
++      return;
++    }
++    frontend_contents_->Focus();
++    if (auto* delegate = frontend_contents_->GetDelegate()) {
++      delegate->ActivateContents(frontend_contents_);
++    }
++  }
++
++  void CloseWindow() override {
++    if (frontend_contents_) {
++      frontend_contents_->ClosePage();
++    }
++  }
++
++  void Inspect(scoped_refptr<content::DevToolsAgentHost> host) override {}
++  void SetInspectedPageBounds(const gfx::Rect& rect) override {}
++  void InspectElementCompleted() override {
++    LOG(INFO) << "[CBF][DevTools] InspectElementCompleted";
++  }
++  void SetIsDocked(bool is_docked) override {}
++  void OpenInNewTab(const std::string& url) override {}
++  void OpenSearchResultsInNewTab(const std::string& query) override {}
++  void SetWhitelistedShortcuts(const std::string& message) override {}
++  void SetEyeDropperActive(bool active) override {}
++  void OpenNodeFrontend() override {}
++  void InspectedContentsClosing() override {
++    LOG(INFO) << "[CBF][DevTools] InspectedContentsClosing";
++    CloseWindow();
++  }
++  void OnLoadCompleted() override {
++    LOG(INFO) << "[CBF][DevTools] Frontend OnLoadCompleted";
++  }
++  void ReadyForTest() override {}
++  void ConnectionReady() override {
++    LOG(INFO) << "[CBF][DevTools] Frontend ConnectionReady";
++  }
++  void SetOpenNewWindowForPopups(bool value) override {}
++  infobars::ContentInfoBarManager* GetInfoBarManager() override {
++    return nullptr;
++  }
++  void RenderProcessGone(bool crashed) override {}
++  void ShowCertificateViewer(const std::string& cert_chain) override {}
++  int GetDockStateForLogging() override { return 0; }
++  int GetOpenedByForLogging() override { return 0; }
++  int GetClosedByForLogging() override { return 0; }
++
++ private:
++  raw_ptr<content::WebContents> frontend_contents_;
++  raw_ptr<content::WebContents> inspected_contents_;
++};
++
++content::RenderFrameHost* ResolveInspectFrame(
++    content::WebContents* inspected_contents) {
++  if (!inspected_contents) {
++    return nullptr;
++  }
++  if (content::RenderFrameHost* frame = inspected_contents->GetFocusedFrame()) {
++    return frame;
++  }
++  return inspected_contents->GetPrimaryMainFrame();
++}
++
++}  // namespace
++
++namespace cbf {
++
++struct CbfProfileDevToolsController::DevToolsSession {
++  DevToolsSession();
++  ~DevToolsSession();
++
++  raw_ptr<DevToolsUIBindings> bindings = nullptr;
++};
++
++CbfProfileDevToolsController::DevToolsSession::DevToolsSession() = default;
++CbfProfileDevToolsController::DevToolsSession::~DevToolsSession() = default;
++
++CbfProfileDevToolsController::CbfProfileDevToolsController(
++    CbfProfileServiceContext* context)
++    : context_(context) {}
++
++CbfProfileDevToolsController::~CbfProfileDevToolsController() = default;
++
++void CbfProfileDevToolsController::SetRegisterImeHandler(
++    base::RepeatingCallback<void(WebPageId, content::WebContents*)>
++        register_ime_handler) {
++  register_ime_handler_ = std::move(register_ime_handler);
++}
++
++void CbfProfileDevToolsController::OpenDevTools(WebPageId inspected_web_page_id) {
++  content::WebContents* inspected_contents =
++      context_->tab_manager().GetWebContents(inspected_web_page_id);
++  if (!inspected_contents) {
++    LOG(INFO) << "[CBF][DevTools] OpenDevTools ignored: inspected page not found id="
++              << inspected_web_page_id;
++    return;
++  }
++  LOG(INFO) << "[CBF][DevTools] OpenDevTools requested inspected_id="
++            << inspected_web_page_id;
++
++  WebPageId devtools_web_page_id = kInvalidWebPageId;
++  auto existing_it = inspected_to_devtools_.find(inspected_web_page_id);
++  if (existing_it != inspected_to_devtools_.end()) {
++    devtools_web_page_id = existing_it->second;
++    if (!context_->tab_manager().GetWebContents(devtools_web_page_id)) {
++      devtools_to_inspected_.erase(devtools_web_page_id);
++      devtools_sessions_.erase(devtools_web_page_id);
++      inspected_to_devtools_.erase(existing_it);
++      devtools_web_page_id = kInvalidWebPageId;
++    }
++  }
++
++  if (devtools_web_page_id == kInvalidWebPageId) {
++    devtools_web_page_id = context_->tab_manager().CreateWebPage(GURL());
++    if (devtools_web_page_id == kInvalidWebPageId) {
++      LOG(INFO) << "[CBF][DevTools] Failed to create devtools page for inspected_id="
++                << inspected_web_page_id;
++      return;
++    }
++
++    content::WebContents* devtools_contents =
++        context_->tab_manager().GetWebContents(devtools_web_page_id);
++    if (!devtools_contents) {
++      LOG(INFO) << "[CBF][DevTools] Created devtools id="
++                << devtools_web_page_id << " but WebContents lookup failed";
++      context_->tab_manager().CloseWebPage(devtools_web_page_id);
++      return;
++    }
++
++    const GURL devtools_frontend_url = BuildDevToolsFrontendUrl();
++    LOG(INFO) << "[CBF][DevTools] Created devtools page id="
++              << devtools_web_page_id
++              << " for inspected_id=" << inspected_web_page_id
++              << " url=" << devtools_frontend_url;
++
++    if (register_ime_handler_) {
++      register_ime_handler_.Run(devtools_web_page_id, devtools_contents);
++    }
++
++    auto session = std::make_unique<DevToolsSession>();
++    session->bindings = nullptr;
++
++    devtools_contents->GetController().LoadURL(
++        devtools_frontend_url, content::Referrer(),
++        ui::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
++    LOG(INFO) << "[CBF][DevTools] Navigated devtools page id="
++              << devtools_web_page_id << " to url=" << devtools_frontend_url;
++
++    devtools_sessions_[devtools_web_page_id] = std::move(session);
++    inspected_to_devtools_[inspected_web_page_id] = devtools_web_page_id;
++    devtools_to_inspected_[devtools_web_page_id] = inspected_web_page_id;
++  } else {
++    LOG(INFO) << "[CBF][DevTools] Reusing existing devtools page id="
++              << devtools_web_page_id
++              << " for inspected_id=" << inspected_web_page_id;
++  }
++
++  TryAttachSession(inspected_web_page_id, devtools_web_page_id, 0);
++
++  auto& observer = context_->observer_remote();
++  if (observer.is_bound()) {
++    LOG(INFO) << "[CBF][DevTools] Notifying OnDevToolsOpened inspected_id="
++              << inspected_web_page_id << " devtools_id=" << devtools_web_page_id;
++    observer->OnDevToolsOpened(inspected_web_page_id, devtools_web_page_id);
++  }
++}
++
++void CbfProfileDevToolsController::InspectElement(WebPageId inspected_web_page_id,
++                                                  int32_t x,
++                                                  int32_t y) {
++  content::WebContents* inspected_contents =
++      context_->tab_manager().GetWebContents(inspected_web_page_id);
++  if (!inspected_contents) {
++    LOG(INFO) << "[CBF][DevTools] InspectElement ignored: inspected page not found id="
++              << inspected_web_page_id;
++    return;
++  }
++
++  LOG(INFO) << "[CBF][DevTools] InspectElement requested inspected_id="
++            << inspected_web_page_id << " x=" << x << " y=" << y;
++  OpenDevTools(inspected_web_page_id);
++
++  scoped_refptr<content::DevToolsAgentHost> agent_host =
++      content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
++  content::RenderFrameHost* frame = ResolveInspectFrame(inspected_contents);
++  if (!agent_host || !frame) {
++    LOG(INFO) << "[CBF][DevTools] InspectElement aborted: missing agent_host/frame";
++    return;
++  }
++
++  LOG(INFO) << "[CBF][DevTools] Dispatching agent_host->InspectElement id="
++            << agent_host->GetId();
++  agent_host->InspectElement(frame, x, y);
++}
++
++void CbfProfileDevToolsController::OnWebPageClosed(WebPageId web_page_id) {
++  auto inspected_it = inspected_to_devtools_.find(web_page_id);
++  if (inspected_it != inspected_to_devtools_.end()) {
++    const WebPageId devtools_web_page_id = inspected_it->second;
++    inspected_to_devtools_.erase(inspected_it);
++    devtools_to_inspected_.erase(devtools_web_page_id);
++    devtools_sessions_.erase(devtools_web_page_id);
++  }
++
++  auto devtools_it = devtools_to_inspected_.find(web_page_id);
++  if (devtools_it != devtools_to_inspected_.end()) {
++    const WebPageId inspected_web_page_id = devtools_it->second;
++    devtools_to_inspected_.erase(devtools_it);
++    inspected_to_devtools_.erase(inspected_web_page_id);
++    devtools_sessions_.erase(web_page_id);
++  }
++}
++
++void CbfProfileDevToolsController::TryAttachSession(
++    WebPageId inspected_web_page_id,
++    WebPageId devtools_web_page_id,
++    int attempt) {
++  constexpr int kMaxAttempts = 50;
++  constexpr base::TimeDelta kRetryDelay = base::Milliseconds(20);
++
++  auto session_it = devtools_sessions_.find(devtools_web_page_id);
++  if (session_it == devtools_sessions_.end()) {
++    return;
++  }
++
++  content::WebContents* inspected_contents =
++      context_->tab_manager().GetWebContents(inspected_web_page_id);
++  content::WebContents* devtools_contents =
++      context_->tab_manager().GetWebContents(devtools_web_page_id);
++  if (!inspected_contents || !devtools_contents) {
++    LOG(INFO) << "[CBF][DevTools] Attach skipped: missing contents inspected_id="
++              << inspected_web_page_id
++              << " devtools_id=" << devtools_web_page_id;
++    return;
++  }
++
++  DevToolsUIBindings* bindings =
++      DevToolsUIBindings::ForWebContents(devtools_contents);
++  if (!bindings) {
++    if (attempt >= kMaxAttempts) {
++      LOG(INFO) << "[CBF][DevTools] Attach failed: bindings not found"
++                << " inspected_id=" << inspected_web_page_id
++                << " devtools_id=" << devtools_web_page_id;
++      return;
++    }
++
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++        FROM_HERE,
++        base::BindOnce(&CbfProfileDevToolsController::TryAttachSession,
++                       weak_factory_.GetWeakPtr(), inspected_web_page_id,
++                       devtools_web_page_id, attempt + 1),
++        kRetryDelay);
++    return;
++  }
++
++  auto& session = session_it->second;
++  if (session->bindings != bindings) {
++    session->bindings = bindings;
++    bindings->SetDelegate(
++        new CbfDevToolsUIDelegate(devtools_contents, inspected_contents));
++  }
++
++  scoped_refptr<content::DevToolsAgentHost> agent_host =
++      content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
++  if (!agent_host) {
++    LOG(INFO) << "[CBF][DevTools] Attach failed: agent_host unavailable"
++              << " inspected_id=" << inspected_web_page_id;
++    return;
++  }
++
++  bindings->AttachTo(agent_host);
++  LOG(INFO) << "[CBF][DevTools] Attached session inspected_id="
++            << inspected_web_page_id << " devtools_id=" << devtools_web_page_id
++            << " agent_host_id="
++            << (agent_host ? agent_host->GetId() : std::string("<null>"));
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
+new file mode 100644
+index 0000000000000..c54ffb7c47357
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
+@@ -0,0 +1,54 @@
++#ifndef CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_DEVTOOLS_CONTROLLER_H_
++#define CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_DEVTOOLS_CONTROLLER_H_
++
++#include <cstdint>
++#include <memory>
++
++#include "base/containers/flat_map.h"
++#include "base/functional/callback.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++
++namespace content {
++class WebContents;
++}
++
++namespace cbf {
++
++class CbfProfileServiceContext;
++
++class CbfProfileDevToolsController {
++ public:
++  explicit CbfProfileDevToolsController(CbfProfileServiceContext* context);
++  CbfProfileDevToolsController(const CbfProfileDevToolsController&) = delete;
++  CbfProfileDevToolsController& operator=(
++      const CbfProfileDevToolsController&) = delete;
++  ~CbfProfileDevToolsController();
++
++  void SetRegisterImeHandler(
++      base::RepeatingCallback<void(WebPageId, content::WebContents*)>
++          register_ime_handler);
++  void OpenDevTools(WebPageId inspected_web_page_id);
++  void InspectElement(WebPageId inspected_web_page_id, int32_t x, int32_t y);
++  void OnWebPageClosed(WebPageId web_page_id);
++
++ private:
++  struct DevToolsSession;
++
++  void TryAttachSession(WebPageId inspected_web_page_id,
++                        WebPageId devtools_web_page_id,
++                        int attempt);
++
++  base::flat_map<WebPageId, std::unique_ptr<DevToolsSession>> devtools_sessions_;
++  base::flat_map<WebPageId, WebPageId> inspected_to_devtools_;
++  base::flat_map<WebPageId, WebPageId> devtools_to_inspected_;
++  base::RepeatingCallback<void(WebPageId, content::WebContents*)>
++      register_ime_handler_;
++  raw_ptr<CbfProfileServiceContext> context_;
++  base::WeakPtrFactory<CbfProfileDevToolsController> weak_factory_{this};
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_DEVTOOLS_CONTROLLER_H_
+diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc b/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
+new file mode 100644
+index 0000000000000..d2dce69c325a8
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
+@@ -0,0 +1,248 @@
++#include "chrome/browser/cbf/profile/cbf_profile_drag_controller.h"
++
++#include <optional>
++#include <utility>
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "content/browser/renderer_host/render_widget_host_impl.h"
++#include "ui/gfx/codec/png_codec.h"
++#include "url/origin.h"
++
++namespace cbf {
++
++CbfProfileDragController::CbfProfileDragController(CbfProfileServiceContext* context)
++    : context_(context) {}
++
++CbfProfileDragController::~CbfProfileDragController() = default;
++
++CbfProfileDragController::DragSessionState::DragSessionState() = default;
++CbfProfileDragController::DragSessionState::DragSessionState(
++    const DragSessionState&) = default;
++CbfProfileDragController::DragSessionState&
++CbfProfileDragController::DragSessionState::operator=(const DragSessionState&) =
++    default;
++CbfProfileDragController::DragSessionState::DragSessionState(
++    DragSessionState&&) = default;
++CbfProfileDragController::DragSessionState&
++CbfProfileDragController::DragSessionState::operator=(DragSessionState&&) =
++    default;
++CbfProfileDragController::DragSessionState::~DragSessionState() = default;
++
++void CbfProfileDragController::NotifyDragStartRequested(
++    content::WebContents* web_contents,
++    const content::DropData& drop_data,
++    const url::Origin& source_origin,
++    blink::DragOperationsMask allowed_ops,
++    const SkBitmap& drag_image,
++    const gfx::Vector2d& cursor_offset_in_dip,
++    const gfx::Rect& drag_obj_rect_in_dip,
++    const blink::mojom::DragEventSourceInfo& event_info,
++    content::RenderWidgetHost* source_rwh) {
++  (void)event_info;
++  if (!context_->observer_remote().is_bound() || !web_contents || !source_rwh) {
++    return;
++  }
++
++  auto* source_rwh_impl = content::RenderWidgetHostImpl::From(source_rwh);
++  if (!source_rwh_impl) {
++    return;
++  }
++
++  const WebPageId web_page_id =
++      context_->tab_manager().GetWebPageIdForWebContents(web_contents);
++  if (web_page_id == kInvalidWebPageId) {
++    return;
++  }
++
++  const uint64_t session_id = next_drag_session_id_++;
++  DragSessionState session;
++  session.web_page_id = web_page_id;
++  session.source_rwh = source_rwh_impl->GetWeakPtr();
++  session.drop_data = drop_data;
++  source_rwh_impl->FilterDropData(&session.drop_data);
++  drag_sessions_[session_id] = std::move(session);
++
++  auto request = mojom::CbfDragStartRequest::New();
++  request->session_id = session_id;
++  request->web_page_id = web_page_id;
++  request->allowed_operations = static_cast<uint32_t>(allowed_ops);
++  request->source_origin = source_origin.Serialize();
++
++  auto data = mojom::CbfDragData::New();
++  data->text = base::UTF16ToUTF8(drop_data.text.value_or(std::u16string()));
++  data->html = base::UTF16ToUTF8(drop_data.html.value_or(std::u16string()));
++  data->html_base_url = drop_data.html_base_url.spec();
++  data->url_infos.reserve(drop_data.url_infos.size());
++  for (const auto& url_info : drop_data.url_infos) {
++    auto info = mojom::CbfDragUrlInfo::New();
++    info->url = url_info.url.spec();
++    info->title = base::UTF16ToUTF8(url_info.title);
++    data->url_infos.push_back(std::move(info));
++  }
++  data->filenames.reserve(drop_data.filenames.size());
++  for (const auto& file_info : drop_data.filenames) {
++    data->filenames.push_back(file_info.path.AsUTF8Unsafe());
++  }
++  data->file_mime_types.reserve(drop_data.file_mime_types.size());
++  for (const auto& mime_type : drop_data.file_mime_types) {
++    data->file_mime_types.push_back(base::UTF16ToUTF8(mime_type));
++  }
++  data->custom_data.reserve(drop_data.custom_data.size());
++  for (const auto& [key, value] : drop_data.custom_data) {
++    auto pair = mojom::CbfStringPair::New();
++    pair->key = base::UTF16ToUTF8(key);
++    pair->value = base::UTF16ToUTF8(value);
++    data->custom_data.push_back(std::move(pair));
++  }
++  request->data = std::move(data);
++
++  if (!drag_image.drawsNothing()) {
++    std::optional<std::vector<uint8_t>> png_bytes =
++        gfx::PNGCodec::EncodeBGRASkBitmap(drag_image,
++                                          /*discard_transparency=*/false);
++    if (png_bytes.has_value()) {
++      auto image = mojom::CbfDragImage::New();
++      image->png_bytes = std::move(*png_bytes);
++      image->pixel_width = static_cast<uint32_t>(drag_image.width());
++      image->pixel_height = static_cast<uint32_t>(drag_image.height());
++      if (drag_image.width() > 0 && drag_obj_rect_in_dip.width() > 0) {
++        image->scale = static_cast<float>(drag_image.width()) /
++                       static_cast<float>(drag_obj_rect_in_dip.width());
++      } else {
++        image->scale = 1.0f;
++      }
++      image->cursor_offset_x = cursor_offset_in_dip.x();
++      image->cursor_offset_y = cursor_offset_in_dip.y();
++      request->image = std::move(image);
++    }
++  }
++
++  context_->observer_remote()->OnDragStartRequested(std::move(request));
++}
++
++void CbfProfileDragController::SendDragUpdate(mojom::CbfDragUpdatePtr update) {
++  const auto it = drag_sessions_.find(update->session_id);
++  if (it == drag_sessions_.end()) {
++    return;
++  }
++
++  DragSessionState& session = it->second;
++  if (session.web_page_id != update->web_page_id || !session.source_rwh) {
++    return;
++  }
++
++  gfx::PointF client_point(update->position_in_widget_x,
++                           update->position_in_widget_y);
++  gfx::PointF screen_point(update->position_in_screen_x,
++                           update->position_in_screen_y);
++  const int modifiers = static_cast<int>(update->modifiers);
++  const blink::DragOperationsMask allowed_ops =
++      static_cast<blink::DragOperationsMask>(update->allowed_operations);
++
++  if (!session.entered) {
++    session.source_rwh->DragTargetDragEnter(
++        session.drop_data, client_point, screen_point, allowed_ops, modifiers,
++        base::BindOnce(
++            [](base::WeakPtr<CbfProfileDragController> self, uint64_t session_id,
++               ui::mojom::DragOperation operation,
++               bool document_is_handling_drag) {
++              if (!self) {
++                return;
++              }
++              auto session_it = self->drag_sessions_.find(session_id);
++              if (session_it == self->drag_sessions_.end()) {
++                return;
++              }
++              session_it->second.last_operation = operation;
++              session_it->second.document_is_handling_drag =
++                  document_is_handling_drag;
++            },
++            weak_factory_.GetWeakPtr(), update->session_id));
++    session.entered = true;
++    return;
++  }
++
++  session.source_rwh->DragTargetDragOver(
++      client_point, screen_point, allowed_ops, modifiers,
++      base::BindOnce(
++          [](base::WeakPtr<CbfProfileDragController> self, uint64_t session_id,
++             ui::mojom::DragOperation operation,
++             bool document_is_handling_drag) {
++            if (!self) {
++              return;
++            }
++            auto session_it = self->drag_sessions_.find(session_id);
++            if (session_it == self->drag_sessions_.end()) {
++              return;
++            }
++            session_it->second.last_operation = operation;
++            session_it->second.document_is_handling_drag =
++                document_is_handling_drag;
++          },
++          weak_factory_.GetWeakPtr(), update->session_id));
++}
++
++void CbfProfileDragController::SendDragDrop(mojom::CbfDragDropPtr drop) {
++  const auto it = drag_sessions_.find(drop->session_id);
++  if (it == drag_sessions_.end()) {
++    return;
++  }
++
++  DragSessionState session = std::move(it->second);
++  drag_sessions_.erase(it);
++
++  if (session.web_page_id != drop->web_page_id || !session.source_rwh) {
++    return;
++  }
++
++  gfx::PointF client_point(drop->position_in_widget_x, drop->position_in_widget_y);
++  gfx::PointF screen_point(drop->position_in_screen_x, drop->position_in_screen_y);
++  const int modifiers = static_cast<int>(drop->modifiers);
++  session.drop_data.document_is_handling_drag = session.document_is_handling_drag;
++
++  session.source_rwh->DragTargetDrop(session.drop_data, client_point, screen_point,
++                                     modifiers, base::DoNothing());
++  session.source_rwh->DragSourceEndedAt(client_point, screen_point,
++                                        session.last_operation, base::DoNothing());
++  session.source_rwh->DragSourceSystemDragEnded();
++}
++
++void CbfProfileDragController::SendDragCancel(uint64_t session_id,
++                                              uint64_t web_page_id) {
++  const auto it = drag_sessions_.find(session_id);
++  if (it == drag_sessions_.end()) {
++    return;
++  }
++
++  DragSessionState session = std::move(it->second);
++  drag_sessions_.erase(it);
++
++  if (session.web_page_id != web_page_id || !session.source_rwh) {
++    return;
++  }
++
++  const gfx::PointF zero_point;
++  if (session.entered) {
++    session.source_rwh->DragTargetDragLeave(zero_point, zero_point);
++  }
++  session.source_rwh->DragSourceEndedAt(zero_point, zero_point,
++                                        ui::mojom::DragOperation::kNone,
++                                        base::DoNothing());
++  session.source_rwh->DragSourceSystemDragEnded();
++}
++
++void CbfProfileDragController::OnWebPageClosed(WebPageId web_page_id) {
++  for (auto it = drag_sessions_.begin(); it != drag_sessions_.end();) {
++    if (it->second.web_page_id == web_page_id) {
++      it = drag_sessions_.erase(it);
++    } else {
++      ++it;
++    }
++  }
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller.h b/chrome/browser/cbf/profile/cbf_profile_drag_controller.h
+new file mode 100644
+index 0000000000000..a081a46a32902
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller.h
+@@ -0,0 +1,78 @@
++#ifndef CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_DRAG_CONTROLLER_H_
++#define CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_DRAG_CONTROLLER_H_
++
++#include <cstdint>
++
++#include "base/containers/flat_map.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "content/public/common/drop_data.h"
++#include "third_party/blink/public/common/page/drag_operation.h"
++#include "third_party/blink/public/mojom/drag/drag.mojom-forward.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-shared.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/vector2d.h"
++
++namespace content {
++class RenderWidgetHost;
++class RenderWidgetHostImpl;
++class WebContents;
++}  // namespace content
++namespace url {
++class Origin;
++}  // namespace url
++
++namespace cbf {
++
++class CbfProfileServiceContext;
++
++class CbfProfileDragController {
++ public:
++  explicit CbfProfileDragController(CbfProfileServiceContext* context);
++  CbfProfileDragController(const CbfProfileDragController&) = delete;
++  CbfProfileDragController& operator=(const CbfProfileDragController&) = delete;
++  ~CbfProfileDragController();
++
++  void NotifyDragStartRequested(content::WebContents* web_contents,
++                                const content::DropData& drop_data,
++                                const url::Origin& source_origin,
++                                blink::DragOperationsMask allowed_ops,
++                                const SkBitmap& drag_image,
++                                const gfx::Vector2d& cursor_offset_in_dip,
++                                const gfx::Rect& drag_obj_rect_in_dip,
++                                const blink::mojom::DragEventSourceInfo& event_info,
++                                content::RenderWidgetHost* source_rwh);
++  void SendDragUpdate(mojom::CbfDragUpdatePtr update);
++  void SendDragDrop(mojom::CbfDragDropPtr drop);
++  void SendDragCancel(uint64_t session_id, uint64_t web_page_id);
++  void OnWebPageClosed(WebPageId web_page_id);
++
++ private:
++  struct DragSessionState {
++    DragSessionState();
++    DragSessionState(const DragSessionState&);
++    DragSessionState& operator=(const DragSessionState&);
++    DragSessionState(DragSessionState&&);
++    DragSessionState& operator=(DragSessionState&&);
++    ~DragSessionState();
++
++    WebPageId web_page_id = kInvalidWebPageId;
++    base::WeakPtr<content::RenderWidgetHostImpl> source_rwh;
++    content::DropData drop_data;
++    bool entered = false;
++    bool document_is_handling_drag = false;
++    ui::mojom::DragOperation last_operation = ui::mojom::DragOperation::kNone;
++  };
++
++  raw_ptr<CbfProfileServiceContext> context_;
++  uint64_t next_drag_session_id_ = 1;
++  base::flat_map<uint64_t, DragSessionState> drag_sessions_;
++  base::WeakPtrFactory<CbfProfileDragController> weak_factory_{this};
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_DRAG_CONTROLLER_H_
+diff --git a/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc b/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc
+new file mode 100644
+index 0000000000000..4945b104132e9
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc
+@@ -0,0 +1,231 @@
++#include "chrome/browser/cbf/profile/cbf_profile_ime_controller.h"
++
++#include "base/logging.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "content/browser/renderer_host/render_widget_host_impl.h"
++#include "content/browser/renderer_host/render_widget_host_view_base.h"
++#include "content/browser/web_contents/web_contents_impl.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_widget_host.h"
++#include "content/public/browser/render_widget_host_view.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/gfx/geometry/rect.h"
++
++namespace {
++
++content::RenderWidgetHost* ResolveInputRenderWidgetHost(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return nullptr;
++  }
++
++  if (content::RenderFrameHost* focused_frame = web_contents->GetFocusedFrame()) {
++    if (content::RenderWidgetHost* widget_host =
++            focused_frame->GetRenderWidgetHost()) {
++      return widget_host;
++    }
++  }
++
++  if (content::RenderFrameHost* primary_frame =
++          web_contents->GetPrimaryMainFrame()) {
++    if (content::RenderWidgetHost* widget_host =
++            primary_frame->GetRenderWidgetHost()) {
++      return widget_host;
++    }
++  }
++
++  content::RenderWidgetHostView* view = web_contents->GetRenderWidgetHostView();
++  return view ? view->GetRenderWidgetHost() : nullptr;
++}
++
++}  // namespace
++
++namespace cbf {
++
++CbfProfileImeController::CbfProfileImeController(CbfProfileServiceContext* context)
++    : context_(context) {}
++
++CbfProfileImeController::~CbfProfileImeController() {
++  text_input_observations_.RemoveAllObservations();
++  text_input_map_.clear();
++}
++
++void CbfProfileImeController::RegisterWebContents(
++    WebPageId web_page_id,
++    content::WebContents* web_contents) {
++  if (!web_contents || web_page_id == kInvalidWebPageId) {
++    return;
++  }
++  auto* web_contents_impl = static_cast<content::WebContentsImpl*>(web_contents);
++  content::TextInputManager* text_input_manager =
++      web_contents_impl->GetTextInputManager();
++  if (!text_input_manager) {
++    return;
++  }
++  if (text_input_map_.find(text_input_manager) == text_input_map_.end()) {
++    text_input_observations_.AddObservation(text_input_manager);
++  }
++  text_input_map_[text_input_manager] = web_page_id;
++}
++
++void CbfProfileImeController::OnWebPageClosed(WebPageId web_page_id) {
++  for (auto it = text_input_map_.begin(); it != text_input_map_.end();) {
++    if (it->second != web_page_id) {
++      ++it;
++      continue;
++    }
++    text_input_observations_.RemoveObservation(it->first);
++    it = text_input_map_.erase(it);
++  }
++}
++
++void CbfProfileImeController::SetComposition(
++    mojom::CbfImeCompositionPtr composition) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(composition->web_page_id);
++  if (!web_contents) {
++    return;
++  }
++  content::RenderWidgetHost* widget_host =
++      ResolveInputRenderWidgetHost(web_contents);
++  if (!widget_host) {
++    DVLOG(1) << "SetComposition dropped: no input widget host for web_page_id="
++             << composition->web_page_id;
++    return;
++  }
++  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++  if (!widget_impl) {
++    return;
++  }
++
++  const std::u16string text16 = base::UTF8ToUTF16(composition->text);
++  const gfx::Range replacement_range = mojo_converters::ToReplacementRange(
++      composition->replacement_range_start, composition->replacement_range_end);
++  widget_impl->ImeSetComposition(text16, mojo_converters::ToImeTextSpans(composition->spans),
++                                 replacement_range, composition->selection_start,
++                                 composition->selection_end);
++}
++
++void CbfProfileImeController::CommitText(mojom::CbfImeCommitTextPtr commit) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(commit->web_page_id);
++  if (!web_contents) {
++    return;
++  }
++  content::RenderWidgetHost* widget_host =
++      ResolveInputRenderWidgetHost(web_contents);
++  if (!widget_host) {
++    DVLOG(1) << "CommitText dropped: no input widget host for web_page_id="
++             << commit->web_page_id;
++    return;
++  }
++  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++  if (!widget_impl) {
++    return;
++  }
++
++  const std::u16string text16 = base::UTF8ToUTF16(commit->text);
++  const gfx::Range replacement_range = mojo_converters::ToReplacementRange(
++      commit->replacement_range_start, commit->replacement_range_end);
++  widget_impl->ImeCommitText(text16, mojo_converters::ToImeTextSpans(commit->spans),
++                             replacement_range, commit->relative_caret_position);
++}
++
++void CbfProfileImeController::FinishComposingText(
++    uint64_t web_page_id,
++    mojom::CbfConfirmCompositionBehavior behavior) {
++  content::WebContents* web_contents = context_->tab_manager().GetWebContents(web_page_id);
++  if (!web_contents) {
++    return;
++  }
++  content::RenderWidgetHost* widget_host =
++      ResolveInputRenderWidgetHost(web_contents);
++  if (!widget_host) {
++    DVLOG(1)
++        << "FinishComposingText dropped: no input widget host for web_page_id="
++        << web_page_id;
++    return;
++  }
++  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++  if (!widget_impl) {
++    return;
++  }
++
++  const bool keep_selection =
++      behavior == mojom::CbfConfirmCompositionBehavior::kKeepSelection;
++  widget_impl->ImeFinishComposingText(keep_selection);
++}
++
++void CbfProfileImeController::NotifyImeBoundsUpdated(
++    content::TextInputManager* text_input_manager,
++    bool include_composition,
++    bool include_selection) {
++  if (!context_->observer_remote().is_bound() || !text_input_manager) {
++    return;
++  }
++  const auto it = text_input_map_.find(text_input_manager);
++  if (it == text_input_map_.end()) {
++    return;
++  }
++
++  auto update = cbf::mojom::CbfImeBoundsUpdate::New();
++  update->web_page_id = it->second;
++
++  if (include_composition) {
++    const auto* composition_info = text_input_manager->GetCompositionRangeInfo();
++    auto composition = cbf::mojom::CbfImeCompositionBounds::New();
++    if (!composition_info || composition_info->character_bounds.empty()) {
++      composition->range_start = -1;
++      composition->range_end = -1;
++    } else {
++      composition->range_start = composition_info->range.start();
++      composition->range_end = composition_info->range.end();
++      composition->character_bounds.reserve(composition_info->character_bounds.size());
++      for (const auto& rect : composition_info->character_bounds) {
++        composition->character_bounds.push_back(mojo_converters::ToCbfRect(rect));
++      }
++    }
++    update->composition = std::move(composition);
++  }
++
++  if (include_selection) {
++    const auto* selection_region = text_input_manager->GetSelectionRegion();
++    const auto* text_selection = text_input_manager->GetTextSelection();
++    auto selection = cbf::mojom::CbfTextSelectionBounds::New();
++    if (!selection_region || !text_selection) {
++      selection->range_start = -1;
++      selection->range_end = -1;
++      selection->caret_rect = mojo_converters::ToCbfRect(gfx::Rect());
++      selection->first_selection_rect = mojo_converters::ToCbfRect(gfx::Rect());
++    } else {
++      selection->range_start = text_selection->range().start();
++      selection->range_end = text_selection->range().end();
++      selection->caret_rect = mojo_converters::ToCbfRect(selection_region->caret_rect);
++      selection->first_selection_rect =
++          mojo_converters::ToCbfRect(selection_region->first_selection_rect);
++    }
++    update->selection = std::move(selection);
++  }
++
++  context_->observer_remote()->OnImeBoundsUpdated(std::move(update));
++}
++
++void CbfProfileImeController::OnSelectionBoundsChanged(
++    content::TextInputManager* text_input_manager,
++    content::RenderWidgetHostViewBase* updated_view) {
++  (void)updated_view;
++  NotifyImeBoundsUpdated(text_input_manager, false, true);
++}
++
++void CbfProfileImeController::OnImeCompositionRangeChanged(
++    content::TextInputManager* text_input_manager,
++    content::RenderWidgetHostViewBase* updated_view,
++    bool character_bounds_changed) {
++  (void)updated_view;
++  (void)character_bounds_changed;
++  NotifyImeBoundsUpdated(text_input_manager, true, false);
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_ime_controller.h b/chrome/browser/cbf/profile/cbf_profile_ime_controller.h
+new file mode 100644
+index 0000000000000..f0e0dea0da3c3
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_ime_controller.h
+@@ -0,0 +1,57 @@
++#ifndef CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_IME_CONTROLLER_H_
++#define CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_IME_CONTROLLER_H_
++
++#include <cstdint>
++
++#include "base/containers/flat_map.h"
++#include "base/memory/raw_ptr.h"
++#include "base/scoped_multi_source_observation.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "content/browser/renderer_host/text_input_manager.h"
++
++namespace content {
++class RenderWidgetHostViewBase;
++class WebContents;
++}  // namespace content
++
++namespace cbf {
++
++class CbfProfileServiceContext;
++
++class CbfProfileImeController final
++    : public content::TextInputManager::Observer {
++ public:
++  explicit CbfProfileImeController(CbfProfileServiceContext* context);
++  CbfProfileImeController(const CbfProfileImeController&) = delete;
++  CbfProfileImeController& operator=(const CbfProfileImeController&) = delete;
++  ~CbfProfileImeController();
++
++  void RegisterWebContents(WebPageId web_page_id, content::WebContents* web_contents);
++  void OnWebPageClosed(WebPageId web_page_id);
++
++  void SetComposition(mojom::CbfImeCompositionPtr composition);
++  void CommitText(mojom::CbfImeCommitTextPtr commit);
++  void FinishComposingText(uint64_t web_page_id,
++                           mojom::CbfConfirmCompositionBehavior behavior);
++
++ private:
++  void NotifyImeBoundsUpdated(content::TextInputManager* text_input_manager,
++                              bool include_composition,
++                              bool include_selection);
++  void OnSelectionBoundsChanged(content::TextInputManager* text_input_manager,
++                                content::RenderWidgetHostViewBase* updated_view) override;
++  void OnImeCompositionRangeChanged(content::TextInputManager* text_input_manager,
++                                    content::RenderWidgetHostViewBase* updated_view,
++                                    bool character_bounds_changed) override;
++
++  raw_ptr<CbfProfileServiceContext> context_;
++  base::ScopedMultiSourceObservation<content::TextInputManager,
++                                     content::TextInputManager::Observer>
++      text_input_observations_{this};
++  base::flat_map<raw_ptr<content::TextInputManager>, WebPageId> text_input_map_;
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_IME_CONTROLLER_H_
+diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
+new file mode 100644
+index 0000000000000..967d9c0a7fc2b
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
+@@ -0,0 +1,344 @@
++#include "chrome/browser/cbf/profile/cbf_profile_input_controller.h"
++
++#include <algorithm>
++#include <array>
++#include <string>
++#include <vector>
++
++#include "base/logging.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/time/time.h"
++#include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "components/input/render_widget_host_input_event_router.h"
++#include "content/browser/renderer_host/render_widget_host_impl.h"
++#include "content/browser/renderer_host/render_widget_host_view_base.h"
++#include "content/browser/web_contents/web_contents_impl.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_widget_host.h"
++#include "content/public/browser/render_widget_host_view.h"
++#include "content/public/browser/web_contents.h"
++#include "third_party/blink/public/mojom/input/input_handler.mojom.h"
++#include "ui/events/keycodes/dom/keycode_converter.h"
++#include "ui/latency/latency_info.h"
++
++namespace {
++
++constexpr base::TimeDelta kSyntheticWheelPhaseGap = base::Milliseconds(120);
++
++bool HasWheelPhase(const blink::WebMouseWheelEvent& event) {
++  return event.phase != blink::WebMouseWheelEvent::kPhaseNone ||
++         event.momentum_phase != blink::WebMouseWheelEvent::kPhaseNone;
++}
++
++void FillText(std::array<char16_t, blink::WebKeyboardEvent::kTextLengthCap>& out,
++              const std::string& text_utf8) {
++  if (text_utf8.empty()) {
++    return;
++  }
++  const std::u16string text16 = base::UTF8ToUTF16(text_utf8);
++  const size_t copy_len = std::min(text16.size(), out.size());
++  for (size_t i = 0; i < copy_len; ++i) {
++    out[i] = text16[i];
++  }
++}
++
++content::RenderWidgetHost* ResolveInputRenderWidgetHost(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return nullptr;
++  }
++
++  if (content::RenderFrameHost* focused_frame = web_contents->GetFocusedFrame()) {
++    if (content::RenderWidgetHost* widget_host =
++            focused_frame->GetRenderWidgetHost()) {
++      return widget_host;
++    }
++  }
++
++  if (content::RenderFrameHost* primary_frame =
++          web_contents->GetPrimaryMainFrame()) {
++    if (content::RenderWidgetHost* widget_host =
++            primary_frame->GetRenderWidgetHost()) {
++      return widget_host;
++    }
++  }
++
++  content::RenderWidgetHostView* view = web_contents->GetRenderWidgetHostView();
++  return view ? view->GetRenderWidgetHost() : nullptr;
++}
++
++content::RenderWidgetHostViewBase* ResolveInputRootView(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return nullptr;
++  }
++  content::RenderWidgetHostView* view = web_contents->GetRenderWidgetHostView();
++  if (!view) {
++    return nullptr;
++  }
++  return static_cast<content::RenderWidgetHostViewBase*>(view);
++}
++
++input::RenderWidgetHostInputEventRouter* ResolveInputEventRouter(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return nullptr;
++  }
++  auto* web_contents_impl = static_cast<content::WebContentsImpl*>(web_contents);
++  return web_contents_impl->GetInputEventRouter();
++}
++
++bool RouteMouseEventViaInputRouter(content::WebContents* web_contents,
++                                   blink::WebMouseEvent* event,
++                                   const ui::LatencyInfo& latency_info) {
++  auto* router = ResolveInputEventRouter(web_contents);
++  auto* root_view = ResolveInputRootView(web_contents);
++  if (!router || !root_view) {
++    return false;
++  }
++  router->RouteMouseEvent(root_view, event, latency_info);
++  return true;
++}
++
++bool RouteMouseWheelEventViaInputRouter(content::WebContents* web_contents,
++                                        blink::WebMouseWheelEvent* event,
++                                        const ui::LatencyInfo& latency_info) {
++  auto* router = ResolveInputEventRouter(web_contents);
++  auto* root_view = ResolveInputRootView(web_contents);
++  if (!router || !root_view) {
++    return false;
++  }
++  router->RouteMouseWheelEvent(root_view, event, latency_info);
++  return true;
++}
++
++}  // namespace
++
++namespace cbf {
++
++CbfProfileInputController::CbfProfileInputController(CbfProfileServiceContext* context)
++    : context_(context) {}
++
++CbfProfileInputController::~CbfProfileInputController() = default;
++
++CbfProfileInputController::WheelPhaseState::WheelPhaseState() = default;
++CbfProfileInputController::WheelPhaseState::~WheelPhaseState() = default;
++
++void CbfProfileInputController::SendKeyEvent(
++    mojom::CbfKeyEventPtr event,
++    const std::optional<std::vector<std::string>>& commands) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(event->web_page_id);
++  if (!web_contents) {
++    return;
++  }
++  content::RenderWidgetHost* widget_host =
++      ResolveInputRenderWidgetHost(web_contents);
++  if (!widget_host) {
++    DVLOG(1) << "SendKeyEvent dropped: no input widget host for web_page_id="
++             << event->web_page_id;
++    return;
++  }
++  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++  if (!widget_impl) {
++    return;
++  }
++
++  input::NativeWebKeyboardEvent key_event(
++      mojo_converters::ToWebInputEventType(event->type),
++      static_cast<int>(event->modifiers),
++      base::TimeTicks::Now());
++  key_event.windows_key_code = event->windows_key_code;
++  key_event.native_key_code = event->native_key_code;
++  key_event.is_system_key = event->is_system_key;
++  key_event.skip_if_unhandled = false;
++
++  if (!event->dom_code.empty()) {
++    key_event.dom_code = static_cast<int>(
++        ui::KeycodeConverter::CodeStringToDomCode(event->dom_code));
++  }
++  if (!event->dom_key.empty()) {
++    key_event.dom_key =
++        static_cast<uint32_t>(ui::KeycodeConverter::KeyStringToDomKey(
++            event->dom_key));
++  }
++
++  FillText(key_event.text, event->text);
++  FillText(key_event.unmodified_text, event->unmodified_text);
++
++  std::vector<blink::mojom::EditCommandPtr> edit_commands;
++  if (commands.has_value()) {
++    edit_commands.reserve(commands->size());
++    for (const auto& command : *commands) {
++      edit_commands.push_back(blink::mojom::EditCommand::New(command, ""));
++    }
++  }
++
++  widget_host->ForwardKeyboardEventWithCommands(
++      key_event, ui::LatencyInfo(), std::move(edit_commands));
++}
++
++void CbfProfileInputController::SendMouseEvent(mojom::CbfMouseEventPtr event) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(event->web_page_id);
++  if (!web_contents) {
++    return;
++  }
++
++  blink::WebMouseEvent mouse_event(
++      mojo_converters::ToWebInputEventType(event->type),
++      gfx::PointF(event->position_in_widget_x, event->position_in_widget_y),
++      gfx::PointF(event->position_in_screen_x, event->position_in_screen_y),
++      mojo_converters::ToWebMouseButton(event->button),
++      event->click_count,
++      static_cast<int>(event->modifiers),
++      base::TimeTicks::Now());
++  mouse_event.movement_x = static_cast<int>(event->movement_x);
++  mouse_event.movement_y = static_cast<int>(event->movement_y);
++  mouse_event.is_raw_movement_event = event->is_raw_movement_event;
++  mouse_event.pointer_type = mojo_converters::ToWebPointerType(event->pointer_type);
++
++  ui::LatencyInfo latency_info;
++  if (RouteMouseEventViaInputRouter(web_contents, &mouse_event, latency_info)) {
++    return;
++  }
++
++  content::RenderWidgetHost* widget_host =
++      ResolveInputRenderWidgetHost(web_contents);
++  if (!widget_host) {
++    DVLOG(1) << "SendMouseEvent dropped: no input widget host for web_page_id="
++             << event->web_page_id;
++    return;
++  }
++  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++  if (!widget_impl) {
++    return;
++  }
++  widget_impl->ForwardMouseEventWithLatencyInfo(mouse_event, latency_info);
++}
++
++void CbfProfileInputController::SendMouseWheelEvent(
++    mojom::CbfMouseWheelEventPtr event) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(event->web_page_id);
++  if (!web_contents) {
++    return;
++  }
++
++  blink::WebMouseWheelEvent wheel_event(
++      blink::WebInputEvent::Type::kMouseWheel,
++      static_cast<int>(event->modifiers),
++      base::TimeTicks::Now());
++  wheel_event.SetPositionInWidget(event->position_in_widget_x,
++                                  event->position_in_widget_y);
++  wheel_event.SetPositionInScreen(event->position_in_screen_x,
++                                  event->position_in_screen_y);
++  wheel_event.movement_x = static_cast<int>(event->movement_x);
++  wheel_event.movement_y = static_cast<int>(event->movement_y);
++  wheel_event.is_raw_movement_event = event->is_raw_movement_event;
++  wheel_event.delta_x = event->delta_x;
++  wheel_event.delta_y = event->delta_y;
++  wheel_event.wheel_ticks_x = event->wheel_ticks_x;
++  wheel_event.wheel_ticks_y = event->wheel_ticks_y;
++  wheel_event.phase = static_cast<blink::WebMouseWheelEvent::Phase>(event->phase);
++  wheel_event.momentum_phase =
++      static_cast<blink::WebMouseWheelEvent::Phase>(event->momentum_phase);
++  wheel_event.delta_units = mojo_converters::ToScrollGranularity(event->delta_units);
++  if (!HasWheelPhase(wheel_event)) {
++    auto& phase_state_ptr = wheel_phase_states_[event->web_page_id];
++    if (!phase_state_ptr) {
++      phase_state_ptr = std::make_unique<WheelPhaseState>();
++    }
++    WheelPhaseState& phase_state = *phase_state_ptr;
++
++    if (!phase_state.in_progress) {
++      wheel_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
++      phase_state.in_progress = true;
++    } else {
++      wheel_event.phase = blink::WebMouseWheelEvent::kPhaseChanged;
++    }
++    wheel_event.momentum_phase = blink::WebMouseWheelEvent::kPhaseNone;
++    phase_state.last_event = wheel_event;
++    phase_state.end_timer.Start(
++        FROM_HERE, kSyntheticWheelPhaseGap,
++        base::BindOnce(&CbfProfileInputController::SendSyntheticWheelEndedEvent,
++                       weak_factory_.GetWeakPtr(), event->web_page_id));
++  } else {
++    wheel_phase_states_.erase(event->web_page_id);
++  }
++
++  ui::LatencyInfo latency_info;
++  if (RouteMouseWheelEventViaInputRouter(web_contents, &wheel_event,
++                                         latency_info)) {
++    return;
++  }
++
++  content::RenderWidgetHost* widget_host =
++      ResolveInputRenderWidgetHost(web_contents);
++  if (!widget_host) {
++    DVLOG(1)
++        << "SendMouseWheelEvent dropped: no input widget host for web_page_id="
++        << event->web_page_id;
++    return;
++  }
++  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++  if (!widget_impl) {
++    return;
++  }
++  widget_impl->ForwardWheelEventWithLatencyInfo(wheel_event, latency_info);
++}
++
++void CbfProfileInputController::OnWebPageClosed(WebPageId web_page_id) {
++  wheel_phase_states_.erase(web_page_id);
++}
++
++void CbfProfileInputController::SendSyntheticWheelEndedEvent(
++    WebPageId web_page_id) {
++  const auto state_it = wheel_phase_states_.find(web_page_id);
++  if (state_it == wheel_phase_states_.end()) {
++    return;
++  }
++
++  WheelPhaseState& phase_state = *state_it->second;
++  if (!phase_state.in_progress || !phase_state.last_event.has_value()) {
++    wheel_phase_states_.erase(state_it);
++    return;
++  }
++
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(web_page_id);
++  if (!web_contents) {
++    wheel_phase_states_.erase(state_it);
++    return;
++  }
++
++  blink::WebMouseWheelEvent ended_event = *phase_state.last_event;
++  ended_event.SetTimeStamp(base::TimeTicks::Now());
++  ended_event.delta_x = 0;
++  ended_event.delta_y = 0;
++  ended_event.wheel_ticks_x = 0;
++  ended_event.wheel_ticks_y = 0;
++  ended_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
++  ended_event.momentum_phase = blink::WebMouseWheelEvent::kPhaseNone;
++
++  ui::LatencyInfo latency_info;
++  if (!RouteMouseWheelEventViaInputRouter(web_contents, &ended_event,
++                                          latency_info)) {
++    content::RenderWidgetHost* widget_host =
++        ResolveInputRenderWidgetHost(web_contents);
++    if (!widget_host) {
++      wheel_phase_states_.erase(state_it);
++      return;
++    }
++    auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++    if (!widget_impl) {
++      wheel_phase_states_.erase(state_it);
++      return;
++    }
++    widget_impl->ForwardWheelEventWithLatencyInfo(ended_event, latency_info);
++  }
++  wheel_phase_states_.erase(state_it);
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.h b/chrome/browser/cbf/profile/cbf_profile_input_controller.h
+new file mode 100644
+index 0000000000000..895c7609c175b
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.h
+@@ -0,0 +1,54 @@
++#ifndef CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_INPUT_CONTROLLER_H_
++#define CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_INPUT_CONTROLLER_H_
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/containers/flat_map.h"
++#include "base/memory/weak_ptr.h"
++#include "base/timer/timer.h"
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
++
++namespace cbf {
++
++class CbfProfileServiceContext;
++
++class CbfProfileInputController {
++ public:
++  explicit CbfProfileInputController(CbfProfileServiceContext* context);
++  CbfProfileInputController(const CbfProfileInputController&) = delete;
++  CbfProfileInputController& operator=(const CbfProfileInputController&) = delete;
++  ~CbfProfileInputController();
++
++  void SendKeyEvent(
++      mojom::CbfKeyEventPtr event,
++      const std::optional<std::vector<std::string>>& commands);
++  void SendMouseEvent(mojom::CbfMouseEventPtr event);
++  void SendMouseWheelEvent(mojom::CbfMouseWheelEventPtr event);
++  void OnWebPageClosed(WebPageId web_page_id);
++
++ private:
++  struct WheelPhaseState {
++    WheelPhaseState();
++    ~WheelPhaseState();
++
++    base::OneShotTimer end_timer;
++    std::optional<blink::WebMouseWheelEvent> last_event;
++    bool in_progress = false;
++  };
++
++  void SendSyntheticWheelEndedEvent(WebPageId web_page_id);
++
++  raw_ptr<CbfProfileServiceContext> context_;
++  base::flat_map<WebPageId, std::unique_ptr<WheelPhaseState>> wheel_phase_states_;
++  base::WeakPtrFactory<CbfProfileInputController> weak_factory_{this};
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_INPUT_CONTROLLER_H_
+diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+new file mode 100644
+index 0000000000000..0d7b89edf1347
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+@@ -0,0 +1,125 @@
++#include "chrome/browser/cbf/profile/cbf_profile_navigation_controller.h"
++
++#include <string>
++
++#include "content/browser/renderer_host/render_widget_host_impl.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/reload_type.h"
++#include "content/public/browser/render_widget_host.h"
++#include "content/public/browser/render_widget_host_view.h"
++#include "content/public/browser/web_contents.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "content/public/common/referrer.h"
++#include "ui/base/page_transition_types.h"
++#include "url/gurl.h"
++
++namespace cbf {
++namespace {
++
++content::RenderWidgetHost* ResolveInputRenderWidgetHost(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return nullptr;
++  }
++
++  if (content::RenderFrameHost* focused_frame = web_contents->GetFocusedFrame()) {
++    if (content::RenderWidgetHost* widget_host =
++            focused_frame->GetRenderWidgetHost()) {
++      return widget_host;
++    }
++  }
++
++  if (content::RenderFrameHost* primary_frame =
++          web_contents->GetPrimaryMainFrame()) {
++    if (content::RenderWidgetHost* widget_host =
++            primary_frame->GetRenderWidgetHost()) {
++      return widget_host;
++    }
++  }
++
++  content::RenderWidgetHostView* view = web_contents->GetRenderWidgetHostView();
++  return view ? view->GetRenderWidgetHost() : nullptr;
++}
++
++}  // namespace
++
++CbfProfileNavigationController::CbfProfileNavigationController(CbfProfileServiceContext* context)
++    : context_(context) {}
++
++CbfProfileNavigationController::~CbfProfileNavigationController() = default;
++
++void CbfProfileNavigationController::Navigate(WebPageId web_page_id,
++                                              const std::string& url) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(web_page_id);
++  if (!web_contents) {
++    return;
++  }
++
++  const GURL gurl(url);
++  if (!gurl.is_valid()) {
++    return;
++  }
++
++  web_contents->GetController().LoadURL(
++      gurl, content::Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
++}
++
++void CbfProfileNavigationController::GoBack(WebPageId web_page_id) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(web_page_id);
++  if (web_contents && web_contents->GetController().CanGoBack()) {
++    web_contents->GetController().GoBack();
++  }
++}
++
++void CbfProfileNavigationController::GoForward(WebPageId web_page_id) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(web_page_id);
++  if (web_contents && web_contents->GetController().CanGoForward()) {
++    web_contents->GetController().GoForward();
++  }
++}
++
++void CbfProfileNavigationController::Reload(WebPageId web_page_id,
++                                            bool ignore_cache) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(web_page_id);
++  if (!web_contents) {
++    return;
++  }
++
++  const content::ReloadType type = ignore_cache
++                                       ? content::ReloadType::BYPASSING_CACHE
++                                       : content::ReloadType::NORMAL;
++  web_contents->GetController().Reload(type, true);
++}
++
++void CbfProfileNavigationController::SetWebPageFocus(WebPageId web_page_id,
++                                                     bool focused) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(web_page_id);
++  if (!web_contents) {
++    return;
++  }
++
++  auto* widget_impl = content::RenderWidgetHostImpl::From(
++      ResolveInputRenderWidgetHost(web_contents));
++
++  if (focused) {
++    if (widget_impl) {
++      widget_impl->SetPageFocus(true);
++    }
++    web_contents->Focus();
++    web_contents->RestoreFocus();
++    return;
++  }
++
++  web_contents->StoreFocus();
++  if (widget_impl) {
++    widget_impl->SetPageFocus(false);
++  }
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
+new file mode 100644
+index 0000000000000..8272adaea1052
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
+@@ -0,0 +1,33 @@
++#ifndef CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_NAVIGATION_CONTROLLER_H_
++#define CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_NAVIGATION_CONTROLLER_H_
++
++#include <string>
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++
++namespace cbf {
++
++class CbfProfileServiceContext;
++
++// Placeholder controller for issue-0001 scaffolding.
++class CbfProfileNavigationController {
++ public:
++  explicit CbfProfileNavigationController(CbfProfileServiceContext* context);
++  CbfProfileNavigationController(const CbfProfileNavigationController&) = delete;
++  CbfProfileNavigationController& operator=(const CbfProfileNavigationController&) = delete;
++  ~CbfProfileNavigationController();
++
++  void Navigate(WebPageId web_page_id, const std::string& url);
++  void GoBack(WebPageId web_page_id);
++  void GoForward(WebPageId web_page_id);
++  void Reload(WebPageId web_page_id, bool ignore_cache);
++  void SetWebPageFocus(WebPageId web_page_id, bool focused);
++
++ private:
++  raw_ptr<CbfProfileServiceContext> context_;
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_NAVIGATION_CONTROLLER_H_
+diff --git a/chrome/browser/cbf/profile/cbf_profile_page_controller.cc b/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
+new file mode 100644
+index 0000000000000..53af147ce3590
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
+@@ -0,0 +1,52 @@
++#include "chrome/browser/cbf/profile/cbf_profile_page_controller.h"
++
++#include "url/gurl.h"
++
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++
++namespace cbf {
++
++CbfProfilePageController::CbfProfilePageController(
++    CbfProfileServiceContext* context)
++    : context_(context) {}
++
++CbfProfilePageController::~CbfProfilePageController() = default;
++
++WebPageId CbfProfilePageController::CreateWebPage(const std::string& initial_url) {
++  return context_->tab_manager().CreateWebPage(GURL(initial_url));
++}
++
++void CbfProfilePageController::RequestCloseWebPage(WebPageId web_page_id) {
++  context_->tab_manager().RequestCloseWebPage(web_page_id);
++}
++
++void CbfProfilePageController::DispatchBeforeUnloadForShutdown() {
++  context_->tab_manager().DispatchBeforeUnloadForAll();
++}
++
++std::vector<WebPageId> CbfProfilePageController::GetDirtyWebPageIds() const {
++  return context_->tab_manager().GetDirtyWebPageIds();
++}
++
++std::vector<WebPageId> CbfProfilePageController::GetAllWebPageIds() const {
++  return context_->tab_manager().GetAllWebPageIds();
++}
++
++size_t CbfProfilePageController::GetWebPageCount() const {
++  return context_->tab_manager().GetWebPageCount();
++}
++
++void CbfProfilePageController::CloseAllWebPages() {
++  context_->tab_manager().CloseAllWebPages();
++}
++
++WebPageId CbfProfilePageController::GetWebPageIdForWebContents(
++    content::WebContents* web_contents) const {
++  return context_->tab_manager().GetWebPageIdForWebContents(web_contents);
++}
++
++void CbfProfilePageController::CloseWebPage(WebPageId web_page_id) {
++  context_->tab_manager().CloseWebPage(web_page_id);
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_page_controller.h b/chrome/browser/cbf/profile/cbf_profile_page_controller.h
+new file mode 100644
+index 0000000000000..601a1865b5624
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_page_controller.h
+@@ -0,0 +1,44 @@
++#ifndef CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_PAGE_CONTROLLER_H_
++#define CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_PAGE_CONTROLLER_H_
++
++#include <cstddef>
++#include <cstdint>
++#include <string>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++
++namespace content {
++class WebContents;
++}
++
++namespace cbf {
++
++class CbfProfileServiceContext;
++
++// Owns page creation/close flows after extraction from CbfProfileService.
++class CbfProfilePageController {
++ public:
++  explicit CbfProfilePageController(CbfProfileServiceContext* context);
++  CbfProfilePageController(const CbfProfilePageController&) = delete;
++  CbfProfilePageController& operator=(const CbfProfilePageController&) = delete;
++  ~CbfProfilePageController();
++
++  WebPageId CreateWebPage(const std::string& initial_url);
++  void RequestCloseWebPage(WebPageId web_page_id);
++  void DispatchBeforeUnloadForShutdown();
++  std::vector<WebPageId> GetDirtyWebPageIds() const;
++  std::vector<WebPageId> GetAllWebPageIds() const;
++  size_t GetWebPageCount() const;
++  void CloseAllWebPages();
++  WebPageId GetWebPageIdForWebContents(content::WebContents* web_contents) const;
++  void CloseWebPage(WebPageId web_page_id);
++
++ private:
++  raw_ptr<CbfProfileServiceContext> context_;
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_PAGE_CONTROLLER_H_
+diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
+new file mode 100644
+index 0000000000000..5c28f592421d8
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
+@@ -0,0 +1,83 @@
++#include "chrome/browser/cbf/profile/cbf_profile_popup_controller.h"
++
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "content/public/browser/web_contents.h"
++#include "url/gurl.h"
++
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++
++namespace cbf {
++
++CbfProfilePopupController::CbfProfilePopupController(CbfProfileServiceContext* context)
++    : context_(context) {}
++
++CbfProfilePopupController::~CbfProfilePopupController() = default;
++
++void CbfProfilePopupController::NotifyNewWebPageRequested(
++    content::WebContents* source,
++    const GURL& target_url,
++    WindowOpenDisposition disposition) {
++  auto& observer = context_->observer_remote();
++  if (!observer.is_bound() || !source) {
++    return;
++  }
++
++  const WebPageId web_page_id =
++      context_->tab_manager().GetWebPageIdForWebContents(source);
++  if (web_page_id == kInvalidWebPageId) {
++    return;
++  }
++
++  const bool is_popup = disposition == WindowOpenDisposition::NEW_POPUP;
++  observer->OnNewWebPageRequested(web_page_id, target_url.spec(), is_popup);
++}
++
++void CbfProfilePopupController::MarkCloseWebPageBeforeUnloadReason(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return;
++  }
++  beforeunload_reasons_[web_contents] =
++      mojom::CbfBeforeUnloadReason::kCloseWebPage;
++}
++
++void CbfProfilePopupController::ClearBeforeUnloadReason(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return;
++  }
++  beforeunload_reasons_.erase(web_contents);
++}
++
++bool CbfProfilePopupController::ConsumeCloseWebPageBeforeUnloadReason(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return false;
++  }
++  const auto it = beforeunload_reasons_.find(web_contents);
++  if (it == beforeunload_reasons_.end()) {
++    return false;
++  }
++  const bool is_close_request =
++      it->second == mojom::CbfBeforeUnloadReason::kCloseWebPage;
++  beforeunload_reasons_.erase(it);
++  return is_close_request;
++}
++
++mojom::CbfBeforeUnloadReason CbfProfilePopupController::ResolveBeforeUnloadReason(
++    content::WebContents* web_contents,
++    bool is_reload) const {
++  if (is_reload) {
++    return mojom::CbfBeforeUnloadReason::kReload;
++  }
++  if (!web_contents) {
++    return mojom::CbfBeforeUnloadReason::kUnknown;
++  }
++  const auto it = beforeunload_reasons_.find(web_contents);
++  if (it == beforeunload_reasons_.end()) {
++    return mojom::CbfBeforeUnloadReason::kUnknown;
++  }
++  return it->second;
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller.h b/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
+new file mode 100644
+index 0000000000000..f82c31383dd00
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
+@@ -0,0 +1,44 @@
++#ifndef CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_POPUP_CONTROLLER_H_
++#define CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_POPUP_CONTROLLER_H_
++
++#include "base/containers/flat_map.h"
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "ui/base/window_open_disposition.h"
++
++class GURL;
++
++namespace content {
++class WebContents;
++}
++
++namespace cbf {
++
++class CbfProfileServiceContext;
++
++class CbfProfilePopupController {
++ public:
++  explicit CbfProfilePopupController(CbfProfileServiceContext* context);
++  CbfProfilePopupController(const CbfProfilePopupController&) = delete;
++  CbfProfilePopupController& operator=(const CbfProfilePopupController&) = delete;
++  ~CbfProfilePopupController();
++
++  void NotifyNewWebPageRequested(content::WebContents* source,
++                                 const GURL& target_url,
++                                 WindowOpenDisposition disposition);
++  void MarkCloseWebPageBeforeUnloadReason(content::WebContents* web_contents);
++  void ClearBeforeUnloadReason(content::WebContents* web_contents);
++  bool ConsumeCloseWebPageBeforeUnloadReason(content::WebContents* web_contents);
++  mojom::CbfBeforeUnloadReason ResolveBeforeUnloadReason(
++      content::WebContents* web_contents,
++      bool is_reload) const;
++
++ private:
++  base::flat_map<raw_ptr<content::WebContents>, mojom::CbfBeforeUnloadReason>
++      beforeunload_reasons_;
++  raw_ptr<CbfProfileServiceContext> context_;
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_POPUP_CONTROLLER_H_
+diff --git a/chrome/browser/cbf/profile/cbf_profile_service_context.cc b/chrome/browser/cbf/profile/cbf_profile_service_context.cc
+new file mode 100644
+index 0000000000000..de2aff89d07c4
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_service_context.cc
+@@ -0,0 +1,31 @@
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++
++#include "chrome/browser/cbf/cbf_java_script_dialog_manager.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++
++namespace cbf {
++
++CbfProfileServiceContext::CbfProfileServiceContext(
++    CbfTabManager* tab_manager,
++    CbfJavaScriptDialogManager* dialog_manager,
++    mojo::Remote<mojom::CbfProfileObserver>* observer_remote)
++    : tab_manager_(tab_manager),
++      dialog_manager_(dialog_manager),
++      observer_remote_(observer_remote) {}
++
++CbfProfileServiceContext::~CbfProfileServiceContext() = default;
++
++CbfTabManager& CbfProfileServiceContext::tab_manager() const {
++  return *tab_manager_;
++}
++
++CbfJavaScriptDialogManager& CbfProfileServiceContext::dialog_manager() const {
++  return *dialog_manager_;
++}
++
++mojo::Remote<mojom::CbfProfileObserver>&
++CbfProfileServiceContext::observer_remote() const {
++  return *observer_remote_;
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_service_context.h b/chrome/browser/cbf/profile/cbf_profile_service_context.h
+new file mode 100644
+index 0000000000000..e76fd9da0731f
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_service_context.h
+@@ -0,0 +1,36 @@
++#ifndef CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_SERVICE_CONTEXT_H_
++#define CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_SERVICE_CONTEXT_H_
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "mojo/public/cpp/bindings/remote.h"
++
++namespace cbf {
++
++class CbfJavaScriptDialogManager;
++class CbfTabManager;
++
++// Shared profile-scoped context used by extracted controllers.
++class CbfProfileServiceContext {
++ public:
++  CbfProfileServiceContext(
++      CbfTabManager* tab_manager,
++      CbfJavaScriptDialogManager* dialog_manager,
++      mojo::Remote<mojom::CbfProfileObserver>* observer_remote);
++  CbfProfileServiceContext(const CbfProfileServiceContext&) = delete;
++  CbfProfileServiceContext& operator=(const CbfProfileServiceContext&) = delete;
++  ~CbfProfileServiceContext();
++
++  CbfTabManager& tab_manager() const;
++  CbfJavaScriptDialogManager& dialog_manager() const;
++  mojo::Remote<mojom::CbfProfileObserver>& observer_remote() const;
++
++ private:
++  raw_ptr<CbfTabManager> tab_manager_;
++  raw_ptr<CbfJavaScriptDialogManager> dialog_manager_;
++  raw_ptr<mojo::Remote<mojom::CbfProfileObserver>> observer_remote_;
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_SERVICE_CONTEXT_H_
+-- 
+2.50.1 (Apple Git-155)
+

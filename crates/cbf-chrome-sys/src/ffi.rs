@@ -25,6 +25,7 @@ pub const CBF_EVENT_WEB_PAGE_DOM_HTML_READ: u8 = 14;
 pub const CBF_EVENT_DRAG_START_REQUESTED: u8 = 15;
 pub const CBF_EVENT_TITLE_UPDATED: u8 = 16;
 pub const CBF_EVENT_FAVICON_URL_UPDATED: u8 = 17;
+pub const CBF_EVENT_DEVTOOLS_OPENED: u8 = 18;
 
 pub const CBF_SURFACE_HANDLE_NONE: u8 = 0;
 pub const CBF_SURFACE_HANDLE_MAC_CA_CONTEXT_ID: u8 = 1;
@@ -143,6 +144,7 @@ pub struct CbfSurfaceHandle {
 pub struct CbfBridgeEvent {
     pub kind: u8,
     pub web_page_id: u64,
+    pub inspected_web_page_id: u64,
     pub request_id: u64,
     pub beforeunload_reason: u8,
     pub cursor_type: u8,
@@ -616,6 +618,16 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         web_page_id: u64,
         ignore_cache: bool,
+    ) -> bool;
+    pub fn cbf_bridge_client_open_dev_tools(
+        client: *mut CbfBridgeClientHandle,
+        web_page_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_inspect_element(
+        client: *mut CbfBridgeClientHandle,
+        web_page_id: u64,
+        x: i32,
+        y: i32,
     ) -> bool;
     pub fn cbf_bridge_client_get_web_page_dom_html(
         client: *mut CbfBridgeClientHandle,

@@ -59,6 +59,14 @@ pub enum ChromeCommand {
         browsing_context_id: BrowsingContextId,
         ignore_cache: bool,
     },
+    OpenDevTools {
+        browsing_context_id: BrowsingContextId,
+    },
+    InspectElement {
+        browsing_context_id: BrowsingContextId,
+        x: i32,
+        y: i32,
+    },
     GetWebContentsDomHtml {
         browsing_context_id: BrowsingContextId,
         request_id: u64,

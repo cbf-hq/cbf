@@ -24,27 +24,46 @@ use crate::cli::Cli;
 /// This struct is protected by a mutex and can be accessed from multiple parts of the application.
 #[derive(Default)]
 pub(crate) struct SharedState {
-    /// The currently active browsing context ID, if any.
-    pub(crate) browsing_context_id: Option<BrowsingContextId>,
+    /// The primary (inspected page) browsing context ID.
+    pub(crate) primary_browsing_context_id: Option<BrowsingContextId>,
+    /// The DevTools browsing context ID.
+    pub(crate) devtools_browsing_context_id: Option<BrowsingContextId>,
     /// Maps drag session IDs to their allowed operations.
     pub(crate) drag_allowed_operations: HashMap<u64, DragOperations>,
 }
 
-/// Gets the currently active browsing context ID from shared state.
-pub(crate) fn current_browsing_context_id(
-    shared: &Arc<Mutex<SharedState>>,
-) -> Option<BrowsingContextId> {
-    let guard = shared.lock().expect("shared state lock poisoned");
-    guard.browsing_context_id
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewTarget {
+    Primary,
+    DevTools,
 }
 
-/// Sets the currently active browsing context ID in shared state.
-pub(crate) fn set_browsing_context_id(
+/// Gets the browsing context ID for the requested target.
+pub(crate) fn browsing_context_id_for_target(
+    shared: &Arc<Mutex<SharedState>>,
+    target: ViewTarget,
+) -> Option<BrowsingContextId> {
+    let guard = shared.lock().expect("shared state lock poisoned");
+    match target {
+        ViewTarget::Primary => guard.primary_browsing_context_id,
+        ViewTarget::DevTools => guard.devtools_browsing_context_id,
+    }
+}
+
+pub(crate) fn set_primary_browsing_context_id(
     shared: &Arc<Mutex<SharedState>>,
     browsing_context_id: Option<BrowsingContextId>,
 ) {
     let mut guard = shared.lock().expect("shared state lock poisoned");
-    guard.browsing_context_id = browsing_context_id;
+    guard.primary_browsing_context_id = browsing_context_id;
+}
+
+pub(crate) fn set_devtools_browsing_context_id(
+    shared: &Arc<Mutex<SharedState>>,
+    browsing_context_id: Option<BrowsingContextId>,
+) {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    guard.devtools_browsing_context_id = browsing_context_id;
 }
 
 /// Gets the allowed drag operations for a given drag session.
@@ -97,12 +116,21 @@ pub(crate) struct CoreState {
 pub(crate) enum CoreAction {
     ExitEventLoop,
     SyncViewAndResize,
-    SyncViewResizeAndFocus,
+    SyncViewResizeAndFocus(ViewTarget),
     UpdateWindowTitle(String),
     UpdateCursor(CursorIcon),
-    ApplySurfaceHandle(SurfaceHandle),
-    ApplyImeBounds(ImeBoundsUpdate),
-    ShowContextMenu(ContextMenu),
+    ApplySurfaceHandle {
+        browsing_context_id: BrowsingContextId,
+        handle: SurfaceHandle,
+    },
+    ApplyImeBounds {
+        browsing_context_id: BrowsingContextId,
+        update: ImeBoundsUpdate,
+    },
+    ShowContextMenu {
+        browsing_context_id: BrowsingContextId,
+        menu: ContextMenu,
+    },
     StartPlatformDrag(DragStartRequest),
 }
 
@@ -125,15 +153,19 @@ impl CoreState {
         self.session.handle()
     }
 
-    pub(crate) fn current_browsing_context_id(&self) -> Option<BrowsingContextId> {
-        current_browsing_context_id(&self.shared)
+    pub(crate) fn browsing_context_id_for_target(
+        &self,
+        target: ViewTarget,
+    ) -> Option<BrowsingContextId> {
+        browsing_context_id_for_target(&self.shared, target)
     }
 
-    pub(crate) fn sync_page_size(&self, width: u32, height: u32) {
-        let Some(browsing_context_id) = self.current_browsing_context_id() else {
-            return;
-        };
-
+    pub(crate) fn sync_page_size(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        width: u32,
+        height: u32,
+    ) {
         if let Err(err) =
             self.browser_handle()
                 .resize_browsing_context(browsing_context_id, width, height)
@@ -142,11 +174,7 @@ impl CoreState {
         }
     }
 
-    pub(crate) fn set_page_focus(&self, focused: bool) {
-        let Some(browsing_context_id) = self.current_browsing_context_id() else {
-            return;
-        };
-
+    pub(crate) fn set_page_focus(&self, browsing_context_id: BrowsingContextId, focused: bool) {
         if let Err(err) = self
             .browser_handle()
             .set_browsing_context_focus(browsing_context_id, focused)
@@ -168,10 +196,27 @@ impl CoreState {
 
     pub(crate) fn handle_surface_update(
         &self,
-        _browsing_context_id: BrowsingContextId,
+        browsing_context_id: BrowsingContextId,
         handle: SurfaceHandle,
     ) -> Vec<CoreAction> {
-        vec![CoreAction::ApplySurfaceHandle(handle)]
+        vec![CoreAction::ApplySurfaceHandle {
+            browsing_context_id,
+            handle,
+        }]
+    }
+
+    pub(crate) fn handle_devtools_opened(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        inspected_browsing_context_id: BrowsingContextId,
+    ) -> Vec<CoreAction> {
+        info!(
+            "devtools opened: inspected={}, devtools={}",
+            inspected_browsing_context_id,
+            browsing_context_id
+        );
+        set_devtools_browsing_context_id(&self.shared, Some(browsing_context_id));
+        vec![CoreAction::SyncViewResizeAndFocus(ViewTarget::DevTools)]
     }
 
     /// Handles incoming browser events and returns platform actions to execute.
@@ -276,7 +321,12 @@ impl CoreState {
                 Vec::new()
             }
             WindowEvent::Focused(focused) => {
-                self.set_page_focus(*focused);
+                if let Some(id) = self.browsing_context_id_for_target(ViewTarget::Primary) {
+                    self.set_page_focus(id, *focused);
+                }
+                if let Some(id) = self.browsing_context_id_for_target(ViewTarget::DevTools) {
+                    self.set_page_focus(id, *focused);
+                }
                 Vec::new()
             }
             _ => Vec::new(),
@@ -290,8 +340,8 @@ impl CoreState {
     ) -> Vec<CoreAction> {
         match event {
             BrowsingContextEvent::Created { .. } => {
-                set_browsing_context_id(&self.shared, Some(browsing_context_id));
-                vec![CoreAction::SyncViewResizeAndFocus]
+                set_primary_browsing_context_id(&self.shared, Some(browsing_context_id));
+                vec![CoreAction::SyncViewResizeAndFocus(ViewTarget::Primary)]
             }
             BrowsingContextEvent::TitleUpdated { title } => {
                 vec![CoreAction::UpdateWindowTitle(title)]
@@ -300,10 +350,16 @@ impl CoreState {
                 vec![CoreAction::UpdateCursor(cursor_type)]
             }
             BrowsingContextEvent::ImeBoundsUpdated { update } => {
-                vec![CoreAction::ApplyImeBounds(update)]
+                vec![CoreAction::ApplyImeBounds {
+                    browsing_context_id,
+                    update,
+                }]
             }
             BrowsingContextEvent::ContextMenuRequested { menu } => {
-                vec![CoreAction::ShowContextMenu(menu)]
+                vec![CoreAction::ShowContextMenu {
+                    browsing_context_id,
+                    menu,
+                }]
             }
             BrowsingContextEvent::DragStartRequested { request } => {
                 vec![CoreAction::StartPlatformDrag(request)]

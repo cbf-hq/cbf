@@ -654,6 +654,18 @@ impl ChromiumBackend {
             } => client
                 .reload(*browsing_context_id, *ignore_cache)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::OpenDevTools {
+                browsing_context_id,
+            } => client
+                .open_dev_tools(*browsing_context_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::InspectElement {
+                browsing_context_id,
+                x,
+                y,
+            } => client
+                .inspect_element(*browsing_context_id, *x, *y)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::GetWebContentsDomHtml {
                 browsing_context_id,
                 request_id,

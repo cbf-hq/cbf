@@ -28,6 +28,15 @@ pub enum IpcEvent {
         browsing_context_id: BrowsingContextId,
         request_id: u64,
     },
+    /// DevTools was opened for a page.
+    ///
+    /// **Note**: This event does not map to `BrowserEvent` because DevTools is
+    /// currently exposed via the Chrome-specific raw event stream only.
+    DevToolsOpened {
+        profile_id: String,
+        browsing_context_id: BrowsingContextId,
+        inspected_browsing_context_id: BrowsingContextId,
+    },
     /// IME bounds information changed.
     ///
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::ImeBoundsUpdated`.

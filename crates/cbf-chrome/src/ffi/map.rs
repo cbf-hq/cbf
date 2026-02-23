@@ -49,6 +49,13 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             browsing_context_id: BrowsingContextId::new(event.web_page_id),
             request_id: event.request_id,
         }),
+        CBF_EVENT_DEVTOOLS_OPENED => Ok(IpcEvent::DevToolsOpened {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
+            inspected_browsing_context_id: BrowsingContextId::new(
+                event.inspected_web_page_id,
+            ),
+        }),
         CBF_EVENT_IME_BOUNDS_UPDATED => Ok(IpcEvent::ImeBoundsUpdated {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: BrowsingContextId::new(event.web_page_id),

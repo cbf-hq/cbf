@@ -33,8 +33,8 @@ use crate::{
     app::PlatformApp,
     app::run_with_platform,
     core::{
-        CoreAction, CoreState, SharedState, current_browsing_context_id, drag_allowed_operations,
-        remove_drag_session, set_drag_allowed_operations,
+        CoreAction, CoreState, SharedState, ViewTarget, browsing_context_id_for_target,
+        drag_allowed_operations, remove_drag_session, set_drag_allowed_operations,
     },
 };
 
@@ -42,6 +42,7 @@ use crate::{
 struct SimpleBrowserViewDelegate {
     handle: BrowserHandle<ChromiumBackend>,
     shared: Arc<Mutex<SharedState>>,
+    target: ViewTarget,
 }
 
 impl SimpleBrowserViewDelegate {
@@ -49,7 +50,8 @@ impl SimpleBrowserViewDelegate {
     where
         F: FnOnce(BrowsingContextId),
     {
-        if let Some(browsing_context_id) = current_browsing_context_id(&self.shared) {
+        if let Some(browsing_context_id) = browsing_context_id_for_target(&self.shared, self.target)
+        {
             f(browsing_context_id);
         }
     }
@@ -269,18 +271,23 @@ struct SimpleAppMac {
     shared: Arc<Mutex<SharedState>>,
     window: Option<Window>,
     window_id: Option<WindowId>,
-    browser_view: Option<Retained<BrowserViewMac>>,
+    primary_browser_view: Option<Retained<BrowserViewMac>>,
+    devtools_browser_view: Option<Retained<BrowserViewMac>>,
 }
 
 impl SimpleAppMac {
     fn create_and_attach_browser_view(
         window: &Window,
+        frame: CGRect,
         handle: BrowserHandle<ChromiumBackend>,
         shared: Arc<Mutex<SharedState>>,
+        target: ViewTarget,
     ) -> Result<Retained<BrowserViewMac>, String> {
-        let frame = view_frame_for_window(window);
-
-        let delegate = Box::new(SimpleBrowserViewDelegate { handle, shared });
+        let delegate = Box::new(SimpleBrowserViewDelegate {
+            handle,
+            shared,
+            target,
+        });
         let mtm = MainThreadMarker::new()
             .ok_or_else(|| "BrowserViewMac must be created on main thread".to_owned())?;
         let browser_view = BrowserViewMac::new(mtm, BrowserViewMacConfig { frame, delegate });
@@ -299,19 +306,52 @@ impl SimpleAppMac {
         content_view.addSubview(&browser_view);
 
         browser_view.setFrame(frame);
-        browser_view.set_layer_frame(frame);
+        browser_view.set_layer_frame(layer_frame_for_view_frame(frame));
 
         Ok(browser_view)
     }
 
-    fn update_view_frame(&self, window: &Window) {
-        let Some(browser_view) = self.browser_view.as_ref() else {
+    fn update_view_frames(&self, window: &Window) {
+        let Some(primary_browser_view) = self.primary_browser_view.as_ref() else {
             return;
         };
 
-        let frame = view_frame_for_window(window);
-        browser_view.setFrame(frame);
-        browser_view.set_layer_frame(frame);
+        let (primary_frame, devtools_frame) =
+            split_frames_for_window(window, self.devtools_browser_view.is_some());
+        primary_browser_view.setFrame(primary_frame);
+        primary_browser_view.set_layer_frame(layer_frame_for_view_frame(primary_frame));
+
+        if let (Some(devtools_browser_view), Some(frame)) =
+            (self.devtools_browser_view.as_ref(), devtools_frame)
+        {
+            devtools_browser_view.setFrame(frame);
+            devtools_browser_view.set_layer_frame(layer_frame_for_view_frame(frame));
+        }
+    }
+
+    fn ensure_devtools_view(&mut self) {
+        if self.devtools_browser_view.is_some() {
+            return;
+        }
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+
+        let (_, devtools_frame) = split_frames_for_window(window, true);
+        let Some(devtools_frame) = devtools_frame else {
+            return;
+        };
+
+        let Ok(devtools_view) = Self::create_and_attach_browser_view(
+            window,
+            devtools_frame,
+            self.browser_handle.clone(),
+            Arc::clone(&self.shared),
+            ViewTarget::DevTools,
+        ) else {
+            return;
+        };
+        self.devtools_browser_view = Some(devtools_view);
     }
 
     fn sync_view_and_page_size(&self, core: &CoreState) {
@@ -319,9 +359,29 @@ impl SimpleAppMac {
             return;
         };
 
-        self.update_view_frame(window);
-        let (width, height) = page_size_for_window(window);
-        core.sync_page_size(width, height);
+        self.update_view_frames(window);
+        let (primary_size, devtools_size) =
+            split_page_sizes_for_window(window, self.devtools_browser_view.is_some());
+
+        if let Some(id) = core.browsing_context_id_for_target(ViewTarget::Primary) {
+            core.sync_page_size(id, primary_size.0, primary_size.1);
+        }
+        if let (Some(id), Some((width, height))) = (
+            core.browsing_context_id_for_target(ViewTarget::DevTools),
+            devtools_size,
+        ) {
+            core.sync_page_size(id, width, height);
+        }
+    }
+
+    fn view_for_context_id(&self, core: &CoreState, id: BrowsingContextId) -> Option<&BrowserViewMac> {
+        if core.browsing_context_id_for_target(ViewTarget::Primary) == Some(id) {
+            return self.primary_browser_view.as_deref();
+        }
+        if core.browsing_context_id_for_target(ViewTarget::DevTools) == Some(id) {
+            return self.devtools_browser_view.as_deref();
+        }
+        None
     }
 }
 
@@ -335,7 +395,8 @@ impl PlatformApp for SimpleAppMac {
             shared,
             window: None,
             window_id: None,
-            browser_view: None,
+            primary_browser_view: None,
+            devtools_browser_view: None,
         }
     }
 
@@ -356,14 +417,17 @@ impl PlatformApp for SimpleAppMac {
             .create_window(attrs)
             .map_err(|err| format!("failed to create window: {err}"))?;
 
+        let (primary_frame, _) = split_frames_for_window(&window, false);
         let browser_view = Self::create_and_attach_browser_view(
             &window,
+            primary_frame,
             self.browser_handle.clone(),
             Arc::clone(&self.shared),
+            ViewTarget::Primary,
         )?;
 
         self.window_id = Some(window.id());
-        self.browser_view = Some(browser_view);
+        self.primary_browser_view = Some(browser_view);
         self.window = Some(window);
 
         Ok(())
@@ -379,9 +443,14 @@ impl PlatformApp for SimpleAppMac {
             match action {
                 CoreAction::ExitEventLoop => event_loop.exit(),
                 CoreAction::SyncViewAndResize => self.sync_view_and_page_size(core),
-                CoreAction::SyncViewResizeAndFocus => {
+                CoreAction::SyncViewResizeAndFocus(target) => {
+                    if target == ViewTarget::DevTools {
+                        self.ensure_devtools_view();
+                    }
                     self.sync_view_and_page_size(core);
-                    core.set_page_focus(true);
+                    if let Some(id) = core.browsing_context_id_for_target(target) {
+                        core.set_page_focus(id, true);
+                    }
                 }
                 CoreAction::UpdateWindowTitle(title) => {
                     if let Some(window) = self.window.as_ref() {
@@ -393,25 +462,37 @@ impl PlatformApp for SimpleAppMac {
                         window.set_cursor(cursor);
                     }
                 }
-                CoreAction::ApplySurfaceHandle(handle) => {
-                    if let (Some(browser_view), SurfaceHandle::MacCaContextId(context_id)) =
-                        (self.browser_view.as_ref(), handle)
-                    {
+                CoreAction::ApplySurfaceHandle {
+                    browsing_context_id,
+                    handle,
+                } => {
+                    if let (Some(browser_view), SurfaceHandle::MacCaContextId(context_id)) = (
+                        self.view_for_context_id(core, browsing_context_id),
+                        handle,
+                    ) {
                         browser_view.set_context_id(context_id);
                     }
                 }
-                CoreAction::ApplyImeBounds(update) => {
-                    if let Some(browser_view) = self.browser_view.as_ref() {
+                CoreAction::ApplyImeBounds {
+                    browsing_context_id,
+                    update,
+                } => {
+                    if let Some(browser_view) = self.view_for_context_id(core, browsing_context_id)
+                    {
                         browser_view.set_ime_bounds(update);
                     }
                 }
-                CoreAction::ShowContextMenu(menu) => {
-                    if let Some(browser_view) = self.browser_view.as_ref() {
+                CoreAction::ShowContextMenu {
+                    browsing_context_id,
+                    menu,
+                } => {
+                    if let Some(browser_view) = self.view_for_context_id(core, browsing_context_id)
+                    {
                         browser_view.show_context_menu(menu);
                     }
                 }
                 CoreAction::StartPlatformDrag(request) => {
-                    if let Some(browser_view) = self.browser_view.as_ref()
+                    if let Some(browser_view) = self.view_for_context_id(core, request.browsing_context_id)
                         && browser_view.start_native_drag_session(&request)
                     {
                         set_drag_allowed_operations(
@@ -436,10 +517,52 @@ fn view_frame_for_window(window: &Window) -> CGRect {
     CGRect::new(CGPoint::ZERO, CGSize::new(logical.width, logical.height))
 }
 
-fn page_size_for_window(window: &Window) -> (u32, u32) {
+fn split_frames_for_window(window: &Window, with_devtools: bool) -> (CGRect, Option<CGRect>) {
+    let frame = view_frame_for_window(window);
+    if !with_devtools {
+        return (frame, None);
+    }
+    let width = frame.size.width;
+    let height = frame.size.height;
+    let primary_width = (width * 0.5).floor();
+    let devtools_width = (width - primary_width).max(1.0);
+
+    let primary_frame = CGRect::new(
+        CGPoint::new(frame.origin.x, frame.origin.y),
+        CGSize::new(primary_width.max(1.0), height),
+    );
+    let devtools_frame = CGRect::new(
+        CGPoint::new(frame.origin.x + primary_width, frame.origin.y),
+        CGSize::new(devtools_width, height),
+    );
+    (primary_frame, Some(devtools_frame))
+}
+
+fn split_page_sizes_for_window(
+    window: &Window,
+    with_devtools: bool,
+) -> ((u32, u32), Option<(u32, u32)>) {
     let logical = window.inner_size().to_logical::<f64>(window.scale_factor());
+    if !with_devtools {
+        return (
+            (
+                logical.width.max(1.0).round() as u32,
+                logical.height.max(1.0).round() as u32,
+            ),
+            None,
+        );
+    }
+
+    let primary_width = (logical.width * 0.5).floor().max(1.0);
+    let devtools_width = (logical.width - primary_width).max(1.0);
+    let height = logical.height.max(1.0).round() as u32;
+
     (
-        logical.width.max(1.0).round() as u32,
-        logical.height.max(1.0).round() as u32,
+        (primary_width.round() as u32, height),
+        Some((devtools_width.round() as u32, height)),
     )
+}
+
+fn layer_frame_for_view_frame(view_frame: CGRect) -> CGRect {
+    CGRect::new(CGPoint::ZERO, view_frame.size)
 }

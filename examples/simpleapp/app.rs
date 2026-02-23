@@ -41,6 +41,10 @@ pub(crate) enum UserEvent {
         browsing_context_id: cbf::data::ids::BrowsingContextId,
         handle: SurfaceHandle,
     },
+    DevToolsOpened {
+        browsing_context_id: cbf::data::ids::BrowsingContextId,
+        inspected_browsing_context_id: cbf::data::ids::BrowsingContextId,
+    },
 }
 
 /// Spawns a background thread that forwards browser events to the winit event loop.
@@ -66,6 +70,21 @@ pub(crate) fn spawn_browser_event_forwarder(
                             .send_event(UserEvent::SurfaceHandleUpdated {
                                 browsing_context_id,
                                 handle,
+                            })
+                            .is_err()
+                    {
+                        return;
+                    }
+                    if let ChromeEvent::Ipc(ipc_event) = event.as_raw().clone()
+                        && let IpcEvent::DevToolsOpened {
+                            browsing_context_id,
+                            inspected_browsing_context_id,
+                            ..
+                        } = *ipc_event
+                        && proxy
+                            .send_event(UserEvent::DevToolsOpened {
+                                browsing_context_id,
+                                inspected_browsing_context_id,
                             })
                             .is_err()
                     {
@@ -140,6 +159,12 @@ impl<P: PlatformApp> ApplicationHandler<UserEvent> for AppRunner<P> {
                 browsing_context_id,
                 handle,
             } => self.core.handle_surface_update(browsing_context_id, handle),
+            UserEvent::DevToolsOpened {
+                browsing_context_id,
+                inspected_browsing_context_id,
+            } => self
+                .core
+                .handle_devtools_opened(browsing_context_id, inspected_browsing_context_id),
         };
         self.platform
             .apply_core_actions(event_loop, &mut self.core, actions);

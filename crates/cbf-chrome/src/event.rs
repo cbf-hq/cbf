@@ -71,6 +71,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 request_id: *request_id,
             }),
         }),
+        IpcEvent::DevToolsOpened { .. } => None,
         IpcEvent::ImeBoundsUpdated {
             profile_id,
             browsing_context_id,

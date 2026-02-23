@@ -36,6 +36,8 @@ pub const CMD_CONTENT_REDO: i32 = 50155;
 pub const CMD_CONTENT_SELECT_ALL: i32 = 50156;
 /// Command id for pasting while matching style.
 pub const CMD_CONTENT_PASTE_AND_MATCH_STYLE: i32 = 50157;
+/// Command id for inspecting element via DevTools.
+pub const CMD_CONTENT_INSPECT_ELEMENT: i32 = 50162;
 
 const CONTEXT_MENU_ALLOWLIST: &[i32] = &[
     CMD_BACK,
@@ -56,6 +58,7 @@ const CONTEXT_MENU_ALLOWLIST: &[i32] = &[
     CMD_CONTENT_REDO,
     CMD_CONTENT_SELECT_ALL,
     CMD_CONTENT_PASTE_AND_MATCH_STYLE,
+    CMD_CONTENT_INSPECT_ELEMENT,
 ];
 
 pub fn filter_supported(menu: ContextMenu) -> ContextMenu {

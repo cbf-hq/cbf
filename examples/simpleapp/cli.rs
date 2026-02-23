@@ -29,6 +29,8 @@ pub(crate) struct Cli {
     pub(crate) channel_name: String,
 
     /// Enable Chromium logging to stderr.
+    ///
+    /// Note: this forces Chromium to log only to stderr.
     #[arg(long)]
     pub(crate) enable_logging_stderr: bool,
 
@@ -69,7 +71,14 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOption
         process: ChromiumProcessOptions {
             executable_path: chromium_executable,
             user_data_dir: Some(user_data_dir.to_string_lossy().to_string()),
-            enable_logging: cli.enable_logging_stderr.then_some("stderr".to_owned()),
+            enable_logging: if cli.enable_logging_stderr {
+                Some("stderr".to_owned())
+            } else if cli.log_file.is_some() {
+                // `--enable-logging=` (empty destination) keeps file logging enabled.
+                Some(String::new())
+            } else {
+                None
+            },
             log_file: cli
                 .log_file
                 .as_ref()

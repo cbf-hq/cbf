@@ -1,0 +1,652 @@
+From 597af2ec589698b0367d54438b4cd1221ec486c4 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Mon, 23 Feb 2026 17:16:20 +0900
+Subject: [PATCH 5/5] test(chrome): add browser and unit tests for profile
+ controllers
+
+---
+ chrome/browser/cbf/BUILD.gn                   |  43 +++++++
+ .../cbf/cbf_profile_service_browsertest.cc    |  56 +++++++++
+ ...profile_devtools_controller_browsertest.cc |  57 +++++++++
+ ...bf_profile_devtools_controller_unittest.cc |  41 +++++++
+ .../cbf_profile_drag_controller_unittest.cc   |  50 ++++++++
+ .../cbf_profile_input_controller_unittest.cc  |  61 ++++++++++
+ .../cbf_profile_popup_controller_unittest.cc  |  44 +++++++
+ .../cbf/test/cbf_test_profile_observer.cc     | 108 ++++++++++++++++++
+ .../cbf/test/cbf_test_profile_observer.h      |  86 ++++++++++++++
+ chrome/test/BUILD.gn                          |   2 +
+ 10 files changed, 548 insertions(+)
+ create mode 100644 chrome/browser/cbf/cbf_profile_service_browsertest.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_profile_popup_controller_unittest.cc
+ create mode 100644 chrome/browser/cbf/test/cbf_test_profile_observer.cc
+ create mode 100644 chrome/browser/cbf/test/cbf_test_profile_observer.h
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index c1881f8606098..148c9638bf486 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -129,3 +129,46 @@ shared_library("cbf_bridge") {
+ mojom("mojom") {
+   sources = [ "mojom/cbf_browser.mojom" ]
+ }
++
++source_set("cbf_tests") {
++  testonly = true
++
++  sources = [
++    "profile/cbf_profile_devtools_controller_unittest.cc",
++    "profile/cbf_profile_drag_controller_unittest.cc",
++    "profile/cbf_profile_input_controller_unittest.cc",
++    "profile/cbf_profile_popup_controller_unittest.cc",
++  ]
++
++  deps = [
++    ":cbf",
++    ":mojom",
++    "//base",
++    "//base/test:test_support",
++    "//content/test:test_support",
++    "//testing/gtest",
++  ]
++}
++
++source_set("cbf_browser_tests") {
++  testonly = true
++  defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
++
++  sources = [
++    "cbf_profile_service_browsertest.cc",
++    "profile/cbf_profile_devtools_controller_browsertest.cc",
++    "test/cbf_test_profile_observer.cc",
++    "test/cbf_test_profile_observer.h",
++  ]
++
++  deps = [
++    ":cbf",
++    ":mojom",
++    "//base",
++    "//base/test:test_support",
++    "//chrome/browser",
++    "//chrome/test:test_support",
++    "//content/test:test_support",
++    "//testing/gtest",
++  ]
++}
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+new file mode 100644
+index 0000000000000..8ea9a622fe11c
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -0,0 +1,56 @@
++#include "chrome/browser/cbf/cbf_profile_service.h"
++
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/run_loop.h"
++#include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/test/base/in_process_browser_test.h"
++#include "content/public/test/browser_test.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace cbf {
++namespace {
++
++class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
++ protected:
++  void SetUpOnMainThread() override {
++    InProcessBrowserTest::SetUpOnMainThread();
++    profile_service_ =
++        std::make_unique<CbfProfileService>(browser()->profile(), nullptr);
++    profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
++  }
++
++  std::unique_ptr<CbfProfileService> profile_service_;
++  cbf::test::CbfTestProfileObserver observer_;
++};
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
++  profile_service_->RequestCloseWebPage(kInvalidWebPageId);
++  profile_service_->SendDragCancel(9999, kInvalidWebPageId);
++  profile_service_->OpenDevTools(kInvalidWebPageId);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       NotifyWebPageClosedEmitsObserverEvent) {
++  WebPageId created_id = kInvalidWebPageId;
++  base::RunLoop run_loop;
++  profile_service_->CreateWebPage(
++      "about:blank", 1,
++      base::BindOnce(
++          [](WebPageId* out_id, base::RunLoop* run_loop, WebPageId web_page_id) {
++            *out_id = web_page_id;
++            run_loop->Quit();
++          },
++          &created_id, &run_loop));
++  run_loop.Run();
++  ASSERT_NE(created_id, kInvalidWebPageId);
++
++  profile_service_->NotifyWebPageClosed(created_id);
++  observer_.WaitForWebPageClosedCount(1);
++  EXPECT_EQ(observer_.web_page_closed_events().front(), created_id);
++}
++
++}  // namespace
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+new file mode 100644
+index 0000000000000..64cbf7c2c1df3
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+@@ -0,0 +1,57 @@
++#include "chrome/browser/cbf/cbf_profile_service.h"
++
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/run_loop.h"
++#include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/test/base/in_process_browser_test.h"
++#include "content/public/test/browser_test.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace cbf {
++namespace {
++
++class CbfProfileDevToolsControllerBrowserTest : public InProcessBrowserTest {
++ protected:
++  void SetUpOnMainThread() override {
++    InProcessBrowserTest::SetUpOnMainThread();
++    profile_service_ =
++        std::make_unique<CbfProfileService>(browser()->profile(), nullptr);
++    profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
++  }
++
++  WebPageId CreatePage() {
++    WebPageId created_id = kInvalidWebPageId;
++    base::RunLoop run_loop;
++    profile_service_->CreateWebPage(
++        "about:blank", 1,
++        base::BindOnce(
++            [](WebPageId* out_id, base::RunLoop* run_loop, WebPageId web_page_id) {
++              *out_id = web_page_id;
++              run_loop->Quit();
++            },
++            &created_id, &run_loop));
++    run_loop.Run();
++    return created_id;
++  }
++
++  std::unique_ptr<CbfProfileService> profile_service_;
++  cbf::test::CbfTestProfileObserver observer_;
++};
++
++IN_PROC_BROWSER_TEST_F(CbfProfileDevToolsControllerBrowserTest,
++                       OpenDevToolsAndCloseRaceDoesNotCrash) {
++  const WebPageId web_page_id = CreatePage();
++  ASSERT_NE(web_page_id, kInvalidWebPageId);
++
++  profile_service_->OpenDevTools(web_page_id);
++  observer_.WaitForDevToolsOpenedCount(1);
++
++  profile_service_->NotifyWebPageClosed(web_page_id);
++  profile_service_->OpenDevTools(web_page_id);
++}
++
++}  // namespace
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+new file mode 100644
+index 0000000000000..181b77e50941b
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+@@ -0,0 +1,41 @@
++#include "chrome/browser/cbf/profile/cbf_profile_devtools_controller.h"
++
++#include "base/test/task_environment.h"
++#include "base/time/time.h"
++#include "chrome/browser/cbf/cbf_java_script_dialog_manager.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace cbf {
++namespace {
++
++class CbfProfileDevToolsControllerTest : public testing::Test {
++ public:
++  CbfProfileDevToolsControllerTest()
++      : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME),
++        tab_manager_(nullptr, nullptr),
++        dialog_manager_(nullptr),
++        service_context_(&tab_manager_, &dialog_manager_, &observer_remote_),
++        controller_(&service_context_) {}
++
++ protected:
++  mojo::Remote<mojom::CbfProfileObserver> observer_remote_;
++  base::test::TaskEnvironment task_environment_;
++  CbfTabManager tab_manager_;
++  CbfJavaScriptDialogManager dialog_manager_;
++  CbfProfileServiceContext service_context_;
++  CbfProfileDevToolsController controller_;
++};
++
++TEST_F(CbfProfileDevToolsControllerTest, CloseDuringAttachRetryIsSafe) {
++  controller_.OpenDevTools(kInvalidWebPageId);
++  controller_.OnWebPageClosed(42);
++  controller_.OnWebPageClosed(42);
++  task_environment_.FastForwardBy(base::Milliseconds(2000));
++}
++
++}  // namespace
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
+new file mode 100644
+index 0000000000000..c234730d69213
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
+@@ -0,0 +1,50 @@
++#include "chrome/browser/cbf/profile/cbf_profile_drag_controller.h"
++
++#include "base/test/task_environment.h"
++#include "chrome/browser/cbf/cbf_java_script_dialog_manager.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace cbf {
++namespace {
++
++class CbfProfileDragControllerTest : public testing::Test {
++ protected:
++  CbfProfileDragControllerTest()
++      : tab_manager_(nullptr, nullptr),
++        dialog_manager_(nullptr),
++        service_context_(&tab_manager_, &dialog_manager_, &observer_remote_),
++        controller_(&service_context_) {}
++
++  base::test::SingleThreadTaskEnvironment task_environment_;
++  mojo::Remote<mojom::CbfProfileObserver> observer_remote_;
++  CbfTabManager tab_manager_;
++  CbfJavaScriptDialogManager dialog_manager_;
++  CbfProfileServiceContext service_context_;
++  CbfProfileDragController controller_;
++};
++
++TEST_F(CbfProfileDragControllerTest, InvalidSessionOperationsAreNoOp) {
++  auto update = mojom::CbfDragUpdate::New();
++  update->session_id = 9999;
++  update->web_page_id = kInvalidWebPageId;
++  controller_.SendDragUpdate(std::move(update));
++
++  auto drop = mojom::CbfDragDrop::New();
++  drop->session_id = 9999;
++  drop->web_page_id = kInvalidWebPageId;
++  controller_.SendDragDrop(std::move(drop));
++
++  controller_.SendDragCancel(9999, kInvalidWebPageId);
++}
++
++TEST_F(CbfProfileDragControllerTest, DuplicateCloseIsSafe) {
++  controller_.OnWebPageClosed(42);
++  controller_.OnWebPageClosed(42);
++}
++
++}  // namespace
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
+new file mode 100644
+index 0000000000000..6be8e1684d7fc
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
+@@ -0,0 +1,61 @@
++#include "chrome/browser/cbf/profile/cbf_profile_input_controller.h"
++
++#include <optional>
++
++#include "base/test/task_environment.h"
++#include "base/time/time.h"
++#include "chrome/browser/cbf/cbf_java_script_dialog_manager.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace cbf {
++namespace {
++
++class CbfProfileInputControllerTest : public testing::Test {
++ public:
++  CbfProfileInputControllerTest()
++      : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME),
++        tab_manager_(nullptr, nullptr),
++        dialog_manager_(nullptr),
++        service_context_(&tab_manager_, &dialog_manager_, &observer_remote_),
++        controller_(&service_context_) {}
++
++ protected:
++  mojo::Remote<mojom::CbfProfileObserver> observer_remote_;
++  base::test::TaskEnvironment task_environment_;
++  CbfTabManager tab_manager_;
++  CbfJavaScriptDialogManager dialog_manager_;
++  CbfProfileServiceContext service_context_;
++  CbfProfileInputController controller_;
++};
++
++TEST_F(CbfProfileInputControllerTest, InvalidWebPageIdInputEventsAreNoOp) {
++  auto key_event = mojom::CbfKeyEvent::New();
++  key_event->web_page_id = kInvalidWebPageId;
++  key_event->type = mojom::CbfKeyEventType::kKeyDown;
++  controller_.SendKeyEvent(std::move(key_event), std::nullopt);
++
++  auto mouse_event = mojom::CbfMouseEvent::New();
++  mouse_event->web_page_id = kInvalidWebPageId;
++  mouse_event->type = mojom::CbfMouseEventType::kMouseMove;
++  mouse_event->button = mojom::CbfMouseButton::kNoButton;
++  mouse_event->pointer_type = mojom::CbfPointerType::kPointerMouse;
++  controller_.SendMouseEvent(std::move(mouse_event));
++
++  auto wheel_event = mojom::CbfMouseWheelEvent::New();
++  wheel_event->web_page_id = kInvalidWebPageId;
++  wheel_event->delta_units = mojom::CbfScrollGranularity::kScrollByPixel;
++  controller_.SendMouseWheelEvent(std::move(wheel_event));
++}
++
++TEST_F(CbfProfileInputControllerTest, DuplicateCloseIsSafe) {
++  controller_.OnWebPageClosed(42);
++  controller_.OnWebPageClosed(42);
++  task_environment_.FastForwardBy(base::Milliseconds(500));
++}
++
++}  // namespace
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_popup_controller_unittest.cc
+new file mode 100644
+index 0000000000000..fbb63065c7779
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller_unittest.cc
+@@ -0,0 +1,44 @@
++#include "chrome/browser/cbf/profile/cbf_profile_popup_controller.h"
++
++#include <memory>
++
++#include "base/test/task_environment.h"
++#include "chrome/browser/cbf/cbf_java_script_dialog_manager.h"
++#include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace cbf {
++namespace {
++
++class CbfProfilePopupControllerTest : public testing::Test {
++ protected:
++  CbfProfilePopupControllerTest()
++      : tab_manager_(nullptr, nullptr),
++        dialog_manager_(nullptr),
++        service_context_(&tab_manager_, &dialog_manager_, &observer_remote_),
++        controller_(&service_context_) {}
++
++  base::test::SingleThreadTaskEnvironment task_environment_;
++  mojo::Remote<mojom::CbfProfileObserver> observer_remote_;
++  CbfTabManager tab_manager_;
++  CbfJavaScriptDialogManager dialog_manager_;
++  CbfProfileServiceContext service_context_;
++  CbfProfilePopupController controller_;
++};
++
++TEST_F(CbfProfilePopupControllerTest, ResolveReasonUnknownForNullWebContents) {
++  EXPECT_EQ(mojom::CbfBeforeUnloadReason::kUnknown,
++            controller_.ResolveBeforeUnloadReason(nullptr, false));
++}
++
++TEST_F(CbfProfilePopupControllerTest, NullWebContentsOperationsAreNoOp) {
++  controller_.MarkCloseWebPageBeforeUnloadReason(nullptr);
++  controller_.ClearBeforeUnloadReason(nullptr);
++  EXPECT_FALSE(controller_.ConsumeCloseWebPageBeforeUnloadReason(nullptr));
++}
++
++}  // namespace
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+new file mode 100644
+index 0000000000000..50bfe996cb244
+--- /dev/null
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -0,0 +1,108 @@
++#include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
++
++namespace cbf::test {
++
++CbfTestProfileObserver::CbfTestProfileObserver() = default;
++CbfTestProfileObserver::~CbfTestProfileObserver() = default;
++
++mojo::PendingRemote<cbf::mojom::CbfProfileObserver>
++CbfTestProfileObserver::BindNewPipeAndPassRemote() {
++  return receiver_.BindNewPipeAndPassRemote();
++}
++
++void CbfTestProfileObserver::WaitForWebPageClosedCount(size_t expected_count) {
++  wait_web_page_closed_count_ = expected_count;
++  if (web_page_closed_events_.size() >= wait_web_page_closed_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
++void CbfTestProfileObserver::WaitForDevToolsOpenedCount(size_t expected_count) {
++  wait_devtools_opened_count_ = expected_count;
++  if (devtools_opened_events_.size() >= wait_devtools_opened_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
++void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t web_page_id,
++                                                    uint32_t ca_context_id) {}
++
++void CbfTestProfileObserver::OnWebPageCreated(uint64_t web_page_id,
++                                              uint64_t request_id) {}
++
++void CbfTestProfileObserver::OnDevToolsOpened(uint64_t web_page_id,
++                                              uint64_t devtools_web_page_id) {
++  devtools_opened_events_.emplace_back(web_page_id, devtools_web_page_id);
++  MaybeQuitWaitLoop();
++}
++
++void CbfTestProfileObserver::OnWebPageClosed(uint64_t web_page_id) {
++  web_page_closed_events_.push_back(web_page_id);
++  MaybeQuitWaitLoop();
++}
++
++void CbfTestProfileObserver::OnWebPageResizeAcknowledged(uint64_t web_page_id) {}
++
++void CbfTestProfileObserver::OnImeBoundsUpdated(
++    cbf::mojom::CbfImeBoundsUpdatePtr update) {}
++
++void CbfTestProfileObserver::OnContextMenuRequested(
++    uint64_t web_page_id,
++    cbf::mojom::CbfContextMenuPtr menu) {}
++
++void CbfTestProfileObserver::OnNewWebPageRequested(uint64_t web_page_id,
++                                                   const std::string& target_url,
++                                                   bool is_popup) {}
++
++void CbfTestProfileObserver::OnTitleUpdated(uint64_t web_page_id,
++                                            const std::string& title) {}
++
++void CbfTestProfileObserver::OnFaviconUrlUpdated(uint64_t web_page_id,
++                                                 const std::string& url) {}
++
++void CbfTestProfileObserver::OnBeforeUnloadDialogRequested(
++    uint64_t web_page_id,
++    uint64_t request_id,
++    cbf::mojom::CbfBeforeUnloadReason reason) {}
++
++void CbfTestProfileObserver::OnCursorChanged(
++    uint64_t web_page_id,
++    cbf::mojom::CbfCursorType cursor_type) {}
++
++void CbfTestProfileObserver::OnNavigationStateChanged(uint64_t web_page_id,
++                                                      const std::string& url,
++                                                      bool can_go_back,
++                                                      bool can_go_forward,
++                                                      bool is_loading) {}
++
++void CbfTestProfileObserver::OnWebPageDomHtmlRead(uint64_t web_page_id,
++                                                  uint64_t request_id,
++                                                  const std::string& html) {}
++
++void CbfTestProfileObserver::OnDragStartRequested(
++    cbf::mojom::CbfDragStartRequestPtr request) {}
++
++void CbfTestProfileObserver::MaybeQuitWaitLoop() {
++  if (quit_wait_loop_.is_null()) {
++    return;
++  }
++  if (wait_web_page_closed_count_ > 0 &&
++      web_page_closed_events_.size() >= wait_web_page_closed_count_) {
++    quit_wait_loop_.Run();
++    return;
++  }
++  if (wait_devtools_opened_count_ > 0 &&
++      devtools_opened_events_.size() >= wait_devtools_opened_count_) {
++    quit_wait_loop_.Run();
++  }
++}
++
++}  // namespace cbf::test
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+new file mode 100644
+index 0000000000000..c86d70cc38407
+--- /dev/null
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -0,0 +1,86 @@
++#ifndef CHROME_BROWSER_CBF_TEST_CBF_TEST_PROFILE_OBSERVER_H_
++#define CHROME_BROWSER_CBF_TEST_CBF_TEST_PROFILE_OBSERVER_H_
++
++#include <cstdint>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/functional/callback.h"
++#include "base/run_loop.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++#include "mojo/public/cpp/bindings/remote.h"
++
++namespace cbf::test {
++
++// Simple mojom observer implementation used by CBF tests.
++class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
++ public:
++  CbfTestProfileObserver();
++  CbfTestProfileObserver(const CbfTestProfileObserver&) = delete;
++  CbfTestProfileObserver& operator=(const CbfTestProfileObserver&) = delete;
++  ~CbfTestProfileObserver() override;
++
++  mojo::PendingRemote<cbf::mojom::CbfProfileObserver> BindNewPipeAndPassRemote();
++
++  const std::vector<uint64_t>& web_page_closed_events() const {
++    return web_page_closed_events_;
++  }
++  const std::vector<std::pair<uint64_t, uint64_t>>& devtools_opened_events()
++      const {
++    return devtools_opened_events_;
++  }
++
++  void WaitForWebPageClosedCount(size_t expected_count);
++  void WaitForDevToolsOpenedCount(size_t expected_count);
++
++  // cbf::mojom::CbfProfileObserver
++  void OnSurfaceHandleUpdated(uint64_t web_page_id,
++                              uint32_t ca_context_id) override;
++  void OnWebPageCreated(uint64_t web_page_id, uint64_t request_id) override;
++  void OnDevToolsOpened(uint64_t web_page_id,
++                        uint64_t devtools_web_page_id) override;
++  void OnWebPageClosed(uint64_t web_page_id) override;
++  void OnWebPageResizeAcknowledged(uint64_t web_page_id) override;
++  void OnImeBoundsUpdated(cbf::mojom::CbfImeBoundsUpdatePtr update) override;
++  void OnContextMenuRequested(
++      uint64_t web_page_id,
++      cbf::mojom::CbfContextMenuPtr menu) override;
++  void OnNewWebPageRequested(uint64_t web_page_id,
++                             const std::string& target_url,
++                             bool is_popup) override;
++  void OnTitleUpdated(uint64_t web_page_id, const std::string& title) override;
++  void OnFaviconUrlUpdated(uint64_t web_page_id,
++                           const std::string& url) override;
++  void OnBeforeUnloadDialogRequested(
++      uint64_t web_page_id,
++      uint64_t request_id,
++      cbf::mojom::CbfBeforeUnloadReason reason) override;
++  void OnCursorChanged(uint64_t web_page_id,
++                       cbf::mojom::CbfCursorType cursor_type) override;
++  void OnNavigationStateChanged(uint64_t web_page_id,
++                                const std::string& url,
++                                bool can_go_back,
++                                bool can_go_forward,
++                                bool is_loading) override;
++  void OnWebPageDomHtmlRead(uint64_t web_page_id,
++                            uint64_t request_id,
++                            const std::string& html) override;
++  void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
++
++ private:
++  void MaybeQuitWaitLoop();
++
++  mojo::Receiver<cbf::mojom::CbfProfileObserver> receiver_{this};
++  std::vector<uint64_t> web_page_closed_events_;
++  std::vector<std::pair<uint64_t, uint64_t>> devtools_opened_events_;
++
++  size_t wait_web_page_closed_count_ = 0;
++  size_t wait_devtools_opened_count_ = 0;
++  base::RepeatingClosure quit_wait_loop_;
++};
++
++}  // namespace cbf::test
++
++#endif  // CHROME_BROWSER_CBF_TEST_CBF_TEST_PROFILE_OBSERVER_H_
+diff --git a/chrome/test/BUILD.gn b/chrome/test/BUILD.gn
+index 1bc07507f5889..7ba07532324c0 100644
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -2494,6 +2494,7 @@ if (!is_android) {
+       "//chrome/browser/breadcrumbs:browser_tests",
+       "//chrome/browser/browsing_data:constants",
+       "//chrome/browser/btm:browser_tests",
++      "//chrome/browser/cbf:cbf_browser_tests",
+       "//chrome/browser/chooser_controller:browser_tests",
+       "//chrome/browser/client_hints:browser_tests",
+       "//chrome/browser/content_extraction",
+@@ -7035,6 +7036,7 @@ test("unit_tests") {
+     "//chrome/browser/breadcrumbs:unit_tests",
+     "//chrome/browser/browsing_data:constants",
+     "//chrome/browser/btm:unit_tests",
++    "//chrome/browser/cbf:cbf_tests",
+     "//chrome/browser/chooser_controller:unit_tests",
+     "//chrome/browser/commerce",
+     "//chrome/browser/commerce:unit_tests",
+-- 
+2.50.1 (Apple Git-155)
+

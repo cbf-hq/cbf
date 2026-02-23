@@ -295,6 +295,41 @@ impl IpcClient {
         }
     }
 
+    /// Open DevTools for the specified page.
+    pub fn open_dev_tools(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe { cbf_bridge_client_open_dev_tools(self.inner, browsing_context_id.get()) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Open DevTools and inspect the element at the given coordinates.
+    pub fn inspect_element(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        x: i32,
+        y: i32,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe { cbf_bridge_client_inspect_element(self.inner, browsing_context_id.get(), x, y) }
+        {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
     /// Request the DOM HTML for the specified page.
     pub fn get_web_contents_dom_html(
         &mut self,
