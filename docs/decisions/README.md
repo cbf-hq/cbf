@@ -4,6 +4,14 @@ This directory, `docs/decisions/`, stores **Architecture Decision Records (ADRs)
 The goal of an ADR is to preserve *why* a decision was made so future maintainers, AI agents, and contributors can trace it.
 An ADR is not an implementation design document.
 
+## Current ADRs
+
+- [ADR 0001: Layered API for Browser-Generic and Chromium-Specific Surfaces](./0001-layered-api-for-generic-and-chromium.md)
+- [ADR 0001: API Design Sketch](./0001-api-design-sketch.md)
+- [ADR 0002: DevTools Integration Without Chrome Browser Dependency](./0002-devtools-integration-without-chrome-browser-dependency.md)
+- [ADR 0003: Chrome Runtime Default and Embedded Scope Boundary](./0003-chrome-runtime-default-and-cbf-scope.md)
+- [ADR 0004: Chrome Feature Wiring on WebContents Path](./0004-chrome-feature-wiring-on-webcontents-path.md)
+
 ## 1. Naming Convention
 
 - Filename: `NNNN-kebab-case-title.md`
