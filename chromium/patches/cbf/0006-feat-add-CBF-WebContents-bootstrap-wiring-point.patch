@@ -1,0 +1,86 @@
+From 342d183205beebdfd3be1785f8a28b0db67a53d3 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Tue, 24 Feb 2026 11:43:25 +0900
+Subject: [PATCH 6/6] feat:add-CBF-WebContents-bootstrap-wiring-point
+
+---
+ chrome/browser/cbf/BUILD.gn                                 | 4 ++++
+ chrome/browser/cbf/cbf_tab_manager.cc                       | 2 ++
+ .../cbf/profile/cbf_profile_devtools_controller_unittest.cc | 6 ++++++
+ 3 files changed, 12 insertions(+)
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index 148c9638bf486..86f9ec022ad58 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -44,6 +44,8 @@ source_set("cbf") {
+     "profile/cbf_profile_popup_controller.h",
+     "profile/cbf_profile_service_context.cc",
+     "profile/cbf_profile_service_context.h",
++    "profile/cbf_web_contents_bootstrap.cc",
++    "profile/cbf_web_contents_bootstrap.h",
+   ]
+ 
+   public_deps = [ "//chrome/browser:browser_public_dependencies" ]
+@@ -138,6 +140,7 @@ source_set("cbf_tests") {
+     "profile/cbf_profile_drag_controller_unittest.cc",
+     "profile/cbf_profile_input_controller_unittest.cc",
+     "profile/cbf_profile_popup_controller_unittest.cc",
++    "profile/cbf_web_contents_bootstrap_unittest.cc",
+   ]
+ 
+   deps = [
+@@ -145,6 +148,7 @@ source_set("cbf_tests") {
+     ":mojom",
+     "//base",
+     "//base/test:test_support",
++    "//chrome/test:test_support",
+     "//content/test:test_support",
+     "//testing/gtest",
+   ]
+diff --git a/chrome/browser/cbf/cbf_tab_manager.cc b/chrome/browser/cbf/cbf_tab_manager.cc
+index cb9f6acca5fff..241d934af2a9f 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.cc
++++ b/chrome/browser/cbf/cbf_tab_manager.cc
+@@ -8,6 +8,7 @@
+ #include "base/logging.h"
+ #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
+ #include "chrome/browser/cbf/cbf_profile_service.h"
++#include "chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+@@ -47,6 +48,7 @@ WebPageId CbfTabManager::CreateWebPage(const GURL& initial_url) {
+   if (profile_service_) {
+     web_contents_ptr->SetDelegate(profile_service_->GetWebContentsDelegate());
+   }
++  BootstrapCbfWebContents(web_contents_ptr, profile_);
+ 
+   const WebPageId web_page_id = next_web_page_id_++;
+   pages_.emplace(web_page_id, std::move(web_contents));
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+index 181b77e50941b..f8df7aec96c3a 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+@@ -6,6 +6,7 @@
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
+ #include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h"
+ #include "mojo/public/cpp/bindings/remote.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+@@ -37,5 +38,10 @@ TEST_F(CbfProfileDevToolsControllerTest, CloseDuringAttachRetryIsSafe) {
+   task_environment_.FastForwardBy(base::Milliseconds(2000));
+ }
+ 
++TEST_F(CbfProfileDevToolsControllerTest, BootstrapNullWebContentsIsSafeNoOp) {
++  BootstrapCbfWebContents(nullptr, nullptr);
++  EXPECT_FALSE(HasCbfWebContentsBootstrapForTesting(nullptr));
++}
++
+ }  // namespace
+ }  // namespace cbf
+-- 
+2.50.1 (Apple Git-155)
+

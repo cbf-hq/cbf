@@ -1,7 +1,7 @@
 From 5de1c1d41dccbe90d6cc6b1fa6c156a93a3e6f7f Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 21 Feb 2026 17:32:17 +0900
-Subject: [PATCH 3/5] refactor(bridge): add devtools bridge commands and event
+Subject: [PATCH 3/6] refactor(bridge): add devtools bridge commands and event
  mapping
 
 ---
