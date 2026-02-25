@@ -6,12 +6,14 @@
 use cursor_icon::CursorIcon;
 
 use crate::data::{
+    browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
     context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId,
     extension::{
         AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
         AuxiliaryWindowResolution, ExtensionInfo,
     },
     ime::ImeBoundsUpdate, profile::ProfileInfo,
+    window_open::{WindowDescriptor, WindowOpenRequest, WindowOpenResult},
 };
 use crate::error::BackendErrorInfo;
 
@@ -35,6 +37,48 @@ pub enum BrowserEvent {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
         event: Box<BrowsingContextEvent>,
+    },
+
+    /// Host-mediated open request for a new browsing context.
+    BrowsingContextOpenRequested {
+        profile_id: String,
+        request_id: u64,
+        source_browsing_context_id: Option<BrowsingContextId>,
+        target_url: String,
+        open_hint: BrowsingContextOpenHint,
+        user_gesture: bool,
+    },
+
+    /// Result of applying host response to browsing context open request.
+    BrowsingContextOpenResolved {
+        profile_id: String,
+        request_id: u64,
+        result: BrowsingContextOpenResult,
+    },
+
+    /// Host-mediated request for opening/selecting a window.
+    WindowOpenRequested {
+        profile_id: String,
+        request: WindowOpenRequest,
+    },
+
+    /// Result of applying host response to a window open request.
+    WindowOpenResolved {
+        profile_id: String,
+        request_id: u64,
+        result: WindowOpenResult,
+    },
+
+    /// A host-managed window descriptor became visible/active.
+    WindowOpened {
+        profile_id: String,
+        window: WindowDescriptor,
+    },
+
+    /// A host-managed window descriptor was closed.
+    WindowClosed {
+        profile_id: String,
+        window_id: crate::data::ids::WindowId,
     },
 
     /// Result of listing available profiles.
@@ -106,14 +150,6 @@ pub enum BrowsingContextEvent {
 
     /// Fullscreen state toggled.
     FullscreenToggled { is_fullscreen: bool },
-
-    // --- Window & Tab Lifecycle ---
-    /// A new web page was requested (e.g., window.open, target="_blank").
-    NewBrowsingContextRequested {
-        target_url: String,
-        // TODO: Add WindowOpenDisposition (Popup, NewTab, etc.).
-        is_popup: bool,
-    },
 
     /// A tab close was requested (e.g., window.close).
     CloseRequested,

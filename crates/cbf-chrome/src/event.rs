@@ -1,5 +1,13 @@
 use cbf::{
-    data::profile::ProfileInfo,
+    data::{
+        browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
+        ids::WindowId,
+        profile::ProfileInfo,
+        window_open::{
+            WindowBounds, WindowDescriptor, WindowKind, WindowOpenReason, WindowOpenRequest,
+            WindowOpenResult, WindowState,
+        },
+    },
     event::{BackendStopReason, BeforeUnloadReason},
 };
 use cbf::{
@@ -92,19 +100,65 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             browsing_context_id: *browsing_context_id,
             event: Box::new(BrowsingContextEvent::ContextMenuRequested { menu: menu.clone() }),
         }),
-        IpcEvent::NewWebContentsRequested {
+        IpcEvent::BrowsingContextOpenRequested {
             profile_id,
-            browsing_context_id,
+            request_id,
+            source_browsing_context_id,
             target_url,
-            is_popup,
-        } => Some(BrowserEvent::BrowsingContext {
-            profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
-            event: Box::new(BrowsingContextEvent::NewBrowsingContextRequested {
+            open_hint,
+            user_gesture,
+        } => match open_hint {
+            BrowsingContextOpenHint::NewWindow | BrowsingContextOpenHint::Popup => {
+                Some(BrowserEvent::WindowOpenRequested {
+                    profile_id: profile_id.clone(),
+                    request: WindowOpenRequest {
+                        request_id: *request_id,
+                        reason: WindowOpenReason::Navigation,
+                        opener_window_id: None,
+                        opener_browsing_context_id: *source_browsing_context_id,
+                        target_url: Some(target_url.clone()),
+                        requested_kind: if matches!(open_hint, BrowsingContextOpenHint::Popup) {
+                            WindowKind::Popup
+                        } else {
+                            WindowKind::Normal
+                        },
+                        user_gesture: *user_gesture,
+                    },
+                })
+            }
+            _ => Some(BrowserEvent::BrowsingContextOpenRequested {
+                profile_id: profile_id.clone(),
+                request_id: *request_id,
+                source_browsing_context_id: *source_browsing_context_id,
                 target_url: target_url.clone(),
-                is_popup: *is_popup,
+                open_hint: *open_hint,
+                user_gesture: *user_gesture,
             }),
-        }),
+        },
+        IpcEvent::BrowsingContextOpenResolved {
+            profile_id,
+            request_id,
+            result,
+        } => match result {
+            BrowsingContextOpenResult::OpenedNewContext { browsing_context_id } => {
+                Some(BrowserEvent::WindowOpenResolved {
+                    profile_id: profile_id.clone(),
+                    request_id: *request_id,
+                    result: WindowOpenResult::OpenedNewWindow {
+                        window: synthetic_window_descriptor(
+                            WindowId::new(browsing_context_id.get()),
+                            WindowKind::Normal,
+                            true,
+                        ),
+                    },
+                })
+            }
+            _ => Some(BrowserEvent::BrowsingContextOpenResolved {
+                profile_id: profile_id.clone(),
+                request_id: *request_id,
+                result: *result,
+            }),
+        },
         IpcEvent::NavigationStateChanged {
             profile_id,
             browsing_context_id,
@@ -299,5 +353,26 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 reason: *reason,
             }),
         }),
+    }
+}
+
+fn synthetic_window_descriptor(
+    window_id: WindowId,
+    kind: WindowKind,
+    focused: bool,
+) -> WindowDescriptor {
+    WindowDescriptor {
+        window_id,
+        kind,
+        state: WindowState::Normal,
+        focused,
+        incognito: false,
+        always_on_top: false,
+        bounds: WindowBounds {
+            left: 0,
+            top: 0,
+            width: 1280,
+            height: 720,
+        },
     }
 }

@@ -6,11 +6,16 @@ use std::{
 use cbf::{
     browser::{BrowserHandle, BrowserSession},
     data::{
+        browsing_context_open::BrowsingContextOpenHint,
+        browsing_context_open::BrowsingContextOpenResponse,
         context_menu::ContextMenu,
         drag::{DragOperations, DragStartRequest},
         extension::{AuxiliaryWindowKind, AuxiliaryWindowResponse},
-        ids::BrowsingContextId,
+        ids::{BrowsingContextId, WindowId},
         ime::ImeBoundsUpdate,
+        window_open::{
+            WindowBounds, WindowDescriptor, WindowKind, WindowOpenResponse, WindowState,
+        },
     },
     event::{BackendStopReason, BrowserEvent, BrowsingContextEvent},
 };
@@ -274,6 +279,106 @@ impl CoreState {
                 event,
                 ..
             } => self.handle_browsing_context_event(browsing_context_id, *event),
+            BrowserEvent::BrowsingContextOpenRequested {
+                request_id,
+                source_browsing_context_id,
+                target_url,
+                open_hint,
+                user_gesture,
+                ..
+            } => {
+                info!(
+                    "browsing context open requested: request_id={request_id}, source={source_browsing_context_id:?}, target_url={target_url}, hint={open_hint:?}, user_gesture={user_gesture}"
+                );
+                let response = match open_hint {
+                    BrowsingContextOpenHint::NewWindow | BrowsingContextOpenHint::Popup => {
+                        BrowsingContextOpenResponse::AllowNewContext { activate: true }
+                    }
+                    BrowsingContextOpenHint::Unknown
+                    | BrowsingContextOpenHint::CurrentContext
+                    | BrowsingContextOpenHint::NewForegroundContext
+                    | BrowsingContextOpenHint::NewBackgroundContext => {
+                        let target_browsing_context_id = source_browsing_context_id
+                            .or_else(|| {
+                                browsing_context_id_for_target(&self.shared, ViewTarget::Primary)
+                            });
+                        if let Some(browsing_context_id) = target_browsing_context_id {
+                            BrowsingContextOpenResponse::AllowExistingContext {
+                                browsing_context_id,
+                                activate: true,
+                            }
+                        } else {
+                            warn!(
+                                "no reusable browsing context available for request_id={request_id}; denying open request"
+                            );
+                            BrowsingContextOpenResponse::Deny
+                        }
+                    }
+                };
+                if let Err(err) = self
+                    .browser_handle()
+                    .respond_browsing_context_open(request_id, response)
+                {
+                    warn!("failed to respond browsing context open request: {err}");
+                }
+                Vec::new()
+            }
+            BrowserEvent::BrowsingContextOpenResolved {
+                request_id,
+                result,
+                ..
+            } => {
+                info!(
+                    "browsing context open resolved: request_id={request_id}, result={result:?}"
+                );
+                Vec::new()
+            }
+            BrowserEvent::WindowOpenRequested { request, .. } => {
+                info!("window open requested: request={request:?}");
+                let kind = match request.requested_kind {
+                    WindowKind::Popup => WindowKind::Popup,
+                    _ => WindowKind::Normal,
+                };
+                let window = WindowDescriptor {
+                    window_id: WindowId::new(request.request_id),
+                    kind,
+                    state: WindowState::Normal,
+                    focused: true,
+                    incognito: false,
+                    always_on_top: false,
+                    bounds: WindowBounds {
+                        left: 80,
+                        top: 80,
+                        width: 1280,
+                        height: 900,
+                    },
+                };
+                if let Err(err) = self
+                    .browser_handle()
+                    .respond_window_open(request.request_id, WindowOpenResponse::AllowNewWindow {
+                        window,
+                    })
+                {
+                    warn!("failed to respond window open request: {err}");
+                }
+                Vec::new()
+            }
+            BrowserEvent::WindowOpenResolved {
+                request_id,
+                result,
+                ..
+            } => {
+                info!("window open resolved: request_id={request_id}, result={result:?}");
+                Vec::new()
+            }
+            BrowserEvent::WindowOpened { window, .. } => {
+                info!("window opened: {window:?}");
+                Vec::new()
+            }
+            BrowserEvent::WindowClosed { window_id, .. } => {
+                info!("window closed: {window_id}");
+                Vec::new()
+            }
             BrowserEvent::ProfilesListed { .. } => Vec::new(),
             BrowserEvent::ShutdownBlocked {
                 request_id,
@@ -423,7 +528,6 @@ impl CoreState {
             | BrowsingContextEvent::FaviconUrlUpdated { .. }
             | BrowsingContextEvent::UpdateTargetUrl { .. }
             | BrowsingContextEvent::FullscreenToggled { .. }
-            | BrowsingContextEvent::NewBrowsingContextRequested { .. }
             | BrowsingContextEvent::RenderProcessGone { .. }
             | BrowsingContextEvent::AudioStateChanged { .. }
             | BrowsingContextEvent::DomHtmlRead { .. }

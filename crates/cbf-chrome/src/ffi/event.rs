@@ -1,6 +1,7 @@
 use cursor_icon::CursorIcon;
 
 use cbf::data::{
+    browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
     context_menu::ContextMenu,
     drag::DragStartRequest,
     extension::{
@@ -59,14 +60,24 @@ pub enum IpcEvent {
         browsing_context_id: BrowsingContextId,
         menu: ContextMenu,
     },
-    /// The backend requested opening a new page.
+    /// Host-mediated open request for browsing context.
     ///
-    /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::NewBrowsingContextRequested`.
-    NewWebContentsRequested {
+    /// Maps to `BrowserEvent::BrowsingContextOpenRequested`.
+    BrowsingContextOpenRequested {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        source_browsing_context_id: Option<BrowsingContextId>,
         target_url: String,
-        is_popup: bool,
+        open_hint: BrowsingContextOpenHint,
+        user_gesture: bool,
+    },
+    /// Result for host-mediated open request.
+    ///
+    /// Maps to `BrowserEvent::BrowsingContextOpenResolved`.
+    BrowsingContextOpenResolved {
+        profile_id: String,
+        request_id: u64,
+        result: BrowsingContextOpenResult,
     },
     /// Navigation state changed for a page.
     ///

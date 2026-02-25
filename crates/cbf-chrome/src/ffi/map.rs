@@ -7,6 +7,7 @@ use tracing::debug;
 
 use cbf::{
     data::{
+        browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
         context_menu::{
             ContextMenu, ContextMenuAccelerator, ContextMenuIcon, ContextMenuItem,
             ContextMenuItemType,
@@ -80,11 +81,28 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             browsing_context_id: BrowsingContextId::new(event.web_page_id),
             menu: parse_context_menu(event.context_menu),
         }),
-        CBF_EVENT_NEW_WEB_PAGE_REQUESTED => Ok(IpcEvent::NewWebContentsRequested {
+        CBF_EVENT_BROWSING_CONTEXT_OPEN_REQUESTED => Ok(IpcEvent::BrowsingContextOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.web_page_id),
+            request_id: event.request_id,
+            source_browsing_context_id: if event.browsing_context_open_has_source {
+                Some(BrowsingContextId::new(
+                    event.browsing_context_open_source_web_page_id,
+                ))
+            } else {
+                None
+            },
             target_url: c_string_to_string(event.target_url),
-            is_popup: event.is_popup,
+            open_hint: browsing_context_open_hint_from_ffi(event.browsing_context_open_hint),
+            user_gesture: event.browsing_context_open_user_gesture,
+        }),
+        CBF_EVENT_BROWSING_CONTEXT_OPEN_RESOLVED => Ok(IpcEvent::BrowsingContextOpenResolved {
+            profile_id: c_string_to_string(event.profile_id),
+            request_id: event.request_id,
+            result: browsing_context_open_result_from_ffi(
+                event.browsing_context_open_result_kind,
+                event.browsing_context_open_has_target,
+                event.browsing_context_open_target_web_page_id,
+            ),
         }),
         CBF_EVENT_NAVIGATION_STATE_CHANGED => Ok(IpcEvent::NavigationStateChanged {
             profile_id: c_string_to_string(event.profile_id),
@@ -214,6 +232,51 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             reason: auxiliary_window_close_reason_from_ffi(event.auxiliary_window_close_reason),
         }),
         _ => Err(Error::InvalidEvent),
+    }
+}
+
+fn browsing_context_open_hint_from_ffi(value: u8) -> BrowsingContextOpenHint {
+    match value {
+        CBF_BROWSING_CONTEXT_OPEN_HINT_CURRENT_CONTEXT => BrowsingContextOpenHint::CurrentContext,
+        CBF_BROWSING_CONTEXT_OPEN_HINT_NEW_FOREGROUND_CONTEXT => {
+            BrowsingContextOpenHint::NewForegroundContext
+        }
+        CBF_BROWSING_CONTEXT_OPEN_HINT_NEW_BACKGROUND_CONTEXT => {
+            BrowsingContextOpenHint::NewBackgroundContext
+        }
+        CBF_BROWSING_CONTEXT_OPEN_HINT_NEW_WINDOW => BrowsingContextOpenHint::NewWindow,
+        CBF_BROWSING_CONTEXT_OPEN_HINT_POPUP => BrowsingContextOpenHint::Popup,
+        _ => BrowsingContextOpenHint::Unknown,
+    }
+}
+
+fn browsing_context_open_result_from_ffi(
+    value: u8,
+    has_target: bool,
+    target_web_page_id: u64,
+) -> BrowsingContextOpenResult {
+    match value {
+        CBF_BROWSING_CONTEXT_OPEN_RESULT_OPENED_NEW_CONTEXT => {
+            if has_target {
+                BrowsingContextOpenResult::OpenedNewContext {
+                    browsing_context_id: BrowsingContextId::new(target_web_page_id),
+                }
+            } else {
+                BrowsingContextOpenResult::Aborted
+            }
+        }
+        CBF_BROWSING_CONTEXT_OPEN_RESULT_OPENED_EXISTING_CONTEXT => {
+            if has_target {
+                BrowsingContextOpenResult::OpenedExistingContext {
+                    browsing_context_id: BrowsingContextId::new(target_web_page_id),
+                }
+            } else {
+                BrowsingContextOpenResult::Aborted
+            }
+        }
+        CBF_BROWSING_CONTEXT_OPEN_RESULT_DENIED => BrowsingContextOpenResult::Denied,
+        CBF_BROWSING_CONTEXT_OPEN_RESULT_ABORTED => BrowsingContextOpenResult::Aborted,
+        _ => BrowsingContextOpenResult::Aborted,
     }
 }
 

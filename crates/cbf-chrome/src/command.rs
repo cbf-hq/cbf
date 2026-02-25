@@ -1,11 +1,13 @@
 use cbf::{
     command::BrowserCommand,
     data::{
+        browsing_context_open::BrowsingContextOpenResponse,
         drag::{DragDrop, DragUpdate},
         extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
         ids::BrowsingContextId,
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         mouse::MouseEvent,
+        window_open::WindowOpenResponse,
     },
 };
 
@@ -132,6 +134,14 @@ pub enum ChromeCommand {
     CloseAuxiliaryWindow {
         browsing_context_id: BrowsingContextId,
         window_id: AuxiliaryWindowId,
+    },
+    RespondBrowsingContextOpen {
+        request_id: u64,
+        response: BrowsingContextOpenResponse,
+    },
+    RespondWindowOpen {
+        request_id: u64,
+        response: WindowOpenResponse,
     },
 }
 
@@ -303,6 +313,20 @@ impl From<BrowserCommand> for ChromeCommand {
             } => Self::CloseAuxiliaryWindow {
                 browsing_context_id,
                 window_id,
+            },
+            BrowserCommand::RespondBrowsingContextOpen {
+                request_id,
+                response,
+            } => Self::RespondBrowsingContextOpen {
+                request_id,
+                response,
+            },
+            BrowserCommand::RespondWindowOpen {
+                request_id,
+                response,
+            } => Self::RespondWindowOpen {
+                request_id,
+                response,
             },
         }
     }

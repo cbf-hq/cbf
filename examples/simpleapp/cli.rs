@@ -37,6 +37,12 @@ pub(crate) struct Cli {
     /// Optional Chromium log file path.
     #[arg(long)]
     pub(crate) log_file: Option<PathBuf>,
+
+    /// Extra Chromium command-line argument.
+    ///
+    /// Repeat this option to pass multiple args.
+    #[arg(long = "chromium-arg")]
+    pub(crate) chromium_args: Vec<String>,
 }
 
 /// Parses command-line arguments into a [`Cli`] struct.
@@ -86,7 +92,7 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOption
             channel_name: cli.channel_name.clone(),
             v: None,
             vmodule: None,
-            extra_args: Vec::new(),
+            extra_args: cli.chromium_args.clone(),
         },
         backend: ChromiumBackendOptions::new(cli.channel_name.clone()),
     })

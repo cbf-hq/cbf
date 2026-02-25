@@ -708,6 +708,18 @@ impl ChromiumBackend {
             } => client
                 .close_auxiliary_window(*browsing_context_id, *window_id)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::RespondBrowsingContextOpen {
+                request_id,
+                response,
+            } => client
+                .respond_browsing_context_open(*request_id, response)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::RespondWindowOpen {
+                request_id,
+                response,
+            } => client
+                .respond_window_open(*request_id, response)
+                .map(|_| (None, Vec::new())),
         };
 
         result.map_err(|source| CommandExecutionError::from_ipc_call(operation, source))

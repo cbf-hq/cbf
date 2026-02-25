@@ -1,6 +1,7 @@
 use std::{ffi::CString, ptr};
 
 use cbf::data::{
+    browsing_context_open::BrowsingContextOpenResponse,
     drag::{DragDrop, DragUpdate},
     extension::{AuxiliaryWindowId, AuxiliaryWindowResponse, ExtensionInfo},
     ids::BrowsingContextId,
@@ -8,6 +9,7 @@ use cbf::data::{
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
     profile::ProfileInfo,
+    window_open::WindowOpenResponse,
 };
 use cbf_chrome_sys::ffi::*;
 use tracing::{debug, warn};
@@ -494,6 +496,74 @@ impl IpcClient {
         } else {
             Err(Error::ConnectionFailed)
         }
+    }
+
+    /// Respond to host-mediated browsing context open request.
+    pub fn respond_browsing_context_open(
+        &mut self,
+        request_id: u64,
+        response: &BrowsingContextOpenResponse,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+        let (response_kind, target_web_page_id, activate) = match response {
+            BrowsingContextOpenResponse::AllowNewContext { activate } => (
+                CBF_BROWSING_CONTEXT_OPEN_RESPONSE_ALLOW_NEW_CONTEXT,
+                0,
+                *activate,
+            ),
+            BrowsingContextOpenResponse::AllowExistingContext {
+                browsing_context_id,
+                activate,
+            } => (
+                CBF_BROWSING_CONTEXT_OPEN_RESPONSE_ALLOW_EXISTING_CONTEXT,
+                browsing_context_id.get(),
+                *activate,
+            ),
+            BrowsingContextOpenResponse::Deny => {
+                (CBF_BROWSING_CONTEXT_OPEN_RESPONSE_DENY, 0, false)
+            }
+        };
+        debug!(
+            request_id,
+            response_kind,
+            target_web_page_id,
+            activate,
+            ?response,
+            "ffi respond_browsing_context_open"
+        );
+        if unsafe {
+            cbf_bridge_client_respond_browsing_context_open(
+                self.inner,
+                request_id,
+                response_kind,
+                target_web_page_id,
+                activate,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Respond to host-mediated window open request.
+    ///
+    /// Current bridge path reuses browsing-context-open response semantics.
+    pub fn respond_window_open(
+        &mut self,
+        request_id: u64,
+        response: &WindowOpenResponse,
+    ) -> Result<(), Error> {
+        let browsing_context_response = match response {
+            WindowOpenResponse::AllowExistingWindow { .. }
+            | WindowOpenResponse::AllowNewWindow { .. } => {
+                BrowsingContextOpenResponse::AllowNewContext { activate: true }
+            }
+            WindowOpenResponse::Deny => BrowsingContextOpenResponse::Deny,
+        };
+        self.respond_browsing_context_open(request_id, &browsing_context_response)
     }
 
     /// Send a keyboard event to the page.

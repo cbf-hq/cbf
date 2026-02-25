@@ -8,12 +8,14 @@ use tracing::info;
 use crate::{
     command::BrowserCommand,
     data::{
+        browsing_context_open::BrowsingContextOpenResponse,
         drag::{DragDrop, DragUpdate},
         extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
         ids::BrowsingContextId,
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         key::KeyEvent,
         mouse::{MouseEvent, MouseWheelEvent},
+        window_open::WindowOpenResponse,
     },
     delegate::BackendDelegate,
     error::Error,
@@ -492,6 +494,36 @@ impl<B: Backend> BrowserHandle<B> {
         self.send(BrowserCommand::CloseAuxiliaryWindow {
             browsing_context_id,
             window_id,
+        })
+    }
+
+    /// Respond to pending host-mediated browsing context open request.
+    pub fn respond_browsing_context_open(
+        &self,
+        request_id: u64,
+        response: BrowsingContextOpenResponse,
+    ) -> Result<(), Error> {
+        info!(
+            request_id,
+            ?response,
+            "dispatch respond_browsing_context_open"
+        );
+        self.send(BrowserCommand::RespondBrowsingContextOpen {
+            request_id,
+            response,
+        })
+    }
+
+    /// Respond to pending host-mediated window open request.
+    pub fn respond_window_open(
+        &self,
+        request_id: u64,
+        response: WindowOpenResponse,
+    ) -> Result<(), Error> {
+        info!(request_id, ?response, "dispatch respond_window_open");
+        self.send(BrowserCommand::RespondWindowOpen {
+            request_id,
+            response,
         })
     }
 

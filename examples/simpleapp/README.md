@@ -60,6 +60,17 @@ cargo run -p cbf --example simpleapp --features chromium-backend
   - Enable Chromium logging to stderr.
 - `--log-file <PATH>`
   - Path to Chromium log file.
+- `--chromium-arg <ARG>`
+  - Extra Chromium argument.
+  - Repeat to pass multiple arguments.
+
+Example to hide Chromium startup window:
+
+```bash
+cargo run -p cbf --example simpleapp --features chromium-backend -- \
+  --chromium-executable /path/to/Chromium.app/Contents/MacOS/Chromium \
+  --chromium-arg=--no-startup-window
+```
 
 ## Notes
 

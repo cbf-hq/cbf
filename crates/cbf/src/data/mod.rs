@@ -4,6 +4,7 @@
 //! profiles, and context menu payloads.
 
 pub mod context_menu;
+pub mod browsing_context_open;
 pub mod drag;
 pub mod extension;
 pub mod ids;
@@ -11,3 +12,4 @@ pub mod ime;
 pub mod key;
 pub mod mouse;
 pub mod profile;
+pub mod window_open;

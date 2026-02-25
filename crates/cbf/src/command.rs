@@ -4,12 +4,14 @@
 //! control browser lifecycle, navigation, and input handling.
 
 use crate::data::{
+    browsing_context_open::BrowsingContextOpenResponse,
     drag::{DragDrop, DragUpdate},
     extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
     ids::BrowsingContextId,
     ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
+    window_open::WindowOpenResponse,
 };
 
 /// Commands issued by the UI process (or app) to the browser backend.
@@ -174,6 +176,18 @@ pub enum BrowserCommand {
         browsing_context_id: BrowsingContextId,
         window_id: AuxiliaryWindowId,
     },
+
+    /// Respond to host-mediated browsing context open request.
+    RespondBrowsingContextOpen {
+        request_id: u64,
+        response: BrowsingContextOpenResponse,
+    },
+
+    /// Respond to host-mediated window open request.
+    RespondWindowOpen {
+        request_id: u64,
+        response: WindowOpenResponse,
+    },
 }
 
 /// Browser operation associated with an execution path.
@@ -209,6 +223,8 @@ pub enum BrowserOperation {
     OpenDefaultAuxiliaryWindow,
     RespondAuxiliaryWindow,
     CloseAuxiliaryWindow,
+    RespondBrowsingContextOpen,
+    RespondWindowOpen,
 }
 
 impl BrowserOperation {
@@ -246,6 +262,10 @@ impl BrowserOperation {
             BrowserCommand::CloseAuxiliaryWindow { .. } => {
                 Self::CloseAuxiliaryWindow
             }
+            BrowserCommand::RespondBrowsingContextOpen { .. } => {
+                Self::RespondBrowsingContextOpen
+            }
+            BrowserCommand::RespondWindowOpen { .. } => Self::RespondWindowOpen,
         }
     }
 }
@@ -283,6 +303,8 @@ impl std::fmt::Display for BrowserOperation {
             Self::OpenDefaultAuxiliaryWindow => "open_default_auxiliary_window",
             Self::RespondAuxiliaryWindow => "respond_auxiliary_window",
             Self::CloseAuxiliaryWindow => "close_auxiliary_window",
+            Self::RespondBrowsingContextOpen => "respond_browsing_context_open",
+            Self::RespondWindowOpen => "respond_window_open",
         };
 
         f.write_str(operation)

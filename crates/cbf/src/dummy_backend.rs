@@ -390,7 +390,9 @@ impl DummyBackend {
             | BrowserCommand::DismissContextMenu { .. }
             | BrowserCommand::OpenDefaultAuxiliaryWindow { .. }
             | BrowserCommand::RespondAuxiliaryWindow { .. }
-            | BrowserCommand::CloseAuxiliaryWindow { .. } => (None, events),
+            | BrowserCommand::CloseAuxiliaryWindow { .. }
+            | BrowserCommand::RespondBrowsingContextOpen { .. }
+            | BrowserCommand::RespondWindowOpen { .. } => (None, events),
             BrowserCommand::RequestCloseBrowsingContext {
                 browsing_context_id,
             } => {
