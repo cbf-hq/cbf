@@ -2,6 +2,7 @@ use std::{ffi::CString, ptr};
 
 use cbf::data::{
     drag::{DragDrop, DragUpdate},
+    extension::{AuxiliaryWindowId, AuxiliaryWindowResponse, ExtensionInfo},
     ids::BrowsingContextId,
     ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
     key::KeyEvent,
@@ -112,6 +113,59 @@ impl IpcClient {
 
         unsafe { cbf_bridge_profile_list_free(&mut list) };
 
+        Ok(result)
+    }
+
+    /// Retrieve the list of extensions from the backend.
+    pub fn list_extensions(
+        &mut self,
+        profile_id: &Option<String>,
+    ) -> Result<Vec<ExtensionInfo>, Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let profile = to_optional_cstring(profile_id).map_err(|_| Error::InvalidInput)?;
+        let profile_ptr = profile.as_ref().map_or(ptr::null(), |v| v.as_ptr());
+
+        let mut list = CbfExtensionInfoList::default();
+        if !unsafe { cbf_bridge_client_list_extensions(self.inner, profile_ptr, &mut list) } {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let values = if list.len == 0 || list.items.is_null() {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(list.items, list.len as usize) }
+        };
+        let mut result = Vec::with_capacity(values.len());
+        for value in values {
+            let permission_names = if value.permission_names.len == 0
+                || value.permission_names.items.is_null()
+            {
+                Vec::new()
+            } else {
+                let permission_items = unsafe {
+                    std::slice::from_raw_parts(
+                        value.permission_names.items,
+                        value.permission_names.len as usize,
+                    )
+                };
+                permission_items
+                    .iter()
+                    .map(|entry| c_string_to_string(*entry))
+                    .collect()
+            };
+            result.push(ExtensionInfo {
+                id: c_string_to_string(value.id),
+                name: c_string_to_string(value.name),
+                version: c_string_to_string(value.version),
+                enabled: value.enabled,
+                permission_names,
+            });
+        }
+
+        unsafe { cbf_bridge_extension_list_free(&mut list) };
         Ok(result)
     }
 
@@ -345,6 +399,95 @@ impl IpcClient {
                 self.inner,
                 browsing_context_id.get(),
                 request_id,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Open Chromium default auxiliary window UI for pending request.
+    pub fn open_default_auxiliary_window(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+        debug!(
+            %browsing_context_id,
+            request_id,
+            "ffi open_default_auxiliary_window"
+        );
+        if unsafe {
+            cbf_bridge_client_open_default_auxiliary_window(
+                self.inner,
+                browsing_context_id.get(),
+                request_id,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Respond to a pending auxiliary request.
+    pub fn respond_auxiliary_window(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        response: &AuxiliaryWindowResponse,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+        let proceed = match response {
+            AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed } => *proceed,
+            AuxiliaryWindowResponse::Unknown => false,
+        };
+        debug!(
+            %browsing_context_id,
+            request_id,
+            proceed,
+            ?response,
+            "ffi respond_auxiliary_window"
+        );
+        if unsafe {
+            cbf_bridge_client_respond_auxiliary_window(
+                self.inner,
+                browsing_context_id.get(),
+                request_id,
+                proceed,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Close a backend-managed auxiliary window/dialog.
+    pub fn close_auxiliary_window(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        window_id: AuxiliaryWindowId,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+        debug!(
+            %browsing_context_id,
+            ?window_id,
+            "ffi close_auxiliary_window"
+        );
+        if unsafe {
+            cbf_bridge_client_close_auxiliary_window(
+                self.inner,
+                browsing_context_id.get(),
+                window_id.get(),
             )
         } {
             Ok(())

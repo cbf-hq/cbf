@@ -1,7 +1,13 @@
 use cursor_icon::CursorIcon;
 
 use cbf::data::{
-    context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId, ime::ImeBoundsUpdate,
+    context_menu::ContextMenu,
+    drag::DragStartRequest,
+    extension::{
+        AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
+        AuxiliaryWindowResolution, ExtensionInfo,
+    },
+    ids::BrowsingContextId, ime::ImeBoundsUpdate,
 };
 use cbf::event::BeforeUnloadReason;
 
@@ -154,4 +160,50 @@ pub enum IpcEvent {
     ///
     /// Maps to `BrowserEvent::ShutdownCancelled`.
     ShutdownCancelled { request_id: u64 },
+    /// Installed extensions were listed for a profile.
+    ///
+    /// Maps to `BrowserEvent::ExtensionsListed`.
+    ExtensionsListed {
+        profile_id: String,
+        extensions: Vec<ExtensionInfo>,
+    },
+    /// Auxiliary window open was requested and host must choose flow.
+    AuxiliaryWindowOpenRequested {
+        profile_id: String,
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        kind: AuxiliaryWindowKind,
+    },
+    /// Auxiliary request was resolved.
+    AuxiliaryWindowResolved {
+        profile_id: String,
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        resolution: AuxiliaryWindowResolution,
+    },
+    /// Non-fatal extension runtime warning.
+    ///
+    /// Maps to `BrowsingContextEvent::ExtensionRuntimeWarning`.
+    ExtensionRuntimeWarning {
+        profile_id: String,
+        browsing_context_id: BrowsingContextId,
+        detail: String,
+    },
+    /// Backend-managed auxiliary window/dialog was opened.
+    AuxiliaryWindowOpened {
+        profile_id: String,
+        browsing_context_id: BrowsingContextId,
+        window_id: AuxiliaryWindowId,
+        kind: AuxiliaryWindowKind,
+        title: Option<String>,
+        modal: bool,
+    },
+    /// Backend-managed auxiliary window/dialog was closed.
+    AuxiliaryWindowClosed {
+        profile_id: String,
+        browsing_context_id: BrowsingContextId,
+        window_id: AuxiliaryWindowId,
+        kind: AuxiliaryWindowKind,
+        reason: AuxiliaryWindowCloseReason,
+    },
 }

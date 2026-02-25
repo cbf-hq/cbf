@@ -574,6 +574,17 @@ impl ChromiumBackend {
             ChromeCommand::ListProfiles => client
                 .list_profiles()
                 .map(|profiles| (None, vec![ChromeEvent::ProfilesListed { profiles }])),
+            ChromeCommand::ListExtensions { profile_id } => client
+                .list_extensions(profile_id)
+                .map(|extensions| {
+                    (
+                        None,
+                        vec![ChromeEvent::Ipc(Box::new(IpcEvent::ExtensionsListed {
+                            profile_id: profile_id.clone().unwrap_or_default(),
+                            extensions,
+                        }))],
+                    )
+                }),
             ChromeCommand::SendKeyEvent {
                 browsing_context_id,
                 event,
@@ -677,6 +688,25 @@ impl ChromiumBackend {
                 focused,
             } => client
                 .set_web_contents_focus(*browsing_context_id, *focused)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::OpenDefaultAuxiliaryWindow {
+                browsing_context_id,
+                request_id,
+            } => client
+                .open_default_auxiliary_window(*browsing_context_id, *request_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::RespondAuxiliaryWindow {
+                browsing_context_id,
+                request_id,
+                response,
+            } => client
+                .respond_auxiliary_window(*browsing_context_id, *request_id, response)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::CloseAuxiliaryWindow {
+                browsing_context_id,
+                window_id,
+            } => client
+                .close_auxiliary_window(*browsing_context_id, *window_id)
                 .map(|_| (None, Vec::new())),
         };
 

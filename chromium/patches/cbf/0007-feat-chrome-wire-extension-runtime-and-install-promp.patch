@@ -1,0 +1,1308 @@
+From e33cbfa2187d15228c7668e1c879da0f1bcfb782 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Tue, 24 Feb 2026 14:41:14 +0900
+Subject: [PATCH 7/7] feat(chrome): wire extension runtime and install prompt
+ flow
+
+---
+ chrome/browser/cbf/BUILD.gn                   |   2 +
+ chrome/browser/cbf/bridge/cbf_bridge.h        |  20 ++
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |   8 +
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |  59 ++++++
+ .../cbf/bridge/cbf_bridge_client_impl.h       |  24 +++
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  89 ++++++++
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  52 +++++
+ .../browser/cbf/bridge/cbf_bridge_profiles.cc | 126 +++++++++++
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc |  91 ++++++++
+ chrome/browser/cbf/cbf_profile_service.cc     | 196 +++++++++++++++++-
+ chrome/browser/cbf/cbf_profile_service.h      |  34 +++
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  40 ++++
+ .../cbf/profile/cbf_web_contents_bootstrap.cc |  91 ++++++++
+ .../cbf/profile/cbf_web_contents_bootstrap.h  |  22 ++
+ .../cbf_web_contents_bootstrap_unittest.cc    |  52 +++++
+ .../cbf/test/cbf_test_profile_observer.cc     |  22 ++
+ .../cbf/test/cbf_test_profile_observer.h      |  17 ++
+ 17 files changed, 944 insertions(+), 1 deletion(-)
+ create mode 100644 chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
+ create mode 100644 chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h
+ create mode 100644 chrome/browser/cbf/profile/cbf_web_contents_bootstrap_unittest.cc
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index 86f9ec022ad58..db0de55a52c51 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -69,12 +69,14 @@ source_set("cbf") {
+     "//chrome/browser:global_features",
+     "//chrome/browser:browser_process",
+     "//chrome/browser/devtools:devtools",
++    "//chrome/browser/extensions",
+     "//chrome/browser/profiles:profile",
+     "//chrome/browser/profiles:profile_util",
+     "//chrome/browser/themes:themes",
+     "//chrome/browser/ui/tab_contents:tab_contents",
+     "//content/public/browser",
+     "//components/named_mojo_ipc_server",
++    "//extensions/browser",
+     "//mojo/public/cpp/bindings",
+     "//third_party/blink/public/common:headers",
+     "//ui/base",
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index 02c3f5c76ca6e..174a8bc2dd6b2 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -29,6 +29,11 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_get_profiles(
+     CbfBridgeClientHandle* client,
+     CbfProfileList* out_list);
+ CBF_BRIDGE_EXPORT void cbf_bridge_profile_list_free(CbfProfileList* list);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_list_extensions(
++    CbfBridgeClientHandle* client,
++    const char* profile_id,
++    CbfExtensionInfoList* out_list);
++CBF_BRIDGE_EXPORT void cbf_bridge_extension_list_free(CbfExtensionInfoList* list);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_create_web_page(
+     CbfBridgeClientHandle* client,
+     uint64_t request_id,
+@@ -101,6 +106,21 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_inspect_element(
+     uint64_t web_page_id,
+     int32_t x,
+     int32_t y);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_get_web_page_dom_html(
++    CbfBridgeClientHandle* client,
++    uint64_t web_page_id,
++    uint64_t request_id);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_request_extension_install_prompt(
++    CbfBridgeClientHandle* client,
++    uint64_t web_page_id,
++    uint64_t request_id,
++    const char* extension_id,
++    uint8_t mode);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_extension_install_prompt(
++    CbfBridgeClientHandle* client,
++    uint64_t web_page_id,
++    uint64_t request_id,
++    bool proceed);
+ CBF_BRIDGE_EXPORT void cbf_bridge_client_shutdown(CbfBridgeClientHandle* client);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_request_shutdown(
+     CbfBridgeClientHandle* client,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index 6789c42105de0..6a8d67e1bd02b 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -20,6 +20,7 @@ class CbfBridgeClient {
+   bool Connect(const std::string& channel_name);
+   bool PollEvent(CbfBridgeEvent* out_event);
+   bool GetProfiles(CbfProfileList* out_list);
++  bool ListExtensions(const std::string& profile_id, CbfExtensionInfoList* out_list);
+   bool CreateWebPage(uint64_t request_id,
+                      const std::string& initial_url,
+                      const std::string& profile_id);
+@@ -53,6 +54,13 @@ class CbfBridgeClient {
+   bool OpenDevTools(uint64_t web_page_id);
+   bool InspectElement(uint64_t web_page_id, int32_t x, int32_t y);
+   bool GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id);
++  bool RequestExtensionInstallPrompt(uint64_t web_page_id,
++                                     uint64_t request_id,
++                                     const std::string& extension_id,
++                                     uint8_t mode);
++  bool RespondExtensionInstallPrompt(uint64_t web_page_id,
++                                     uint64_t request_id,
++                                     bool proceed);
+   void Shutdown();
+ 
+  private:
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index 7135cca04c0e6..eb73f643b4cea 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -313,6 +313,65 @@ void CbfBridgeClientImpl::Observer::OnDragStartRequested(
+   impl_->events.push(std::move(event));
+ }
+ 
++void CbfBridgeClientImpl::Observer::OnExtensionsListed(
++    const std::string& profile_id,
++    std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions) {
++  CbfBridgeEventData event;
++  event.kind = kEventExtensionsListed;
++  event.profile_id = profile_id;
++  event.extensions = std::move(extensions);
++  std::lock_guard<std::mutex> lock(impl_->events_mutex);
++  impl_->events.push(std::move(event));
++}
++
++void CbfBridgeClientImpl::Observer::OnExtensionInstallPromptRequested(
++    uint64_t web_page_id,
++    uint64_t request_id,
++    const std::string& extension_id,
++    const std::string& extension_name,
++    const std::vector<std::string>& permission_names) {
++  CbfBridgeEventData event;
++  event.kind = kEventExtensionInstallPromptRequested;
++  event.profile_id = profile_id_;
++  event.web_page_id = web_page_id;
++  event.request_id = request_id;
++  event.extension_id = extension_id;
++  event.extension_name = extension_name;
++  event.permission_names = permission_names;
++  std::lock_guard<std::mutex> lock(impl_->events_mutex);
++  impl_->events.push(std::move(event));
++}
++
++void CbfBridgeClientImpl::Observer::OnExtensionInstallPromptResolved(
++    uint64_t web_page_id,
++    uint64_t request_id,
++    const std::string& extension_id,
++    cbf::mojom::CbfExtensionInstallPromptResult result,
++    const std::string& detail) {
++  CbfBridgeEventData event;
++  event.kind = kEventExtensionInstallPromptResolved;
++  event.profile_id = profile_id_;
++  event.web_page_id = web_page_id;
++  event.request_id = request_id;
++  event.extension_id = extension_id;
++  event.extension_install_prompt_result = static_cast<uint8_t>(result);
++  event.extension_install_prompt_detail = detail;
++  std::lock_guard<std::mutex> lock(impl_->events_mutex);
++  impl_->events.push(std::move(event));
++}
++
++void CbfBridgeClientImpl::Observer::OnExtensionRuntimeWarning(
++    uint64_t web_page_id,
++    const std::string& detail) {
++  CbfBridgeEventData event;
++  event.kind = kEventExtensionRuntimeWarning;
++  event.profile_id = profile_id_;
++  event.web_page_id = web_page_id;
++  event.extension_runtime_warning = detail;
++  std::lock_guard<std::mutex> lock(impl_->events_mutex);
++  impl_->events.push(std::move(event));
++}
++
+ CbfBridgeClientImpl::ProfileConnection::ProfileConnection() = default;
+ CbfBridgeClientImpl::ProfileConnection::~ProfileConnection() = default;
+ 
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+index 47a7199e008e1..204c2db1ba6e3 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+@@ -45,8 +45,15 @@ struct CbfBridgeEventData {
+   std::string favicon_url;
+   uint8_t cursor_type = 0;
+   std::vector<uint64_t> dirty_web_page_ids;
++  std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions;
+   cbf::mojom::CbfContextMenuPtr context_menu;
+   cbf::mojom::CbfDragStartRequestPtr drag_start_request;
++  std::string extension_id;
++  std::string extension_name;
++  std::vector<std::string> permission_names;
++  uint8_t extension_install_prompt_result = 0;
++  std::string extension_install_prompt_detail;
++  std::string extension_runtime_warning;
+ 
+   struct ImeCompositionBoundsData {
+     ImeCompositionBoundsData();
+@@ -132,6 +139,23 @@ struct CbfBridgeClientImpl {
+                               uint64_t request_id,
+                               const std::string& html) override;
+     void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
++    void OnExtensionsListed(
++        const std::string& profile_id,
++        std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions) override;
++    void OnExtensionInstallPromptRequested(
++        uint64_t web_page_id,
++        uint64_t request_id,
++        const std::string& extension_id,
++        const std::string& extension_name,
++        const std::vector<std::string>& permission_names) override;
++    void OnExtensionInstallPromptResolved(
++        uint64_t web_page_id,
++        uint64_t request_id,
++        const std::string& extension_id,
++        cbf::mojom::CbfExtensionInstallPromptResult result,
++        const std::string& detail) override;
++    void OnExtensionRuntimeWarning(uint64_t web_page_id,
++                                   const std::string& detail) override;
+ 
+    private:
+     raw_ptr<CbfBridgeClientImpl> impl_;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index 4d55de14d1867..38a714f5e8337 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -146,6 +146,30 @@ CbfStringList ToCbfStringList(const std::vector<std::string>& values) {
+   return out;
+ }
+ 
++CbfExtensionInfoList ToCbfExtensionInfoList(
++    const std::vector<cbf::mojom::CbfExtensionInfoPtr>& values) {
++  CbfExtensionInfoList out = {};
++  if (values.empty()) {
++    return out;
++  }
++  CbfExtensionInfo* out_items = new CbfExtensionInfo[values.size()];
++  auto out_span = UNSAFE_BUFFERS(base::span(out_items, values.size()));
++  for (size_t i = 0; i < out_span.size(); ++i) {
++    out_span[i] = {};
++    if (!values[i]) {
++      continue;
++    }
++    out_span[i].id = CopyCString(values[i]->id);
++    out_span[i].name = CopyCString(values[i]->name);
++    out_span[i].version = CopyCString(values[i]->version);
++    out_span[i].enabled = values[i]->enabled;
++    out_span[i].permission_names = ToCbfStringList(values[i]->permission_names);
++  }
++  out.items = out_items;
++  out.len = static_cast<uint32_t>(values.size());
++  return out;
++}
++
+ CbfStringPairList ToCbfStringPairList(
+     const std::vector<cbf::mojom::CbfStringPairPtr>& pairs) {
+   CbfStringPairList out = {};
+@@ -226,6 +250,14 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+   out_event->beforeunload_reason = kCbfBeforeUnloadReasonUnknown;
+   out_event->cursor_type = kCbfCursorDefault;
+   out_event->drag_start_request = {};
++  out_event->extensions = {};
++  out_event->extension_id = nullptr;
++  out_event->extension_name = nullptr;
++  out_event->permission_names = {};
++  out_event->extension_install_prompt_result =
++      kCbfExtensionInstallPromptResultAborted;
++  out_event->extension_install_prompt_detail = nullptr;
++  out_event->extension_runtime_warning = nullptr;
+ 
+   if (event.kind == kEventImeBoundsUpdated) {
+     if (event.composition_bounds.has_value()) {
+@@ -333,6 +365,33 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+           ToCbfDragImage(event.drag_start_request->image);
+     }
+   }
++  if (event.kind == kEventExtensionsListed) {
++    out_event->extensions = ToCbfExtensionInfoList(event.extensions);
++  }
++  if (event.kind == kEventExtensionInstallPromptRequested) {
++    out_event->extension_id =
++        event.extension_id.empty() ? nullptr : CopyCString(event.extension_id);
++    out_event->extension_name = event.extension_name.empty()
++                                    ? nullptr
++                                    : CopyCString(event.extension_name);
++    out_event->permission_names = ToCbfStringList(event.permission_names);
++  }
++  if (event.kind == kEventExtensionInstallPromptResolved) {
++    out_event->extension_id =
++        event.extension_id.empty() ? nullptr : CopyCString(event.extension_id);
++    out_event->extension_install_prompt_result =
++        event.extension_install_prompt_result;
++    out_event->extension_install_prompt_detail =
++        event.extension_install_prompt_detail.empty()
++            ? nullptr
++            : CopyCString(event.extension_install_prompt_detail);
++  }
++  if (event.kind == kEventExtensionRuntimeWarning) {
++    out_event->extension_runtime_warning =
++        event.extension_runtime_warning.empty()
++            ? nullptr
++            : CopyCString(event.extension_runtime_warning);
++  }
+   impl_->events.pop();
+   return true;
+ }
+@@ -400,6 +459,22 @@ void FreeStringPairList(CbfStringPairList list) {
+   delete[] list.items;
+ }
+ 
++void FreeExtensionInfoList(CbfExtensionInfoList list) {
++  if (!list.items || list.len == 0) {
++    return;
++  }
++  auto items = UNSAFE_BUFFERS(base::span(list.items, list.len));
++  for (auto& item : items) {
++    delete[] item.id;
++    delete[] item.name;
++    delete[] item.version;
++    FreeStringList(item.permission_names);
++    item.permission_names.items = nullptr;
++    item.permission_names.len = 0;
++  }
++  delete[] list.items;
++}
++
+ }  // namespace
+ 
+ extern "C" void cbf_bridge_event_free(CbfBridgeEvent* event) {
+@@ -418,6 +493,20 @@ extern "C" void cbf_bridge_event_free(CbfBridgeEvent* event) {
+   event->title = nullptr;
+   delete[] event->favicon_url;
+   event->favicon_url = nullptr;
++  delete[] event->extension_id;
++  event->extension_id = nullptr;
++  delete[] event->extension_name;
++  event->extension_name = nullptr;
++  delete[] event->extension_install_prompt_detail;
++  event->extension_install_prompt_detail = nullptr;
++  delete[] event->extension_runtime_warning;
++  event->extension_runtime_warning = nullptr;
++  FreeStringList(event->permission_names);
++  event->permission_names.items = nullptr;
++  event->permission_names.len = 0;
++  FreeExtensionInfoList(event->extensions);
++  event->extensions.items = nullptr;
++  event->extensions.len = 0;
+   if (event->ime_bounds.has_composition &&
+       event->ime_bounds.composition.character_bounds.items) {
+     delete[] event->ime_bounds.composition.character_bounds.items;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index 57e5bfd4f863c..1347f56dd97b7 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -29,6 +29,22 @@ enum CbfEventKind {
+   kEventTitleUpdated = 16,
+   kEventFaviconUrlUpdated = 17,
+   kEventDevToolsOpened = 18,
++  kEventExtensionsListed = 19,
++  kEventExtensionInstallPromptRequested = 20,
++  kEventExtensionInstallPromptResolved = 21,
++  kEventExtensionRuntimeWarning = 22,
++};
++
++enum CbfExtensionInstallPromptMode {
++  kCbfExtensionInstallPromptModeChromiumDefaultDialog = 0,
++  kCbfExtensionInstallPromptModeHostMediated = 1,
++};
++
++enum CbfExtensionInstallPromptResult {
++  kCbfExtensionInstallPromptResultAccepted = 0,
++  kCbfExtensionInstallPromptResultAcceptedWithWithheldPermissions = 1,
++  kCbfExtensionInstallPromptResultUserCanceled = 2,
++  kCbfExtensionInstallPromptResultAborted = 3,
+ };
+ 
+ enum CbfSurfaceHandleKind {
+@@ -266,6 +282,19 @@ typedef struct CbfStringList {
+   uint32_t len;
+ } CbfStringList;
+ 
++typedef struct CbfExtensionInfo {
++  char* id;
++  char* name;
++  char* version;
++  bool enabled;
++  CbfStringList permission_names;
++} CbfExtensionInfo;
++
++typedef struct CbfExtensionInfoList {
++  CbfExtensionInfo* items;
++  uint32_t len;
++} CbfExtensionInfoList;
++
+ typedef struct CbfStringPair {
+   char* key;
+   char* value;
+@@ -427,6 +456,13 @@ typedef struct CbfBridgeEvent {
+   char* title;
+   char* favicon_url;
+   CbfDragStartRequest drag_start_request;
++  CbfExtensionInfoList extensions;
++  char* extension_id;
++  char* extension_name;
++  CbfStringList permission_names;
++  uint8_t extension_install_prompt_result;
++  char* extension_install_prompt_detail;
++  char* extension_runtime_warning;
+ } CbfBridgeEvent;
+ 
+ typedef struct CbfImeTextSpan {
+@@ -521,6 +557,22 @@ bool cbf_bridge_client_get_web_page_dom_html(
+     CbfBridgeClientHandle* client,
+     uint64_t web_page_id,
+     uint64_t request_id);
++bool cbf_bridge_client_list_extensions(
++    CbfBridgeClientHandle* client,
++    const char* profile_id,
++    CbfExtensionInfoList* out_list);
++void cbf_bridge_extension_list_free(CbfExtensionInfoList* list);
++bool cbf_bridge_client_request_extension_install_prompt(
++    CbfBridgeClientHandle* client,
++    uint64_t web_page_id,
++    uint64_t request_id,
++    const char* extension_id,
++    uint8_t mode);
++bool cbf_bridge_client_respond_extension_install_prompt(
++    CbfBridgeClientHandle* client,
++    uint64_t web_page_id,
++    uint64_t request_id,
++    bool proceed);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc b/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc
+index 791f61e51730d..fe960365b5f18 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc
+@@ -67,6 +67,96 @@ bool CbfBridgeClient::GetProfiles(CbfProfileList* out_list) {
+   return true;
+ }
+ 
++bool CbfBridgeClient::ListExtensions(const std::string& profile_id,
++                                     CbfExtensionInfoList* out_list) {
++  if (!impl_ || !out_list) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner || !impl_->browser_remote.is_bound()) {
++    return false;
++  }
++
++  base::WaitableEvent done(
++      base::WaitableEvent::ResetPolicy::MANUAL,
++      base::WaitableEvent::InitialState::NOT_SIGNALED);
++  bool success = false;
++  std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions;
++
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, std::string profile_id,
++             std::vector<cbf::mojom::CbfExtensionInfoPtr>* out_extensions,
++             bool* success, base::WaitableEvent* done) {
++            if (!impl->browser_remote.is_bound()) {
++              done->Signal();
++              return;
++            }
++            auto& connection = impl->profile_connections[profile_id];
++            if (!connection.remote.is_bound()) {
++              mojo::PendingRemote<cbf::mojom::CbfProfileService>
++                  profile_remote;
++              mojo::PendingReceiver<cbf::mojom::CbfProfileService> receiver =
++                  profile_remote.InitWithNewPipeAndPassReceiver();
++              impl->browser_remote->BindProfileService(profile_id,
++                                                       std::move(receiver));
++              connection.remote.Bind(std::move(profile_remote));
++              connection.observer = std::make_unique<
++                  CbfBridgeClientImpl::Observer>(impl, profile_id);
++              mojo::PendingRemote<cbf::mojom::CbfProfileObserver>
++                  observer_remote;
++              connection.observer_receiver = std::make_unique<
++                  mojo::Receiver<cbf::mojom::CbfProfileObserver>>(
++                  connection.observer.get(),
++                  observer_remote.InitWithNewPipeAndPassReceiver());
++              connection.remote->SetObserver(std::move(observer_remote));
++            }
++            connection.remote->ListExtensions(
++                profile_id, base::BindOnce(
++                                [](std::vector<cbf::mojom::CbfExtensionInfoPtr>*
++                                       out_extensions,
++                                   bool* success, base::WaitableEvent* done,
++                                   std::vector<cbf::mojom::CbfExtensionInfoPtr>
++                                       extensions) {
++                                  *out_extensions = std::move(extensions);
++                                  *success = true;
++                                  done->Signal();
++                                },
++                                out_extensions, success, done));
++          },
++          impl_.get(), profile_id, &extensions, &success, &done));
++  done.Wait();
++  if (!success) {
++    return false;
++  }
++
++  out_list->len = static_cast<uint32_t>(extensions.size());
++  out_list->items =
++      extensions.empty() ? nullptr : new CbfExtensionInfo[extensions.size()];
++  auto out_extensions =
++      UNSAFE_BUFFERS(base::span(out_list->items, out_list->len));
++  size_t index = 0;
++  for (auto& entry : out_extensions) {
++    const auto& extension = extensions[index++];
++    entry.id = CopyCString(extension->id);
++    entry.name = CopyCString(extension->name);
++    entry.version = CopyCString(extension->version);
++    entry.enabled = extension->enabled;
++    entry.permission_names.len =
++        static_cast<uint32_t>(extension->permission_names.size());
++    entry.permission_names.items = extension->permission_names.empty()
++                                       ? nullptr
++                                       : new char*[extension->permission_names.size()];
++    auto out_permissions = UNSAFE_BUFFERS(
++        base::span(entry.permission_names.items, entry.permission_names.len));
++    for (size_t i = 0; i < out_permissions.size(); ++i) {
++      out_permissions[i] = CopyCString(extension->permission_names[i]);
++    }
++  }
++  return true;
++}
++
+ }  // namespace cbf_bridge::internal
+ 
+ extern "C" bool cbf_bridge_client_get_profiles(CbfBridgeClientHandle* client,
+@@ -92,3 +182,39 @@ extern "C" void cbf_bridge_profile_list_free(CbfProfileList* list) {
+   list->profiles = nullptr;
+   list->len = 0;
+ }
++
++extern "C" bool cbf_bridge_client_list_extensions(CbfBridgeClientHandle* client,
++                                                  const char* profile_id,
++                                                  CbfExtensionInfoList* out_list) {
++  if (!client || !out_list) {
++    return false;
++  }
++  const std::string resolved_profile_id = profile_id ? profile_id : std::string();
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->ListExtensions(resolved_profile_id, out_list);
++}
++
++extern "C" void cbf_bridge_extension_list_free(CbfExtensionInfoList* list) {
++  if (!list || !list->items) {
++    return;
++  }
++  auto extensions = UNSAFE_BUFFERS(base::span(list->items, list->len));
++  for (auto& extension : extensions) {
++    delete[] extension.id;
++    delete[] extension.name;
++    delete[] extension.version;
++    if (extension.permission_names.items) {
++      auto permissions = UNSAFE_BUFFERS(
++          base::span(extension.permission_names.items, extension.permission_names.len));
++      for (char* permission : permissions) {
++        delete[] permission;
++      }
++      delete[] extension.permission_names.items;
++      extension.permission_names.items = nullptr;
++      extension.permission_names.len = 0;
++    }
++  }
++  delete[] list->items;
++  list->items = nullptr;
++  list->len = 0;
++}
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index 04e6a3ac6038d..350a5897fc1ef 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -398,6 +398,71 @@ bool CbfBridgeClient::GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_i
+   return true;
+ }
+ 
++bool CbfBridgeClient::RequestExtensionInstallPrompt(
++    uint64_t web_page_id,
++    uint64_t request_id,
++    const std::string& extension_id,
++    uint8_t mode) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t web_page_id, uint64_t request_id,
++             std::string extension_id, uint8_t mode) {
++            auto it = impl->web_page_profiles.find(web_page_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->RequestExtensionInstallPrompt(
++                web_page_id, request_id, extension_id,
++                static_cast<cbf::mojom::CbfExtensionInstallPromptMode>(mode));
++          },
++          impl, web_page_id, request_id, extension_id, mode));
++  return true;
++}
++
++bool CbfBridgeClient::RespondExtensionInstallPrompt(uint64_t web_page_id,
++                                                    uint64_t request_id,
++                                                    bool proceed) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t web_page_id,
++             uint64_t request_id, bool proceed) {
++            auto it = impl->web_page_profiles.find(web_page_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->RespondExtensionInstallPrompt(
++                web_page_id, request_id, proceed);
++          },
++          impl, web_page_id, request_id, proceed));
++  return true;
++}
++
+ }  // namespace cbf_bridge::internal
+ 
+ extern "C" bool cbf_bridge_client_create_web_page(CbfBridgeClientHandle* client,
+@@ -526,3 +591,29 @@ extern "C" bool cbf_bridge_client_inspect_element(
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+       ->InspectElement(web_page_id, x, y);
+ }
++
++extern "C" bool cbf_bridge_client_request_extension_install_prompt(
++    CbfBridgeClientHandle* client,
++    uint64_t web_page_id,
++    uint64_t request_id,
++    const char* extension_id,
++    uint8_t mode) {
++  if (!client || !extension_id) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->RequestExtensionInstallPrompt(web_page_id, request_id, extension_id,
++                                      mode);
++}
++
++extern "C" bool cbf_bridge_client_respond_extension_install_prompt(
++    CbfBridgeClientHandle* client,
++    uint64_t web_page_id,
++    uint64_t request_id,
++    bool proceed) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->RespondExtensionInstallPrompt(web_page_id, request_id, proceed);
++}
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index bcc78e16d2c88..f3eec6138d62a 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -11,6 +11,8 @@
+ #include "base/values.h"
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+ #include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
++#include "chrome/browser/extensions/extension_install_prompt.h"
++#include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_devtools_controller.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_drag_controller.h"
+@@ -20,17 +22,64 @@
+ #include "chrome/browser/cbf/profile/cbf_profile_page_controller.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_popup_controller.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "extensions/browser/extension_registry.h"
++#include "extensions/common/extension.h"
++#include "extensions/common/permissions/permissions_data.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/isolated_world_ids.h"
++#include "mojo/public/cpp/bindings/clone_traits.h"
+ #include "url/gurl.h"
+ 
+ namespace cbf {
++namespace {
++
++std::vector<std::string> BuildPermissionNames(const extensions::Extension* extension) {
++  std::vector<std::string> names;
++  if (!extension || !extension->permissions_data()) {
++    return names;
++  }
++  const auto messages = extension->permissions_data()->GetPermissionMessages();
++  names.reserve(messages.size());
++  for (const auto& message : messages) {
++    names.push_back(base::UTF16ToUTF8(message.message()));
++  }
++  return names;
++}
++
++mojom::CbfExtensionInstallPromptResult ToCbfInstallPromptResult(
++    extensions::ExtensionInstallPromptClient::Result result) {
++  switch (result) {
++    case extensions::ExtensionInstallPromptClient::Result::ACCEPTED:
++      return mojom::CbfExtensionInstallPromptResult::kAccepted;
++    case extensions::ExtensionInstallPromptClient::Result::
++        ACCEPTED_WITH_WITHHELD_PERMISSIONS:
++      return mojom::CbfExtensionInstallPromptResult::
++          kAcceptedWithWithheldPermissions;
++    case extensions::ExtensionInstallPromptClient::Result::USER_CANCELED:
++      return mojom::CbfExtensionInstallPromptResult::kUserCanceled;
++    case extensions::ExtensionInstallPromptClient::Result::ABORTED:
++      return mojom::CbfExtensionInstallPromptResult::kAborted;
++  }
++}
++
++}  // namespace
++
++CbfProfileService::PendingExtensionInstallPrompt::PendingExtensionInstallPrompt() =
++    default;
++CbfProfileService::PendingExtensionInstallPrompt::~PendingExtensionInstallPrompt() =
++    default;
++CbfProfileService::PendingExtensionInstallPrompt::PendingExtensionInstallPrompt(
++    PendingExtensionInstallPrompt&&) = default;
++CbfProfileService::PendingExtensionInstallPrompt&
++CbfProfileService::PendingExtensionInstallPrompt::operator=(
++    PendingExtensionInstallPrompt&&) = default;
+ 
+ CbfProfileService::CbfProfileService(::Profile* profile,
+                                      CbfBrowserService* browser_service)
+-    : browser_service_(browser_service),
++    : profile_(profile),
++      browser_service_(browser_service),
+       dialog_manager_(this),
+       web_contents_delegate_(this, &dialog_manager_),
+       tab_manager_(profile, this),
+@@ -246,6 +295,133 @@ void CbfProfileService::GetWebPageDomHtml(uint64_t web_page_id,
+       content::ISOLATED_WORLD_ID_CONTENT_END);
+ }
+ 
++void CbfProfileService::ListExtensions(const std::string& profile_id,
++                                       ListExtensionsCallback callback) {
++  std::vector<mojom::CbfExtensionInfoPtr> result;
++  if (!profile_) {
++    std::move(callback).Run(std::move(result));
++    return;
++  }
++
++  extensions::ExtensionRegistry* registry =
++      extensions::ExtensionRegistry::Get(profile_.get());
++  if (!registry) {
++    std::move(callback).Run(std::move(result));
++    return;
++  }
++
++  auto append_set = [&result](const extensions::ExtensionSet& set, bool enabled) {
++    for (const auto& extension : set) {
++      if (!extension) {
++        continue;
++      }
++      auto info = mojom::CbfExtensionInfo::New();
++      info->id = extension->id();
++      info->name = extension->name();
++      info->version = extension->version().GetString();
++      info->enabled = enabled;
++      info->permission_names = BuildPermissionNames(extension.get());
++      result.push_back(std::move(info));
++    }
++  };
++  append_set(registry->enabled_extensions(), true);
++  append_set(registry->disabled_extensions(), false);
++
++  if (observer_) {
++    observer_->OnExtensionsListed(profile_id, mojo::Clone(result));
++  }
++  std::move(callback).Run(std::move(result));
++}
++
++void CbfProfileService::RequestExtensionInstallPrompt(
++    uint64_t web_page_id,
++    uint64_t request_id,
++    const std::string& extension_id,
++    mojom::CbfExtensionInstallPromptMode mode) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++  if (!web_contents || !profile_) {
++    return;
++  }
++  extensions::ExtensionRegistry* registry =
++      extensions::ExtensionRegistry::Get(profile_.get());
++  if (!registry) {
++    if (observer_) {
++      observer_->OnExtensionRuntimeWarning(
++          web_page_id, "extension_registry_unavailable");
++    }
++    return;
++  }
++  const extensions::Extension* extension =
++      registry->GetInstalledExtension(extension_id);
++  if (!extension) {
++    if (observer_) {
++      observer_->OnExtensionRuntimeWarning(web_page_id,
++                                           "extension_not_found");
++    }
++    return;
++  }
++
++  auto pending = PendingExtensionInstallPrompt();
++  pending.web_page_id = web_page_id;
++  pending.extension_id = extension_id;
++
++  if (mode == mojom::CbfExtensionInstallPromptMode::kHostMediated) {
++    pending.host_callback = base::BindOnce(
++        [](base::WeakPtr<CbfProfileService> self, uint64_t prompt_request_id,
++           bool proceed) {
++          if (!self) {
++            return;
++          }
++          self->ResolveExtensionInstallPrompt(
++              prompt_request_id,
++              proceed ? mojom::CbfExtensionInstallPromptResult::kAccepted
++                      : mojom::CbfExtensionInstallPromptResult::kUserCanceled,
++              std::string());
++        },
++        weak_factory_.GetWeakPtr(), request_id);
++    pending_extension_prompts_[request_id] = std::move(pending);
++    if (observer_) {
++      observer_->OnExtensionInstallPromptRequested(
++          web_page_id, request_id, extension_id, extension->name(),
++          BuildPermissionNames(extension));
++    }
++    return;
++  }
++
++  pending.prompt = std::make_unique<ExtensionInstallPrompt>(web_contents);
++  pending.prompt->ConfirmInstall(
++      base::BindOnce(
++          [](base::WeakPtr<CbfProfileService> self, uint64_t prompt_request_id,
++             extensions::ExtensionInstallPromptClient::DoneCallbackPayload
++                 payload) {
++            if (!self) {
++              return;
++            }
++            self->ResolveExtensionInstallPrompt(
++                prompt_request_id, ToCbfInstallPromptResult(payload.result),
++                payload.justification);
++          },
++          weak_factory_.GetWeakPtr(), request_id),
++      extension);
++  pending_extension_prompts_[request_id] = std::move(pending);
++}
++
++void CbfProfileService::RespondExtensionInstallPrompt(uint64_t web_page_id,
++                                                      uint64_t request_id,
++                                                      bool proceed) {
++  auto it = pending_extension_prompts_.find(request_id);
++  if (it == pending_extension_prompts_.end()) {
++    return;
++  }
++  if (it->second.web_page_id != web_page_id) {
++    return;
++  }
++  if (!it->second.host_callback) {
++    return;
++  }
++  std::move(it->second.host_callback).Run(proceed);
++}
++
+ void CbfProfileService::SetShutdownDialogAutoConfirm(bool enabled) {
+   dialog_manager_.SetAutoConfirmBeforeUnload(enabled);
+ }
+@@ -487,6 +663,24 @@ void CbfProfileService::NotifyFaviconUrlUpdated(
+   observer_->OnFaviconUrlUpdated(web_page_id, favicon_url);
+ }
+ 
++void CbfProfileService::ResolveExtensionInstallPrompt(
++    uint64_t request_id,
++    mojom::CbfExtensionInstallPromptResult result,
++    const std::string& detail) {
++  auto it = pending_extension_prompts_.find(request_id);
++  if (it == pending_extension_prompts_.end()) {
++    return;
++  }
++  const WebPageId web_page_id = it->second.web_page_id;
++  const std::string extension_id = it->second.extension_id;
++  pending_extension_prompts_.erase(it);
++  if (!observer_) {
++    return;
++  }
++  observer_->OnExtensionInstallPromptResolved(web_page_id, request_id,
++                                              extension_id, result, detail);
++}
++
+ void CbfProfileService::NotifyDragStartRequested(
+     content::WebContents* web_contents,
+     const content::DropData& drop_data,
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 649b8424ae54c..f99badec84402 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -3,6 +3,7 @@
+ 
+ #include <cstddef>
+ #include <cstdint>
++#include <map>
+ #include <memory>
+ #include <optional>
+ #include <string>
+@@ -29,6 +30,7 @@
+ 
+ class Profile;
+ class GURL;
++class ExtensionInstallPrompt;
+ 
+ namespace content {
+ class RenderWidgetHost;
+@@ -95,6 +97,16 @@ class CbfProfileService : public mojom::CbfProfileService {
+   void SetWebPageFocus(uint64_t web_page_id, bool focused) override;
+ 
+   void GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id) override;
++  void ListExtensions(const std::string& profile_id,
++                      ListExtensionsCallback callback) override;
++  void RequestExtensionInstallPrompt(
++      uint64_t web_page_id,
++      uint64_t request_id,
++      const std::string& extension_id,
++      mojom::CbfExtensionInstallPromptMode mode) override;
++  void RespondExtensionInstallPrompt(uint64_t web_page_id,
++                                     uint64_t request_id,
++                                     bool proceed) override;
+ 
+   bool IsShutdownRequested() const;
+   void SetShutdownDialogAutoConfirm(bool enabled);
+@@ -144,6 +156,27 @@ class CbfProfileService : public mojom::CbfProfileService {
+                                 content::RenderWidgetHost* source_rwh);
+ 
+  private:
++  struct PendingExtensionInstallPrompt {
++    PendingExtensionInstallPrompt();
++    ~PendingExtensionInstallPrompt();
++    PendingExtensionInstallPrompt(PendingExtensionInstallPrompt&&);
++    PendingExtensionInstallPrompt& operator=(PendingExtensionInstallPrompt&&);
++    PendingExtensionInstallPrompt(const PendingExtensionInstallPrompt&) = delete;
++    PendingExtensionInstallPrompt& operator=(
++        const PendingExtensionInstallPrompt&) = delete;
++
++    WebPageId web_page_id = kInvalidWebPageId;
++    std::string extension_id;
++    std::unique_ptr<ExtensionInstallPrompt> prompt;
++    base::OnceCallback<void(bool)> host_callback;
++  };
++
++  void ResolveExtensionInstallPrompt(
++      uint64_t request_id,
++      mojom::CbfExtensionInstallPromptResult result,
++      const std::string& detail);
++
++  raw_ptr<::Profile> profile_;
+   raw_ptr<CbfBrowserService> browser_service_;
+   mojo::Remote<mojom::CbfProfileObserver> observer_;
+   CbfJavaScriptDialogManager dialog_manager_;
+@@ -158,6 +191,7 @@ class CbfProfileService : public mojom::CbfProfileService {
+   std::unique_ptr<CbfProfileImeController> ime_controller_;
+   std::unique_ptr<CbfProfileDragController> drag_controller_;
+   std::unique_ptr<CbfProfileDevToolsController> devtools_controller_;
++  std::map<uint64_t, PendingExtensionInstallPrompt> pending_extension_prompts_;
+   mojo::ReceiverSet<mojom::CbfProfileService> receivers_;
+ 
+   base::WeakPtrFactory<CbfProfileService> weak_factory_{this};
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 55ec2f8e02c2c..aab85e801cf88 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -6,6 +6,26 @@ struct CbfProfileInfo {
+   string display_name;
+ };
+ 
++struct CbfExtensionInfo {
++  string id;
++  string name;
++  string version;
++  bool enabled;
++  array<string> permission_names;
++};
++
++enum CbfExtensionInstallPromptMode {
++  kChromiumDefaultDialog,
++  kHostMediated,
++};
++
++enum CbfExtensionInstallPromptResult {
++  kAccepted,
++  kAcceptedWithWithheldPermissions,
++  kUserCanceled,
++  kAborted,
++};
++
+ enum CbfKeyEventType {
+   kRawKeyDown,
+   kKeyDown,
+@@ -384,6 +404,18 @@ interface CbfProfileObserver {
+                            bool is_loading);
+   OnWebPageDomHtmlRead(uint64 web_page_id, uint64 request_id, string html);
+   OnDragStartRequested(CbfDragStartRequest request);
++  OnExtensionsListed(string profile_id, array<CbfExtensionInfo> extensions);
++  OnExtensionInstallPromptRequested(uint64 web_page_id,
++                                    uint64 request_id,
++                                    string extension_id,
++                                    string extension_name,
++                                    array<string> permission_names);
++  OnExtensionInstallPromptResolved(uint64 web_page_id,
++                                   uint64 request_id,
++                                   string extension_id,
++                                   CbfExtensionInstallPromptResult result,
++                                   string detail);
++  OnExtensionRuntimeWarning(uint64 web_page_id, string detail);
+ };
+ 
+ interface CbfProfileService {
+@@ -413,6 +445,14 @@ interface CbfProfileService {
+   SetWebPageFocus(uint64 web_page_id, bool focused);
+ 
+   GetWebPageDomHtml(uint64 web_page_id, uint64 request_id);
++  ListExtensions(string profile_id) => (array<CbfExtensionInfo> extensions);
++  RequestExtensionInstallPrompt(uint64 web_page_id,
++                                uint64 request_id,
++                                string extension_id,
++                                CbfExtensionInstallPromptMode mode);
++  RespondExtensionInstallPrompt(uint64 web_page_id,
++                                uint64 request_id,
++                                bool proceed);
+ };
+ 
+ interface CbfBrowserService {
+diff --git a/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
+new file mode 100644
+index 0000000000000..7d15716086e64
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
+@@ -0,0 +1,91 @@
++#include "chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h"
++
++#include "build/build_config.h"
++#include "build/buildflag.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_contents_user_data.h"
++#include "extensions/buildflags/buildflags.h"
++
++#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
++#include "chrome/browser/extensions/navigation_extension_enabler.h"
++#include "chrome/browser/extensions/tab_helper.h"
++#include "chrome/browser/extensions/api/web_navigation/web_navigation_tab_observer.h"
++#include "extensions/browser/view_type_utils.h"
++#include "extensions/common/mojom/view_type.mojom-shared.h"
++#endif
++
++namespace cbf {
++namespace {
++
++class CbfWebContentsBootstrapMarker
++    : public content::WebContentsUserData<CbfWebContentsBootstrapMarker> {
++ public:
++  CbfWebContentsBootstrapMarker(const CbfWebContentsBootstrapMarker&) = delete;
++  CbfWebContentsBootstrapMarker& operator=(
++      const CbfWebContentsBootstrapMarker&) = delete;
++  ~CbfWebContentsBootstrapMarker() override = default;
++
++ private:
++  explicit CbfWebContentsBootstrapMarker(content::WebContents* web_contents)
++      : content::WebContentsUserData<CbfWebContentsBootstrapMarker>(
++            *web_contents) {}
++  friend class content::WebContentsUserData<CbfWebContentsBootstrapMarker>;
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++void AttachExtensionRuntimeHelpers(content::WebContents* web_contents,
++                                   ::Profile* profile) {
++  (void)profile;
++#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
++  if (extensions::GetViewType(web_contents) ==
++      extensions::mojom::ViewType::kInvalid) {
++    extensions::SetViewType(web_contents,
++                            extensions::mojom::ViewType::kTabContents);
++  }
++  extensions::NavigationExtensionEnabler::CreateForWebContents(web_contents);
++  extensions::WebNavigationTabObserver::CreateForWebContents(web_contents);
++  extensions::TabHelper::CreateForWebContents(web_contents);
++#endif
++}
++
++void AttachPrintingPdfHelpers(content::WebContents* web_contents,
++                              ::Profile* profile) {
++  (void)web_contents;
++  (void)profile;
++}
++
++void AttachAutofillHelpers(content::WebContents* web_contents,
++                           ::Profile* profile) {
++  (void)web_contents;
++  (void)profile;
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(CbfWebContentsBootstrapMarker);
++
++}  // namespace
++
++void BootstrapCbfWebContents(content::WebContents* web_contents,
++                             ::Profile* profile) {
++  if (!web_contents) {
++    return;
++  }
++  if (CbfWebContentsBootstrapMarker::FromWebContents(web_contents)) {
++    return;
++  }
++
++  CbfWebContentsBootstrapMarker::CreateForWebContents(web_contents);
++
++  AttachExtensionRuntimeHelpers(web_contents, profile);
++  AttachPrintingPdfHelpers(web_contents, profile);
++  AttachAutofillHelpers(web_contents, profile);
++}
++
++bool HasCbfWebContentsBootstrapForTesting(content::WebContents* web_contents) {
++  if (!web_contents) {
++    return false;
++  }
++  return CbfWebContentsBootstrapMarker::FromWebContents(web_contents) !=
++         nullptr;
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h
+new file mode 100644
+index 0000000000000..5e55bbc22ea51
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h
+@@ -0,0 +1,22 @@
++#ifndef CHROME_BROWSER_CBF_PROFILE_CBF_WEB_CONTENTS_BOOTSTRAP_H_
++#define CHROME_BROWSER_CBF_PROFILE_CBF_WEB_CONTENTS_BOOTSTRAP_H_
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++class Profile;
++
++namespace cbf {
++
++// Runs CBF-scoped WebContents bootstrap for capability helper wiring.
++// This function is safe to call repeatedly for the same WebContents.
++void BootstrapCbfWebContents(content::WebContents* web_contents,
++                             ::Profile* profile);
++
++// Returns whether bootstrap has run for the given WebContents.
++bool HasCbfWebContentsBootstrapForTesting(content::WebContents* web_contents);
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_WEB_CONTENTS_BOOTSTRAP_H_
+diff --git a/chrome/browser/cbf/profile/cbf_web_contents_bootstrap_unittest.cc b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap_unittest.cc
+new file mode 100644
+index 0000000000000..d82cddc44d67a
+--- /dev/null
++++ b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap_unittest.cc
+@@ -0,0 +1,52 @@
++#include "chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h"
++
++#include <memory>
++
++#include "base/files/file_path.h"
++#include "base/files/scoped_temp_dir.h"
++#include "chrome/test/base/testing_profile.h"
++#include "content/public/test/browser_task_environment.h"
++#include "content/public/test/test_renderer_host.h"
++#include "content/public/test/web_contents_tester.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace cbf {
++namespace {
++
++class CbfWebContentsBootstrapTest : public testing::Test {
++ protected:
++  void SetUp() override {
++    ASSERT_TRUE(
++        temp_dir_.CreateUniqueTempDirUnderPath(base::FilePath("/tmp")));
++    TestingProfile::Builder builder;
++    builder.SetPath(temp_dir_.GetPath());
++    profile_ = builder.Build();
++  }
++
++  content::BrowserTaskEnvironment task_environment_;
++  content::RenderViewHostTestEnabler rvh_test_enabler_;
++  base::ScopedTempDir temp_dir_;
++  std::unique_ptr<TestingProfile> profile_;
++};
++
++TEST_F(CbfWebContentsBootstrapTest, NullWebContentsIsSafeNoOp) {
++  BootstrapCbfWebContents(nullptr, nullptr);
++  EXPECT_FALSE(HasCbfWebContentsBootstrapForTesting(nullptr));
++}
++
++TEST_F(CbfWebContentsBootstrapTest, BootstrapMarksWebContentsAndIsIdempotent) {
++  std::unique_ptr<content::WebContents> web_contents =
++      content::WebContentsTester::CreateTestWebContents(profile_.get(),
++                                                        nullptr);
++  ASSERT_NE(web_contents, nullptr);
++  EXPECT_FALSE(HasCbfWebContentsBootstrapForTesting(web_contents.get()));
++
++  BootstrapCbfWebContents(web_contents.get(), nullptr);
++  EXPECT_TRUE(HasCbfWebContentsBootstrapForTesting(web_contents.get()));
++
++  BootstrapCbfWebContents(web_contents.get(), nullptr);
++  EXPECT_TRUE(HasCbfWebContentsBootstrapForTesting(web_contents.get()));
++}
++
++}  // namespace
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index 50bfe996cb244..b6c8635dbefb1 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -90,6 +90,28 @@ void CbfTestProfileObserver::OnWebPageDomHtmlRead(uint64_t web_page_id,
+ void CbfTestProfileObserver::OnDragStartRequested(
+     cbf::mojom::CbfDragStartRequestPtr request) {}
+ 
++void CbfTestProfileObserver::OnExtensionsListed(
++    const std::string& profile_id,
++    std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions) {}
++
++void CbfTestProfileObserver::OnExtensionInstallPromptRequested(
++    uint64_t web_page_id,
++    uint64_t request_id,
++    const std::string& extension_id,
++    const std::string& extension_name,
++    const std::vector<std::string>& permission_names) {}
++
++void CbfTestProfileObserver::OnExtensionInstallPromptResolved(
++    uint64_t web_page_id,
++    uint64_t request_id,
++    const std::string& extension_id,
++    cbf::mojom::CbfExtensionInstallPromptResult result,
++    const std::string& detail) {}
++
++void CbfTestProfileObserver::OnExtensionRuntimeWarning(
++    uint64_t web_page_id,
++    const std::string& detail) {}
++
+ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
+   if (quit_wait_loop_.is_null()) {
+     return;
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index c86d70cc38407..919f248c1dcc9 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -68,6 +68,23 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+                             uint64_t request_id,
+                             const std::string& html) override;
+   void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
++  void OnExtensionsListed(
++      const std::string& profile_id,
++      std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions) override;
++  void OnExtensionInstallPromptRequested(
++      uint64_t web_page_id,
++      uint64_t request_id,
++      const std::string& extension_id,
++      const std::string& extension_name,
++      const std::vector<std::string>& permission_names) override;
++  void OnExtensionInstallPromptResolved(
++      uint64_t web_page_id,
++      uint64_t request_id,
++      const std::string& extension_id,
++      cbf::mojom::CbfExtensionInstallPromptResult result,
++      const std::string& detail) override;
++  void OnExtensionRuntimeWarning(uint64_t web_page_id,
++                                 const std::string& detail) override;
+ 
+  private:
+   void MaybeQuitWaitLoop();
+-- 
+2.50.1 (Apple Git-155)
+

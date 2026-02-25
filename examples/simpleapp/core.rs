@@ -8,6 +8,7 @@ use cbf::{
     data::{
         context_menu::ContextMenu,
         drag::{DragOperations, DragStartRequest},
+        extension::{AuxiliaryWindowKind, AuxiliaryWindowResponse},
         ids::BrowsingContextId,
         ime::ImeBoundsUpdate,
     },
@@ -212,8 +213,7 @@ impl CoreState {
     ) -> Vec<CoreAction> {
         info!(
             "devtools opened: inspected={}, devtools={}",
-            inspected_browsing_context_id,
-            browsing_context_id
+            inspected_browsing_context_id, browsing_context_id
         );
         set_devtools_browsing_context_id(&self.shared, Some(browsing_context_id));
         vec![CoreAction::SyncViewResizeAndFocus(ViewTarget::DevTools)]
@@ -227,6 +227,7 @@ impl CoreState {
         match event {
             BrowserEvent::BackendReady => {
                 info!("backend ready");
+
                 if !self.page_create_requested {
                     self.page_create_requested = true;
                     if let Err(err) = self.browser_handle().create_browsing_context(
@@ -238,6 +239,7 @@ impl CoreState {
                         return vec![CoreAction::ExitEventLoop];
                     }
                 }
+
                 Vec::new()
             }
             BrowserEvent::BackendStopped { reason } => {
@@ -293,6 +295,13 @@ impl CoreState {
             BrowserEvent::ShutdownCancelled { request_id } => {
                 warn!("shutdown cancelled: request_id={request_id}");
                 self.shutdown_requested = false;
+                Vec::new()
+            }
+            BrowserEvent::ExtensionsListed {
+                profile_id,
+                extensions,
+            } => {
+                println!("extensions: {profile_id} {extensions:?}");
                 Vec::new()
             }
         }
@@ -384,6 +393,30 @@ impl CoreState {
                 self.request_shutdown_once();
                 vec![CoreAction::ExitEventLoop]
             }
+            BrowsingContextEvent::AuxiliaryWindowOpenRequested { request_id, kind } => {
+                info!("auxiliary open requested: request_id={request_id}, kind={kind:?}");
+
+                // Extension install prompts
+                if matches!(kind, AuxiliaryWindowKind::ExtensionInstallPrompt { .. })
+                    && self
+                        .browser_handle()
+                        .open_default_auxiliary_window(browsing_context_id, request_id)
+                        .is_err()
+                {
+                    // Best-effort
+                    warn!("failed to open default auxiliary window for request_id={request_id}");
+
+                    self.browser_handle()
+                        .respond_auxiliary_window(
+                            browsing_context_id,
+                            request_id,
+                            AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed: false },
+                        )
+                        .ok();
+                };
+
+                Vec::new()
+            }
             BrowsingContextEvent::SelectionChanged { .. }
             | BrowsingContextEvent::ScrollPositionChanged { .. }
             | BrowsingContextEvent::NavigationStateChanged { .. }
@@ -393,7 +426,11 @@ impl CoreState {
             | BrowsingContextEvent::NewBrowsingContextRequested { .. }
             | BrowsingContextEvent::RenderProcessGone { .. }
             | BrowsingContextEvent::AudioStateChanged { .. }
-            | BrowsingContextEvent::DomHtmlRead { .. } => Vec::new(),
+            | BrowsingContextEvent::DomHtmlRead { .. }
+            | BrowsingContextEvent::AuxiliaryWindowResolved { .. }
+            | BrowsingContextEvent::ExtensionRuntimeWarning { .. }
+            | BrowsingContextEvent::AuxiliaryWindowOpened { .. }
+            | BrowsingContextEvent::AuxiliaryWindowClosed { .. } => Vec::new(),
         }
     }
 }

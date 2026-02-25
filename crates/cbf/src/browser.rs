@@ -3,11 +3,13 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use async_channel::{Receiver, Sender, TrySendError};
+use tracing::info;
 
 use crate::{
     command::BrowserCommand,
     data::{
         drag::{DragDrop, DragUpdate},
+        extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
         ids::BrowsingContextId,
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         key::KeyEvent,
@@ -333,6 +335,11 @@ impl<B: Backend> BrowserHandle<B> {
         self.send(BrowserCommand::ListProfiles)
     }
 
+    /// Request the list of available extensions from the backend.
+    pub fn request_list_extensions(&self, profile_id: Option<String>) -> Result<(), Error> {
+        self.send(BrowserCommand::ListExtensions { profile_id })
+    }
+
     /// Send a keyboard input event to the web page.
     pub fn send_key_event(
         &self,
@@ -432,6 +439,60 @@ impl<B: Backend> BrowserHandle<B> {
     /// Dismiss an open context menu by menu id.
     pub fn dismiss_context_menu(&self, menu_id: u64) -> Result<(), Error> {
         self.send(BrowserCommand::DismissContextMenu { menu_id })
+    }
+
+    /// Ask backend to open Chromium default UI for a pending auxiliary request.
+    pub fn open_default_auxiliary_window(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+    ) -> Result<(), Error> {
+        info!(
+            %browsing_context_id,
+            request_id,
+            "dispatch open_default_auxiliary_window"
+        );
+        self.send(BrowserCommand::OpenDefaultAuxiliaryWindow {
+            browsing_context_id,
+            request_id,
+        })
+    }
+
+    /// Respond to a pending auxiliary request with host-side decision.
+    pub fn respond_auxiliary_window(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        response: AuxiliaryWindowResponse,
+    ) -> Result<(), Error> {
+        info!(
+            %browsing_context_id,
+            request_id,
+            ?response,
+            "dispatch respond_auxiliary_window"
+        );
+        self.send(BrowserCommand::RespondAuxiliaryWindow {
+            browsing_context_id,
+            request_id,
+            response,
+        })
+    }
+
+    /// Close a backend-managed auxiliary window/dialog.
+    pub fn close_auxiliary_window(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        window_id: AuxiliaryWindowId,
+    ) -> Result<(), Error> {
+        info!(
+            %browsing_context_id,
+            ?window_id,
+            "dispatch close_auxiliary_window"
+        );
+        self.send(BrowserCommand::CloseAuxiliaryWindow {
+            browsing_context_id,
+            window_id,
+        })
     }
 
     /// Request a graceful shutdown flow.

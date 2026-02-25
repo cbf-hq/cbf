@@ -223,5 +223,81 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
         IpcEvent::ShutdownCancelled { request_id } => Some(BrowserEvent::ShutdownCancelled {
             request_id: *request_id,
         }),
+        IpcEvent::ExtensionsListed {
+            profile_id,
+            extensions,
+        } => Some(BrowserEvent::ExtensionsListed {
+            profile_id: profile_id.clone(),
+            extensions: extensions.clone(),
+        }),
+        IpcEvent::AuxiliaryWindowOpenRequested {
+            profile_id,
+            browsing_context_id,
+            request_id,
+            kind,
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: *browsing_context_id,
+            event: Box::new(BrowsingContextEvent::AuxiliaryWindowOpenRequested {
+                request_id: *request_id,
+                kind: kind.clone(),
+            }),
+        }),
+        IpcEvent::AuxiliaryWindowResolved {
+            profile_id,
+            browsing_context_id,
+            request_id,
+            resolution,
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: *browsing_context_id,
+            event: Box::new(BrowsingContextEvent::AuxiliaryWindowResolved {
+                request_id: *request_id,
+                resolution: resolution.clone(),
+            }),
+        }),
+        IpcEvent::ExtensionRuntimeWarning {
+            profile_id,
+            browsing_context_id,
+            detail,
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: *browsing_context_id,
+            event: Box::new(BrowsingContextEvent::ExtensionRuntimeWarning {
+                detail: detail.clone(),
+            }),
+        }),
+        IpcEvent::AuxiliaryWindowOpened {
+            profile_id,
+            browsing_context_id,
+            window_id,
+            kind,
+            title,
+            modal,
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: *browsing_context_id,
+            event: Box::new(BrowsingContextEvent::AuxiliaryWindowOpened {
+                window_id: *window_id,
+                kind: kind.clone(),
+                title: title.clone(),
+                modal: *modal,
+            }),
+        }),
+        IpcEvent::AuxiliaryWindowClosed {
+            profile_id,
+            browsing_context_id,
+            window_id,
+            kind,
+            reason,
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: *browsing_context_id,
+            event: Box::new(BrowsingContextEvent::AuxiliaryWindowClosed {
+                window_id: *window_id,
+                kind: kind.clone(),
+                reason: *reason,
+            }),
+        }),
     }
 }

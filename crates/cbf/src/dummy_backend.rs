@@ -314,6 +314,13 @@ impl DummyBackend {
                 });
                 (None, events)
             }
+            BrowserCommand::ListExtensions { profile_id } => {
+                events.push(BrowserEvent::ExtensionsListed {
+                    profile_id: profile_id.unwrap_or_default(),
+                    extensions: Vec::new(),
+                });
+                (None, events)
+            }
             BrowserCommand::Navigate {
                 browsing_context_id,
                 url,
@@ -380,7 +387,10 @@ impl DummyBackend {
             | BrowserCommand::CommitText { .. }
             | BrowserCommand::FinishComposingText { .. }
             | BrowserCommand::ExecuteContextMenuCommand { .. }
-            | BrowserCommand::DismissContextMenu { .. } => (None, events),
+            | BrowserCommand::DismissContextMenu { .. }
+            | BrowserCommand::OpenDefaultAuxiliaryWindow { .. }
+            | BrowserCommand::RespondAuxiliaryWindow { .. }
+            | BrowserCommand::CloseAuxiliaryWindow { .. } => (None, events),
             BrowserCommand::RequestCloseBrowsingContext {
                 browsing_context_id,
             } => {

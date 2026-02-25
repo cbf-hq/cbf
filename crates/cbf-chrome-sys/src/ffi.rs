@@ -26,6 +26,25 @@ pub const CBF_EVENT_DRAG_START_REQUESTED: u8 = 15;
 pub const CBF_EVENT_TITLE_UPDATED: u8 = 16;
 pub const CBF_EVENT_FAVICON_URL_UPDATED: u8 = 17;
 pub const CBF_EVENT_DEVTOOLS_OPENED: u8 = 18;
+pub const CBF_EVENT_EXTENSIONS_LISTED: u8 = 19;
+pub const CBF_EVENT_AUXILIARY_WINDOW_OPEN_REQUESTED: u8 = 20;
+pub const CBF_EVENT_AUXILIARY_WINDOW_RESOLVED: u8 = 21;
+pub const CBF_EVENT_EXTENSION_RUNTIME_WARNING: u8 = 22;
+pub const CBF_EVENT_AUXILIARY_WINDOW_OPENED: u8 = 23;
+pub const CBF_EVENT_AUXILIARY_WINDOW_CLOSED: u8 = 24;
+
+pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED: u8 = 0;
+pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS: u8 = 1;
+pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_USER_CANCELED: u8 = 2;
+pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ABORTED: u8 = 3;
+
+pub const CBF_AUXILIARY_WINDOW_KIND_UNKNOWN: u8 = 0;
+pub const CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT: u8 = 1;
+
+pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_UNKNOWN: u8 = 0;
+pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED: u8 = 1;
+pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_HOST_FORCED: u8 = 2;
+pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_SYSTEM_DISMISSED: u8 = 3;
 
 pub const CBF_SURFACE_HANDLE_NONE: u8 = 0;
 pub const CBF_SURFACE_HANDLE_MAC_CA_CONTEXT_ID: u8 = 1;
@@ -163,6 +182,18 @@ pub struct CbfBridgeEvent {
     pub title: *mut c_char,
     pub favicon_url: *mut c_char,
     pub drag_start_request: CbfDragStartRequest,
+    pub extensions: CbfExtensionInfoList,
+    pub extension_id: *mut c_char,
+    pub extension_name: *mut c_char,
+    pub permission_names: CbfStringList,
+    pub extension_install_prompt_result: u8,
+    pub extension_install_prompt_detail: *mut c_char,
+    pub extension_runtime_warning: *mut c_char,
+    pub auxiliary_window_id: u64,
+    pub auxiliary_window_kind: u8,
+    pub auxiliary_window_close_reason: u8,
+    pub auxiliary_window_title: *mut c_char,
+    pub auxiliary_window_modal: bool,
 }
 
 #[repr(C)]
@@ -262,6 +293,23 @@ pub struct CbfDragUrlInfoList {
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfStringList {
     pub items: *mut *mut c_char,
+    pub len: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfExtensionInfo {
+    pub id: *mut c_char,
+    pub name: *mut c_char,
+    pub version: *mut c_char,
+    pub enabled: bool,
+    pub permission_names: CbfStringList,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfExtensionInfoList {
+    pub items: *mut CbfExtensionInfo,
     pub len: u32,
 }
 
@@ -503,6 +551,12 @@ unsafe extern "C" {
         out_list: *mut CbfProfileList,
     ) -> bool;
     pub fn cbf_bridge_profile_list_free(list: *mut CbfProfileList);
+    pub fn cbf_bridge_client_list_extensions(
+        client: *mut CbfBridgeClientHandle,
+        profile_id: *const c_char,
+        out_list: *mut CbfExtensionInfoList,
+    ) -> bool;
+    pub fn cbf_bridge_extension_list_free(list: *mut CbfExtensionInfoList);
     pub fn cbf_bridge_client_create_web_page(
         client: *mut CbfBridgeClientHandle,
         request_id: u64,
@@ -633,6 +687,22 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         web_page_id: u64,
         request_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_open_default_auxiliary_window(
+        client: *mut CbfBridgeClientHandle,
+        web_page_id: u64,
+        request_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_respond_auxiliary_window(
+        client: *mut CbfBridgeClientHandle,
+        web_page_id: u64,
+        request_id: u64,
+        proceed: bool,
+    ) -> bool;
+    pub fn cbf_bridge_client_close_auxiliary_window(
+        client: *mut CbfBridgeClientHandle,
+        web_page_id: u64,
+        window_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_shutdown(client: *mut CbfBridgeClientHandle);
     pub fn cbf_bridge_client_request_shutdown(

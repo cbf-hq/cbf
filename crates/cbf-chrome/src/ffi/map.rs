@@ -12,6 +12,10 @@ use cbf::{
             ContextMenuItemType,
         },
         drag::{DragData, DragImage, DragOperations, DragStartRequest, DragUrlInfo},
+        extension::{
+            AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
+            AuxiliaryWindowResolution, ExtensionInfo, ExtensionInstallPromptResult,
+        },
         ids::BrowsingContextId,
         ime::{
             ChromeImeTextSpanStyle, ChromeImeTextSpanThickness, ChromeImeTextSpanUnderlineStyle,
@@ -146,6 +150,69 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 request,
             })
         }
+        CBF_EVENT_EXTENSIONS_LISTED => Ok(IpcEvent::ExtensionsListed {
+            profile_id: c_string_to_string(event.profile_id),
+            extensions: parse_extension_list(event.extensions),
+        }),
+        CBF_EVENT_AUXILIARY_WINDOW_OPEN_REQUESTED => Ok(IpcEvent::AuxiliaryWindowOpenRequested {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
+            request_id: event.request_id,
+            kind: auxiliary_window_kind_from_ffi(
+                event.auxiliary_window_kind,
+                event.extension_id,
+                event.extension_name,
+                event.permission_names,
+            ),
+        }),
+        CBF_EVENT_AUXILIARY_WINDOW_RESOLVED => Ok(IpcEvent::AuxiliaryWindowResolved {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
+            request_id: event.request_id,
+            resolution: auxiliary_window_resolution_from_ffi(
+                event.auxiliary_window_kind,
+                event.extension_id,
+                event.extension_install_prompt_result,
+                event.extension_install_prompt_detail,
+            ),
+        }),
+        CBF_EVENT_EXTENSION_RUNTIME_WARNING => Ok(IpcEvent::ExtensionRuntimeWarning {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
+            detail: c_string_to_string(event.extension_runtime_warning),
+        }),
+        CBF_EVENT_AUXILIARY_WINDOW_OPENED => Ok(IpcEvent::AuxiliaryWindowOpened {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
+            window_id: AuxiliaryWindowId::new(event.auxiliary_window_id),
+            kind: auxiliary_window_kind_from_ffi(
+                event.auxiliary_window_kind,
+                event.extension_id,
+                event.extension_name,
+                event.permission_names,
+            ),
+            title: {
+                let value = c_string_to_string(event.auxiliary_window_title);
+                if value.is_empty() {
+                    None
+                } else {
+                    Some(value)
+                }
+            },
+            modal: event.auxiliary_window_modal,
+        }),
+        CBF_EVENT_AUXILIARY_WINDOW_CLOSED => Ok(IpcEvent::AuxiliaryWindowClosed {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: BrowsingContextId::new(event.web_page_id),
+            window_id: AuxiliaryWindowId::new(event.auxiliary_window_id),
+            kind: auxiliary_window_kind_from_ffi(
+                event.auxiliary_window_kind,
+                event.extension_id,
+                event.extension_name,
+                event.permission_names,
+            ),
+            reason: auxiliary_window_close_reason_from_ffi(event.auxiliary_window_close_reason),
+        }),
         _ => Err(Error::InvalidEvent),
     }
 }
@@ -191,6 +258,23 @@ fn parse_string_list(list: CbfStringList) -> Vec<String> {
     values
         .iter()
         .map(|value| c_string_to_string(*value))
+        .collect()
+}
+
+fn parse_extension_list(list: CbfExtensionInfoList) -> Vec<ExtensionInfo> {
+    if list.len == 0 || list.items.is_null() {
+        return Vec::new();
+    }
+    let values = unsafe { std::slice::from_raw_parts(list.items, list.len as usize) };
+    values
+        .iter()
+        .map(|value| ExtensionInfo {
+            id: c_string_to_string(value.id),
+            name: c_string_to_string(value.name),
+            version: c_string_to_string(value.version),
+            enabled: value.enabled,
+            permission_names: parse_string_list(value.permission_names),
+        })
         .collect()
 }
 
@@ -363,6 +447,76 @@ fn beforeunload_reason_from_ffi(value: u8) -> BeforeUnloadReason {
         CBF_BEFOREUNLOAD_REASON_RELOAD => BeforeUnloadReason::Reload,
         CBF_BEFOREUNLOAD_REASON_WINDOW_CLOSE => BeforeUnloadReason::WindowClose,
         _ => BeforeUnloadReason::Unknown,
+    }
+}
+
+fn extension_install_prompt_result_from_ffi(value: u8) -> ExtensionInstallPromptResult {
+    match value {
+        CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED => ExtensionInstallPromptResult::Accepted,
+        CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS => {
+            ExtensionInstallPromptResult::AcceptedWithWithheldPermissions
+        }
+        CBF_EXTENSION_INSTALL_PROMPT_RESULT_USER_CANCELED => {
+            ExtensionInstallPromptResult::UserCanceled
+        }
+        CBF_EXTENSION_INSTALL_PROMPT_RESULT_ABORTED => ExtensionInstallPromptResult::Aborted,
+        _ => ExtensionInstallPromptResult::Aborted,
+    }
+}
+
+fn auxiliary_window_kind_from_ffi(
+    value: u8,
+    extension_id: *mut std::ffi::c_char,
+    extension_name: *mut std::ffi::c_char,
+    permission_names: CbfStringList,
+) -> AuxiliaryWindowKind {
+    match value {
+        CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT => {
+            AuxiliaryWindowKind::ExtensionInstallPrompt {
+                extension_id: c_string_to_string(extension_id),
+                extension_name: c_string_to_string(extension_name),
+                permission_names: parse_string_list(permission_names),
+            }
+        }
+        _ => AuxiliaryWindowKind::Unknown,
+    }
+}
+
+fn auxiliary_window_resolution_from_ffi(
+    kind: u8,
+    extension_id: *mut std::ffi::c_char,
+    result: u8,
+    detail: *mut std::ffi::c_char,
+) -> AuxiliaryWindowResolution {
+    match kind {
+        CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT => {
+            AuxiliaryWindowResolution::ExtensionInstallPrompt {
+                extension_id: c_string_to_string(extension_id),
+                result: extension_install_prompt_result_from_ffi(result),
+                detail: {
+                    let value = c_string_to_string(detail);
+                    if value.is_empty() {
+                        None
+                    } else {
+                        Some(value)
+                    }
+                },
+            }
+        }
+        _ => AuxiliaryWindowResolution::Unknown,
+    }
+}
+
+fn auxiliary_window_close_reason_from_ffi(value: u8) -> AuxiliaryWindowCloseReason {
+    match value {
+        CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED => {
+            AuxiliaryWindowCloseReason::UserCanceled
+        }
+        CBF_AUXILIARY_WINDOW_CLOSE_REASON_HOST_FORCED => AuxiliaryWindowCloseReason::HostForced,
+        CBF_AUXILIARY_WINDOW_CLOSE_REASON_SYSTEM_DISMISSED => {
+            AuxiliaryWindowCloseReason::SystemDismissed
+        }
+        _ => AuxiliaryWindowCloseReason::Unknown,
     }
 }
 

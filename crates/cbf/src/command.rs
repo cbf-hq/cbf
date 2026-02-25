@@ -5,6 +5,7 @@
 
 use crate::data::{
     drag::{DragDrop, DragUpdate},
+    extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
     ids::BrowsingContextId,
     ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
     key::KeyEvent,
@@ -51,6 +52,10 @@ pub enum BrowserCommand {
 
     /// Fetch the list of available profiles from the backend.
     ListProfiles,
+    /// Fetch the list of available extensions from the backend.
+    ListExtensions {
+        profile_id: Option<String>,
+    },
 
     /// Request to close a web page.
     RequestCloseBrowsingContext {
@@ -150,6 +155,25 @@ pub enum BrowserCommand {
 
     /// Dismiss an open context menu.
     DismissContextMenu { menu_id: u64 },
+
+    /// Ask backend to open Chromium's default UI for a pending auxiliary request.
+    OpenDefaultAuxiliaryWindow {
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+    },
+
+    /// Respond to a pending auxiliary request with host-provided decision.
+    RespondAuxiliaryWindow {
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        response: AuxiliaryWindowResponse,
+    },
+
+    /// Request backend to close an auxiliary window/dialog.
+    CloseAuxiliaryWindow {
+        browsing_context_id: BrowsingContextId,
+        window_id: AuxiliaryWindowId,
+    },
 }
 
 /// Browser operation associated with an execution path.
@@ -162,6 +186,7 @@ pub enum BrowserOperation {
     ConfirmPermission,
     CreateBrowsingContext,
     ListProfiles,
+    ListExtensions,
     RequestCloseBrowsingContext,
     ResizeBrowsingContext,
     Navigate,
@@ -181,6 +206,9 @@ pub enum BrowserOperation {
     FinishComposingText,
     ExecuteContextMenuCommand,
     DismissContextMenu,
+    OpenDefaultAuxiliaryWindow,
+    RespondAuxiliaryWindow,
+    CloseAuxiliaryWindow,
 }
 
 impl BrowserOperation {
@@ -193,6 +221,7 @@ impl BrowserOperation {
             BrowserCommand::ConfirmPermission { .. } => Self::ConfirmPermission,
             BrowserCommand::CreateBrowsingContext { .. } => Self::CreateBrowsingContext,
             BrowserCommand::ListProfiles => Self::ListProfiles,
+            BrowserCommand::ListExtensions { .. } => Self::ListExtensions,
             BrowserCommand::RequestCloseBrowsingContext { .. } => Self::RequestCloseBrowsingContext,
             BrowserCommand::ResizeBrowsingContext { .. } => Self::ResizeBrowsingContext,
             BrowserCommand::Navigate { .. } => Self::Navigate,
@@ -212,6 +241,11 @@ impl BrowserOperation {
             BrowserCommand::FinishComposingText { .. } => Self::FinishComposingText,
             BrowserCommand::ExecuteContextMenuCommand { .. } => Self::ExecuteContextMenuCommand,
             BrowserCommand::DismissContextMenu { .. } => Self::DismissContextMenu,
+            BrowserCommand::OpenDefaultAuxiliaryWindow { .. } => Self::OpenDefaultAuxiliaryWindow,
+            BrowserCommand::RespondAuxiliaryWindow { .. } => Self::RespondAuxiliaryWindow,
+            BrowserCommand::CloseAuxiliaryWindow { .. } => {
+                Self::CloseAuxiliaryWindow
+            }
         }
     }
 }
@@ -226,6 +260,7 @@ impl std::fmt::Display for BrowserOperation {
             Self::ConfirmPermission => "confirm_permission",
             Self::CreateBrowsingContext => "create_browsing_context",
             Self::ListProfiles => "list_profiles",
+            Self::ListExtensions => "list_extensions",
             Self::RequestCloseBrowsingContext => "request_close_browsing_context",
             Self::ResizeBrowsingContext => "resize_browsing_context",
             Self::Navigate => "navigate",
@@ -245,6 +280,9 @@ impl std::fmt::Display for BrowserOperation {
             Self::FinishComposingText => "finish_composing_text",
             Self::ExecuteContextMenuCommand => "execute_context_menu_command",
             Self::DismissContextMenu => "dismiss_context_menu",
+            Self::OpenDefaultAuxiliaryWindow => "open_default_auxiliary_window",
+            Self::RespondAuxiliaryWindow => "respond_auxiliary_window",
+            Self::CloseAuxiliaryWindow => "close_auxiliary_window",
         };
 
         f.write_str(operation)

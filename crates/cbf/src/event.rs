@@ -7,6 +7,10 @@ use cursor_icon::CursorIcon;
 
 use crate::data::{
     context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId,
+    extension::{
+        AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
+        AuxiliaryWindowResolution, ExtensionInfo,
+    },
     ime::ImeBoundsUpdate, profile::ProfileInfo,
 };
 use crate::error::BackendErrorInfo;
@@ -35,6 +39,12 @@ pub enum BrowserEvent {
 
     /// Result of listing available profiles.
     ProfilesListed { profiles: Vec<ProfileInfo> },
+
+    /// Result of listing available extensions for a profile.
+    ExtensionsListed {
+        profile_id: String,
+        extensions: Vec<ExtensionInfo>,
+    },
 
     /// Shutdown is blocked by dirty pages that require confirmation.
     ShutdownBlocked {
@@ -152,6 +162,36 @@ pub enum BrowsingContextEvent {
     ///
     /// Carries browser-generic drag payload only.
     DragStartRequested { request: DragStartRequest },
+
+    /// Auxiliary window open was requested and host must choose flow.
+    AuxiliaryWindowOpenRequested {
+        request_id: u64,
+        kind: AuxiliaryWindowKind,
+    },
+
+    /// Auxiliary window request was resolved.
+    AuxiliaryWindowResolved {
+        request_id: u64,
+        resolution: AuxiliaryWindowResolution,
+    },
+
+    /// Backend-managed auxiliary window/dialog was opened.
+    AuxiliaryWindowOpened {
+        window_id: AuxiliaryWindowId,
+        kind: AuxiliaryWindowKind,
+        title: Option<String>,
+        modal: bool,
+    },
+
+    /// Backend-managed auxiliary window/dialog was closed.
+    AuxiliaryWindowClosed {
+        window_id: AuxiliaryWindowId,
+        kind: AuxiliaryWindowKind,
+        reason: AuxiliaryWindowCloseReason,
+    },
+
+    /// Non-fatal extension runtime warning.
+    ExtensionRuntimeWarning { detail: String },
 
     // --- Additional Signals ---
     /// The text selection range changed.

@@ -2,6 +2,7 @@ use cbf::{
     command::BrowserCommand,
     data::{
         drag::{DragDrop, DragUpdate},
+        extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
         ids::BrowsingContextId,
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         mouse::MouseEvent,
@@ -115,6 +116,22 @@ pub enum ChromeCommand {
     },
     DismissContextMenu {
         menu_id: u64,
+    },
+    ListExtensions {
+        profile_id: Option<String>,
+    },
+    OpenDefaultAuxiliaryWindow {
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+    },
+    RespondAuxiliaryWindow {
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        response: AuxiliaryWindowResponse,
+    },
+    CloseAuxiliaryWindow {
+        browsing_context_id: BrowsingContextId,
+        window_id: AuxiliaryWindowId,
     },
 }
 
@@ -263,6 +280,30 @@ impl From<BrowserCommand> for ChromeCommand {
                 event_flags,
             },
             BrowserCommand::DismissContextMenu { menu_id } => Self::DismissContextMenu { menu_id },
+            BrowserCommand::ListExtensions { profile_id } => Self::ListExtensions { profile_id },
+            BrowserCommand::OpenDefaultAuxiliaryWindow {
+                browsing_context_id,
+                request_id,
+            } => Self::OpenDefaultAuxiliaryWindow {
+                browsing_context_id,
+                request_id,
+            },
+            BrowserCommand::RespondAuxiliaryWindow {
+                browsing_context_id,
+                request_id,
+                response,
+            } => Self::RespondAuxiliaryWindow {
+                browsing_context_id,
+                request_id,
+                response,
+            },
+            BrowserCommand::CloseAuxiliaryWindow {
+                browsing_context_id,
+                window_id,
+            } => Self::CloseAuxiliaryWindow {
+                browsing_context_id,
+                window_id,
+            },
         }
     }
 }

@@ -5,6 +5,7 @@
 
 pub mod context_menu;
 pub mod drag;
+pub mod extension;
 pub mod ids;
 pub mod ime;
 pub mod key;
