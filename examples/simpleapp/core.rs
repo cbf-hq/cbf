@@ -14,7 +14,8 @@ use cbf::{
         ids::{BrowsingContextId, WindowId},
         ime::ImeBoundsUpdate,
         window_open::{
-            WindowBounds, WindowDescriptor, WindowKind, WindowOpenResponse, WindowState,
+            WindowBounds, WindowDescriptor, WindowKind, WindowOpenResponse, WindowOpenResult,
+            WindowState,
         },
     },
     event::{BackendStopReason, BrowserEvent, BrowsingContextEvent},
@@ -34,9 +35,19 @@ pub(crate) struct SharedState {
     pub(crate) primary_browsing_context_id: Option<BrowsingContextId>,
     /// The DevTools browsing context ID.
     pub(crate) devtools_browsing_context_id: Option<BrowsingContextId>,
+    /// The initial host window used for app startup browsing contexts.
+    pub(crate) primary_host_window_id: Option<WindowId>,
+    /// Maps browsing contexts to host window IDs.
+    pub(crate) browsing_context_to_window: HashMap<BrowsingContextId, WindowId>,
+    /// Maps host window IDs to browsing contexts.
+    pub(crate) window_to_browsing_context: HashMap<WindowId, BrowsingContextId>,
+    /// Tracks pending backend window-open request IDs to the host window ID selected by app.
+    pub(crate) pending_window_open_requests: HashMap<u64, WindowId>,
     /// Maps drag session IDs to their allowed operations.
     pub(crate) drag_allowed_operations: HashMap<u64, DragOperations>,
 }
+
+pub(crate) const PRIMARY_HOST_WINDOW_ID: WindowId = WindowId::new(u64::MAX - 1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewTarget {
@@ -70,6 +81,87 @@ pub(crate) fn set_devtools_browsing_context_id(
 ) {
     let mut guard = shared.lock().expect("shared state lock poisoned");
     guard.devtools_browsing_context_id = browsing_context_id;
+}
+
+pub(crate) fn set_primary_host_window_id(shared: &Arc<Mutex<SharedState>>, window_id: WindowId) {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    guard.primary_host_window_id = Some(window_id);
+}
+
+pub(crate) fn primary_host_window_id(shared: &Arc<Mutex<SharedState>>) -> Option<WindowId> {
+    let guard = shared.lock().expect("shared state lock poisoned");
+    guard.primary_host_window_id
+}
+
+pub(crate) fn register_pending_window_open_request(
+    shared: &Arc<Mutex<SharedState>>,
+    request_id: u64,
+    window_id: WindowId,
+) {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    guard
+        .pending_window_open_requests
+        .insert(request_id, window_id);
+}
+
+pub(crate) fn take_pending_window_open_request(
+    shared: &Arc<Mutex<SharedState>>,
+    request_id: u64,
+) -> Option<WindowId> {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    guard.pending_window_open_requests.remove(&request_id)
+}
+
+pub(crate) fn bind_browsing_context_to_window(
+    shared: &Arc<Mutex<SharedState>>,
+    browsing_context_id: BrowsingContextId,
+    window_id: WindowId,
+) {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    guard
+        .browsing_context_to_window
+        .insert(browsing_context_id, window_id);
+    guard
+        .window_to_browsing_context
+        .insert(window_id, browsing_context_id);
+}
+
+pub(crate) fn unbind_browsing_context(
+    shared: &Arc<Mutex<SharedState>>,
+    browsing_context_id: BrowsingContextId,
+) -> Option<WindowId> {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    let window_id = guard
+        .browsing_context_to_window
+        .remove(&browsing_context_id);
+    if let Some(window_id) = window_id {
+        guard.window_to_browsing_context.remove(&window_id);
+    }
+    window_id
+}
+
+pub(crate) fn window_id_for_browsing_context(
+    shared: &Arc<Mutex<SharedState>>,
+    browsing_context_id: BrowsingContextId,
+) -> Option<WindowId> {
+    let guard = shared.lock().expect("shared state lock poisoned");
+    guard
+        .browsing_context_to_window
+        .get(&browsing_context_id)
+        .copied()
+}
+
+pub(crate) fn browsing_context_id_for_window(
+    shared: &Arc<Mutex<SharedState>>,
+    window_id: WindowId,
+) -> Option<BrowsingContextId> {
+    let guard = shared.lock().expect("shared state lock poisoned");
+    guard.window_to_browsing_context.get(&window_id).copied()
+}
+
+pub(crate) fn has_bound_windows(shared: &Arc<Mutex<SharedState>>) -> bool {
+    let guard = shared.lock().expect("shared state lock poisoned");
+    !guard.window_to_browsing_context.is_empty()
 }
 
 /// Gets the allowed drag operations for a given drag session.
@@ -121,10 +213,26 @@ pub(crate) struct CoreState {
 /// These are returned from event handlers and applied by the platform-specific code.
 pub(crate) enum CoreAction {
     ExitEventLoop,
-    SyncViewAndResize,
-    SyncViewResizeAndFocus(ViewTarget),
-    UpdateWindowTitle(String),
-    UpdateCursor(CursorIcon),
+    EnsureHostWindow {
+        window: WindowDescriptor,
+    },
+    CloseHostWindow {
+        window_id: WindowId,
+    },
+    SyncWindowAndResize {
+        window_id: WindowId,
+    },
+    SyncWindowResizeAndFocus {
+        window_id: WindowId,
+    },
+    UpdateWindowTitle {
+        window_id: WindowId,
+        title: String,
+    },
+    UpdateCursor {
+        window_id: WindowId,
+        cursor: CursorIcon,
+    },
     ApplySurfaceHandle {
         browsing_context_id: BrowsingContextId,
         handle: SurfaceHandle,
@@ -221,7 +329,7 @@ impl CoreState {
             inspected_browsing_context_id, browsing_context_id
         );
         set_devtools_browsing_context_id(&self.shared, Some(browsing_context_id));
-        vec![CoreAction::SyncViewResizeAndFocus(ViewTarget::DevTools)]
+        Vec::new()
     }
 
     /// Handles incoming browser events and returns platform actions to execute.
@@ -298,10 +406,10 @@ impl CoreState {
                     | BrowsingContextOpenHint::CurrentContext
                     | BrowsingContextOpenHint::NewForegroundContext
                     | BrowsingContextOpenHint::NewBackgroundContext => {
-                        let target_browsing_context_id = source_browsing_context_id
-                            .or_else(|| {
-                                browsing_context_id_for_target(&self.shared, ViewTarget::Primary)
-                            });
+                        let target_browsing_context_id = source_browsing_context_id.or_else(|| {
+                            browsing_context_id_for_target(&self.shared, ViewTarget::Primary)
+                        });
+
                         if let Some(browsing_context_id) = target_browsing_context_id {
                             BrowsingContextOpenResponse::AllowExistingContext {
                                 browsing_context_id,
@@ -324,17 +432,14 @@ impl CoreState {
                 Vec::new()
             }
             BrowserEvent::BrowsingContextOpenResolved {
-                request_id,
-                result,
-                ..
+                request_id, result, ..
             } => {
-                info!(
-                    "browsing context open resolved: request_id={request_id}, result={result:?}"
-                );
+                info!("browsing context open resolved: request_id={request_id}, result={result:?}");
                 Vec::new()
             }
             BrowserEvent::WindowOpenRequested { request, .. } => {
                 info!("window open requested: request={request:?}");
+
                 let kind = match request.requested_kind {
                     WindowKind::Popup => WindowKind::Popup,
                     _ => WindowKind::Normal,
@@ -353,22 +458,34 @@ impl CoreState {
                         height: 900,
                     },
                 };
-                if let Err(err) = self
-                    .browser_handle()
-                    .respond_window_open(request.request_id, WindowOpenResponse::AllowNewWindow {
-                        window,
-                    })
-                {
+
+                register_pending_window_open_request(
+                    &self.shared,
+                    request.request_id,
+                    window.window_id,
+                );
+
+                if let Err(err) = self.browser_handle().respond_window_open(
+                    request.request_id,
+                    WindowOpenResponse::AllowNewWindow { window },
+                ) {
                     warn!("failed to respond window open request: {err}");
                 }
-                Vec::new()
+
+                vec![CoreAction::EnsureHostWindow { window }]
             }
             BrowserEvent::WindowOpenResolved {
-                request_id,
-                result,
-                ..
+                request_id, result, ..
             } => {
                 info!("window open resolved: request_id={request_id}, result={result:?}");
+
+                if matches!(result, WindowOpenResult::Denied | WindowOpenResult::Aborted)
+                    && let Some(window_id) =
+                        take_pending_window_open_request(&self.shared, request_id)
+                {
+                    return vec![CoreAction::CloseHostWindow { window_id }];
+                }
+
                 Vec::new()
             }
             BrowserEvent::WindowOpened { window, .. } => {
@@ -413,14 +530,30 @@ impl CoreState {
     }
 
     /// Handles incoming window events from the platform layer.
-    pub(crate) fn handle_window_event(&mut self, event: &WindowEvent) -> Vec<CoreAction> {
+    pub(crate) fn handle_window_event(
+        &mut self,
+        window_id: WindowId,
+        event: &WindowEvent,
+    ) -> Vec<CoreAction> {
         match event {
             WindowEvent::CloseRequested => {
-                self.request_shutdown_once();
-                vec![CoreAction::ExitEventLoop]
+                if let Some(browsing_context_id) =
+                    browsing_context_id_for_window(&self.shared, window_id)
+                {
+                    if let Err(err) = self
+                        .browser_handle()
+                        .request_close_browsing_context(browsing_context_id)
+                    {
+                        warn!("failed to request context close on window close: {err}");
+                    }
+                    Vec::new()
+                } else {
+                    self.request_shutdown_once();
+                    vec![CoreAction::ExitEventLoop]
+                }
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
-                vec![CoreAction::SyncViewAndResize]
+                vec![CoreAction::SyncWindowAndResize { window_id }]
             }
             WindowEvent::DroppedFile(path) => {
                 info!("os dropped file received: {}", path.display());
@@ -435,10 +568,7 @@ impl CoreState {
                 Vec::new()
             }
             WindowEvent::Focused(focused) => {
-                if let Some(id) = self.browsing_context_id_for_target(ViewTarget::Primary) {
-                    self.set_page_focus(id, *focused);
-                }
-                if let Some(id) = self.browsing_context_id_for_target(ViewTarget::DevTools) {
+                if let Some(id) = browsing_context_id_for_window(&self.shared, window_id) {
                     self.set_page_focus(id, *focused);
                 }
                 Vec::new()
@@ -453,15 +583,53 @@ impl CoreState {
         event: BrowsingContextEvent,
     ) -> Vec<CoreAction> {
         match event {
-            BrowsingContextEvent::Created { .. } => {
-                set_primary_browsing_context_id(&self.shared, Some(browsing_context_id));
-                vec![CoreAction::SyncViewResizeAndFocus(ViewTarget::Primary)]
+            BrowsingContextEvent::Created { request_id } => {
+                if self
+                    .browsing_context_id_for_target(ViewTarget::Primary)
+                    .is_none()
+                {
+                    set_primary_browsing_context_id(&self.shared, Some(browsing_context_id));
+                }
+
+                let host_window_id = take_pending_window_open_request(&self.shared, request_id)
+                    .or_else(|| primary_host_window_id(&self.shared));
+                if let Some(host_window_id) = host_window_id {
+                    bind_browsing_context_to_window(
+                        &self.shared,
+                        browsing_context_id,
+                        host_window_id,
+                    );
+                    vec![CoreAction::SyncWindowResizeAndFocus {
+                        window_id: host_window_id,
+                    }]
+                } else {
+                    warn!(
+                        "created browsing context has no host window mapping: context={}, request_id={request_id}",
+                        browsing_context_id
+                    );
+                    Vec::new()
+                }
             }
             BrowsingContextEvent::TitleUpdated { title } => {
-                vec![CoreAction::UpdateWindowTitle(title)]
+                if let Some(window_id) =
+                    window_id_for_browsing_context(&self.shared, browsing_context_id)
+                {
+                    vec![CoreAction::UpdateWindowTitle { window_id, title }]
+                } else {
+                    Vec::new()
+                }
             }
             BrowsingContextEvent::CursorChanged { cursor_type } => {
-                vec![CoreAction::UpdateCursor(cursor_type)]
+                if let Some(window_id) =
+                    window_id_for_browsing_context(&self.shared, browsing_context_id)
+                {
+                    vec![CoreAction::UpdateCursor {
+                        window_id,
+                        cursor: cursor_type,
+                    }]
+                } else {
+                    Vec::new()
+                }
             }
             BrowsingContextEvent::ImeBoundsUpdated { update } => {
                 vec![CoreAction::ApplyImeBounds {
@@ -494,9 +662,42 @@ impl CoreState {
                 );
                 Vec::new()
             }
-            BrowsingContextEvent::CloseRequested | BrowsingContextEvent::Closed => {
-                self.request_shutdown_once();
-                vec![CoreAction::ExitEventLoop]
+            BrowsingContextEvent::CloseRequested => {
+                if let Err(err) = self
+                    .browser_handle()
+                    .request_close_browsing_context(browsing_context_id)
+                {
+                    warn!(
+                        "failed to request close for context {}: {err}",
+                        browsing_context_id
+                    );
+                }
+                Vec::new()
+            }
+            BrowsingContextEvent::Closed => {
+                let close_action = unbind_browsing_context(&self.shared, browsing_context_id)
+                    .map(|window_id| CoreAction::CloseHostWindow { window_id });
+
+                if self.browsing_context_id_for_target(ViewTarget::Primary)
+                    == Some(browsing_context_id)
+                {
+                    set_primary_browsing_context_id(&self.shared, None);
+                }
+                if self.browsing_context_id_for_target(ViewTarget::DevTools)
+                    == Some(browsing_context_id)
+                {
+                    set_devtools_browsing_context_id(&self.shared, None);
+                }
+
+                let mut actions = Vec::new();
+                if let Some(action) = close_action {
+                    actions.push(action);
+                }
+                if !has_bound_windows(&self.shared) {
+                    self.request_shutdown_once();
+                    actions.push(CoreAction::ExitEventLoop);
+                }
+                actions
             }
             BrowsingContextEvent::AuxiliaryWindowOpenRequested { request_id, kind } => {
                 info!("auxiliary open requested: request_id={request_id}, kind={kind:?}");

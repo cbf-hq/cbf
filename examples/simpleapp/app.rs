@@ -31,6 +31,7 @@ use crate::{
     cli::{chromium_options_from_cli, parse_cli},
     core::{CoreAction, CoreState, SharedState},
 };
+use cbf::data::ids::WindowId as HostWindowId;
 
 /// Custom event type for the winit event loop.
 /// This wraps browser events so they can be delivered through the event loop.
@@ -116,8 +117,8 @@ pub(crate) trait PlatformApp {
     fn new(browser_handle: BrowserHandle<ChromiumBackend>, shared: Arc<Mutex<SharedState>>)
     -> Self;
 
-    /// Returns the winit window ID, if a window has been created.
-    fn window_id(&self) -> Option<WindowId>;
+    /// Resolves a winit window ID to host window ID, if managed by this app.
+    fn host_window_id_for_winit_window(&self, window_id: WindowId) -> Option<HostWindowId>;
 
     /// Ensures that a window and browser view are created and ready.
     /// Called when the event loop is resumed.
@@ -176,11 +177,11 @@ impl<P: PlatformApp> ApplicationHandler<UserEvent> for AppRunner<P> {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        if Some(window_id) != self.platform.window_id() {
+        let Some(host_window_id) = self.platform.host_window_id_for_winit_window(window_id) else {
             return;
-        }
+        };
 
-        let actions = self.core.handle_window_event(&event);
+        let actions = self.core.handle_window_event(host_window_id, &event);
         self.platform
             .apply_core_actions(event_loop, &mut self.core, actions);
     }

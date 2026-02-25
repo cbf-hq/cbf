@@ -1,13 +1,17 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use cbf::{
     browser::BrowserHandle,
     data::{
         drag::{DragDrop, DragUpdate},
-        ids::BrowsingContextId,
+        ids::{BrowsingContextId, WindowId as HostWindowId},
         ime::{
             ConfirmCompositionBehavior, ImeCommitText, ImeComposition, ImeTextSpan, ImeTextSpanType,
         },
+        window_open::WindowDescriptor,
     },
 };
 use cbf_chrome::{
@@ -26,23 +30,31 @@ use tracing::warn;
 use winit::{
     dpi::LogicalSize,
     event_loop::ActiveEventLoop,
-    window::{Window, WindowAttributes, WindowId},
+    window::{Window, WindowAttributes, WindowId as WinitWindowId},
 };
 
 use crate::{
     app::PlatformApp,
     app::run_with_platform,
     core::{
-        CoreAction, CoreState, SharedState, ViewTarget, browsing_context_id_for_target,
-        drag_allowed_operations, remove_drag_session, set_drag_allowed_operations,
+        CoreAction, CoreState, PRIMARY_HOST_WINDOW_ID, SharedState, ViewTarget,
+        browsing_context_id_for_target, browsing_context_id_for_window, drag_allowed_operations,
+        remove_drag_session, set_drag_allowed_operations, set_primary_host_window_id,
     },
 };
+
+#[derive(Debug, Clone, Copy)]
+enum BrowserViewBinding {
+    Primary,
+    DevTools,
+    HostWindow(HostWindowId),
+}
 
 /// Delegate for the macOS browser view that handles input events, IME, drag-and-drop, etc.
 struct SimpleBrowserViewDelegate {
     handle: BrowserHandle<ChromiumBackend>,
     shared: Arc<Mutex<SharedState>>,
-    target: ViewTarget,
+    binding: BrowserViewBinding,
 }
 
 impl SimpleBrowserViewDelegate {
@@ -50,8 +62,18 @@ impl SimpleBrowserViewDelegate {
     where
         F: FnOnce(BrowsingContextId),
     {
-        if let Some(browsing_context_id) = browsing_context_id_for_target(&self.shared, self.target)
-        {
+        let browsing_context_id = match self.binding {
+            BrowserViewBinding::Primary => {
+                browsing_context_id_for_target(&self.shared, ViewTarget::Primary)
+            }
+            BrowserViewBinding::DevTools => {
+                browsing_context_id_for_target(&self.shared, ViewTarget::DevTools)
+            }
+            BrowserViewBinding::HostWindow(window_id) => {
+                browsing_context_id_for_window(&self.shared, window_id)
+            }
+        };
+        if let Some(browsing_context_id) = browsing_context_id {
             f(browsing_context_id);
         }
     }
@@ -265,14 +287,19 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
     }
 }
 
+struct WindowEntry {
+    host_window_id: HostWindowId,
+    window: Window,
+    primary_browser_view: Retained<BrowserViewMac>,
+    devtools_browser_view: Option<Retained<BrowserViewMac>>,
+}
+
 /// macOS platform-specific application implementation.
 struct SimpleAppMac {
     browser_handle: BrowserHandle<ChromiumBackend>,
     shared: Arc<Mutex<SharedState>>,
-    window: Option<Window>,
-    window_id: Option<WindowId>,
-    primary_browser_view: Option<Retained<BrowserViewMac>>,
-    devtools_browser_view: Option<Retained<BrowserViewMac>>,
+    windows: HashMap<WinitWindowId, WindowEntry>,
+    winit_id_by_host_window: HashMap<HostWindowId, WinitWindowId>,
 }
 
 impl SimpleAppMac {
@@ -281,12 +308,12 @@ impl SimpleAppMac {
         frame: CGRect,
         handle: BrowserHandle<ChromiumBackend>,
         shared: Arc<Mutex<SharedState>>,
-        target: ViewTarget,
+        binding: BrowserViewBinding,
     ) -> Result<Retained<BrowserViewMac>, String> {
         let delegate = Box::new(SimpleBrowserViewDelegate {
             handle,
             shared,
-            target,
+            binding,
         });
         let mtm = MainThreadMarker::new()
             .ok_or_else(|| "BrowserViewMac must be created on main thread".to_owned())?;
@@ -311,77 +338,192 @@ impl SimpleAppMac {
         Ok(browser_view)
     }
 
-    fn update_view_frames(&self, window: &Window) {
-        let Some(primary_browser_view) = self.primary_browser_view.as_ref() else {
+    fn create_window_for_host(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        host_window_id: HostWindowId,
+        title: &str,
+        size: LogicalSize<f64>,
+        binding: BrowserViewBinding,
+    ) -> Result<(), String> {
+        if self.winit_id_by_host_window.contains_key(&host_window_id) {
+            return Ok(());
+        }
+
+        let attrs: WindowAttributes = Window::default_attributes()
+            .with_title(title)
+            .with_inner_size(size);
+
+        let window = event_loop
+            .create_window(attrs)
+            .map_err(|err| format!("failed to create window: {err}"))?;
+
+        let frame = view_frame_for_window(&window);
+        let browser_view = Self::create_and_attach_browser_view(
+            &window,
+            frame,
+            self.browser_handle.clone(),
+            Arc::clone(&self.shared),
+            binding,
+        )?;
+
+        let winit_window_id = window.id();
+        self.windows.insert(
+            winit_window_id,
+            WindowEntry {
+                host_window_id,
+                window,
+                primary_browser_view: browser_view,
+                devtools_browser_view: None,
+            },
+        );
+        self.winit_id_by_host_window
+            .insert(host_window_id, winit_window_id);
+
+        Ok(())
+    }
+
+    fn close_window_for_host(&mut self, host_window_id: HostWindowId) {
+        let Some(winit_id) = self.winit_id_by_host_window.remove(&host_window_id) else {
+            return;
+        };
+        self.windows.remove(&winit_id);
+    }
+
+    fn sync_window_and_page_size(&self, core: &CoreState, host_window_id: HostWindowId) {
+        let Some(winit_id) = self.winit_id_by_host_window.get(&host_window_id).copied() else {
+            return;
+        };
+        let Some(entry) = self.windows.get(&winit_id) else {
             return;
         };
 
-        let (primary_frame, devtools_frame) =
-            split_frames_for_window(window, self.devtools_browser_view.is_some());
-        primary_browser_view.setFrame(primary_frame);
-        primary_browser_view.set_layer_frame(layer_frame_for_view_frame(primary_frame));
+        let has_devtools =
+            host_window_id == PRIMARY_HOST_WINDOW_ID && entry.devtools_browser_view.is_some();
+        let (primary_frame, devtools_frame) = split_frames_for_window(&entry.window, has_devtools);
+        entry.primary_browser_view.setFrame(primary_frame);
+        entry
+            .primary_browser_view
+            .set_layer_frame(layer_frame_for_view_frame(primary_frame));
 
-        if let (Some(devtools_browser_view), Some(frame)) =
-            (self.devtools_browser_view.as_ref(), devtools_frame)
+        if let (Some(devtools_view), Some(frame)) =
+            (entry.devtools_browser_view.as_ref(), devtools_frame)
         {
-            devtools_browser_view.setFrame(frame);
-            devtools_browser_view.set_layer_frame(layer_frame_for_view_frame(frame));
+            devtools_view.setFrame(frame);
+            devtools_view.set_layer_frame(layer_frame_for_view_frame(frame));
+        }
+
+        let (primary_size, devtools_size) =
+            split_page_sizes_for_window(&entry.window, has_devtools);
+
+        if host_window_id == PRIMARY_HOST_WINDOW_ID {
+            if let Some(id) = core.browsing_context_id_for_target(ViewTarget::Primary) {
+                core.sync_page_size(id, primary_size.0, primary_size.1);
+            }
+            if let (Some(id), Some((width, height))) = (
+                core.browsing_context_id_for_target(ViewTarget::DevTools),
+                devtools_size,
+            ) {
+                core.sync_page_size(id, width, height);
+            }
+            return;
+        }
+
+        if let Some(id) = browsing_context_id_for_window(&self.shared, host_window_id) {
+            core.sync_page_size(id, primary_size.0, primary_size.1);
         }
     }
 
     fn ensure_devtools_view(&mut self) {
-        if self.devtools_browser_view.is_some() {
-            return;
-        }
-        let Some(window) = self.window.as_ref() else {
+        let Some(winit_id) = self
+            .winit_id_by_host_window
+            .get(&PRIMARY_HOST_WINDOW_ID)
+            .copied()
+        else {
             return;
         };
+        let Some(entry) = self.windows.get_mut(&winit_id) else {
+            return;
+        };
+        if entry.devtools_browser_view.is_some() {
+            return;
+        }
 
-        let (_, devtools_frame) = split_frames_for_window(window, true);
+        let (_, devtools_frame) = split_frames_for_window(&entry.window, true);
         let Some(devtools_frame) = devtools_frame else {
             return;
         };
 
         let Ok(devtools_view) = Self::create_and_attach_browser_view(
-            window,
+            &entry.window,
             devtools_frame,
             self.browser_handle.clone(),
             Arc::clone(&self.shared),
-            ViewTarget::DevTools,
+            BrowserViewBinding::DevTools,
         ) else {
             return;
         };
-        self.devtools_browser_view = Some(devtools_view);
+
+        entry.devtools_browser_view = Some(devtools_view);
     }
 
-    fn sync_view_and_page_size(&self, core: &CoreState) {
-        let Some(window) = self.window.as_ref() else {
-            return;
+    fn view_for_context_id(
+        &self,
+        core: &CoreState,
+        id: BrowsingContextId,
+    ) -> Option<&BrowserViewMac> {
+        if core.browsing_context_id_for_target(ViewTarget::Primary) == Some(id)
+            && let Some(winit_id) = self.winit_id_by_host_window.get(&PRIMARY_HOST_WINDOW_ID)
+            && let Some(entry) = self.windows.get(winit_id)
+        {
+            return Some(&entry.primary_browser_view);
+        }
+        if core.browsing_context_id_for_target(ViewTarget::DevTools) == Some(id)
+            && let Some(winit_id) = self.winit_id_by_host_window.get(&PRIMARY_HOST_WINDOW_ID)
+            && let Some(entry) = self.windows.get(winit_id)
+        {
+            return entry.devtools_browser_view.as_deref();
+        }
+
+        let host_window_id = {
+            let guard = self.shared.lock().expect("shared state lock poisoned");
+            guard.browsing_context_to_window.get(&id).copied()
         };
+        let host_window_id = host_window_id?;
+        let winit_id = self.winit_id_by_host_window.get(&host_window_id)?;
+        self.windows
+            .get(winit_id)
+            .map(|entry| entry.primary_browser_view.as_ref())
+    }
 
-        self.update_view_frames(window);
-        let (primary_size, devtools_size) =
-            split_page_sizes_for_window(window, self.devtools_browser_view.is_some());
-
-        if let Some(id) = core.browsing_context_id_for_target(ViewTarget::Primary) {
-            core.sync_page_size(id, primary_size.0, primary_size.1);
+    fn ensure_host_window_for_descriptor(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window: WindowDescriptor,
+    ) {
+        if self.winit_id_by_host_window.contains_key(&window.window_id) {
+            return;
         }
-        if let (Some(id), Some((width, height))) = (
-            core.browsing_context_id_for_target(ViewTarget::DevTools),
-            devtools_size,
+
+        let size = LogicalSize::new(
+            f64::from(window.bounds.width.max(1)),
+            f64::from(window.bounds.height.max(1)),
+        );
+
+        if let Err(err) = self.create_window_for_host(
+            event_loop,
+            window.window_id,
+            "CBF SimpleApp",
+            size,
+            BrowserViewBinding::HostWindow(window.window_id),
         ) {
-            core.sync_page_size(id, width, height);
+            warn!("failed to create host window {}: {err}", window.window_id);
         }
     }
 
-    fn view_for_context_id(&self, core: &CoreState, id: BrowsingContextId) -> Option<&BrowserViewMac> {
-        if core.browsing_context_id_for_target(ViewTarget::Primary) == Some(id) {
-            return self.primary_browser_view.as_deref();
-        }
-        if core.browsing_context_id_for_target(ViewTarget::DevTools) == Some(id) {
-            return self.devtools_browser_view.as_deref();
-        }
-        None
+    fn window_for_host_id(&self, host_window_id: HostWindowId) -> Option<&Window> {
+        let winit_id = self.winit_id_by_host_window.get(&host_window_id)?;
+        self.windows.get(winit_id).map(|entry| &entry.window)
     }
 }
 
@@ -393,43 +535,33 @@ impl PlatformApp for SimpleAppMac {
         Self {
             browser_handle,
             shared,
-            window: None,
-            window_id: None,
-            primary_browser_view: None,
-            devtools_browser_view: None,
+            windows: HashMap::new(),
+            winit_id_by_host_window: HashMap::new(),
         }
     }
 
-    fn window_id(&self) -> Option<WindowId> {
-        self.window_id
+    fn host_window_id_for_winit_window(&self, window_id: WinitWindowId) -> Option<HostWindowId> {
+        self.windows
+            .get(&window_id)
+            .map(|entry| entry.host_window_id)
     }
 
     fn ensure_window_and_view(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
-        if self.window.is_some() {
+        if self
+            .winit_id_by_host_window
+            .contains_key(&PRIMARY_HOST_WINDOW_ID)
+        {
             return Ok(());
         }
 
-        let attrs: WindowAttributes = Window::default_attributes()
-            .with_title("CBF SimpleApp")
-            .with_inner_size(LogicalSize::new(1280.0, 800.0));
-
-        let window = event_loop
-            .create_window(attrs)
-            .map_err(|err| format!("failed to create window: {err}"))?;
-
-        let (primary_frame, _) = split_frames_for_window(&window, false);
-        let browser_view = Self::create_and_attach_browser_view(
-            &window,
-            primary_frame,
-            self.browser_handle.clone(),
-            Arc::clone(&self.shared),
-            ViewTarget::Primary,
+        self.create_window_for_host(
+            event_loop,
+            PRIMARY_HOST_WINDOW_ID,
+            "CBF SimpleApp",
+            LogicalSize::new(1280.0, 800.0),
+            BrowserViewBinding::Primary,
         )?;
-
-        self.window_id = Some(window.id());
-        self.primary_browser_view = Some(browser_view);
-        self.window = Some(window);
-
+        set_primary_host_window_id(&self.shared, PRIMARY_HOST_WINDOW_ID);
         Ok(())
     }
 
@@ -442,23 +574,26 @@ impl PlatformApp for SimpleAppMac {
         for action in actions {
             match action {
                 CoreAction::ExitEventLoop => event_loop.exit(),
-                CoreAction::SyncViewAndResize => self.sync_view_and_page_size(core),
-                CoreAction::SyncViewResizeAndFocus(target) => {
-                    if target == ViewTarget::DevTools {
-                        self.ensure_devtools_view();
-                    }
-                    self.sync_view_and_page_size(core);
-                    if let Some(id) = core.browsing_context_id_for_target(target) {
+                CoreAction::EnsureHostWindow { window } => {
+                    self.ensure_host_window_for_descriptor(event_loop, window)
+                }
+                CoreAction::CloseHostWindow { window_id } => self.close_window_for_host(window_id),
+                CoreAction::SyncWindowAndResize { window_id } => {
+                    self.sync_window_and_page_size(core, window_id)
+                }
+                CoreAction::SyncWindowResizeAndFocus { window_id } => {
+                    self.sync_window_and_page_size(core, window_id);
+                    if let Some(id) = browsing_context_id_for_window(&self.shared, window_id) {
                         core.set_page_focus(id, true);
                     }
                 }
-                CoreAction::UpdateWindowTitle(title) => {
-                    if let Some(window) = self.window.as_ref() {
+                CoreAction::UpdateWindowTitle { window_id, title } => {
+                    if let Some(window) = self.window_for_host_id(window_id) {
                         window.set_title(&title);
                     }
                 }
-                CoreAction::UpdateCursor(cursor) => {
-                    if let Some(window) = self.window.as_ref() {
+                CoreAction::UpdateCursor { window_id, cursor } => {
+                    if let Some(window) = self.window_for_host_id(window_id) {
                         window.set_cursor(cursor);
                     }
                 }
@@ -466,10 +601,9 @@ impl PlatformApp for SimpleAppMac {
                     browsing_context_id,
                     handle,
                 } => {
-                    if let (Some(browser_view), SurfaceHandle::MacCaContextId(context_id)) = (
-                        self.view_for_context_id(core, browsing_context_id),
-                        handle,
-                    ) {
+                    if let (Some(browser_view), SurfaceHandle::MacCaContextId(context_id)) =
+                        (self.view_for_context_id(core, browsing_context_id), handle)
+                    {
                         browser_view.set_context_id(context_id);
                     }
                 }
@@ -492,7 +626,8 @@ impl PlatformApp for SimpleAppMac {
                     }
                 }
                 CoreAction::StartPlatformDrag(request) => {
-                    if let Some(browser_view) = self.view_for_context_id(core, request.browsing_context_id)
+                    if let Some(browser_view) =
+                        self.view_for_context_id(core, request.browsing_context_id)
                         && browser_view.start_native_drag_session(&request)
                     {
                         set_drag_allowed_operations(
@@ -503,6 +638,14 @@ impl PlatformApp for SimpleAppMac {
                     }
                 }
             }
+        }
+
+        if core
+            .browsing_context_id_for_target(ViewTarget::DevTools)
+            .is_some()
+        {
+            self.ensure_devtools_view();
+            self.sync_window_and_page_size(core, PRIMARY_HOST_WINDOW_ID);
         }
     }
 }
