@@ -156,7 +156,7 @@ fn resolve_package<'a>(
         return metadata
             .packages
             .iter()
-            .find(|package| package.name.to_string() == name)
+            .find(|package| package.name == name)
             .ok_or_else(|| CliError::PackageNotFound {
                 package: name.to_owned(),
             });

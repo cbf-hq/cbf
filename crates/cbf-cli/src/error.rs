@@ -43,6 +43,9 @@ pub enum CliError {
     #[error("expected directory path but got non-directory: {path}")]
     NotDirectory { path: PathBuf },
 
+    #[error("unsupported filesystem entry type: {path}")]
+    UnsupportedFileType { path: PathBuf },
+
     #[error("I/O failed for path {path}")]
     Io {
         path: PathBuf,

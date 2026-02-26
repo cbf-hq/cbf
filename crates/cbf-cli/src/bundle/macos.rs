@@ -226,17 +226,44 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
         let entry_path = entry.path();
         let target = dst.join(entry.file_name());
 
-        let file_type = entry.file_type().map_err(|source| CliError::Io {
+        let metadata = fs::symlink_metadata(&entry_path).map_err(|source| CliError::Io {
             path: entry_path.clone(),
             source,
         })?;
+        let file_type = metadata.file_type();
 
-        if file_type.is_dir() {
+        if file_type.is_symlink() {
+            let link_target = fs::read_link(&entry_path).map_err(|source| CliError::Io {
+                path: entry_path.clone(),
+                source,
+            })?;
+            create_symlink(&link_target, &target)?;
+        } else if file_type.is_dir() {
             copy_dir_recursive(&entry_path, &target)?;
-        } else {
+        } else if file_type.is_file() {
             copy_file(&entry_path, &target)?;
+        } else {
+            return Err(CliError::UnsupportedFileType { path: entry_path });
         }
     }
 
     Ok(())
+}
+
+fn create_symlink(source: &Path, destination: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(source, destination).map_err(|source| CliError::Io {
+            path: destination.to_path_buf(),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = source;
+        let _ = destination;
+        unreachable!("macOS bundling is unix-only")
+    }
 }
