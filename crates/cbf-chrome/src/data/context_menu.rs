@@ -6,6 +6,8 @@ pub const CMD_BACK: i32 = 33000;
 pub const CMD_FORWARD: i32 = 33001;
 /// Command id for reloading the page.
 pub const CMD_RELOAD: i32 = 33002;
+/// Command id for printing the page.
+pub const CMD_PRINT: i32 = 35003;
 /// Command id for cutting selection.
 pub const CMD_CUT: i32 = 36000;
 /// Command id for copying selection.
@@ -43,6 +45,7 @@ const CONTEXT_MENU_ALLOWLIST: &[i32] = &[
     CMD_BACK,
     CMD_FORWARD,
     CMD_RELOAD,
+    CMD_PRINT,
     CMD_CUT,
     CMD_COPY,
     CMD_PASTE,

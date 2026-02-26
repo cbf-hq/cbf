@@ -62,6 +62,9 @@ pub enum ChromeCommand {
         browsing_context_id: BrowsingContextId,
         ignore_cache: bool,
     },
+    PrintPreview {
+        browsing_context_id: BrowsingContextId,
+    },
     OpenDevTools {
         browsing_context_id: BrowsingContextId,
     },
@@ -222,6 +225,11 @@ impl From<BrowserCommand> for ChromeCommand {
             } => Self::Reload {
                 browsing_context_id,
                 ignore_cache,
+            },
+            BrowserCommand::PrintPreview {
+                browsing_context_id,
+            } => Self::PrintPreview {
+                browsing_context_id,
             },
             BrowserCommand::GetBrowsingContextDomHtml {
                 browsing_context_id,

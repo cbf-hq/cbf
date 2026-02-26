@@ -39,6 +39,7 @@ pub enum AuxiliaryWindowKind {
         extension_name: String,
         permission_names: Vec<String>,
     },
+    PrintPreviewDialog,
     Unknown,
 }
 

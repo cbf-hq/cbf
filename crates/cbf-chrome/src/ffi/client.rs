@@ -350,6 +350,19 @@ impl IpcClient {
         }
     }
 
+    /// Open print preview for the page.
+    pub fn print_preview(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe { cbf_bridge_client_print_preview(self.inner, browsing_context_id.get()) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
     /// Open DevTools for the specified page.
     pub fn open_dev_tools(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
         if self.inner.is_null() {

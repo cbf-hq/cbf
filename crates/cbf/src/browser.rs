@@ -309,6 +309,13 @@ impl<B: Backend> BrowserHandle<B> {
         })
     }
 
+    /// Open print preview for the current page content.
+    pub fn print_preview(&self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+        self.send(BrowserCommand::PrintPreview {
+            browsing_context_id,
+        })
+    }
+
     pub fn get_browsing_context_dom_html(
         &self,
         browsing_context_id: BrowsingContextId,

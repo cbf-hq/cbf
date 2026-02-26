@@ -42,6 +42,7 @@ pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ABORTED: u8 = 3;
 
 pub const CBF_AUXILIARY_WINDOW_KIND_UNKNOWN: u8 = 0;
 pub const CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT: u8 = 1;
+pub const CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG: u8 = 2;
 
 pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_UNKNOWN: u8 = 0;
 pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED: u8 = 1;
@@ -697,6 +698,10 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         web_page_id: u64,
         ignore_cache: bool,
+    ) -> bool;
+    pub fn cbf_bridge_client_print_preview(
+        client: *mut CbfBridgeClientHandle,
+        web_page_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_open_dev_tools(
         client: *mut CbfBridgeClientHandle,

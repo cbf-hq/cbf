@@ -535,6 +535,9 @@ fn auxiliary_window_kind_from_ffi(
                 permission_names: parse_string_list(permission_names),
             }
         }
+        CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG => {
+            AuxiliaryWindowKind::PrintPreviewDialog
+        }
         _ => AuxiliaryWindowKind::Unknown,
     }
 }

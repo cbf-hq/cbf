@@ -665,6 +665,11 @@ impl ChromiumBackend {
             } => client
                 .reload(*browsing_context_id, *ignore_cache)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::PrintPreview {
+                browsing_context_id,
+            } => client
+                .print_preview(*browsing_context_id)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::OpenDevTools {
                 browsing_context_id,
             } => client

@@ -391,6 +391,7 @@ impl DummyBackend {
             | BrowserCommand::OpenDefaultAuxiliaryWindow { .. }
             | BrowserCommand::RespondAuxiliaryWindow { .. }
             | BrowserCommand::CloseAuxiliaryWindow { .. }
+            | BrowserCommand::PrintPreview { .. }
             | BrowserCommand::RespondBrowsingContextOpen { .. }
             | BrowserCommand::RespondWindowOpen { .. } => (None, events),
             BrowserCommand::RequestCloseBrowsingContext {

@@ -88,6 +88,10 @@ pub enum BrowserCommand {
         browsing_context_id: BrowsingContextId,
         ignore_cache: bool,
     },
+    /// Open print preview for the current page content.
+    PrintPreview {
+        browsing_context_id: BrowsingContextId,
+    },
 
     /// Request the DOM HTML of a web page.
     GetBrowsingContextDomHtml {
@@ -205,6 +209,7 @@ pub enum BrowserOperation {
     GoBack,
     GoForward,
     Reload,
+    PrintPreview,
     GetBrowsingContextDomHtml,
     SetBrowsingContextFocus,
     SendKeyEvent,
@@ -242,6 +247,7 @@ impl BrowserOperation {
             BrowserCommand::GoBack { .. } => Self::GoBack,
             BrowserCommand::GoForward { .. } => Self::GoForward,
             BrowserCommand::Reload { .. } => Self::Reload,
+            BrowserCommand::PrintPreview { .. } => Self::PrintPreview,
             BrowserCommand::GetBrowsingContextDomHtml { .. } => Self::GetBrowsingContextDomHtml,
             BrowserCommand::SetBrowsingContextFocus { .. } => Self::SetBrowsingContextFocus,
             BrowserCommand::SendKeyEvent { .. } => Self::SendKeyEvent,
@@ -281,6 +287,7 @@ impl std::fmt::Display for BrowserOperation {
             Self::GoBack => "go_back",
             Self::GoForward => "go_forward",
             Self::Reload => "reload",
+            Self::PrintPreview => "print_preview",
             Self::GetBrowsingContextDomHtml => "get_browsing_context_dom_html",
             Self::SetBrowsingContextFocus => "set_browsing_context_focus",
             Self::SendKeyEvent => "send_key_event",
