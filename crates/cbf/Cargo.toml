@@ -21,23 +21,3 @@ async-process.workspace = true
 futures-lite.workspace = true
 oneshot = { workspace = true, features = ["async", "std"] }
 tracing.workspace = true
-
-[dev-dependencies]
-cbf-chrome = { path = "../cbf-chrome" }
-clap = { workspace = true, features = ["derive"] }
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
-winit.workspace = true
-raw-window-handle.workspace = true
-dirs.workspace = true
-
-[target.'cfg(target_os = "macos")'.dev-dependencies]
-objc2 = { workspace = true }
-objc2-core-foundation = { workspace = true, features = ["CFCGTypes"] }
-
-[target.'cfg(target_os = "macos")'.dev-dependencies.objc2-app-kit]
-workspace = true
-features = ["NSView"]
-
-[[example]]
-name = "simpleapp"
-path = "../../examples/simpleapp/main.rs"
