@@ -574,9 +574,8 @@ impl ChromiumBackend {
             ChromeCommand::ListProfiles => client
                 .list_profiles()
                 .map(|profiles| (None, vec![ChromeEvent::ProfilesListed { profiles }])),
-            ChromeCommand::ListExtensions { profile_id } => client
-                .list_extensions(profile_id)
-                .map(|extensions| {
+            ChromeCommand::ListExtensions { profile_id } => {
+                client.list_extensions(profile_id).map(|extensions| {
                     (
                         None,
                         vec![ChromeEvent::Ipc(Box::new(IpcEvent::ExtensionsListed {
@@ -584,7 +583,8 @@ impl ChromiumBackend {
                             extensions,
                         }))],
                     )
-                }),
+                })
+            }
             ChromeCommand::SendKeyEvent {
                 browsing_context_id,
                 event,

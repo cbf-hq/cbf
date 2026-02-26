@@ -57,9 +57,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         CBF_EVENT_DEVTOOLS_OPENED => Ok(IpcEvent::DevToolsOpened {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: BrowsingContextId::new(event.web_page_id),
-            inspected_browsing_context_id: BrowsingContextId::new(
-                event.inspected_web_page_id,
-            ),
+            inspected_browsing_context_id: BrowsingContextId::new(event.inspected_web_page_id),
         }),
         CBF_EVENT_IME_BOUNDS_UPDATED => Ok(IpcEvent::ImeBoundsUpdated {
             profile_id: c_string_to_string(event.profile_id),
@@ -211,11 +209,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             ),
             title: {
                 let value = c_string_to_string(event.auxiliary_window_title);
-                if value.is_empty() {
-                    None
-                } else {
-                    Some(value)
-                }
+                if value.is_empty() { None } else { Some(value) }
             },
             modal: event.auxiliary_window_modal,
         }),
@@ -558,11 +552,7 @@ fn auxiliary_window_resolution_from_ffi(
                 result: extension_install_prompt_result_from_ffi(result),
                 detail: {
                     let value = c_string_to_string(detail);
-                    if value.is_empty() {
-                        None
-                    } else {
-                        Some(value)
-                    }
+                    if value.is_empty() { None } else { Some(value) }
                 },
             }
         }
@@ -572,9 +562,7 @@ fn auxiliary_window_resolution_from_ffi(
 
 fn auxiliary_window_close_reason_from_ffi(value: u8) -> AuxiliaryWindowCloseReason {
     match value {
-        CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED => {
-            AuxiliaryWindowCloseReason::UserCanceled
-        }
+        CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED => AuxiliaryWindowCloseReason::UserCanceled,
         CBF_AUXILIARY_WINDOW_CLOSE_REASON_HOST_FORCED => AuxiliaryWindowCloseReason::HostForced,
         CBF_AUXILIARY_WINDOW_CLOSE_REASON_SYSTEM_DISMISSED => {
             AuxiliaryWindowCloseReason::SystemDismissed

@@ -14,7 +14,9 @@ pub enum BrowsingContextOpenHint {
 /// Host decision for an open request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowsingContextOpenResponse {
-    AllowNewContext { activate: bool },
+    AllowNewContext {
+        activate: bool,
+    },
     AllowExistingContext {
         browsing_context_id: BrowsingContextId,
         activate: bool,

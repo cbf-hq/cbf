@@ -8,7 +8,8 @@ use cbf::data::{
         AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
         AuxiliaryWindowResolution, ExtensionInfo,
     },
-    ids::BrowsingContextId, ime::ImeBoundsUpdate,
+    ids::BrowsingContextId,
+    ime::ImeBoundsUpdate,
 };
 use cbf::event::BeforeUnloadReason;
 

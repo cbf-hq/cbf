@@ -142,22 +142,21 @@ impl IpcClient {
         };
         let mut result = Vec::with_capacity(values.len());
         for value in values {
-            let permission_names = if value.permission_names.len == 0
-                || value.permission_names.items.is_null()
-            {
-                Vec::new()
-            } else {
-                let permission_items = unsafe {
-                    std::slice::from_raw_parts(
-                        value.permission_names.items,
-                        value.permission_names.len as usize,
-                    )
+            let permission_names =
+                if value.permission_names.len == 0 || value.permission_names.items.is_null() {
+                    Vec::new()
+                } else {
+                    let permission_items = unsafe {
+                        std::slice::from_raw_parts(
+                            value.permission_names.items,
+                            value.permission_names.len as usize,
+                        )
+                    };
+                    permission_items
+                        .iter()
+                        .map(|entry| c_string_to_string(*entry))
+                        .collect()
                 };
-                permission_items
-                    .iter()
-                    .map(|entry| c_string_to_string(*entry))
-                    .collect()
-            };
             result.push(ExtensionInfo {
                 id: c_string_to_string(value.id),
                 name: c_string_to_string(value.name),
@@ -352,10 +351,7 @@ impl IpcClient {
     }
 
     /// Open DevTools for the specified page.
-    pub fn open_dev_tools(
-        &mut self,
-        browsing_context_id: BrowsingContextId,
-    ) -> Result<(), Error> {
+    pub fn open_dev_tools(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }

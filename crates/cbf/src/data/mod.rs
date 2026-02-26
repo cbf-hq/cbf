@@ -3,8 +3,8 @@
 //! These types represent browser-facing concepts such as input events, IDs,
 //! profiles, and context menu payloads.
 
-pub mod context_menu;
 pub mod browsing_context_open;
+pub mod context_menu;
 pub mod drag;
 pub mod extension;
 pub mod ids;

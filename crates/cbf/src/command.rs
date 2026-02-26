@@ -55,9 +55,7 @@ pub enum BrowserCommand {
     /// Fetch the list of available profiles from the backend.
     ListProfiles,
     /// Fetch the list of available extensions from the backend.
-    ListExtensions {
-        profile_id: Option<String>,
-    },
+    ListExtensions { profile_id: Option<String> },
 
     /// Request to close a web page.
     RequestCloseBrowsingContext {
@@ -259,12 +257,8 @@ impl BrowserOperation {
             BrowserCommand::DismissContextMenu { .. } => Self::DismissContextMenu,
             BrowserCommand::OpenDefaultAuxiliaryWindow { .. } => Self::OpenDefaultAuxiliaryWindow,
             BrowserCommand::RespondAuxiliaryWindow { .. } => Self::RespondAuxiliaryWindow,
-            BrowserCommand::CloseAuxiliaryWindow { .. } => {
-                Self::CloseAuxiliaryWindow
-            }
-            BrowserCommand::RespondBrowsingContextOpen { .. } => {
-                Self::RespondBrowsingContextOpen
-            }
+            BrowserCommand::CloseAuxiliaryWindow { .. } => Self::CloseAuxiliaryWindow,
+            BrowserCommand::RespondBrowsingContextOpen { .. } => Self::RespondBrowsingContextOpen,
             BrowserCommand::RespondWindowOpen { .. } => Self::RespondWindowOpen,
         }
     }

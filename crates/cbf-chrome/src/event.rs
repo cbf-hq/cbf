@@ -140,19 +140,19 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             request_id,
             result,
         } => match result {
-            BrowsingContextOpenResult::OpenedNewContext { browsing_context_id } => {
-                Some(BrowserEvent::WindowOpenResolved {
-                    profile_id: profile_id.clone(),
-                    request_id: *request_id,
-                    result: WindowOpenResult::OpenedNewWindow {
-                        window: synthetic_window_descriptor(
-                            WindowId::new(browsing_context_id.get()),
-                            WindowKind::Normal,
-                            true,
-                        ),
-                    },
-                })
-            }
+            BrowsingContextOpenResult::OpenedNewContext {
+                browsing_context_id,
+            } => Some(BrowserEvent::WindowOpenResolved {
+                profile_id: profile_id.clone(),
+                request_id: *request_id,
+                result: WindowOpenResult::OpenedNewWindow {
+                    window: synthetic_window_descriptor(
+                        WindowId::new(browsing_context_id.get()),
+                        WindowKind::Normal,
+                        true,
+                    ),
+                },
+            }),
             _ => Some(BrowserEvent::BrowsingContextOpenResolved {
                 profile_id: profile_id.clone(),
                 request_id: *request_id,

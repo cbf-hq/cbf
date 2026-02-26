@@ -7,12 +7,15 @@ use cursor_icon::CursorIcon;
 
 use crate::data::{
     browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
-    context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId,
+    context_menu::ContextMenu,
+    drag::DragStartRequest,
     extension::{
         AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
         AuxiliaryWindowResolution, ExtensionInfo,
     },
-    ime::ImeBoundsUpdate, profile::ProfileInfo,
+    ids::BrowsingContextId,
+    ime::ImeBoundsUpdate,
+    profile::ProfileInfo,
     window_open::{WindowDescriptor, WindowOpenRequest, WindowOpenResult},
 };
 use crate::error::BackendErrorInfo;
