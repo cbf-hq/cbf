@@ -1,7 +1,7 @@
 From e33cbfa2187d15228c7668e1c879da0f1bcfb782 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 24 Feb 2026 14:41:14 +0900
-Subject: [PATCH 7/8] feat(chrome): wire extension runtime and install prompt
+Subject: [PATCH 7/9] feat(chrome): wire extension runtime and install prompt
  flow
 
 ---

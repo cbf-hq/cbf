@@ -1,0 +1,1456 @@
+From 820c3603925d48713965efe6fe731f524079ecf0 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 26 Feb 2026 14:04:11 +0900
+Subject: [PATCH 9/9] refactor extension system, implement print feature and
+ fix devtools
+
+---
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |   5 -
+ chrome/browser/cbf/cbf_browser_service.cc     |  19 +
+ chrome/browser/cbf/cbf_browser_service.h      |   4 +
+ chrome/browser/cbf/cbf_profile_service.cc     | 541 +++++++++++++++---
+ .../browser/cbf/cbf_web_contents_delegate.cc  |  13 +-
+ .../cbf_profile_context_menu_controller.cc    |  22 +-
+ .../cbf_profile_context_menu_controller.h     |  18 +-
+ .../cbf_profile_devtools_controller.cc        | 238 +++++---
+ .../profile/cbf_profile_devtools_controller.h |  13 +-
+ ...bf_profile_devtools_controller_unittest.cc |   4 +
+ .../chrome_devtools_manager_delegate.cc       |   9 +
+ .../browser/devtools/devtools_ui_bindings.cc  |  26 -
+ 12 files changed, 701 insertions(+), 211 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index 546638c5338ac..444219e88bf77 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -2,8 +2,6 @@
+ 
+ #include <utility>
+ 
+-#include "base/logging.h"
+-
+ namespace cbf_bridge::internal {
+ 
+ CbfBridgeEventData::CbfBridgeEventData() = default;
+@@ -109,9 +107,6 @@ void CbfBridgeClientImpl::Observer::OnWebPageCreated(uint64_t web_page_id,
+ void CbfBridgeClientImpl::Observer::OnDevToolsOpened(
+     uint64_t web_page_id,
+     uint64_t devtools_web_page_id) {
+-  LOG(INFO) << "[CBF][Bridge] OnDevToolsOpened inspected_id=" << web_page_id
+-            << " devtools_id=" << devtools_web_page_id
+-            << " profile_id=" << profile_id_;
+   impl_->web_page_profiles.emplace(devtools_web_page_id, profile_id_);
+   CbfBridgeEventData event;
+   event.kind = kEventDevToolsOpened;
+diff --git a/chrome/browser/cbf/cbf_browser_service.cc b/chrome/browser/cbf/cbf_browser_service.cc
+index 47b6a1dffacc2..d20c9f053f72d 100644
+--- a/chrome/browser/cbf/cbf_browser_service.cc
++++ b/chrome/browser/cbf/cbf_browser_service.cc
+@@ -180,6 +180,25 @@ bool CbfBrowserService::IsShutdownRequested() const {
+          shutdown_state_ == ShutdownState::kBlocked;
+ }
+ 
++bool CbfBrowserService::IsManagedWebContents(
++    content::WebContents* web_contents) const {
++  if (!web_contents) {
++    return false;
++  }
++
++  for (const auto& entry : profile_services_) {
++    const auto& service = entry.second;
++    if (!service) {
++      continue;
++    }
++    if (service->GetWebPageIdForWebContents(web_contents) !=
++        kInvalidWebPageId) {
++      return true;
++    }
++  }
++  return false;
++}
++
+ void CbfBrowserService::NotifyBeforeUnloadDialogRequested(
+     WebPageId web_page_id) {
+   if (shutdown_state_ != ShutdownState::kWaitingBeforeUnload &&
+diff --git a/chrome/browser/cbf/cbf_browser_service.h b/chrome/browser/cbf/cbf_browser_service.h
+index f10dc86f876da..7d0d699c555b6 100644
+--- a/chrome/browser/cbf/cbf_browser_service.h
++++ b/chrome/browser/cbf/cbf_browser_service.h
+@@ -13,6 +13,9 @@
+ #include "mojo/public/cpp/bindings/remote.h"
+ 
+ class Profile;
++namespace content {
++class WebContents;
++}  // namespace content
+ 
+ namespace cbf {
+ 
+@@ -38,6 +41,7 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+   void ForceShutdown() override;
+   void NotifyWebPageClosed();
+   bool IsShutdownRequested() const;
++  bool IsManagedWebContents(content::WebContents* web_contents) const;
+   void NotifyBeforeUnloadDialogRequested(WebPageId web_page_id);
+   void NotifyBeforeUnloadFired(WebPageId web_page_id, bool proceed);
+   CbfProfileService* GetProfileServiceForProfile(::Profile* profile);
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index f3eec6138d62a..130ab4c05b773 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -4,14 +4,20 @@
+ #include <utility>
+ #include <vector>
+ 
++#include "build/build_config.h"
++#include "build/buildflag.h"
+ #include "base/logging.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/functional/bind.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/values.h"
++#include "base/time/time.h"
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+ #include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
+ #include "chrome/browser/extensions/extension_install_prompt.h"
++#include "chrome/browser/extensions/extension_install_prompt_show_params.h"
++#include "chrome/browser/printing/print_preview_dialog_controller.h"
++#include "chrome/browser/printing/print_view_manager_common.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_devtools_controller.h"
+@@ -30,6 +36,8 @@
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/isolated_world_ids.h"
+ #include "mojo/public/cpp/bindings/clone_traits.h"
++#include "mojo/public/cpp/bindings/pending_associated_remote.h"
++#include "ui/views/widget/widget.h"
+ #include "url/gurl.h"
+ 
+ namespace cbf {
+@@ -64,6 +72,36 @@ mojom::CbfExtensionInstallPromptResult ToCbfInstallPromptResult(
+   }
+ }
+ 
++extensions::ExtensionInstallPromptClient::Result ToExtensionInstallResult(
++    mojom::CbfExtensionInstallPromptResult result) {
++  switch (result) {
++    case mojom::CbfExtensionInstallPromptResult::kAccepted:
++      return extensions::ExtensionInstallPromptClient::Result::ACCEPTED;
++    case mojom::CbfExtensionInstallPromptResult::
++        kAcceptedWithWithheldPermissions:
++      return extensions::ExtensionInstallPromptClient::Result::
++          ACCEPTED_WITH_WITHHELD_PERMISSIONS;
++    case mojom::CbfExtensionInstallPromptResult::kUserCanceled:
++      return extensions::ExtensionInstallPromptClient::Result::USER_CANCELED;
++    case mojom::CbfExtensionInstallPromptResult::kAborted:
++      return extensions::ExtensionInstallPromptClient::Result::ABORTED;
++  }
++}
++
++mojom::CbfAuxiliaryWindowCloseReason ToAuxiliaryWindowCloseReason(
++    mojom::CbfExtensionInstallPromptResult result) {
++  switch (result) {
++    case mojom::CbfExtensionInstallPromptResult::kAccepted:
++    case mojom::CbfExtensionInstallPromptResult::
++        kAcceptedWithWithheldPermissions:
++      return mojom::CbfAuxiliaryWindowCloseReason::kUnknown;
++    case mojom::CbfExtensionInstallPromptResult::kUserCanceled:
++      return mojom::CbfAuxiliaryWindowCloseReason::kUserCanceled;
++    case mojom::CbfExtensionInstallPromptResult::kAborted:
++      return mojom::CbfAuxiliaryWindowCloseReason::kSystemDismissed;
++  }
++}
++
+ }  // namespace
+ 
+ CbfProfileService::PendingExtensionInstallPrompt::PendingExtensionInstallPrompt() =
+@@ -103,16 +141,35 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+       drag_controller_(std::make_unique<CbfProfileDragController>(
+           service_context_.get())),
+       devtools_controller_(std::make_unique<CbfProfileDevToolsController>(
+-          service_context_.get())) {
++          service_context_.get())),
++      print_preview_web_contents_collection_(this) {
++  service_context_->SetControllers(page_controller_.get(),
++                                   navigation_controller_.get(),
++                                   ime_controller_.get());
+   context_menu_controller_->SetInspectElementHandler(base::BindRepeating(
+       [](base::WeakPtr<CbfProfileService> self, WebPageId web_page_id,
++         const std::optional<content::GlobalRenderFrameHostId>& frame_id,
+          int32_t x, int32_t y) {
+         if (!self) {
+           return;
+         }
++        if (frame_id) {
++          self->devtools_controller_->InspectElementForFrame(web_page_id,
++                                                             frame_id, x, y);
++          return;
++        }
+         self->InspectElement(web_page_id, x, y);
+       },
+       weak_factory_.GetWeakPtr()));
++  context_menu_controller_->SetPrintPreviewRequestedHandler(
++      base::BindRepeating(
++          [](base::WeakPtr<CbfProfileService> self, WebPageId web_page_id) {
++            if (!self) {
++              return;
++            }
++            self->PrintPreview(web_page_id);
++          },
++          weak_factory_.GetWeakPtr()));
+   devtools_controller_->SetRegisterImeHandler(base::BindRepeating(
+       [](base::WeakPtr<CbfProfileService> self, WebPageId web_page_id,
+          content::WebContents* web_contents) {
+@@ -250,6 +307,41 @@ void CbfProfileService::Reload(uint64_t web_page_id, bool ignore_cache) {
+   navigation_controller_->Reload(web_page_id, ignore_cache);
+ }
+ 
++void CbfProfileService::PrintPreview(uint64_t web_page_id) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++  if (!web_contents) {
++    return;
++  }
++
++  bool print_preview_disabled = false;
++#if BUILDFLAG(IS_MAC)
++  // WebContents-modal preview on macOS requires a parent NSWindow for kChild
++  // modal widgets. CBF pages can run without one, so fall back safely.
++  views::Widget* top_level_widget =
++      views::Widget::GetTopLevelWidgetForNativeView(web_contents->GetNativeView());
++  if (!top_level_widget || !top_level_widget->GetNativeWindow()) {
++    print_preview_disabled = true;
++  }
++#endif
++
++  const bool started = printing::StartPrint(
++      web_contents,
++#if BUILDFLAG(IS_CHROMEOS)
++      /*print_renderer=*/mojo::NullAssociatedRemote(),
++#endif
++      /*print_preview_disabled=*/print_preview_disabled,
++      /*has_selection=*/false);
++  if (!started) {
++    return;
++  }
++
++  if (print_preview_disabled) {
++    return;
++  }
++
++  TryAttachPrintPreviewDialog(web_page_id, /*attempts_remaining=*/10);
++}
++
+ void CbfProfileService::OpenDevTools(uint64_t web_page_id) {
+   devtools_controller_->OpenDevTools(web_page_id);
+ }
+@@ -260,6 +352,20 @@ void CbfProfileService::InspectElement(uint64_t web_page_id, int32_t x, int32_t
+ 
+ void CbfProfileService::SetWebPageFocus(uint64_t web_page_id, bool focused) {
+   navigation_controller_->SetWebPageFocus(web_page_id, focused);
++  if (!focused) {
++    return;
++  }
++
++  std::vector<uint64_t> cancel_request_ids;
++  for (const auto& [request_id, pending] : pending_extension_prompts_) {
++    if (pending.web_page_id == web_page_id && pending.auxiliary_window_id != 0) {
++      cancel_request_ids.push_back(request_id);
++    }
++  }
++  for (uint64_t request_id : cancel_request_ids) {
++    ResolveAndClosePlatformPrompt(request_id,
++                                  mojom::CbfAuxiliaryWindowCloseReason::kHostForced);
++  }
+ }
+ 
+ void CbfProfileService::GetWebPageDomHtml(uint64_t web_page_id,
+@@ -333,82 +439,53 @@ void CbfProfileService::ListExtensions(const std::string& profile_id,
+   std::move(callback).Run(std::move(result));
+ }
+ 
+-void CbfProfileService::RequestExtensionInstallPrompt(
+-    uint64_t web_page_id,
+-    uint64_t request_id,
+-    const std::string& extension_id,
+-    mojom::CbfExtensionInstallPromptMode mode) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-  if (!web_contents || !profile_) {
+-    return;
+-  }
+-  extensions::ExtensionRegistry* registry =
+-      extensions::ExtensionRegistry::Get(profile_.get());
+-  if (!registry) {
+-    if (observer_) {
+-      observer_->OnExtensionRuntimeWarning(
+-          web_page_id, "extension_registry_unavailable");
+-    }
+-    return;
++bool CbfProfileService::RequestAuxiliaryInstallPromptForWebstore(
++    content::WebContents* web_contents,
++    const extensions::Extension* extension,
++    const SkBitmap* icon,
++    ExtensionInstallPrompt::DoneCallback done_callback) {
++  if (!web_contents || !extension || !observer_) {
++    return false;
+   }
+-  const extensions::Extension* extension =
+-      registry->GetInstalledExtension(extension_id);
+-  if (!extension) {
+-    if (observer_) {
+-      observer_->OnExtensionRuntimeWarning(web_page_id,
+-                                           "extension_not_found");
+-    }
+-    return;
++  const WebPageId web_page_id = tab_manager_.GetWebPageIdForWebContents(web_contents);
++  if (web_page_id == kInvalidWebPageId) {
++    return false;
+   }
+-
++  const uint64_t request_id = next_auxiliary_request_id_++;
+   auto pending = PendingExtensionInstallPrompt();
+   pending.web_page_id = web_page_id;
+-  pending.extension_id = extension_id;
+-
+-  if (mode == mojom::CbfExtensionInstallPromptMode::kHostMediated) {
+-    pending.host_callback = base::BindOnce(
+-        [](base::WeakPtr<CbfProfileService> self, uint64_t prompt_request_id,
+-           bool proceed) {
+-          if (!self) {
+-            return;
+-          }
+-          self->ResolveExtensionInstallPrompt(
+-              prompt_request_id,
+-              proceed ? mojom::CbfExtensionInstallPromptResult::kAccepted
+-                      : mojom::CbfExtensionInstallPromptResult::kUserCanceled,
+-              std::string());
+-        },
+-        weak_factory_.GetWeakPtr(), request_id);
+-    pending_extension_prompts_[request_id] = std::move(pending);
+-    if (observer_) {
+-      observer_->OnExtensionInstallPromptRequested(
+-          web_page_id, request_id, extension_id, extension->name(),
+-          BuildPermissionNames(extension));
+-    }
+-    return;
++  pending.request_id = request_id;
++  pending.extension_id = extension->id();
++  pending.extension_name = extension->name();
++  pending.permission_names = BuildPermissionNames(extension);
++  pending.extension = extension;
++  if (icon && !icon->empty()) {
++    pending.icon = *icon;
+   }
+-
+-  pending.prompt = std::make_unique<ExtensionInstallPrompt>(web_contents);
+-  pending.prompt->ConfirmInstall(
+-      base::BindOnce(
+-          [](base::WeakPtr<CbfProfileService> self, uint64_t prompt_request_id,
+-             extensions::ExtensionInstallPromptClient::DoneCallbackPayload
+-                 payload) {
+-            if (!self) {
+-              return;
+-            }
+-            self->ResolveExtensionInstallPrompt(
+-                prompt_request_id, ToCbfInstallPromptResult(payload.result),
+-                payload.justification);
+-          },
+-          weak_factory_.GetWeakPtr(), request_id),
+-      extension);
++  pending.done_callback = std::move(done_callback);
+   pending_extension_prompts_[request_id] = std::move(pending);
++  NotifyAuxiliaryWindowOpenRequested(
++      web_page_id, request_id, mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt,
++      extension->id(), extension->name(), BuildPermissionNames(extension));
++  return true;
++}
++
++void CbfProfileService::OpenDefaultAuxiliaryWindow(uint64_t web_page_id,
++                                                   uint64_t request_id) {
++  auto it = pending_extension_prompts_.find(request_id);
++  if (it == pending_extension_prompts_.end()) {
++    return;
++  }
++  if (it->second.web_page_id != web_page_id) {
++    return;
++  }
++  OpenDefaultAuxiliaryWindowImpl(request_id);
+ }
+ 
+-void CbfProfileService::RespondExtensionInstallPrompt(uint64_t web_page_id,
+-                                                      uint64_t request_id,
+-                                                      bool proceed) {
++void CbfProfileService::RespondAuxiliaryWindow(
++    uint64_t web_page_id,
++    uint64_t request_id,
++    mojom::CbfAuxiliaryWindowResponsePtr response) {
+   auto it = pending_extension_prompts_.find(request_id);
+   if (it == pending_extension_prompts_.end()) {
+     return;
+@@ -416,10 +493,45 @@ void CbfProfileService::RespondExtensionInstallPrompt(uint64_t web_page_id,
+   if (it->second.web_page_id != web_page_id) {
+     return;
+   }
+-  if (!it->second.host_callback) {
++  RespondAuxiliaryWindowImpl(request_id, std::move(response));
++}
++
++void CbfProfileService::CloseAuxiliaryWindow(uint64_t web_page_id,
++                                             uint64_t window_id) {
++  auto print_it = print_preview_window_to_dialog_.find(window_id);
++  if (print_it != print_preview_window_to_dialog_.end()) {
++    auto page_it = print_preview_window_to_web_page_.find(window_id);
++    if (page_it == print_preview_window_to_web_page_.end() ||
++        page_it->second != web_page_id) {
++      return;
++    }
++    host_forced_print_preview_windows_.insert(window_id);
++    content::WebContents* dialog = print_it->second;
++    if (!dialog) {
++      ResolvePrintPreviewWindowClosed(
++          window_id, mojom::CbfAuxiliaryWindowCloseReason::kHostForced);
++      return;
++    }
++    dialog->Close();
++    return;
++  }
++
++  auto request_it = auxiliary_window_to_prompt_request_.find(window_id);
++  if (request_it == auxiliary_window_to_prompt_request_.end()) {
+     return;
+   }
+-  std::move(it->second.host_callback).Run(proceed);
++  auto prompt_it = pending_extension_prompts_.find(request_it->second);
++  if (prompt_it == pending_extension_prompts_.end() ||
++      prompt_it->second.web_page_id != web_page_id) {
++    return;
++  }
++  ResolveAndClosePlatformPrompt(request_it->second,
++                                mojom::CbfAuxiliaryWindowCloseReason::kHostForced);
++}
++
++void CbfProfileService::RespondBrowsingContextOpen(
++    mojom::CbfBrowsingContextOpenResponsePtr response) {
++  popup_controller_->RespondBrowsingContextOpen(std::move(response));
+ }
+ 
+ void CbfProfileService::SetShutdownDialogAutoConfirm(bool enabled) {
+@@ -497,8 +609,10 @@ bool CbfProfileService::HandleContextMenu(
+ void CbfProfileService::NotifyNewWebPageRequested(
+     content::WebContents* source,
+     const GURL& target_url,
+-    WindowOpenDisposition disposition) {
+-  popup_controller_->NotifyNewWebPageRequested(source, target_url, disposition);
++    WindowOpenDisposition disposition,
++    bool user_gesture) {
++  popup_controller_->RequestBrowsingContextOpen(source, target_url, disposition,
++                                                user_gesture);
+ }
+ 
+ void CbfProfileService::NotifyWebPageClosed(WebPageId web_page_id) {
+@@ -666,19 +780,294 @@ void CbfProfileService::NotifyFaviconUrlUpdated(
+ void CbfProfileService::ResolveExtensionInstallPrompt(
+     uint64_t request_id,
+     mojom::CbfExtensionInstallPromptResult result,
+-    const std::string& detail) {
++    const std::string& detail,
++    std::optional<mojom::CbfAuxiliaryWindowCloseReason> close_reason_override) {
+   auto it = pending_extension_prompts_.find(request_id);
+   if (it == pending_extension_prompts_.end()) {
+     return;
+   }
+   const WebPageId web_page_id = it->second.web_page_id;
++  const uint64_t auxiliary_window_id = it->second.auxiliary_window_id;
+   const std::string extension_id = it->second.extension_id;
++  auto done_callback = std::move(it->second.done_callback);
++  if (auxiliary_window_id != 0) {
++    auxiliary_window_to_prompt_request_.erase(auxiliary_window_id);
++  }
+   pending_extension_prompts_.erase(it);
++  if (auxiliary_window_id != 0) {
++    NotifyAuxiliaryWindowClosed(
++        web_page_id, auxiliary_window_id,
++        mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt,
++        close_reason_override.value_or(ToAuxiliaryWindowCloseReason(result)));
++  }
++  NotifyAuxiliaryWindowResolved(
++      web_page_id, request_id, mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt,
++      extension_id, result, detail);
++  if (done_callback) {
++    std::move(done_callback).Run(
++        extensions::ExtensionInstallPromptClient::DoneCallbackPayload(
++            ToExtensionInstallResult(result),
++            detail));
++  }
++}
++
++bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
++  auto it = pending_extension_prompts_.find(request_id);
++  if (it == pending_extension_prompts_.end()) {
++    return false;
++  }
++  auto& pending = it->second;
++  content::WebContents* web_contents = tab_manager_.GetWebContents(pending.web_page_id);
++  if (!web_contents || !pending.extension.get()) {
++    ResolveExtensionInstallPrompt(
++        request_id, mojom::CbfExtensionInstallPromptResult::kAborted, "missing_web_contents");
++    return false;
++  }
++  if (pending.prompt) {
++    return true;
++  }
++  pending.auxiliary_window_id = next_auxiliary_window_id_++;
++  const uint64_t web_page_id = pending.web_page_id;
++  const uint64_t auxiliary_window_id = pending.auxiliary_window_id;
++  pending.prompt = std::make_unique<ExtensionInstallPrompt>(web_contents);
++  std::optional<SkBitmap> icon = pending.icon;
++  pending.prompt->ShowDialog(
++      base::BindOnce(
++          [](base::WeakPtr<CbfProfileService> self, uint64_t prompt_request_id,
++             extensions::ExtensionInstallPromptClient::DoneCallbackPayload payload) {
++            if (!self) {
++              return;
++            }
++            self->ResolveExtensionInstallPrompt(
++                prompt_request_id, ToCbfInstallPromptResult(payload.result),
++                payload.justification);
++          },
++          weak_factory_.GetWeakPtr(), request_id),
++      pending.extension.get(), icon ? &(*icon) : nullptr,
++      base::BindRepeating(
++          [](base::WeakPtr<CbfProfileService> self, uint64_t web_page_id,
++             uint64_t auxiliary_window_id, std::string extension_name,
++             std::unique_ptr<ExtensionInstallPromptShowParams> show_params,
++             ExtensionInstallPrompt::DoneCallback done_callback,
++             std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt) {
++            if (!self) {
++              std::move(done_callback).Run(
++                  extensions::ExtensionInstallPromptClient::DoneCallbackPayload(
++                      extensions::ExtensionInstallPromptClient::Result::ABORTED));
++              return;
++            }
++            self->NotifyAuxiliaryWindowOpened(
++                web_page_id, auxiliary_window_id,
++                mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt,
++                extension_name, true);
++            ExtensionInstallPrompt::GetDefaultShowDialogCallback().Run(
++                std::move(show_params), std::move(done_callback), std::move(prompt));
++          },
++          weak_factory_.GetWeakPtr(), web_page_id, auxiliary_window_id, pending.extension_name));
++  auxiliary_window_to_prompt_request_[auxiliary_window_id] = request_id;
++  return true;
++}
++
++bool CbfProfileService::RespondAuxiliaryWindowImpl(
++    uint64_t request_id,
++    mojom::CbfAuxiliaryWindowResponsePtr response) {
++  if (!response) {
++    return false;
++  }
++  if (response->kind != mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt) {
++    return false;
++  }
++  ResolveExtensionInstallPrompt(
++      request_id,
++      response->proceed ? mojom::CbfExtensionInstallPromptResult::kAccepted
++                        : mojom::CbfExtensionInstallPromptResult::kUserCanceled,
++      std::string());
++  return true;
++}
++
++void CbfProfileService::ResolveAndClosePlatformPrompt(
++    uint64_t request_id,
++    mojom::CbfAuxiliaryWindowCloseReason reason) {
++  ResolveExtensionInstallPrompt(request_id,
++                                mojom::CbfExtensionInstallPromptResult::kUserCanceled,
++                                std::string(), reason);
++}
++
++void CbfProfileService::NotifyAuxiliaryWindowOpenRequested(
++    uint64_t web_page_id,
++    uint64_t request_id,
++    mojom::CbfAuxiliaryWindowKind kind,
++    const std::string& extension_id,
++    const std::string& extension_name,
++    const std::vector<std::string>& permission_names) {
++  if (!observer_) {
++    return;
++  }
++  auto request = mojom::CbfAuxiliaryWindowRequest::New();
++  request->request_id = request_id;
++  request->kind = kind;
++  request->extension_id = extension_id;
++  request->extension_name = extension_name;
++  request->permission_names = permission_names;
++  observer_->OnAuxiliaryWindowOpenRequested(web_page_id, std::move(request));
++}
++
++void CbfProfileService::NotifyAuxiliaryWindowResolved(
++    uint64_t web_page_id,
++    uint64_t request_id,
++    mojom::CbfAuxiliaryWindowKind kind,
++    const std::string& extension_id,
++    mojom::CbfExtensionInstallPromptResult result,
++    const std::string& detail) {
++  if (!observer_) {
++    return;
++  }
++  auto resolution = mojom::CbfAuxiliaryWindowResolution::New();
++  resolution->request_id = request_id;
++  resolution->kind = kind;
++  resolution->extension_id = extension_id;
++  resolution->result = result;
++  resolution->detail = detail;
++  observer_->OnAuxiliaryWindowResolved(web_page_id, std::move(resolution));
++}
++
++void CbfProfileService::NotifyAuxiliaryWindowOpened(
++    uint64_t web_page_id,
++    uint64_t window_id,
++    mojom::CbfAuxiliaryWindowKind kind,
++    const std::string& title,
++    bool modal) {
++  if (!observer_) {
++    return;
++  }
++  observer_->OnAuxiliaryWindowOpened(web_page_id, window_id, kind, title, modal);
++}
++
++void CbfProfileService::NotifyAuxiliaryWindowClosed(
++    uint64_t web_page_id,
++    uint64_t window_id,
++    mojom::CbfAuxiliaryWindowKind kind,
++    mojom::CbfAuxiliaryWindowCloseReason reason) {
+   if (!observer_) {
+     return;
+   }
+-  observer_->OnExtensionInstallPromptResolved(web_page_id, request_id,
+-                                              extension_id, result, detail);
++  observer_->OnAuxiliaryWindowClosed(web_page_id, window_id, kind, reason);
++}
++
++void CbfProfileService::TryAttachPrintPreviewDialog(WebPageId web_page_id,
++                                                    int attempts_remaining) {
++  if (attempts_remaining < 0) {
++    return;
++  }
++  if (web_page_id == kInvalidWebPageId) {
++    return;
++  }
++
++  for (const auto& entry : print_preview_window_to_web_page_) {
++    if (entry.second == web_page_id) {
++      return;
++    }
++  }
++
++  content::WebContents* initiator = tab_manager_.GetWebContents(web_page_id);
++  if (!initiator) {
++    return;
++  }
++
++  auto* dialog_controller = printing::PrintPreviewDialogController::GetInstance();
++  if (!dialog_controller) {
++    return;
++  }
++  content::WebContents* preview_dialog =
++      dialog_controller->GetPrintPreviewForContents(initiator);
++  if (preview_dialog) {
++    RegisterPrintPreviewDialog(web_page_id, preview_dialog);
++    return;
++  }
++
++  if (attempts_remaining == 0) {
++    return;
++  }
++
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++      FROM_HERE,
++      base::BindOnce(&CbfProfileService::TryAttachPrintPreviewDialog,
++                     weak_factory_.GetWeakPtr(), web_page_id,
++                     attempts_remaining - 1),
++      base::Milliseconds(50));
++}
++
++void CbfProfileService::RegisterPrintPreviewDialog(
++    WebPageId web_page_id,
++    content::WebContents* preview_dialog) {
++  if (!preview_dialog) {
++    return;
++  }
++  auto existing_it = print_preview_dialog_to_window_.find(preview_dialog);
++  if (existing_it != print_preview_dialog_to_window_.end()) {
++    return;
++  }
++
++  const uint64_t window_id = next_auxiliary_window_id_++;
++  print_preview_window_to_dialog_[window_id] = preview_dialog;
++  print_preview_dialog_to_window_[preview_dialog] = window_id;
++  print_preview_window_to_web_page_[window_id] = web_page_id;
++  print_preview_web_contents_collection_.StartObserving(preview_dialog);
++  NotifyAuxiliaryWindowOpened(web_page_id, window_id,
++                              mojom::CbfAuxiliaryWindowKind::kPrintPreviewDialog,
++                              "Print Preview", true);
++}
++
++void CbfProfileService::ResolvePrintPreviewWindowClosed(
++    uint64_t window_id,
++    mojom::CbfAuxiliaryWindowCloseReason reason) {
++  auto web_page_it = print_preview_window_to_web_page_.find(window_id);
++  if (web_page_it == print_preview_window_to_web_page_.end()) {
++    return;
++  }
++  const WebPageId web_page_id = web_page_it->second;
++
++  auto dialog_it = print_preview_window_to_dialog_.find(window_id);
++  if (dialog_it != print_preview_window_to_dialog_.end()) {
++    content::WebContents* dialog = dialog_it->second;
++    if (dialog) {
++      print_preview_web_contents_collection_.StopObserving(dialog);
++      print_preview_dialog_to_window_.erase(dialog);
++    }
++    print_preview_window_to_dialog_.erase(dialog_it);
++  }
++  print_preview_window_to_web_page_.erase(web_page_it);
++  host_forced_print_preview_windows_.erase(window_id);
++
++  NotifyAuxiliaryWindowClosed(
++      web_page_id, window_id, mojom::CbfAuxiliaryWindowKind::kPrintPreviewDialog,
++      reason);
++}
++
++void CbfProfileService::OnWidgetClosing(views::Widget* widget) {
++  auto it = auxiliary_widget_to_window_id_.find(widget);
++  if (it == auxiliary_widget_to_window_id_.end()) {
++    return;
++  }
++  auxiliary_widget_to_window_id_.erase(it);
++}
++
++void CbfProfileService::WebContentsDestroyed(content::WebContents* web_contents) {
++  auto it = print_preview_dialog_to_window_.find(web_contents);
++  if (it == print_preview_dialog_to_window_.end()) {
++    return;
++  }
++  const uint64_t window_id = it->second;
++  const auto reason = host_forced_print_preview_windows_.contains(window_id)
++                          ? mojom::CbfAuxiliaryWindowCloseReason::kHostForced
++                          : mojom::CbfAuxiliaryWindowCloseReason::kUnknown;
++  ResolvePrintPreviewWindowClosed(window_id, reason);
++}
++
++void CbfProfileService::RenderProcessGone(content::WebContents* web_contents,
++                                          base::TerminationStatus status) {
++  (void)status;
++  WebContentsDestroyed(web_contents);
+ }
+ 
+ void CbfProfileService::NotifyDragStartRequested(
+diff --git a/chrome/browser/cbf/cbf_web_contents_delegate.cc b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+index b07f16639e180..062c0cdd2d655 100644
+--- a/chrome/browser/cbf/cbf_web_contents_delegate.cc
++++ b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+@@ -7,6 +7,7 @@
+ #include "base/logging.h"
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ #include "chrome/browser/cbf/cbf_switches.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/page_navigator.h"
+ 
+ namespace cbf {
+@@ -47,12 +48,20 @@ content::WebContents* CbfWebContentsDelegate::OpenURLFromTab(
+     const content::OpenURLParams& params,
+     base::OnceCallback<void(content::NavigationHandle&)>
+         navigation_handle_callback) {
+-  (void)navigation_handle_callback;
+-
+   if (!profile_service_ || !source) {
+     return nullptr;
+   }
+ 
++  if (params.disposition == WindowOpenDisposition::CURRENT_TAB) {
++    base::WeakPtr<content::NavigationHandle> navigation_handle =
++        source->GetController().LoadURLWithParams(
++            content::NavigationController::LoadURLParams(params));
++    if (navigation_handle_callback && navigation_handle) {
++      std::move(navigation_handle_callback).Run(*navigation_handle);
++    }
++    return source;
++  }
++
+   switch (params.disposition) {
+     case WindowOpenDisposition::NEW_FOREGROUND_TAB:
+     case WindowOpenDisposition::NEW_BACKGROUND_TAB:
+diff --git a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
+index 674e40ad0d769..d9c055e94f68d 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
+@@ -54,11 +54,20 @@ CbfProfileContextMenuController::CbfProfileContextMenuController(CbfProfileServi
+ CbfProfileContextMenuController::~CbfProfileContextMenuController() = default;
+ 
+ void CbfProfileContextMenuController::SetInspectElementHandler(
+-    base::RepeatingCallback<void(WebPageId, int32_t, int32_t)>
++    base::RepeatingCallback<void(
++        WebPageId,
++        const std::optional<content::GlobalRenderFrameHostId>&,
++        int32_t,
++        int32_t)>
+         inspect_element_handler) {
+   inspect_element_handler_ = std::move(inspect_element_handler);
+ }
+ 
++void CbfProfileContextMenuController::SetPrintPreviewRequestedHandler(
++    base::RepeatingCallback<void(WebPageId)> print_preview_requested_handler) {
++  print_preview_requested_handler_ = std::move(print_preview_requested_handler);
++}
++
+ bool CbfProfileContextMenuController::HandleContextMenu(
+     content::RenderFrameHost& render_frame_host,
+     const content::ContextMenuParams& params) {
+@@ -102,6 +111,7 @@ bool CbfProfileContextMenuController::HandleContextMenu(
+ 
+   auto entry = std::make_unique<ContextMenuEntry>();
+   entry->web_page_id = web_page_id;
++  entry->inspect_frame_id = render_frame_host.GetGlobalId();
+   entry->x = enriched_params.x;
+   entry->y = enriched_params.y;
+   entry->menu = std::move(menu);
+@@ -122,10 +132,16 @@ void CbfProfileContextMenuController::ExecuteContextMenuCommand(
+ 
+   auto& entry = it->second;
+   if (entry->menu) {
+-    if (command_id == IDC_CONTENT_CONTEXT_INSPECTELEMENT ||
++    const WebPageId web_page_id = entry->web_page_id;
++    if (command_id == IDC_PRINT) {
++      if (print_preview_requested_handler_) {
++        print_preview_requested_handler_.Run(web_page_id);
++      }
++    } else if (command_id == IDC_CONTENT_CONTEXT_INSPECTELEMENT ||
+         command_id == IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS) {
+       if (inspect_element_handler_) {
+-        inspect_element_handler_.Run(entry->web_page_id, entry->x, entry->y);
++        inspect_element_handler_.Run(web_page_id, entry->inspect_frame_id,
++                                     entry->x, entry->y);
+       }
+     } else {
+       entry->menu->ExecuteCommand(command_id, event_flags);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
+index 969c9384b7cd1..e779bdcaf67df 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
+@@ -3,12 +3,14 @@
+ 
+ #include <cstdint>
+ #include <memory>
++#include <optional>
+ 
+ #include "base/containers/flat_map.h"
+ #include "base/functional/callback_forward.h"
+ #include "base/memory/raw_ptr.h"
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
+ #include "content/public/browser/context_menu_params.h"
++#include "content/public/browser/global_routing_id.h"
+ #include "content/public/browser/render_frame_host.h"
+ 
+ namespace cbf {
+@@ -24,8 +26,14 @@ class CbfProfileContextMenuController {
+   ~CbfProfileContextMenuController();
+ 
+   void SetInspectElementHandler(
+-      base::RepeatingCallback<void(WebPageId, int32_t, int32_t)>
++      base::RepeatingCallback<void(
++          WebPageId,
++          const std::optional<content::GlobalRenderFrameHostId>&,
++          int32_t,
++          int32_t)>
+           inspect_element_handler);
++  void SetPrintPreviewRequestedHandler(
++      base::RepeatingCallback<void(WebPageId)> print_preview_requested_handler);
+   bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
+                          const content::ContextMenuParams& params);
+   void ExecuteContextMenuCommand(uint64_t menu_id,
+@@ -37,6 +45,7 @@ class CbfProfileContextMenuController {
+  private:
+   struct ContextMenuEntry {
+     WebPageId web_page_id = kInvalidWebPageId;
++    std::optional<content::GlobalRenderFrameHostId> inspect_frame_id;
+     int32_t x = 0;
+     int32_t y = 0;
+     std::unique_ptr<CbfRenderViewContextMenu> menu;
+@@ -47,8 +56,13 @@ class CbfProfileContextMenuController {
+   std::uint64_t next_context_menu_id_ = 1;
+   base::flat_map<std::uint64_t, std::unique_ptr<ContextMenuEntry>>
+       context_menus_;
+-  base::RepeatingCallback<void(WebPageId, int32_t, int32_t)>
++  base::RepeatingCallback<void(
++      WebPageId,
++      const std::optional<content::GlobalRenderFrameHostId>&,
++      int32_t,
++      int32_t)>
+       inspect_element_handler_;
++  base::RepeatingCallback<void(WebPageId)> print_preview_requested_handler_;
+   raw_ptr<CbfProfileServiceContext> context_;
+ };
+ 
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+index 10af4e385ddaa..380ba62871008 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+@@ -5,19 +5,17 @@
+ 
+ #include "base/command_line.h"
+ #include "base/functional/bind.h"
+-#include "base/logging.h"
+-#include "base/task/single_thread_task_runner.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "chrome/browser/devtools/devtools_window.h"
+ #include "chrome/browser/devtools/devtools_ui_bindings.h"
++#include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/webui/devtools/devtools_ui.h"
+ #include "chrome/common/chrome_switches.h"
+ #include "content/public/browser/devtools_agent_host.h"
+-#include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_delegate.h"
+-#include "content/public/common/referrer.h"
+-#include "ui/base/page_transition_types.h"
++#include "content/public/browser/web_contents_observer.h"
+ #include "ui/gfx/geometry/rect.h"
+ #include "url/gurl.h"
+ 
+@@ -72,9 +70,7 @@ class CbfDevToolsUIDelegate final : public DevToolsUIBindings::Delegate {
+ 
+   void Inspect(scoped_refptr<content::DevToolsAgentHost> host) override {}
+   void SetInspectedPageBounds(const gfx::Rect& rect) override {}
+-  void InspectElementCompleted() override {
+-    LOG(INFO) << "[CBF][DevTools] InspectElementCompleted";
+-  }
++  void InspectElementCompleted() override {}
+   void SetIsDocked(bool is_docked) override {}
+   void OpenInNewTab(const std::string& url) override {}
+   void OpenSearchResultsInNewTab(const std::string& query) override {}
+@@ -82,16 +78,11 @@ class CbfDevToolsUIDelegate final : public DevToolsUIBindings::Delegate {
+   void SetEyeDropperActive(bool active) override {}
+   void OpenNodeFrontend() override {}
+   void InspectedContentsClosing() override {
+-    LOG(INFO) << "[CBF][DevTools] InspectedContentsClosing";
+     CloseWindow();
+   }
+-  void OnLoadCompleted() override {
+-    LOG(INFO) << "[CBF][DevTools] Frontend OnLoadCompleted";
+-  }
++  void OnLoadCompleted() override {}
+   void ReadyForTest() override {}
+-  void ConnectionReady() override {
+-    LOG(INFO) << "[CBF][DevTools] Frontend ConnectionReady";
+-  }
++  void ConnectionReady() override {}
+   void SetOpenNewWindowForPopups(bool value) override {}
+   infobars::ContentInfoBarManager* GetInfoBarManager() override {
+     return nullptr;
+@@ -118,15 +109,60 @@ content::RenderFrameHost* ResolveInspectFrame(
+   return inspected_contents->GetPrimaryMainFrame();
+ }
+ 
++bool IsDevToolsAllowed(content::WebContents* inspected_contents) {
++  if (!inspected_contents) {
++    return false;
++  }
++  Profile* profile = Profile::FromBrowserContext(
++      inspected_contents->GetBrowserContext());
++  if (!profile) {
++    return false;
++  }
++  return DevToolsWindow::AllowDevToolsFor(profile, inspected_contents);
++}
++
+ }  // namespace
+ 
+ namespace cbf {
+ 
++class CbfProfileDevToolsController::DevToolsFrontendObserver final
++    : public content::WebContentsObserver {
++ public:
++  DevToolsFrontendObserver(
++      content::WebContents* web_contents,
++      base::WeakPtr<CbfProfileDevToolsController> controller,
++      WebPageId inspected_web_page_id,
++      WebPageId devtools_web_page_id)
++      : content::WebContentsObserver(web_contents),
++        controller_(std::move(controller)),
++        inspected_web_page_id_(inspected_web_page_id),
++        devtools_web_page_id_(devtools_web_page_id) {}
++  ~DevToolsFrontendObserver() override = default;
++
++  void RenderFrameHostChanged(content::RenderFrameHost* old_frame,
++                              content::RenderFrameHost* new_frame) override {
++    if (!new_frame || !new_frame->IsInPrimaryMainFrame()) {
++      return;
++    }
++    if (!controller_) {
++      return;
++    }
++    controller_->OnDevToolsFrontendFrameChanged(inspected_web_page_id_,
++                                                devtools_web_page_id_);
++  }
++
++ private:
++  base::WeakPtr<CbfProfileDevToolsController> controller_;
++  WebPageId inspected_web_page_id_ = kInvalidWebPageId;
++  WebPageId devtools_web_page_id_ = kInvalidWebPageId;
++};
++
+ struct CbfProfileDevToolsController::DevToolsSession {
+   DevToolsSession();
+   ~DevToolsSession();
+ 
+   raw_ptr<DevToolsUIBindings> bindings = nullptr;
++  std::unique_ptr<DevToolsFrontendObserver> frontend_observer;
+ };
+ 
+ CbfProfileDevToolsController::DevToolsSession::DevToolsSession() = default;
+@@ -148,12 +184,16 @@ void CbfProfileDevToolsController::OpenDevTools(WebPageId inspected_web_page_id)
+   content::WebContents* inspected_contents =
+       context_->tab_manager().GetWebContents(inspected_web_page_id);
+   if (!inspected_contents) {
+-    LOG(INFO) << "[CBF][DevTools] OpenDevTools ignored: inspected page not found id="
+-              << inspected_web_page_id;
+     return;
+   }
+-  LOG(INFO) << "[CBF][DevTools] OpenDevTools requested inspected_id="
+-            << inspected_web_page_id;
++  if (!IsDevToolsAllowed(inspected_contents)) {
++    auto& observer = context_->observer_remote();
++    if (observer.is_bound()) {
++      observer->OnExtensionRuntimeWarning(inspected_web_page_id,
++                                          "DevTools blocked by policy");
++    }
++    return;
++  }
+ 
+   WebPageId devtools_web_page_id = kInvalidWebPageId;
+   auto existing_it = inspected_to_devtools_.find(inspected_web_page_id);
+@@ -168,56 +208,59 @@ void CbfProfileDevToolsController::OpenDevTools(WebPageId inspected_web_page_id)
+   }
+ 
+   if (devtools_web_page_id == kInvalidWebPageId) {
+-    devtools_web_page_id = context_->tab_manager().CreateWebPage(GURL());
++    const GURL devtools_frontend_url = BuildDevToolsFrontendUrl();
++
++    // CreateWebPage navigates to the devtools:// URL internally via LoadURL.
++    // The WebUI system creates DevToolsUIBindings synchronously during
++    // LoadURL, so ForWebContents returns non-null immediately after this call.
++    devtools_web_page_id =
++        context_->tab_manager().CreateWebPage(devtools_frontend_url);
+     if (devtools_web_page_id == kInvalidWebPageId) {
+-      LOG(INFO) << "[CBF][DevTools] Failed to create devtools page for inspected_id="
+-                << inspected_web_page_id;
+       return;
+     }
+ 
+     content::WebContents* devtools_contents =
+         context_->tab_manager().GetWebContents(devtools_web_page_id);
+     if (!devtools_contents) {
+-      LOG(INFO) << "[CBF][DevTools] Created devtools id="
+-                << devtools_web_page_id << " but WebContents lookup failed";
+       context_->tab_manager().CloseWebPage(devtools_web_page_id);
+       return;
+     }
+ 
+-    const GURL devtools_frontend_url = BuildDevToolsFrontendUrl();
+-    LOG(INFO) << "[CBF][DevTools] Created devtools page id="
+-              << devtools_web_page_id
+-              << " for inspected_id=" << inspected_web_page_id
+-              << " url=" << devtools_frontend_url;
+-
+     if (register_ime_handler_) {
+       register_ime_handler_.Run(devtools_web_page_id, devtools_contents);
+     }
+ 
+-    auto session = std::make_unique<DevToolsSession>();
+-    session->bindings = nullptr;
++    DevToolsUIBindings* bindings =
++        DevToolsUIBindings::ForWebContents(devtools_contents);
++    if (!bindings) {
++      context_->tab_manager().CloseWebPage(devtools_web_page_id);
++      return;
++    }
++
++    scoped_refptr<content::DevToolsAgentHost> agent_host =
++        content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
++    if (!agent_host) {
++      context_->tab_manager().CloseWebPage(devtools_web_page_id);
++      return;
++    }
+ 
+-    devtools_contents->GetController().LoadURL(
+-        devtools_frontend_url, content::Referrer(),
+-        ui::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
+-    LOG(INFO) << "[CBF][DevTools] Navigated devtools page id="
+-              << devtools_web_page_id << " to url=" << devtools_frontend_url;
++    bindings->SetDelegate(
++        new CbfDevToolsUIDelegate(devtools_contents, inspected_contents));
++    bindings->AttachTo(agent_host);
++
++    auto session = std::make_unique<DevToolsSession>();
++    session->bindings = bindings;
++    session->frontend_observer = std::make_unique<DevToolsFrontendObserver>(
++        devtools_contents, weak_factory_.GetWeakPtr(), inspected_web_page_id,
++        devtools_web_page_id);
+ 
+     devtools_sessions_[devtools_web_page_id] = std::move(session);
+     inspected_to_devtools_[inspected_web_page_id] = devtools_web_page_id;
+     devtools_to_inspected_[devtools_web_page_id] = inspected_web_page_id;
+-  } else {
+-    LOG(INFO) << "[CBF][DevTools] Reusing existing devtools page id="
+-              << devtools_web_page_id
+-              << " for inspected_id=" << inspected_web_page_id;
+   }
+ 
+-  TryAttachSession(inspected_web_page_id, devtools_web_page_id, 0);
+-
+   auto& observer = context_->observer_remote();
+   if (observer.is_bound()) {
+-    LOG(INFO) << "[CBF][DevTools] Notifying OnDevToolsOpened inspected_id="
+-              << inspected_web_page_id << " devtools_id=" << devtools_web_page_id;
+     observer->OnDevToolsOpened(inspected_web_page_id, devtools_web_page_id);
+   }
+ }
+@@ -225,28 +268,49 @@ void CbfProfileDevToolsController::OpenDevTools(WebPageId inspected_web_page_id)
+ void CbfProfileDevToolsController::InspectElement(WebPageId inspected_web_page_id,
+                                                   int32_t x,
+                                                   int32_t y) {
++  InspectElementForFrame(inspected_web_page_id, std::nullopt, x, y);
++}
++
++void CbfProfileDevToolsController::InspectElementForFrame(
++    WebPageId inspected_web_page_id,
++    const std::optional<content::GlobalRenderFrameHostId>& inspected_frame_id,
++    int32_t x,
++    int32_t y) {
+   content::WebContents* inspected_contents =
+       context_->tab_manager().GetWebContents(inspected_web_page_id);
+   if (!inspected_contents) {
+-    LOG(INFO) << "[CBF][DevTools] InspectElement ignored: inspected page not found id="
+-              << inspected_web_page_id;
++    return;
++  }
++  if (!IsDevToolsAllowed(inspected_contents)) {
++    auto& observer = context_->observer_remote();
++    if (observer.is_bound()) {
++      observer->OnExtensionRuntimeWarning(inspected_web_page_id,
++                                          "DevTools blocked by policy");
++    }
+     return;
+   }
+ 
+-  LOG(INFO) << "[CBF][DevTools] InspectElement requested inspected_id="
+-            << inspected_web_page_id << " x=" << x << " y=" << y;
+   OpenDevTools(inspected_web_page_id);
+ 
+   scoped_refptr<content::DevToolsAgentHost> agent_host =
+       content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
+-  content::RenderFrameHost* frame = ResolveInspectFrame(inspected_contents);
++  content::RenderFrameHost* frame = nullptr;
++  if (inspected_frame_id) {
++    content::RenderFrameHost* explicit_frame =
++        content::RenderFrameHost::FromID(*inspected_frame_id);
++    if (explicit_frame &&
++        content::WebContents::FromRenderFrameHost(explicit_frame) ==
++            inspected_contents) {
++      frame = explicit_frame;
++    }
++  }
++  if (!frame) {
++    frame = ResolveInspectFrame(inspected_contents);
++  }
+   if (!agent_host || !frame) {
+-    LOG(INFO) << "[CBF][DevTools] InspectElement aborted: missing agent_host/frame";
+     return;
+   }
+ 
+-  LOG(INFO) << "[CBF][DevTools] Dispatching agent_host->InspectElement id="
+-            << agent_host->GetId();
+   agent_host->InspectElement(frame, x, y);
+ }
+ 
+@@ -268,68 +332,54 @@ void CbfProfileDevToolsController::OnWebPageClosed(WebPageId web_page_id) {
+   }
+ }
+ 
+-void CbfProfileDevToolsController::TryAttachSession(
++void CbfProfileDevToolsController::OnDevToolsFrontendFrameChanged(
+     WebPageId inspected_web_page_id,
+-    WebPageId devtools_web_page_id,
+-    int attempt) {
+-  constexpr int kMaxAttempts = 50;
+-  constexpr base::TimeDelta kRetryDelay = base::Milliseconds(20);
+-
++    WebPageId devtools_web_page_id) {
+   auto session_it = devtools_sessions_.find(devtools_web_page_id);
+   if (session_it == devtools_sessions_.end()) {
+     return;
+   }
+ 
+-  content::WebContents* inspected_contents =
+-      context_->tab_manager().GetWebContents(inspected_web_page_id);
+   content::WebContents* devtools_contents =
+       context_->tab_manager().GetWebContents(devtools_web_page_id);
+-  if (!inspected_contents || !devtools_contents) {
+-    LOG(INFO) << "[CBF][DevTools] Attach skipped: missing contents inspected_id="
+-              << inspected_web_page_id
+-              << " devtools_id=" << devtools_web_page_id;
++  if (!devtools_contents) {
+     return;
+   }
+ 
+   DevToolsUIBindings* bindings =
+       DevToolsUIBindings::ForWebContents(devtools_contents);
+   if (!bindings) {
+-    if (attempt >= kMaxAttempts) {
+-      LOG(INFO) << "[CBF][DevTools] Attach failed: bindings not found"
+-                << " inspected_id=" << inspected_web_page_id
+-                << " devtools_id=" << devtools_web_page_id;
+-      return;
+-    }
+-
+-    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+-        FROM_HERE,
+-        base::BindOnce(&CbfProfileDevToolsController::TryAttachSession,
+-                       weak_factory_.GetWeakPtr(), inspected_web_page_id,
+-                       devtools_web_page_id, attempt + 1),
+-        kRetryDelay);
+     return;
+   }
+ 
+   auto& session = session_it->second;
+-  if (session->bindings != bindings) {
+-    session->bindings = bindings;
+-    bindings->SetDelegate(
+-        new CbfDevToolsUIDelegate(devtools_contents, inspected_contents));
+-  }
+-
+-  scoped_refptr<content::DevToolsAgentHost> agent_host =
+-      content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
+-  if (!agent_host) {
+-    LOG(INFO) << "[CBF][DevTools] Attach failed: agent_host unavailable"
+-              << " inspected_id=" << inspected_web_page_id;
++  if (session->bindings == bindings) {
++    // Same bindings instance — no action needed.
++    // DevToolsUIBindings::ReadyToCommitNavigation handles same-RFH reloads
++    // internally (DetachClient + InnerAttach).
+     return;
+   }
+ 
+-  bindings->AttachTo(agent_host);
+-  LOG(INFO) << "[CBF][DevTools] Attached session inspected_id="
+-            << inspected_web_page_id << " devtools_id=" << devtools_web_page_id
+-            << " agent_host_id="
+-            << (agent_host ? agent_host->GetId() : std::string("<null>"));
++  // Cross-RFH navigation: old DevToolsUIBindings destroyed, new one created.
++  // Transfer the delegate and session from old to new bindings.
++  if (session->bindings) {
++    session->bindings->TransferDelegate(*bindings);
++  } else {
++    // Shouldn't happen — initial attach sets bindings. Recover gracefully.
++    content::WebContents* inspected_contents =
++        context_->tab_manager().GetWebContents(inspected_web_page_id);
++    if (!inspected_contents) {
++      return;
++    }
++    bindings->SetDelegate(
++        new CbfDevToolsUIDelegate(devtools_contents, inspected_contents));
++    scoped_refptr<content::DevToolsAgentHost> agent_host =
++        content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
++    if (agent_host) {
++      bindings->AttachTo(agent_host);
++    }
++  }
++  session->bindings = bindings;
+ }
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
+index c54ffb7c47357..8d60c5353619e 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
+@@ -3,12 +3,14 @@
+ 
+ #include <cstdint>
+ #include <memory>
++#include <optional>
+ 
+ #include "base/containers/flat_map.h"
+ #include "base/functional/callback.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "content/public/browser/global_routing_id.h"
+ 
+ namespace content {
+ class WebContents;
+@@ -31,14 +33,19 @@ class CbfProfileDevToolsController {
+           register_ime_handler);
+   void OpenDevTools(WebPageId inspected_web_page_id);
+   void InspectElement(WebPageId inspected_web_page_id, int32_t x, int32_t y);
++  void InspectElementForFrame(
++      WebPageId inspected_web_page_id,
++      const std::optional<content::GlobalRenderFrameHostId>& inspected_frame_id,
++      int32_t x,
++      int32_t y);
+   void OnWebPageClosed(WebPageId web_page_id);
+ 
+  private:
+   struct DevToolsSession;
++  class DevToolsFrontendObserver;
+ 
+-  void TryAttachSession(WebPageId inspected_web_page_id,
+-                        WebPageId devtools_web_page_id,
+-                        int attempt);
++  void OnDevToolsFrontendFrameChanged(WebPageId inspected_web_page_id,
++                                      WebPageId devtools_web_page_id);
+ 
+   base::flat_map<WebPageId, std::unique_ptr<DevToolsSession>> devtools_sessions_;
+   base::flat_map<WebPageId, WebPageId> inspected_to_devtools_;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+index f8df7aec96c3a..e8a86f6c11bbf 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+@@ -43,5 +43,9 @@ TEST_F(CbfProfileDevToolsControllerTest, BootstrapNullWebContentsIsSafeNoOp) {
+   EXPECT_FALSE(HasCbfWebContentsBootstrapForTesting(nullptr));
+ }
+ 
++TEST_F(CbfProfileDevToolsControllerTest, InspectElementForFrameIsSafeNoOp) {
++  controller_.InspectElementForFrame(kInvalidWebPageId, std::nullopt, 0, 0);
++}
++
+ }  // namespace
+ }  // namespace cbf
+diff --git a/chrome/browser/devtools/chrome_devtools_manager_delegate.cc b/chrome/browser/devtools/chrome_devtools_manager_delegate.cc
+index 556a9c5a4c986..817d418aae4ae 100644
+--- a/chrome/browser/devtools/chrome_devtools_manager_delegate.cc
++++ b/chrome/browser/devtools/chrome_devtools_manager_delegate.cc
+@@ -14,6 +14,7 @@
+ #include "base/strings/utf_string_conversions.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/browser_features.h"
++#include "chrome/browser/cbf/cbf_service.h"
+ #include "chrome/browser/devtools/chrome_devtools_session.h"
+ #include "chrome/browser/devtools/device/android_device_manager.h"
+ #include "chrome/browser/devtools/device/tcp_device_provider.h"
+@@ -316,6 +317,14 @@ std::string ChromeDevToolsManagerDelegate::GetTargetType(
+     return DevToolsAgentHost::kTypePage;
+   }
+ 
++  if (cbf::CbfService* cbf_service = cbf::CbfService::GetForProcess()) {
++    cbf::CbfBrowserService* cbf_browser_service = cbf_service->browser_service();
++    if (cbf_browser_service &&
++        cbf_browser_service->IsManagedWebContents(web_contents)) {
++      return DevToolsAgentHost::kTypePage;
++    }
++  }
++
+   return DevToolsAgentHost::kTypeOther;
+ }
+ 
+diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
+index 21f332160b77c..3892bb1526bee 100644
+--- a/chrome/browser/devtools/devtools_ui_bindings.cc
++++ b/chrome/browser/devtools/devtools_ui_bindings.cc
+@@ -860,8 +860,6 @@ DevToolsUIBindings::~DevToolsUIBindings() {
+ void DevToolsUIBindings::HandleMessageFromDevToolsFrontend(
+     base::DictValue message) {
+   if (!frontend_host_) {
+-    LOG(INFO) << "[CBF][DevToolsUIBindings] Drop frontend message: "
+-              << "frontend_host is null";
+     return;
+   }
+   const std::string* method = message.FindString(kFrontendHostMethod);
+@@ -871,8 +869,6 @@ void DevToolsUIBindings::HandleMessageFromDevToolsFrontend(
+     return;
+   }
+   int id = message.FindInt(kFrontendHostId).value_or(0);
+-  LOG(INFO) << "[CBF][DevToolsUIBindings] Frontend->Embedder method="
+-            << (method ? *method : std::string("<null>")) << " id=" << id;
+   base::ListValue params_list;
+   if (params) {
+     params_list = std::move(*params).TakeList();
+@@ -895,13 +891,8 @@ void DevToolsUIBindings::DispatchProtocolMessage(
+     base::span<const uint8_t> message) {
+   DCHECK(agent_host == agent_host_.get());
+   if (!frontend_host_) {
+-    LOG(INFO) << "[CBF][DevToolsUIBindings] Drop backend protocol message: "
+-              << "frontend_host is null";
+     return;
+   }
+-  LOG(INFO) << "[CBF][DevToolsUIBindings] Backend->Frontend protocol bytes="
+-            << message.size();
+-
+   std::string_view message_sp(reinterpret_cast<const char*>(message.data()),
+                               message.size());
+   if (message_sp.length() < kMaxMessageChunkSize) {
+@@ -2164,7 +2155,6 @@ void DevToolsUIBindings::ReadyForTest() {
+ }
+ 
+ void DevToolsUIBindings::ConnectionReady() {
+-  LOG(INFO) << "[CBF][DevToolsUIBindings] ConnectionReady delegate call";
+   delegate_->ConnectionReady();
+ }
+ 
+@@ -2175,12 +2165,8 @@ void DevToolsUIBindings::SetOpenNewWindowForPopups(bool value) {
+ void DevToolsUIBindings::DispatchProtocolMessageFromDevToolsFrontend(
+     const std::string& message) {
+   if (!agent_host_) {
+-    LOG(INFO) << "[CBF][DevToolsUIBindings] Drop frontend protocol message: "
+-              << "agent_host is null";
+     return;
+   }
+-  LOG(INFO) << "[CBF][DevToolsUIBindings] Frontend->Backend protocol bytes="
+-            << message.size();
+   agent_host_->DispatchProtocolMessage(this, base::as_byte_span(message));
+ }
+ 
+@@ -2952,11 +2938,6 @@ void DevToolsUIBindings::CallClientMethodImpl(
+ void DevToolsUIBindings::ReadyToCommitNavigation(
+     content::NavigationHandle* navigation_handle) {
+   if (navigation_handle->IsInPrimaryMainFrame()) {
+-    LOG(INFO) << "[CBF][DevToolsUIBindings] ReadyToCommitNavigation url="
+-              << navigation_handle->GetURL()
+-              << " frontend_loaded=" << frontend_loaded_
+-              << " has_agent_host=" << static_cast<bool>(agent_host_.get())
+-              << " has_frontend_host=" << static_cast<bool>(frontend_host_);
+     if (frontend_loaded_ && agent_host_.get()) {
+       agent_host_->DetachClient(this);
+       InnerAttach();
+@@ -2968,8 +2949,6 @@ void DevToolsUIBindings::ReadyToCommitNavigation(
+       return;
+     }
+     if (frontend_host_) {
+-      LOG(INFO) << "[CBF][DevToolsUIBindings] ReadyToCommitNavigation: "
+-                << "frontend_host already exists";
+       return;
+     }
+     if (content::RenderFrameHost* opener = web_contents_->GetOpener()) {
+@@ -2978,9 +2957,6 @@ void DevToolsUIBindings::ReadyToCommitNavigation(
+       DevToolsUIBindings* opener_bindings =
+           opener_wc ? DevToolsUIBindings::ForWebContents(opener_wc) : nullptr;
+       if (!opener_bindings || !opener_bindings->frontend_host_) {
+-        LOG(INFO) << "[CBF][DevToolsUIBindings] ReadyToCommitNavigation: "
+-                  << "waiting for opener frontend host; opener_wc="
+-                  << static_cast<const void*>(opener_wc);
+         return;
+       }
+     }
+@@ -2989,8 +2965,6 @@ void DevToolsUIBindings::ReadyToCommitNavigation(
+         base::BindRepeating(
+             &DevToolsUIBindings::HandleMessageFromDevToolsFrontend,
+             base::Unretained(this)));
+-    LOG(INFO) << "[CBF][DevToolsUIBindings] ReadyToCommitNavigation: "
+-              << "frontend_host created";
+     return;
+   }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,7 +1,7 @@
 From c10d8bbfd93ce0acd5851618aa6d416f22bdf3bd Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 21 Feb 2026 17:32:32 +0900
-Subject: [PATCH 4/8] chore(chrome): add devtools ui bindings diagnostics
+Subject: [PATCH 4/9] chore(chrome): add devtools ui bindings diagnostics
 
 ---
  .../browser/devtools/devtools_ui_bindings.cc  | 25 +++++++++++++++++++
