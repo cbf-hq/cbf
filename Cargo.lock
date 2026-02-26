@@ -353,20 +353,11 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "async-channel",
  "async-process",
- "cbf-chrome",
- "clap",
  "cursor-icon",
- "dirs",
  "futures-lite",
- "objc2 0.6.3",
- "objc2-app-kit 0.3.2",
- "objc2-core-foundation",
  "oneshot",
- "raw-window-handle",
  "thiserror 2.0.18",
  "tracing",
- "tracing-subscriber",
- "winit",
 ]
 
 [[package]]
@@ -1621,6 +1612,24 @@ checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
  "errno",
  "libc",
+]
+
+[[package]]
+name = "simpleapp"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "cbf",
+ "cbf-chrome",
+ "clap",
+ "cursor-icon",
+ "dirs",
+ "objc2 0.6.3",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "raw-window-handle",
+ "tracing",
+ "tracing-subscriber",
+ "winit",
 ]
 
 [[package]]

@@ -30,7 +30,7 @@ It keeps one window and one surface, and continuously renders a single browsing 
 ## Run
 
 ```bash
-cargo run -p cbf --example simpleapp --features chromium-backend -- \
+cargo run -p simpleapp -- \
   --chromium-executable /path/to/Chromium.app/Contents/MacOS/Chromium
 ```
 
@@ -38,7 +38,7 @@ Using environment variable instead of `--chromium-executable`:
 
 ```bash
 CBF_CHROMIUM_EXECUTABLE=/path/to/Chromium.app/Contents/MacOS/Chromium \
-cargo run -p cbf --example simpleapp --features chromium-backend
+cargo run -p simpleapp
 ```
 
 ## CLI Options
@@ -67,7 +67,7 @@ cargo run -p cbf --example simpleapp --features chromium-backend
 Example to hide Chromium startup window:
 
 ```bash
-cargo run -p cbf --example simpleapp --features chromium-backend -- \
+cargo run -p simpleapp -- \
   --chromium-executable /path/to/Chromium.app/Contents/MacOS/Chromium \
   --chromium-arg=--no-startup-window
 ```

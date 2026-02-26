@@ -1,0 +1,35 @@
+[package]
+name = "simpleapp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "A minimal single-window sample app for CBF"
+repository.workspace = true
+keywords.workspace = true
+license.workspace = true
+publish = false
+
+[package.metadata.cbf.macos-bundle]
+app-name = "CBF SimpleApp"
+bundle-identifier = "io.github.tasuren.cbf.simpleapp"
+category = "public.app-category.developer-tools"
+minimum-system-version = "13.0"
+
+[dependencies]
+cbf = { path = "../../crates/cbf" }
+cbf-chrome = { path = "../../crates/cbf-chrome" }
+clap = { workspace = true, features = ["derive"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+winit.workspace = true
+raw-window-handle.workspace = true
+dirs.workspace = true
+cursor-icon.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+objc2-core-foundation = { workspace = true, features = ["CFCGTypes"] }
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
+workspace = true
+features = ["NSView"]

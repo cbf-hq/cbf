@@ -1,8 +1,8 @@
-use std::{env, path::PathBuf};
+use std::path::PathBuf;
 
 use cbf_chrome::{
     backend::ChromiumBackendOptions,
-    process::{ChromiumProcessOptions, StartChromiumOptions},
+    process::{ChromiumProcessOptions, StartChromiumOptions, resolve_chromium_executable},
 };
 use clap::Parser;
 
@@ -61,12 +61,9 @@ pub(crate) fn parse_cli() -> Cli {
 /// This function resolves the Chromium executable path and user data directory,
 /// either from CLI arguments or from environment variables/defaults.
 pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOptions, String> {
-    let chromium_executable = cli
-        .chromium_executable
-        .clone()
-        .or_else(|| env::var_os("CBF_CHROMIUM_EXECUTABLE").map(PathBuf::from))
+    let chromium_executable = resolve_chromium_executable(cli.chromium_executable.clone())
         .ok_or_else(|| {
-            "missing chromium executable: pass --chromium-executable or set CBF_CHROMIUM_EXECUTABLE"
+            "missing chromium executable: pass --chromium-executable, set CBF_CHROMIUM_EXECUTABLE, or run from a bundled app"
                 .to_owned()
         })?;
 

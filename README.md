@@ -95,7 +95,7 @@ Still to expand:
 Run:
 
 ```bash
-cargo run -p cbf --example simpleapp --features chromium-backend -- \
+cargo run -p simpleapp -- \
   --chromium-executable /path/to/Chromium.app/Contents/MacOS/Chromium \
 ```
 
