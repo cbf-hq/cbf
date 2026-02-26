@@ -30,6 +30,12 @@ Available commands:
 - `tool patch verify`
 - `tool patch build`
 
+`tool patch build` supports `--out-dir` to override `series.toml` output dir:
+
+```bash
+tool patch build -t chrome --out-dir out/Release
+```
+
 ## Deprecated Alias
 
 `tool chromium ...` is still available as a compatibility alias, but it is deprecated.

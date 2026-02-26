@@ -1,4 +1,5 @@
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 import click
@@ -120,21 +121,34 @@ def cmd_chromium_build(
     series: str,
     depot_tools: str | None,
     targets: Sequence[str],
+    out_dir: str | None,
 ) -> int:
     root = repo_root()
     cfg = load_series_config(root, series)
     chromium_src = chromium_src_dir(root)
+    out_dir_path = _resolve_out_dir(chromium_src, out_dir, cfg.out_dir)
     env = tool_env_with_depot_tools(root, depot_tools)
 
     autoninja(
         chromium_src=chromium_src,
-        out_dir=cfg.out_dir,
+        out_dir=out_dir_path,
         targets=targets,
         env=env,
     )
-    click.echo(f"Build OK: {cfg.out_dir}")
+    click.echo(f"Build OK: {out_dir_path}")
 
     return 0
+
+
+def _resolve_out_dir(chromium_src: Path, out_dir: str | None, default: Path) -> Path:
+    if out_dir is None:
+        return default
+
+    candidate = Path(out_dir)
+    if candidate.is_absolute():
+        return candidate
+
+    return chromium_src / candidate
 
 
 def cmd_chromium_run(
@@ -415,17 +429,27 @@ def chromium_verify(
     show_default=True,
     help="Build target name (repeatable)",
 )
+@click.option(
+    "--out-dir",
+    default=None,
+    help=(
+        "Override GN output directory. Relative paths are resolved from "
+        "chromium/src (e.g. out/Release)."
+    ),
+)
 @_common_depot_tools_option
 def patch_build(
     *,
     series: str,
     targets: tuple[str, ...],
+    out_dir: str | None,
     depot_tools: str | None,
 ) -> None:
     cmd_chromium_build(
         series=series,
         depot_tools=depot_tools,
         targets=targets,
+        out_dir=out_dir,
     )
 
 
@@ -440,6 +464,14 @@ def patch_build(
     show_default=True,
     help="Build target name (repeatable)",
 )
+@click.option(
+    "--out-dir",
+    default=None,
+    help=(
+        "Override GN output directory. Relative paths are resolved from "
+        "chromium/src (e.g. out/Release)."
+    ),
+)
 @_common_depot_tools_option
 @click.pass_context
 def chromium_build(
@@ -447,6 +479,7 @@ def chromium_build(
     *,
     series: str,
     targets: tuple[str, ...],
+    out_dir: str | None,
     depot_tools: str | None,
 ) -> None:
     _warn_if_chromium_alias(ctx)
@@ -454,6 +487,7 @@ def chromium_build(
         series=series,
         depot_tools=depot_tools,
         targets=targets,
+        out_dir=out_dir,
     )
 
 
