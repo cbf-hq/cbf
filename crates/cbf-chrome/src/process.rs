@@ -1,6 +1,6 @@
 use async_process::{Child, Command};
 use futures_lite::future::block_on;
-use std::{path::PathBuf, process::ExitStatus};
+use std::{env, path::PathBuf, process::ExitStatus};
 
 use cbf::{
     browser::{BrowserSession, EventStream},
@@ -9,6 +9,40 @@ use cbf::{
 };
 
 use crate::backend::{ChromiumBackend, ChromiumBackendOptions};
+
+/// Resolves Chromium executable path for CBF applications.
+///
+/// Resolution order:
+/// 1. Explicit path (for example CLI argument)
+/// 2. `CBF_CHROMIUM_EXECUTABLE` environment variable
+/// 3. Path relative to current app bundle:
+///    `../Frameworks/Chromium.app/Contents/MacOS/Chromium`
+///
+/// Returns `None` when no candidate can be resolved.
+pub fn resolve_chromium_executable(explicit_path: Option<PathBuf>) -> Option<PathBuf> {
+    explicit_path
+        .or_else(|| env::var_os("CBF_CHROMIUM_EXECUTABLE").map(PathBuf::from))
+        .or_else(resolve_chromium_executable_from_bundle)
+}
+
+fn resolve_chromium_executable_from_bundle() -> Option<PathBuf> {
+    let current_exe = env::current_exe().ok()?;
+    let macos_dir = current_exe.parent()?;
+    let contents_dir = macos_dir.parent()?;
+
+    if contents_dir.file_name()?.to_str()? != "Contents" {
+        return None;
+    }
+
+    let candidate = contents_dir
+        .join("Frameworks")
+        .join("Chromium.app")
+        .join("Contents")
+        .join("MacOS")
+        .join("Chromium");
+
+    candidate.is_file().then_some(candidate)
+}
 
 /// Options for launching the Chromium process.
 #[derive(Debug, Clone)]
