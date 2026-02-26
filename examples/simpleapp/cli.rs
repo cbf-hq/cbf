@@ -38,6 +38,12 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub(crate) log_file: Option<PathBuf>,
 
+    /// Allow Chromium to create the built-in startup default window.
+    ///
+    /// This is unsafe for CBF-controlled lifecycle behavior.
+    #[arg(long)]
+    pub(crate) unsafe_enable_startup_default_window: bool,
+
     /// Extra Chromium command-line argument.
     ///
     /// Repeat this option to pass multiple args.
@@ -90,6 +96,7 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOption
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
             channel_name: cli.channel_name.clone(),
+            unsafe_enable_startup_default_window: cli.unsafe_enable_startup_default_window,
             v: None,
             vmodule: None,
             extra_args: cli.chromium_args.clone(),

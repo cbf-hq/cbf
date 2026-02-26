@@ -38,6 +38,14 @@ pub struct ChromiumProcessOptions {
     /// The name of the IPC channel to use.
     /// Passed as `--cbf-ipc-channel=<name>`.
     pub channel_name: String,
+    /// Allow Chromium to create its default startup window.
+    ///
+    /// By default, CBF passes `--no-startup-window` to prevent Chromium's
+    /// built-in initial window from being created unexpectedly.
+    ///
+    /// This option is intentionally marked unsafe because enabling it can
+    /// interfere with CBF-controlled window lifecycle behavior.
+    pub unsafe_enable_startup_default_window: bool,
     /// Additional arguments to pass to the browser process.
     pub extra_args: Vec<String>,
 }
@@ -111,6 +119,7 @@ pub fn start_chromium(
         v,
         vmodule,
         channel_name,
+        unsafe_enable_startup_default_window,
         extra_args,
     } = process;
 
@@ -141,6 +150,10 @@ pub fn start_chromium(
 
     if let Some(vmodule) = &vmodule {
         command.arg(format!("--vmodule={}", vmodule));
+    }
+
+    if !unsafe_enable_startup_default_window {
+        command.arg("--no-startup-window");
     }
 
     // Add extra arguments
