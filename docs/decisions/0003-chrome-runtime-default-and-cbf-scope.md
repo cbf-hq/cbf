@@ -16,6 +16,11 @@ At the same time, CBF product scope is explicitly embedded-first:
 - Integrators provide application UI.
 - Chrome Views shell UI (tab strip, omnibox/URL bar, toolbar, settings shell) is out of scope.
 
+ADR 0006 later finalized the chrome-only runtime ownership model and ID vocabulary
+boundary. This ADR is updated to keep scope/runtime wording aligned with that
+decision set and associated implementation track (#38, #39, #40, #41, #42, #43,
+#44, #45).
+
 Reference:
 
 - `CHROME_RUNTIME_SCOPE_MATRIX.md`
@@ -24,7 +29,8 @@ Reference:
 
 ## Decision
 
-CBF adopts Chrome Runtime (chrome layer) as the default runtime direction for Chromium integration.
+CBF adopts a chrome-only-first runtime strategy for Chromium integration.
+Non-Chrome runtime alternatives (including Alloy runtime design) are deferred.
 
 CBF scope is fixed as follows:
 
@@ -36,6 +42,9 @@ Architecture and layering constraints remain unchanged:
 - Dependency direction stays `Application -> cbf -> cbf-chrome -> cbf-chrome-sys -> Chromium`.
 - Public `cbf` API remains browser-generic.
 - Chromium/Mojo internals do not leak above `cbf-chrome-sys`.
+- Vocabulary boundary is explicit:
+  - `cbf` uses `BrowsingContextId`.
+  - Chrome runtime / bridge / FFI layers use `TabId`.
 
 Implementation direction for refactoring:
 
@@ -82,6 +91,7 @@ Patch management direction:
 - This ADR sets architecture direction and scope boundaries, not final class/file names.
 - Chromium-native error page behavior remains default unless explicitly overridden by integrator policy.
 - Async/lifecycle safety invariants remain mandatory (`ID + re-resolve`, weak ownership, safe no-op on stale targets).
+- Ownership/lifecycle semantics are defined by ADR 0006 and corresponding design issue #39.
 
 ## Follow-ups
 
@@ -90,3 +100,4 @@ Patch management direction:
 - Split `chromium/patches/cbf/0001-...patch` into dependency-ordered patch series.
 - Add/adjust targeted tests for popup lifecycle, extension flows, failure paths, and shutdown races.
 - Create implementation ADR(s) or design notes for concrete component boundaries and migration sequence if needed.
+- Keep implementation rollout aligned with #40, #42, #43, #44, and #45.

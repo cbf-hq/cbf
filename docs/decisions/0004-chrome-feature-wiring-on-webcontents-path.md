@@ -7,6 +7,8 @@
 
 ADR 0003 established Chrome Runtime as the default direction while keeping CBF embedded-first.
 CBF currently uses multiple Chrome-layer integrations (for example profile services, themes, and DevTools frontend bindings), but still owns page lifecycle via direct `content::WebContents` management.
+ADR 0006 later finalized a Browser-backed ownership model for the chrome-only
+runtime track, and this ADR is interpreted in that updated ownership context.
 
 Current code shape:
 
@@ -25,14 +27,21 @@ At the same time, CBF wants to support browser capabilities typical in Chromium-
 
 ## Decision
 
-CBF will keep Browser-less embedded ownership with WebContents as the primary page boundary, and strengthen Chrome feature wiring on that path.
+CBF keeps chrome capability wiring focused on the tab/WebContents execution path,
+while ownership/lifecycle semantics follow ADR 0006 (Browser-backed model).
+Runtime strategy is chrome-only-first; non-Chrome runtime alternatives (including
+Alloy runtime design) are deferred.
 
 Concretely:
 
-- Keep WebContents ownership/lifecycle in CBF Chromium integration.
+- Keep feature wiring on CBF-managed tab/WebContents execution path.
+- Treat ownership/lifecycle as Browser-backed (`Browser -> Tab`) per ADR 0006.
 - Increase explicit integration points for Chrome-layer capabilities required by CBF goals.
 - Keep public CBF API browser-generic and maintain existing layer direction:
   `Application -> cbf -> cbf-chrome -> cbf-chrome-sys -> Chromium`.
+- Keep vocabulary boundary explicit:
+  - `cbf` uses `BrowsingContextId`.
+  - chrome runtime / bridge / FFI use `TabId`.
 
 Non-goals remain explicit:
 
@@ -62,7 +71,7 @@ DevTools policy for this ADR:
 
 - Requires explicit integration work for each targeted Chrome capability.
 - Some behavior that `DevToolsWindow` provides out of the box remains gap work in CBF.
-- Continued use of WebContents-first ownership requires careful lifecycle/race handling.
+- Browser-backed lifecycle + tab re-resolution still requires careful race handling.
 
 ## Alternatives Considered
 
@@ -72,7 +81,8 @@ DevTools policy for this ADR:
 
 ### B. Move to Browser-owned model as primary architecture
 
-- Not selected due to conflict with embedded-first ownership and host UI responsibility.
+- Not selected at the time of this ADR; later adopted in ADR 0006 without adopting
+  Chrome shell UI ownership.
 
 ### C. Adopt `DevToolsWindow` as primary DevTools integration
 
@@ -87,6 +97,8 @@ DevTools policy for this ADR:
 - This ADR defines architecture direction and capability targets, not final class names.
 - ADR 0002 remains as historical decision context for DevTools architecture rationale.
 - Failure model remains unchanged: disconnects/crashes/timeouts are surfaced as non-fatal events/errors.
+- ADR 0006 partially supersedes this ADR for ownership/lifecycle semantics.
+- Related implementation track: #40, #41, #42, #43, #44, #45.
 
 Current DevTools gap themes (relative to Browser-integrated path) include:
 
@@ -101,3 +113,4 @@ Current DevTools gap themes (relative to Browser-integrated path) include:
 - Define and validate required extension browser-control API coverage (including `chrome.tabs.*` and `chrome.windows.*`).
 - Define and validate autofill suggestion popup behavior on CBF-managed pages.
 - Track DevTools capability gaps as explicit implementation issues while keeping current primary path.
+- Keep feature wiring tasks aligned with ownership/lifecycle rollout order from ADR 0006.
