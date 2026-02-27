@@ -12,6 +12,7 @@ An ADR is not an implementation design document.
 - [ADR 0003: Chrome Runtime Default and Embedded Scope Boundary](./0003-chrome-runtime-default-and-cbf-scope.md)
 - [ADR 0004: Chrome Feature Wiring on WebContents Path](./0004-chrome-feature-wiring-on-webcontents-path.md)
 - [ADR 0005: Host-Mediated Browsing Context Open and Disposition Mapping](./0005-host-mediated-browsing-context-open-and-disposition-mapping.md)
+- [ADR 0006: Chrome-Only Runtime First and ID Vocabulary Boundary](./0006-chrome-only-runtime-and-id-vocabulary-boundary.md)
 
 ## 1. Naming Convention
 
