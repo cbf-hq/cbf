@@ -1,79 +1,123 @@
-# ADR 0006: Chrome-Only Runtime First and ID Vocabulary Boundary
+# ADR 0006: Browser-Backed Ownership Model and ID Boundary for Chrome-Only Runtime
 
 - Status: Accepted
 - Date: 2026-02-27
 
 ## Context
 
-CBF needs to support Chrome-layer capabilities that often assume Browser/Tab ownership semantics (for example `chrome://settings` and `chrome://history` paths).
+CBF must support Chrome-layer capabilities that assume Browser/Tab ownership
+semantics (for example `chrome://settings` and `chrome://history` paths).
 
-Recent issue planning established a new execution direction:
+Issue planning established a chrome-only Browser-backed direction:
 
 - Epic: #38 (`epic(chrome): adopt chrome-only runtime with Browser-backed integration`)
-- Key child issues: #39, #40, #41, #42, #43, #44, #45
-- Existing tasks re-parented for this direction: #36, #37
+- Design issue: #39
+- Related implementation issues: #40, #41, #42, #43, #44, #45
+- Existing feature tasks in scope: #36, #37
 
 At the same time, CBF keeps a strict layered API boundary:
 
 - Public `cbf` API must remain browser-generic.
-- Chromium internals must not leak above `cbf-chrome-sys`.
+- Chromium/Mojo internals must not leak above `cbf-chrome-sys`.
 - Dependency direction remains:
   `Application -> cbf -> cbf-chrome -> cbf-chrome-sys -> Chromium`
 
-Historically, chrome-facing layers used legacy `WebPageId` terminology. This predated the current `BrowsingContextId` vocabulary in `cbf` and causes conceptual drift.
+Historically, chrome-facing layers used legacy `WebPageId` naming.
+This now conflicts with Browser/Tab runtime assumptions and with the explicit
+vocabulary boundary required by #38.
+
+ADR 0004 documented a WebContents-first ownership direction. The new #38/#39
+direction requires an explicit update for ownership and lifecycle semantics.
 
 ## Decision
 
-CBF adopts a **chrome-only runtime-first** direction for current implementation work.
+CBF adopts a Browser-backed ownership model for the chrome-only runtime track.
 
 Concretely:
 
-- Runtime adoption work will target Browser-backed chrome runtime assumptions first.
-- Alloy runtime implementation is deferred and will be decided separately in the future.
-- Identifier vocabulary is split by layer boundary:
-  - `cbf` public layer: `BrowsingContextId`
-  - chrome-facing layers (`cbf-chrome`, `cbf-chrome-sys`, `cbf_bridge`, Chromium CBF runtime): `TabId`
-- Legacy `WebPageId` naming in chrome-facing layers will be migrated to `TabId` (tracked by #40).
+1. Ownership model
+   - Chrome runtime ownership is `Browser -> Tab (WebContents-backed)`.
+   - `cbf` does not own Chromium objects; it operates on stable logical IDs.
+   - `WebContents` ownership remains in Chromium process space.
+
+2. ID boundary and mapping
+   - `cbf` public layer uses `BrowsingContextId`.
+   - Chrome-facing layers (`cbf-chrome`, `cbf-chrome-sys`, bridge, Chromium CBF runtime) use `TabId`.
+   - `BrowsingContextId <-> TabId` is treated as a stable 1:1 logical mapping.
+   - Conversion responsibility is localized at chrome boundary conversion points,
+     not spread across public `cbf` API code.
+   - Legacy `WebPageId` naming is replaced by `TabId` in chrome-facing layers (#40).
+
+3. Lifecycle model
+   - `create`: allocate/resolve Browser-owned tab and emit created signal only
+     after `TabId` is established.
+   - `navigate`: execute against resolved `TabId`; if resolution fails, no-op safely.
+   - `close`: duplicate and late close operations are valid and must no-op safely
+     when target tab no longer exists.
+   - `shutdown`: close/shutdown races are expected; operations must be idempotent
+     and deterministic.
+
+4. Async/failure safety model
+   - Never carry raw `WebContents*` or owning `this` across async boundaries.
+   - Use `ID + re-resolve` at execution time.
+   - Guard async callbacks with weak ownership (`WeakPtr` pattern).
+   - Use `DCHECK + guard return` on race-prone paths instead of `CHECK`.
+   - Treat disconnect/crash/late callback as normal runtime outcomes.
+
+5. Rollout ordering is fixed
+   - #41 (ADR/doc alignment)
+   - #40 (`WebPageId -> TabId` migration)
+   - #42 (Browser-backed lifecycle scaffolding)
+   - #43 (BrowserWindowInterface/TabInterface integration)
+   - #44 (regression suite)
+   - #45 (runtime selection gate: chrome-only default)
 
 ## Consequences
 
 ### Positive
 
-- Aligns implementation vocabulary with Chromium Browser/Tab mental model in chrome-facing layers.
-- Reduces confusion between generic API IDs and Chromium runtime IDs.
-- Improves consistency for Browser/Tab assumption fixes required by settings/history work.
-- Keeps `cbf` public API browser-generic.
+- Removes ambiguity in Browser/Tab ownership responsibilities.
+- Gives implementation issues a fixed lifecycle and race-handling contract.
+- Preserves browser-generic public API while allowing chrome-specific internals.
+- Improves traceability of ID mapping and failure behavior in tests and code reviews.
 
 ### Negative / Trade-offs
 
-- Large, potentially breaking rename surface in bridge/FFI/runtime code.
-- Short-term migration overhead for tests, tooling, and docs.
-- Alloy runtime remains intentionally unimplemented for now.
+- Requires broad rename and contract updates across chrome-facing layers.
+- Introduces temporary complexity while old/new assumptions coexist during migration.
+- ADR 0004 ownership direction is no longer fully aligned and must be interpreted
+  with this ADR's supersede note.
 
 ## Alternatives Considered
 
-### A. Keep WebContents-first approach and continue ad-hoc compatibility guards
+### A. Keep WebContents-first ownership and continue compatibility guards
 
-- Not selected as primary direction due to recurring Browser/Tab assumption gaps.
+- Not selected due to recurring Browser/Tab assumption gaps and crash-prone paths.
 
-### B. Implement chrome-only and Alloy runtimes in parallel now
+### B. Defer ownership decision and decide during implementation
 
-- Not selected due to scope expansion and reduced delivery focus.
+- Not selected because it pushes high-impact decisions into implementation issues.
 
-### C. Keep legacy `WebPageId` naming in chrome-facing layers
+### C. Keep legacy `WebPageId` naming
 
-- Not selected because it preserves vocabulary drift and onboarding friction.
+- Not selected because it keeps vocabulary drift and boundary ambiguity.
 
 ## Notes
 
-- This ADR captures architecture and naming direction, not final class/file names.
-- This ADR does not change `cbf` public naming (`BrowsingContextId`).
-- Existing ADRs remain historical context; this ADR governs the current runtime-first execution track tied to #38.
+- This ADR supersedes ADR 0004 **partially** for ownership/lifecycle direction:
+  Browser-backed ownership in this ADR replaces ADR 0004's WebContents-first
+  ownership guidance.
+- ADR 0004 remains valid as historical context for capability wiring themes that
+  do not conflict with this ownership decision.
+- This ADR does not change `cbf` public naming (`BrowsingContextId`) or expose
+  Chromium internals above `cbf-chrome-sys`.
+- Alloy runtime design remains explicitly out of scope for this ADR.
 
 ## Follow-ups
 
-- Execute #39 (ownership model) and #41 (ADR/doc alignment).
-- Execute #40 (`WebPageId -> TabId` migration) before deeper runtime integration tasks.
-- Execute #42 and #43 to satisfy Browser/Tab assumptions for target flows.
-- Validate via #44 regression suite.
-- Introduce runtime selection gate via #45 (chrome-only default, Alloy deferred).
+1. Update ADR references and wording in #41 to reflect this ownership model.
+2. Complete `WebPageId -> TabId` migration in #40 across chrome-facing layers.
+3. Implement lifecycle scaffolding with idempotent close/shutdown behavior in #42.
+4. Add BrowserWindowInterface/TabInterface integration in #43.
+5. Add regression suite for ID consistency and race/late-callback paths in #44.
+6. Introduce runtime selection gate in #45 with chrome-only default.
