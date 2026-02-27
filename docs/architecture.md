@@ -23,7 +23,7 @@ CBF is designed to be product-agnostic and reusable across multiple applications
 
 ## 3. Layering and Dependency Direction
 
-Three-layer model:
+Layer model:
 
 - `cbf` (browser-generic high-level API)
 - `cbf-chrome` (chrome-specific safe API/backend)
@@ -32,7 +32,9 @@ Three-layer model:
 
 Dependency direction:
 
-`Application -> cbf -> cbf-chrome -> cbf-chrome-sys -> Chromium process`
+- `cbf`: no internal crate dependency
+- `cbf-chrome`: depends on `cbf` and `cbf-chrome-sys`
+- `cbf-chrome-sys`: links to Chromium bridge/runtime
 
 Key rule:
 

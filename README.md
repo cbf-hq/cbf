@@ -43,7 +43,9 @@ It provides a stable, application-agnostic API surface for controlling browsing 
 
 Dependency direction:
 
-`Application -> cbf -> cbf-chrome -> cbf-chrome-sys -> Chromium process`
+- `cbf`: no internal crate dependency
+- `cbf-chrome`: depends on `cbf` and `cbf-chrome-sys`
+- `cbf-chrome-sys`: links to Chromium bridge/runtime
 
 ## API Model
 
