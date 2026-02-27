@@ -16,10 +16,10 @@ It provides a stable, application-agnostic API surface for controlling browsing 
 
 ## Platform Support
 
-| Target | Linux | macOS | Windows |
-| --- | --- | --- | --- |
-| x86_64 | ✖ | ✔ | ✖ |
-| aarch64 | ✖ | ✔ | ✖ |
+| Target  | Linux | macOS | Windows |
+| ------- | ----- | ----- | ------- |
+| x86_64  | ❌    | ✅    | ❌      |
+| aarch64 | ❌    | ✅    | ❌      |
 
 ## Vision
 
