@@ -1,4 +1,4 @@
-From d22ce861729ee7299be2069581ceb282e1872f0c Mon Sep 17 00:00:00 2001
+From e7e0acfdfc5d9ba180d43dc48091ef128ef95c26 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Feb 2026 10:14:42 +0900
 Subject: [PATCH 8/9] feat(chrome): wire extension runtime and auxiliary window
@@ -32,24 +32,24 @@ Subject: [PATCH 8/9] feat(chrome): wire extension runtime and auxiliary window
  24 files changed, 1071 insertions(+), 176 deletions(-)
 
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
-index 174a8bc2dd6b2..24c014feb14ef 100644
+index 677baf355b181..346ccece381b0 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge.h
 @@ -106,21 +106,32 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_inspect_element(
-     uint64_t web_page_id,
+     uint64_t tab_id,
      int32_t x,
      int32_t y);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_print_preview(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id);
++    uint64_t tab_id);
  CBF_BRIDGE_EXPORT bool cbf_bridge_client_get_web_page_dom_html(
      CbfBridgeClientHandle* client,
-     uint64_t web_page_id,
+     uint64_t tab_id,
      uint64_t request_id);
 -CBF_BRIDGE_EXPORT bool cbf_bridge_client_request_extension_install_prompt(
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_open_default_auxiliary_window(
      CbfBridgeClientHandle* client,
-     uint64_t web_page_id,
+     uint64_t tab_id,
 -    uint64_t request_id,
 -    const char* extension_id,
 -    uint8_t mode);
@@ -57,55 +57,55 @@ index 174a8bc2dd6b2..24c014feb14ef 100644
 +    uint64_t request_id);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_auxiliary_window(
      CbfBridgeClientHandle* client,
-     uint64_t web_page_id,
+     uint64_t tab_id,
      uint64_t request_id,
      bool proceed);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_close_auxiliary_window(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t window_id);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_browsing_context_open(
 +    CbfBridgeClientHandle* client,
 +    uint64_t request_id,
 +    uint8_t response_kind,
-+    uint64_t target_web_page_id,
++    uint64_t target_tab_id,
 +    bool activate);
  CBF_BRIDGE_EXPORT void cbf_bridge_client_shutdown(CbfBridgeClientHandle* client);
  CBF_BRIDGE_EXPORT bool cbf_bridge_client_request_shutdown(
      CbfBridgeClientHandle* client,
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
-index 6a8d67e1bd02b..850e4c3faab3d 100644
+index fa5b3c15ecae0..a35faf082412e 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
 @@ -51,16 +51,19 @@ class CbfBridgeClient {
-   bool GoBack(uint64_t web_page_id);
-   bool GoForward(uint64_t web_page_id);
-   bool Reload(uint64_t web_page_id, bool ignore_cache);
-+  bool PrintPreview(uint64_t web_page_id);
-   bool OpenDevTools(uint64_t web_page_id);
-   bool InspectElement(uint64_t web_page_id, int32_t x, int32_t y);
-   bool GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id);
--  bool RequestExtensionInstallPrompt(uint64_t web_page_id,
+   bool GoBack(uint64_t tab_id);
+   bool GoForward(uint64_t tab_id);
+   bool Reload(uint64_t tab_id, bool ignore_cache);
++  bool PrintPreview(uint64_t tab_id);
+   bool OpenDevTools(uint64_t tab_id);
+   bool InspectElement(uint64_t tab_id, int32_t x, int32_t y);
+   bool GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id);
+-  bool RequestExtensionInstallPrompt(uint64_t tab_id,
 -                                     uint64_t request_id,
 -                                     const std::string& extension_id,
 -                                     uint8_t mode);
--  bool RespondExtensionInstallPrompt(uint64_t web_page_id,
+-  bool RespondExtensionInstallPrompt(uint64_t tab_id,
 -                                     uint64_t request_id,
 -                                     bool proceed);
-+  bool OpenDefaultAuxiliaryWindow(uint64_t web_page_id, uint64_t request_id);
-+  bool RespondAuxiliaryWindow(uint64_t web_page_id,
++  bool OpenDefaultAuxiliaryWindow(uint64_t tab_id, uint64_t request_id);
++  bool RespondAuxiliaryWindow(uint64_t tab_id,
 +                              uint64_t request_id,
 +                              bool proceed);
-+  bool CloseAuxiliaryWindow(uint64_t web_page_id, uint64_t window_id);
++  bool CloseAuxiliaryWindow(uint64_t tab_id, uint64_t window_id);
 +  bool RespondBrowsingContextOpen(uint64_t request_id,
 +                                  uint8_t response_kind,
-+                                  uint64_t target_web_page_id,
++                                  uint64_t target_tab_id,
 +                                  bool activate);
    void Shutdown();
  
   private:
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
-index eb73f643b4cea..546638c5338ac 100644
+index 9013fc4f513c9..0646ac9cc4c46 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
 @@ -209,16 +209,42 @@ void CbfBridgeClientImpl::Observer::OnContextMenuRequested(
@@ -113,7 +113,7 @@ index eb73f643b4cea..546638c5338ac 100644
  }
  
 -void CbfBridgeClientImpl::Observer::OnNewWebPageRequested(
--    uint64_t web_page_id,
+-    uint64_t tab_id,
 -    const std::string& target_url,
 -    bool is_popup) {
 +void CbfBridgeClientImpl::Observer::OnBrowsingContextOpenRequested(
@@ -123,7 +123,7 @@ index eb73f643b4cea..546638c5338ac 100644
 +  }
    CbfBridgeEventData event;
 -  event.kind = kEventNewWebPageRequested;
--  event.web_page_id = web_page_id;
+-  event.tab_id = tab_id;
 +  event.kind = kEventBrowsingContextOpenRequested;
 +  event.request_id = request->request_id;
    event.profile_id = profile_id_;
@@ -132,9 +132,9 @@ index eb73f643b4cea..546638c5338ac 100644
 +  event.target_url = request->target_url;
 +  event.user_gesture = request->user_gesture;
 +  event.browsing_context_open_hint = static_cast<uint8_t>(request->hint);
-+  if (request->source_web_page_id.has_value()) {
-+    event.has_source_web_page_id = true;
-+    event.source_web_page_id = request->source_web_page_id.value();
++  if (request->source_tab_id.has_value()) {
++    event.has_source_tab_id = true;
++    event.source_tab_id = request->source_tab_id.value();
 +  }
 +  impl_->browsing_context_open_request_profiles[request->request_id] = profile_id_;
 +  std::lock_guard<std::mutex> lock(impl_->events_mutex);
@@ -151,9 +151,9 @@ index eb73f643b4cea..546638c5338ac 100644
 +  event.request_id = result->request_id;
 +  event.profile_id = profile_id_;
 +  event.browsing_context_open_result = static_cast<uint8_t>(result->result);
-+  if (result->target_web_page_id.has_value()) {
-+    event.has_target_web_page_id = true;
-+    event.target_web_page_id = result->target_web_page_id.value();
++  if (result->target_tab_id.has_value()) {
++    event.has_target_tab_id = true;
++    event.target_tab_id = result->target_tab_id.value();
 +  }
 +  impl_->browsing_context_open_request_profiles.erase(result->request_id);
    std::lock_guard<std::mutex> lock(impl_->events_mutex);
@@ -165,7 +165,7 @@ index eb73f643b4cea..546638c5338ac 100644
  
 -void CbfBridgeClientImpl::Observer::OnExtensionInstallPromptRequested(
 +void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowOpenRequested(
-     uint64_t web_page_id,
+     uint64_t tab_id,
 -    uint64_t request_id,
 -    const std::string& extension_id,
 -    const std::string& extension_name,
@@ -178,7 +178,7 @@ index eb73f643b4cea..546638c5338ac 100644
 -  event.kind = kEventExtensionInstallPromptRequested;
 +  event.kind = kEventAuxiliaryWindowOpenRequested;
    event.profile_id = profile_id_;
-   event.web_page_id = web_page_id;
+   event.tab_id = tab_id;
 -  event.request_id = request_id;
 -  event.extension_id = extension_id;
 -  event.extension_name = extension_name;
@@ -194,7 +194,7 @@ index eb73f643b4cea..546638c5338ac 100644
  
 -void CbfBridgeClientImpl::Observer::OnExtensionInstallPromptResolved(
 +void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowResolved(
-     uint64_t web_page_id,
+     uint64_t tab_id,
 -    uint64_t request_id,
 -    const std::string& extension_id,
 -    cbf::mojom::CbfExtensionInstallPromptResult result,
@@ -207,7 +207,7 @@ index eb73f643b4cea..546638c5338ac 100644
 -  event.kind = kEventExtensionInstallPromptResolved;
 +  event.kind = kEventAuxiliaryWindowResolved;
    event.profile_id = profile_id_;
-   event.web_page_id = web_page_id;
+   event.tab_id = tab_id;
 -  event.request_id = request_id;
 -  event.extension_id = extension_id;
 -  event.extension_install_prompt_result = static_cast<uint8_t>(result);
@@ -225,7 +225,7 @@ index eb73f643b4cea..546638c5338ac 100644
  }
  
 +void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowOpened(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t window_id,
 +    cbf::mojom::CbfAuxiliaryWindowKind kind,
 +    const std::string& title,
@@ -233,7 +233,7 @@ index eb73f643b4cea..546638c5338ac 100644
 +  CbfBridgeEventData event;
 +  event.kind = kEventAuxiliaryWindowOpened;
 +  event.profile_id = profile_id_;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.auxiliary_window_id = window_id;
 +  event.auxiliary_window_kind = static_cast<uint8_t>(kind);
 +  event.auxiliary_window_title = title;
@@ -243,14 +243,14 @@ index eb73f643b4cea..546638c5338ac 100644
 +}
 +
 +void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowClosed(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t window_id,
 +    cbf::mojom::CbfAuxiliaryWindowKind kind,
 +    cbf::mojom::CbfAuxiliaryWindowCloseReason reason) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventAuxiliaryWindowClosed;
 +  event.profile_id = profile_id_;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.auxiliary_window_id = window_id;
 +  event.auxiliary_window_kind = static_cast<uint8_t>(kind);
 +  event.auxiliary_window_close_reason = static_cast<uint8_t>(reason);
@@ -262,7 +262,7 @@ index eb73f643b4cea..546638c5338ac 100644
  CbfBridgeClientImpl::ProfileConnection::~ProfileConnection() = default;
  
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
-index 204c2db1ba6e3..abe2f692694d3 100644
+index 3f14018aa51cd..98962d0eb351a 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
 @@ -36,7 +36,7 @@ struct CbfBridgeEventData {
@@ -283,20 +283,20 @@ index 204c2db1ba6e3..abe2f692694d3 100644
 +  uint8_t auxiliary_window_close_reason = kCbfAuxiliaryWindowCloseReasonUnknown;
 +  std::string auxiliary_window_title;
 +  bool auxiliary_window_modal = false;
-+  bool has_source_web_page_id = false;
-+  uint64_t source_web_page_id = 0;
++  bool has_source_tab_id = false;
++  uint64_t source_tab_id = 0;
 +  uint8_t browsing_context_open_hint = kCbfBrowsingContextOpenHintUnknown;
-+  bool has_target_web_page_id = false;
-+  uint64_t target_web_page_id = 0;
++  bool has_target_tab_id = false;
++  uint64_t target_tab_id = 0;
 +  uint8_t browsing_context_open_result = kCbfBrowsingContextOpenResultAborted;
  
    struct ImeCompositionBoundsData {
      ImeCompositionBoundsData();
 @@ -122,9 +133,10 @@ struct CbfBridgeClientImpl {
      void OnImeBoundsUpdated(cbf::mojom::CbfImeBoundsUpdatePtr update) override;
-     void OnContextMenuRequested(uint64_t web_page_id,
+     void OnContextMenuRequested(uint64_t tab_id,
                                  cbf::mojom::CbfContextMenuPtr menu) override;
--    void OnNewWebPageRequested(uint64_t web_page_id,
+-    void OnNewWebPageRequested(uint64_t tab_id,
 -                               const std::string& target_url,
 -                               bool is_popup) override;
 +    void OnBrowsingContextOpenRequested(
@@ -304,7 +304,7 @@ index 204c2db1ba6e3..abe2f692694d3 100644
 +    void OnBrowsingContextOpenResolved(
 +        cbf::mojom::CbfBrowsingContextOpenResultPtr result) override;
      void OnBeforeUnloadDialogRequested(
-         uint64_t web_page_id,
+         uint64_t tab_id,
          uint64_t request_id,
 @@ -142,20 +154,24 @@ struct CbfBridgeClientImpl {
      void OnExtensionsListed(
@@ -312,7 +312,7 @@ index 204c2db1ba6e3..abe2f692694d3 100644
          std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions) override;
 -    void OnExtensionInstallPromptRequested(
 +    void OnAuxiliaryWindowOpenRequested(
-         uint64_t web_page_id,
+         uint64_t tab_id,
 -        uint64_t request_id,
 -        const std::string& extension_id,
 -        const std::string& extension_name,
@@ -320,21 +320,21 @@ index 204c2db1ba6e3..abe2f692694d3 100644
 -    void OnExtensionInstallPromptResolved(
 +        cbf::mojom::CbfAuxiliaryWindowRequestPtr request) override;
 +    void OnAuxiliaryWindowResolved(
-         uint64_t web_page_id,
+         uint64_t tab_id,
 -        uint64_t request_id,
 -        const std::string& extension_id,
 -        cbf::mojom::CbfExtensionInstallPromptResult result,
 -        const std::string& detail) override;
 +        cbf::mojom::CbfAuxiliaryWindowResolutionPtr resolution) override;
-     void OnExtensionRuntimeWarning(uint64_t web_page_id,
+     void OnExtensionRuntimeWarning(uint64_t tab_id,
                                     const std::string& detail) override;
-+    void OnAuxiliaryWindowOpened(uint64_t web_page_id,
++    void OnAuxiliaryWindowOpened(uint64_t tab_id,
 +                                 uint64_t window_id,
 +                                 cbf::mojom::CbfAuxiliaryWindowKind kind,
 +                                 const std::string& title,
 +                                 bool modal) override;
 +    void OnAuxiliaryWindowClosed(
-+        uint64_t web_page_id,
++        uint64_t tab_id,
 +        uint64_t window_id,
 +        cbf::mojom::CbfAuxiliaryWindowKind kind,
 +        cbf::mojom::CbfAuxiliaryWindowCloseReason reason) override;
@@ -350,7 +350,7 @@ index 204c2db1ba6e3..abe2f692694d3 100644
  
  }  // namespace cbf_bridge::internal
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
-index 38a714f5e8337..8ab6aa5e07af7 100644
+index 62de9323f7d13..a3bf91651c454 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
 @@ -258,6 +258,18 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
@@ -365,10 +365,10 @@ index 38a714f5e8337..8ab6aa5e07af7 100644
 +  out_event->browsing_context_open_hint = kCbfBrowsingContextOpenHintUnknown;
 +  out_event->browsing_context_open_user_gesture = false;
 +  out_event->browsing_context_open_has_source = false;
-+  out_event->browsing_context_open_source_web_page_id = 0;
++  out_event->browsing_context_open_source_tab_id = 0;
 +  out_event->browsing_context_open_result_kind = kCbfBrowsingContextOpenResultAborted;
 +  out_event->browsing_context_open_has_target = false;
-+  out_event->browsing_context_open_target_web_page_id = 0;
++  out_event->browsing_context_open_target_tab_id = 0;
  
    if (event.kind == kEventImeBoundsUpdated) {
      if (event.composition_bounds.has_value()) {
@@ -435,16 +435,16 @@ index 38a714f5e8337..8ab6aa5e07af7 100644
 +        event.target_url.empty() ? nullptr : CopyCString(event.target_url);
 +    out_event->browsing_context_open_hint = event.browsing_context_open_hint;
 +    out_event->browsing_context_open_user_gesture = event.user_gesture;
-+    out_event->browsing_context_open_has_source = event.has_source_web_page_id;
-+    out_event->browsing_context_open_source_web_page_id =
-+        event.source_web_page_id;
++    out_event->browsing_context_open_has_source = event.has_source_tab_id;
++    out_event->browsing_context_open_source_tab_id =
++        event.source_tab_id;
 +  }
 +  if (event.kind == kEventBrowsingContextOpenResolved) {
 +    out_event->browsing_context_open_result_kind =
 +        event.browsing_context_open_result;
-+    out_event->browsing_context_open_has_target = event.has_target_web_page_id;
-+    out_event->browsing_context_open_target_web_page_id =
-+        event.target_web_page_id;
++    out_event->browsing_context_open_has_target = event.has_target_tab_id;
++    out_event->browsing_context_open_target_tab_id =
++        event.target_tab_id;
 +  }
    impl_->events.pop();
    return true;
@@ -459,7 +459,7 @@ index 38a714f5e8337..8ab6aa5e07af7 100644
    event->permission_names.items = nullptr;
    event->permission_names.len = 0;
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
-index 1347f56dd97b7..a083dd01db400 100644
+index fc63af304f898..f34147b3f2e7d 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 @@ -30,14 +30,13 @@ enum CbfEventKind {
@@ -537,21 +537,21 @@ index 1347f56dd97b7..a083dd01db400 100644
 +  uint8_t browsing_context_open_hint;
 +  bool browsing_context_open_user_gesture;
 +  bool browsing_context_open_has_source;
-+  uint64_t browsing_context_open_source_web_page_id;
++  uint64_t browsing_context_open_source_tab_id;
 +  uint8_t browsing_context_open_result_kind;
 +  bool browsing_context_open_has_target;
-+  uint64_t browsing_context_open_target_web_page_id;
++  uint64_t browsing_context_open_target_tab_id;
  } CbfBridgeEvent;
  
  typedef struct CbfImeTextSpan {
 @@ -544,6 +590,8 @@ bool cbf_bridge_client_go_forward(CbfBridgeClientHandle* client,
  bool cbf_bridge_client_reload(CbfBridgeClientHandle* client,
-                                uint64_t web_page_id,
+                                uint64_t tab_id,
                                 bool ignore_cache);
 +bool cbf_bridge_client_print_preview(CbfBridgeClientHandle* client,
-+                                     uint64_t web_page_id);
++                                     uint64_t tab_id);
  bool cbf_bridge_client_open_dev_tools(CbfBridgeClientHandle* client,
-                                       uint64_t web_page_id);
+                                       uint64_t tab_id);
  bool cbf_bridge_client_inspect_element(CbfBridgeClientHandle* client,
 @@ -562,17 +610,24 @@ bool cbf_bridge_client_list_extensions(
      const char* profile_id,
@@ -560,7 +560,7 @@ index 1347f56dd97b7..a083dd01db400 100644
 -bool cbf_bridge_client_request_extension_install_prompt(
 +bool cbf_bridge_client_open_default_auxiliary_window(
      CbfBridgeClientHandle* client,
-     uint64_t web_page_id,
+     uint64_t tab_id,
 -    uint64_t request_id,
 -    const char* extension_id,
 -    uint8_t mode);
@@ -568,30 +568,30 @@ index 1347f56dd97b7..a083dd01db400 100644
 +    uint64_t request_id);
 +bool cbf_bridge_client_respond_auxiliary_window(
      CbfBridgeClientHandle* client,
-     uint64_t web_page_id,
+     uint64_t tab_id,
      uint64_t request_id,
      bool proceed);
 +bool cbf_bridge_client_close_auxiliary_window(CbfBridgeClientHandle* client,
-+                                              uint64_t web_page_id,
++                                              uint64_t tab_id,
 +                                              uint64_t window_id);
 +bool cbf_bridge_client_respond_browsing_context_open(
 +    CbfBridgeClientHandle* client,
 +    uint64_t request_id,
 +    uint8_t response_kind,
-+    uint64_t target_web_page_id,
++    uint64_t target_tab_id,
 +    bool activate);
  
  #ifdef __cplusplus
  }
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
-index 350a5897fc1ef..be974f1306713 100644
+index b3db5b134d555..560cfec599319 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
-@@ -316,6 +316,33 @@ bool CbfBridgeClient::Reload(uint64_t web_page_id, bool ignore_cache) {
+@@ -316,6 +316,33 @@ bool CbfBridgeClient::Reload(uint64_t tab_id, bool ignore_cache) {
    return true;
  }
  
-+bool CbfBridgeClient::PrintPreview(uint64_t web_page_id) {
++bool CbfBridgeClient::PrintPreview(uint64_t tab_id) {
 +  if (!impl_) {
 +    return false;
 +  }
@@ -603,8 +603,8 @@ index 350a5897fc1ef..be974f1306713 100644
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id) {
-+            auto it = impl->web_page_profiles.find(web_page_id);
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id) {
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -612,22 +612,22 @@ index 350a5897fc1ef..be974f1306713 100644
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->PrintPreview(web_page_id);
++            remote_it->second.remote->PrintPreview(tab_id);
 +          },
-+          impl, web_page_id));
++          impl, tab_id));
 +  return true;
 +}
 +
- bool CbfBridgeClient::OpenDevTools(uint64_t web_page_id) {
+ bool CbfBridgeClient::OpenDevTools(uint64_t tab_id) {
    if (!impl_) {
      return false;
-@@ -398,11 +425,9 @@ bool CbfBridgeClient::GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_i
+@@ -398,11 +425,9 @@ bool CbfBridgeClient::GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id) {
    return true;
  }
  
 -bool CbfBridgeClient::RequestExtensionInstallPrompt(
 +bool CbfBridgeClient::OpenDefaultAuxiliaryWindow(
-     uint64_t web_page_id,
+     uint64_t tab_id,
 -    uint64_t request_id,
 -    const std::string& extension_id,
 -    uint8_t mode) {
@@ -639,10 +639,10 @@ index 350a5897fc1ef..be974f1306713 100644
    task_runner->PostTask(
        FROM_HERE,
        base::BindOnce(
--          [](CbfBridgeClientImpl* impl, uint64_t web_page_id, uint64_t request_id,
+-          [](CbfBridgeClientImpl* impl, uint64_t tab_id, uint64_t request_id,
 -             std::string extension_id, uint8_t mode) {
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id, uint64_t request_id) {
-             auto it = impl->web_page_profiles.find(web_page_id);
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id, uint64_t request_id) {
+             auto it = impl->web_page_profiles.find(tab_id);
              if (it == impl->web_page_profiles.end()) {
                return;
 @@ -424,17 +448,15 @@ bool CbfBridgeClient::RequestExtensionInstallPrompt(
@@ -650,41 +650,41 @@ index 350a5897fc1ef..be974f1306713 100644
                return;
              }
 -            remote_it->second.remote->RequestExtensionInstallPrompt(
--                web_page_id, request_id, extension_id,
+-                tab_id, request_id, extension_id,
 -                static_cast<cbf::mojom::CbfExtensionInstallPromptMode>(mode));
-+            remote_it->second.remote->OpenDefaultAuxiliaryWindow(web_page_id, request_id);
++            remote_it->second.remote->OpenDefaultAuxiliaryWindow(tab_id, request_id);
            },
--          impl, web_page_id, request_id, extension_id, mode));
-+          impl, web_page_id, request_id));
+-          impl, tab_id, request_id, extension_id, mode));
++          impl, tab_id, request_id));
    return true;
  }
  
--bool CbfBridgeClient::RespondExtensionInstallPrompt(uint64_t web_page_id,
+-bool CbfBridgeClient::RespondExtensionInstallPrompt(uint64_t tab_id,
 -                                                    uint64_t request_id,
 -                                                    bool proceed) {
-+bool CbfBridgeClient::RespondAuxiliaryWindow(uint64_t web_page_id,
++bool CbfBridgeClient::RespondAuxiliaryWindow(uint64_t tab_id,
 +                                             uint64_t request_id,
 +                                             bool proceed) {
    if (!impl_) {
      return false;
    }
-@@ -456,13 +478,98 @@ bool CbfBridgeClient::RespondExtensionInstallPrompt(uint64_t web_page_id,
+@@ -456,13 +478,98 @@ bool CbfBridgeClient::RespondExtensionInstallPrompt(uint64_t tab_id,
              if (remote_it == impl->profile_connections.end()) {
                return;
              }
 -            remote_it->second.remote->RespondExtensionInstallPrompt(
--                web_page_id, request_id, proceed);
+-                tab_id, request_id, proceed);
 +            auto response = cbf::mojom::CbfAuxiliaryWindowResponse::New();
 +            response->kind = cbf::mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt;
 +            response->proceed = proceed;
 +            remote_it->second.remote->RespondAuxiliaryWindow(
-+                web_page_id, request_id, std::move(response));
++                tab_id, request_id, std::move(response));
            },
-           impl, web_page_id, request_id, proceed));
+           impl, tab_id, request_id, proceed));
    return true;
  }
  
-+bool CbfBridgeClient::CloseAuxiliaryWindow(uint64_t web_page_id,
++bool CbfBridgeClient::CloseAuxiliaryWindow(uint64_t tab_id,
 +                                           uint64_t window_id) {
 +  if (!impl_) {
 +    return false;
@@ -697,9 +697,9 @@ index 350a5897fc1ef..be974f1306713 100644
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id,
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id,
 +             uint64_t window_id) {
-+            auto it = impl->web_page_profiles.find(web_page_id);
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -707,15 +707,15 @@ index 350a5897fc1ef..be974f1306713 100644
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->CloseAuxiliaryWindow(web_page_id, window_id);
++            remote_it->second.remote->CloseAuxiliaryWindow(tab_id, window_id);
 +          },
-+          impl, web_page_id, window_id));
++          impl, tab_id, window_id));
 +  return true;
 +}
 +
 +bool CbfBridgeClient::RespondBrowsingContextOpen(uint64_t request_id,
 +                                                 uint8_t response_kind,
-+                                                 uint64_t target_web_page_id,
++                                                 uint64_t target_tab_id,
 +                                                 bool activate) {
 +  if (!impl_) {
 +    return false;
@@ -729,7 +729,7 @@ index 350a5897fc1ef..be974f1306713 100644
 +      FROM_HERE,
 +      base::BindOnce(
 +          [](CbfBridgeClientImpl* impl, uint64_t request_id,
-+             uint8_t response_kind, uint64_t target_web_page_id, bool activate) {
++             uint8_t response_kind, uint64_t target_tab_id, bool activate) {
 +            auto profile_it =
 +                impl->browsing_context_open_request_profiles.find(request_id);
 +            if (profile_it == impl->browsing_context_open_request_profiles.end()) {
@@ -750,19 +750,19 @@ index 350a5897fc1ef..be974f1306713 100644
 +              case kCbfBrowsingContextOpenResponseAllowExistingContext:
 +                response->action =
 +                    cbf::mojom::CbfBrowsingContextOpenResponseAction::kAllowExistingContext;
-+                response->target_web_page_id = target_web_page_id;
++                response->target_tab_id = target_tab_id;
 +                break;
 +              case kCbfBrowsingContextOpenResponseDeny:
 +              default:
 +                response->action =
 +                    cbf::mojom::CbfBrowsingContextOpenResponseAction::kDeny;
-+                response->target_web_page_id.reset();
++                response->target_tab_id.reset();
 +                response->activate = false;
 +                break;
 +            }
 +            remote_it->second.remote->RespondBrowsingContextOpen(std::move(response));
 +          },
-+          impl, request_id, response_kind, target_web_page_id, activate));
++          impl, request_id, response_kind, target_tab_id, activate));
 +  return true;
 +}
 +
@@ -770,29 +770,29 @@ index 350a5897fc1ef..be974f1306713 100644
  
  extern "C" bool cbf_bridge_client_create_web_page(CbfBridgeClientHandle* client,
 @@ -559,6 +666,15 @@ extern "C" bool cbf_bridge_client_reload(CbfBridgeClientHandle* client,
-       ->Reload(web_page_id, ignore_cache);
+       ->Reload(tab_id, ignore_cache);
  }
  
 +extern "C" bool cbf_bridge_client_print_preview(CbfBridgeClientHandle* client,
-+                                                uint64_t web_page_id) {
++                                                uint64_t tab_id) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->PrintPreview(web_page_id);
++      ->PrintPreview(tab_id);
 +}
 +
  extern "C" bool cbf_bridge_client_get_web_page_dom_html(
      CbfBridgeClientHandle* client,
-     uint64_t web_page_id,
+     uint64_t tab_id,
 @@ -592,21 +708,18 @@ extern "C" bool cbf_bridge_client_inspect_element(
-       ->InspectElement(web_page_id, x, y);
+       ->InspectElement(tab_id, x, y);
  }
  
 -extern "C" bool cbf_bridge_client_request_extension_install_prompt(
 +extern "C" bool cbf_bridge_client_open_default_auxiliary_window(
      CbfBridgeClientHandle* client,
-     uint64_t web_page_id,
+     uint64_t tab_id,
 -    uint64_t request_id,
 -    const char* extension_id,
 -    uint8_t mode) {
@@ -802,53 +802,53 @@ index 350a5897fc1ef..be974f1306713 100644
      return false;
    }
    return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
--      ->RequestExtensionInstallPrompt(web_page_id, request_id, extension_id,
+-      ->RequestExtensionInstallPrompt(tab_id, request_id, extension_id,
 -                                      mode);
-+      ->OpenDefaultAuxiliaryWindow(web_page_id, request_id);
++      ->OpenDefaultAuxiliaryWindow(tab_id, request_id);
  }
  
 -extern "C" bool cbf_bridge_client_respond_extension_install_prompt(
 +extern "C" bool cbf_bridge_client_respond_auxiliary_window(
      CbfBridgeClientHandle* client,
-     uint64_t web_page_id,
+     uint64_t tab_id,
      uint64_t request_id,
 @@ -615,5 +728,30 @@ extern "C" bool cbf_bridge_client_respond_extension_install_prompt(
      return false;
    }
    return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
--      ->RespondExtensionInstallPrompt(web_page_id, request_id, proceed);
-+      ->RespondAuxiliaryWindow(web_page_id, request_id, proceed);
+-      ->RespondExtensionInstallPrompt(tab_id, request_id, proceed);
++      ->RespondAuxiliaryWindow(tab_id, request_id, proceed);
 +}
 +
 +extern "C" bool cbf_bridge_client_close_auxiliary_window(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t window_id) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->CloseAuxiliaryWindow(web_page_id, window_id);
++      ->CloseAuxiliaryWindow(tab_id, window_id);
 +}
 +
 +extern "C" bool cbf_bridge_client_respond_browsing_context_open(
 +    CbfBridgeClientHandle* client,
 +    uint64_t request_id,
 +    uint8_t response_kind,
-+    uint64_t target_web_page_id,
++    uint64_t target_tab_id,
 +    bool activate) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->RespondBrowsingContextOpen(request_id, response_kind, target_web_page_id,
++      ->RespondBrowsingContextOpen(request_id, response_kind, target_tab_id,
 +                                   activate);
  }
 diff --git a/chrome/browser/cbf/cbf_browser_service.cc b/chrome/browser/cbf/cbf_browser_service.cc
-index 5e686ca39c5a7..47b6a1dffacc2 100644
+index 152cbbaa59856..eb34e7ab0fa04 100644
 --- a/chrome/browser/cbf/cbf_browser_service.cc
 +++ b/chrome/browser/cbf/cbf_browser_service.cc
-@@ -201,6 +201,25 @@ void CbfBrowserService::NotifyBeforeUnloadFired(WebPageId web_page_id,
+@@ -201,6 +201,25 @@ void CbfBrowserService::NotifyBeforeUnloadFired(TabId tab_id,
    }
  }
  
@@ -872,22 +872,22 @@ index 5e686ca39c5a7..47b6a1dffacc2 100644
 +}
 +
  void CbfBrowserService::MarkBeforeUnloadDispatchComplete(
-     WebPageId web_page_id) {
-   const auto it = pending_beforeunload_pages_.find(web_page_id);
+     TabId tab_id) {
+   const auto it = pending_beforeunload_pages_.find(tab_id);
 diff --git a/chrome/browser/cbf/cbf_browser_service.h b/chrome/browser/cbf/cbf_browser_service.h
-index 8df7b2292b4dc..f10dc86f876da 100644
+index 2cef30622fc54..9d110944250cc 100644
 --- a/chrome/browser/cbf/cbf_browser_service.h
 +++ b/chrome/browser/cbf/cbf_browser_service.h
 @@ -40,6 +40,7 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
    bool IsShutdownRequested() const;
-   void NotifyBeforeUnloadDialogRequested(WebPageId web_page_id);
-   void NotifyBeforeUnloadFired(WebPageId web_page_id, bool proceed);
+   void NotifyBeforeUnloadDialogRequested(TabId tab_id);
+   void NotifyBeforeUnloadFired(TabId tab_id, bool proceed);
 +  CbfProfileService* GetProfileServiceForProfile(::Profile* profile);
  
   private:
    enum class ShutdownState {
 diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
-index f99badec84402..ec691f2cfba40 100644
+index cc51737e6551a..1d4bdebcf09f4 100644
 --- a/chrome/browser/cbf/cbf_profile_service.h
 +++ b/chrome/browser/cbf/cbf_profile_service.h
 @@ -6,15 +6,19 @@
@@ -942,30 +942,30 @@ index f99badec84402..ec691f2cfba40 100644
    CbfProfileService(::Profile* profile, CbfBrowserService* browser_service);
    CbfProfileService(const CbfProfileService&) = delete;
 @@ -92,6 +101,7 @@ class CbfProfileService : public mojom::CbfProfileService {
-   void GoBack(uint64_t web_page_id) override;
-   void GoForward(uint64_t web_page_id) override;
-   void Reload(uint64_t web_page_id, bool ignore_cache) override;
-+  void PrintPreview(uint64_t web_page_id) override;
-   void OpenDevTools(uint64_t web_page_id) override;
-   void InspectElement(uint64_t web_page_id, int32_t x, int32_t y) override;
-   void SetWebPageFocus(uint64_t web_page_id, bool focused) override;
+   void GoBack(uint64_t tab_id) override;
+   void GoForward(uint64_t tab_id) override;
+   void Reload(uint64_t tab_id, bool ignore_cache) override;
++  void PrintPreview(uint64_t tab_id) override;
+   void OpenDevTools(uint64_t tab_id) override;
+   void InspectElement(uint64_t tab_id, int32_t x, int32_t y) override;
+   void SetWebPageFocus(uint64_t tab_id, bool focused) override;
 @@ -99,14 +109,21 @@ class CbfProfileService : public mojom::CbfProfileService {
-   void GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id) override;
+   void GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id) override;
    void ListExtensions(const std::string& profile_id,
                        ListExtensionsCallback callback) override;
 -  void RequestExtensionInstallPrompt(
-+  void OpenDefaultAuxiliaryWindow(uint64_t web_page_id,
++  void OpenDefaultAuxiliaryWindow(uint64_t tab_id,
 +                                  uint64_t request_id) override;
 +  void RespondAuxiliaryWindow(
-       uint64_t web_page_id,
+       uint64_t tab_id,
        uint64_t request_id,
 -      const std::string& extension_id,
 -      mojom::CbfExtensionInstallPromptMode mode) override;
--  void RespondExtensionInstallPrompt(uint64_t web_page_id,
+-  void RespondExtensionInstallPrompt(uint64_t tab_id,
 -                                     uint64_t request_id,
 -                                     bool proceed) override;
 +      mojom::CbfAuxiliaryWindowResponsePtr response) override;
-+  void CloseAuxiliaryWindow(uint64_t web_page_id,
++  void CloseAuxiliaryWindow(uint64_t tab_id,
 +                            uint64_t window_id) override;
 +  void RespondBrowsingContextOpen(
 +      mojom::CbfBrowsingContextOpenResponsePtr response) override;
@@ -984,13 +984,13 @@ index f99badec84402..ec691f2cfba40 100644
 -                                 WindowOpenDisposition disposition);
 +                                 WindowOpenDisposition disposition,
 +                                 bool user_gesture);
-   void NotifyWebPageClosed(WebPageId web_page_id);
+   void NotifyWebPageClosed(TabId tab_id);
  
    void OnBeforeUnloadDialogRequested(content::WebContents* web_contents);
 @@ -166,15 +184,64 @@ class CbfProfileService : public mojom::CbfProfileService {
          const PendingExtensionInstallPrompt&) = delete;
  
-     WebPageId web_page_id = kInvalidWebPageId;
+     TabId tab_id = kInvalidTabId;
 +    uint64_t request_id = 0;
 +    uint64_t auxiliary_window_id = 0;
      std::string extension_id;
@@ -1016,30 +1016,30 @@ index f99badec84402..ec691f2cfba40 100644
 +      mojom::CbfAuxiliaryWindowResponsePtr response);
 +  void ResolveAndClosePlatformPrompt(uint64_t request_id,
 +                                     mojom::CbfAuxiliaryWindowCloseReason reason);
-+  void NotifyAuxiliaryWindowOpenRequested(uint64_t web_page_id,
++  void NotifyAuxiliaryWindowOpenRequested(uint64_t tab_id,
 +                                          uint64_t request_id,
 +                                          mojom::CbfAuxiliaryWindowKind kind,
 +                                          const std::string& extension_id,
 +                                          const std::string& extension_name,
 +                                          const std::vector<std::string>& permission_names);
-+  void NotifyAuxiliaryWindowResolved(uint64_t web_page_id,
++  void NotifyAuxiliaryWindowResolved(uint64_t tab_id,
 +                                     uint64_t request_id,
 +                                     mojom::CbfAuxiliaryWindowKind kind,
 +                                     const std::string& extension_id,
 +                                     mojom::CbfExtensionInstallPromptResult result,
 +                                     const std::string& detail);
 +  void NotifyAuxiliaryWindowOpened(
-+      uint64_t web_page_id,
++      uint64_t tab_id,
 +      uint64_t window_id,
 +      mojom::CbfAuxiliaryWindowKind kind,
 +      const std::string& title,
 +      bool modal);
-+  void NotifyAuxiliaryWindowClosed(uint64_t web_page_id,
++  void NotifyAuxiliaryWindowClosed(uint64_t tab_id,
 +                                   uint64_t window_id,
 +                                   mojom::CbfAuxiliaryWindowKind kind,
 +                                   mojom::CbfAuxiliaryWindowCloseReason reason);
-+  void TryAttachPrintPreviewDialog(WebPageId web_page_id, int attempts_remaining);
-+  void RegisterPrintPreviewDialog(WebPageId web_page_id,
++  void TryAttachPrintPreviewDialog(TabId tab_id, int attempts_remaining);
++  void RegisterPrintPreviewDialog(TabId tab_id,
 +                                  content::WebContents* preview_dialog);
 +  void ResolvePrintPreviewWindowClosed(
 +      uint64_t window_id,
@@ -1067,7 +1067,7 @@ index f99badec84402..ec691f2cfba40 100644
 +      print_preview_window_to_dialog_;
 +  std::map<raw_ptr<content::WebContents>, uint64_t>
 +      print_preview_dialog_to_window_;
-+  std::map<uint64_t, WebPageId> print_preview_window_to_web_page_;
++  std::map<uint64_t, TabId> print_preview_window_to_web_page_;
 +  std::set<uint64_t> host_forced_print_preview_windows_;
 +  WebContentsCollection print_preview_web_contents_collection_;
    mojo::ReceiverSet<mojom::CbfProfileService> receivers_;
@@ -1098,7 +1098,7 @@ index e79cebbeba3fe..b07f16639e180 100644
  
    return nullptr;
 diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
-index aab85e801cf88..3bf0a9679e06d 100644
+index d6f38058309e2..11ec52f6a4e65 100644
 --- a/chrome/browser/cbf/mojom/cbf_browser.mojom
 +++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
 @@ -14,11 +14,6 @@ struct CbfExtensionInfo {
@@ -1175,7 +1175,7 @@ index aab85e801cf88..3bf0a9679e06d 100644
 +
 +struct CbfBrowsingContextOpenRequest {
 +  uint64 request_id;
-+  uint64? source_web_page_id;
++  uint64? source_tab_id;
 +  string target_url;
 +  CbfBrowsingContextOpenHint hint;
 +  bool user_gesture;
@@ -1184,54 +1184,54 @@ index aab85e801cf88..3bf0a9679e06d 100644
 +struct CbfBrowsingContextOpenResponse {
 +  uint64 request_id;
 +  CbfBrowsingContextOpenResponseAction action;
-+  uint64? target_web_page_id;
++  uint64? target_tab_id;
 +  bool activate;
 +};
 +
 +struct CbfBrowsingContextOpenResult {
 +  uint64 request_id;
 +  CbfBrowsingContextOpenResultKind result;
-+  uint64? target_web_page_id;
++  uint64? target_tab_id;
 +};
 +
  enum CbfKeyEventType {
    kRawKeyDown,
    kKeyDown,
 @@ -390,7 +462,8 @@ interface CbfProfileObserver {
-   OnWebPageResizeAcknowledged(uint64 web_page_id);
+   OnWebPageResizeAcknowledged(uint64 tab_id);
    OnImeBoundsUpdated(CbfImeBoundsUpdate update);
-   OnContextMenuRequested(uint64 web_page_id, CbfContextMenu menu);
--  OnNewWebPageRequested(uint64 web_page_id, string target_url, bool is_popup);
+   OnContextMenuRequested(uint64 tab_id, CbfContextMenu menu);
+-  OnNewWebPageRequested(uint64 tab_id, string target_url, bool is_popup);
 +  OnBrowsingContextOpenRequested(CbfBrowsingContextOpenRequest request);
 +  OnBrowsingContextOpenResolved(CbfBrowsingContextOpenResult result);
-   OnTitleUpdated(uint64 web_page_id, string title);
-   OnFaviconUrlUpdated(uint64 web_page_id, string url);
-   OnBeforeUnloadDialogRequested(uint64 web_page_id,
+   OnTitleUpdated(uint64 tab_id, string title);
+   OnFaviconUrlUpdated(uint64 tab_id, string url);
+   OnBeforeUnloadDialogRequested(uint64 tab_id,
 @@ -405,17 +478,20 @@ interface CbfProfileObserver {
-   OnWebPageDomHtmlRead(uint64 web_page_id, uint64 request_id, string html);
+   OnWebPageDomHtmlRead(uint64 tab_id, uint64 request_id, string html);
    OnDragStartRequested(CbfDragStartRequest request);
    OnExtensionsListed(string profile_id, array<CbfExtensionInfo> extensions);
--  OnExtensionInstallPromptRequested(uint64 web_page_id,
+-  OnExtensionInstallPromptRequested(uint64 tab_id,
 -                                    uint64 request_id,
 -                                    string extension_id,
 -                                    string extension_name,
 -                                    array<string> permission_names);
--  OnExtensionInstallPromptResolved(uint64 web_page_id,
+-  OnExtensionInstallPromptResolved(uint64 tab_id,
 -                                   uint64 request_id,
 -                                   string extension_id,
 -                                   CbfExtensionInstallPromptResult result,
 -                                   string detail);
-+  OnAuxiliaryWindowOpenRequested(uint64 web_page_id,
++  OnAuxiliaryWindowOpenRequested(uint64 tab_id,
 +                                 CbfAuxiliaryWindowRequest request);
-+  OnAuxiliaryWindowResolved(uint64 web_page_id,
++  OnAuxiliaryWindowResolved(uint64 tab_id,
 +                            CbfAuxiliaryWindowResolution resolution);
-   OnExtensionRuntimeWarning(uint64 web_page_id, string detail);
-+  OnAuxiliaryWindowOpened(uint64 web_page_id,
+   OnExtensionRuntimeWarning(uint64 tab_id, string detail);
++  OnAuxiliaryWindowOpened(uint64 tab_id,
 +                          uint64 window_id,
 +                          CbfAuxiliaryWindowKind kind,
 +                          string title,
 +                          bool modal);
-+  OnAuxiliaryWindowClosed(uint64 web_page_id,
++  OnAuxiliaryWindowClosed(uint64 tab_id,
 +                          uint64 window_id,
 +                          CbfAuxiliaryWindowKind kind,
 +                          CbfAuxiliaryWindowCloseReason reason);
@@ -1239,34 +1239,34 @@ index aab85e801cf88..3bf0a9679e06d 100644
  
  interface CbfProfileService {
 @@ -440,19 +516,19 @@ interface CbfProfileService {
-   GoBack(uint64 web_page_id);
-   GoForward(uint64 web_page_id);
-   Reload(uint64 web_page_id, bool ignore_cache);
-+  PrintPreview(uint64 web_page_id);
-   OpenDevTools(uint64 web_page_id);
-   InspectElement(uint64 web_page_id, int32 x, int32 y);
-   SetWebPageFocus(uint64 web_page_id, bool focused);
+   GoBack(uint64 tab_id);
+   GoForward(uint64 tab_id);
+   Reload(uint64 tab_id, bool ignore_cache);
++  PrintPreview(uint64 tab_id);
+   OpenDevTools(uint64 tab_id);
+   InspectElement(uint64 tab_id, int32 x, int32 y);
+   SetWebPageFocus(uint64 tab_id, bool focused);
  
-   GetWebPageDomHtml(uint64 web_page_id, uint64 request_id);
+   GetWebPageDomHtml(uint64 tab_id, uint64 request_id);
    ListExtensions(string profile_id) => (array<CbfExtensionInfo> extensions);
--  RequestExtensionInstallPrompt(uint64 web_page_id,
+-  RequestExtensionInstallPrompt(uint64 tab_id,
 -                                uint64 request_id,
 -                                string extension_id,
 -                                CbfExtensionInstallPromptMode mode);
--  RespondExtensionInstallPrompt(uint64 web_page_id,
+-  RespondExtensionInstallPrompt(uint64 tab_id,
 -                                uint64 request_id,
 -                                bool proceed);
-+  OpenDefaultAuxiliaryWindow(uint64 web_page_id, uint64 request_id);
-+  RespondAuxiliaryWindow(uint64 web_page_id,
++  OpenDefaultAuxiliaryWindow(uint64 tab_id, uint64 request_id);
++  RespondAuxiliaryWindow(uint64 tab_id,
 +                         uint64 request_id,
 +                         CbfAuxiliaryWindowResponse response);
-+  CloseAuxiliaryWindow(uint64 web_page_id, uint64 window_id);
++  CloseAuxiliaryWindow(uint64 tab_id, uint64 window_id);
 +  RespondBrowsingContextOpen(CbfBrowsingContextOpenResponse response);
  };
  
  interface CbfBrowserService {
 diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
-index 5c28f592421d8..5324e3b7bbded 100644
+index 142fbd9eac0a6..1e08ac4bbd637 100644
 --- a/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
 +++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
 @@ -1,6 +1,9 @@
@@ -1296,22 +1296,22 @@ index 5c28f592421d8..5324e3b7bbded 100644
      return;
    }
  
--  const WebPageId web_page_id =
--      context_->tab_manager().GetWebPageIdForWebContents(source);
--  if (web_page_id == kInvalidWebPageId) {
-+  std::optional<uint64_t> source_web_page_id;
+-  const TabId tab_id =
+-      context_->tab_manager().GetTabIdForWebContents(source);
+-  if (tab_id == kInvalidTabId) {
++  std::optional<uint64_t> source_tab_id;
 +  if (source) {
-+    const WebPageId web_page_id =
-+        context_->tab_manager().GetWebPageIdForWebContents(source);
-+    if (web_page_id != kInvalidWebPageId) {
-+      source_web_page_id = web_page_id;
++    const TabId tab_id =
++        context_->tab_manager().GetTabIdForWebContents(source);
++    if (tab_id != kInvalidTabId) {
++      source_tab_id = tab_id;
 +    }
 +  }
 +
 +  const uint64_t request_id = next_open_request_id_++;
 +  PendingOpenRequest request;
 +  request.request_id = request_id;
-+  request.source_web_page_id = source_web_page_id;
++  request.source_tab_id = source_tab_id;
 +  request.target_url = target_url;
 +  request.hint = ToOpenHint(disposition);
 +  request.user_gesture = user_gesture;
@@ -1319,8 +1319,8 @@ index 5c28f592421d8..5324e3b7bbded 100644
 +
 +  auto event = mojom::CbfBrowsingContextOpenRequest::New();
 +  event->request_id = request_id;
-+  if (source_web_page_id.has_value()) {
-+    event->source_web_page_id = source_web_page_id.value();
++  if (source_tab_id.has_value()) {
++    event->source_tab_id = source_tab_id.value();
 +  }
 +  event->target_url = target_url.spec();
 +  event->hint = request.hint;
@@ -1341,24 +1341,24 @@ index 5c28f592421d8..5324e3b7bbded 100644
 +  const PendingOpenRequest request = it->second;
  
 -  const bool is_popup = disposition == WindowOpenDisposition::NEW_POPUP;
--  observer->OnNewWebPageRequested(web_page_id, target_url.spec(), is_popup);
+-  observer->OnNewWebPageRequested(tab_id, target_url.spec(), is_popup);
 +  switch (response->action) {
 +    case mojom::CbfBrowsingContextOpenResponseAction::kAllowNewContext: {
-+      const WebPageId web_page_id =
++      const TabId tab_id =
 +          context_->page_controller().CreateWebPage(request.target_url.spec());
-+      if (web_page_id != kInvalidWebPageId) {
++      if (tab_id != kInvalidTabId) {
 +        context_->ime_controller().RegisterWebContents(
-+            web_page_id, context_->tab_manager().GetWebContents(web_page_id));
++            tab_id, context_->tab_manager().GetWebContents(tab_id));
 +        auto& observer = context_->observer_remote();
 +        if (observer.is_bound()) {
-+          observer->OnWebPageCreated(web_page_id, response->request_id);
++          observer->OnWebPageCreated(tab_id, response->request_id);
 +        }
 +        if (response->activate) {
-+          context_->navigation_controller().SetWebPageFocus(web_page_id, true);
++          context_->navigation_controller().SetWebPageFocus(tab_id, true);
 +        }
 +        ResolveOpenRequest(response->request_id,
 +                           mojom::CbfBrowsingContextOpenResultKind::kOpenedNewContext,
-+                           web_page_id);
++                           tab_id);
 +      } else {
 +        ResolveOpenRequest(response->request_id,
 +                           mojom::CbfBrowsingContextOpenResultKind::kAborted,
@@ -1367,13 +1367,13 @@ index 5c28f592421d8..5324e3b7bbded 100644
 +      return;
 +    }
 +    case mojom::CbfBrowsingContextOpenResponseAction::kAllowExistingContext: {
-+      if (!response->target_web_page_id.has_value()) {
++      if (!response->target_tab_id.has_value()) {
 +        ResolveOpenRequest(response->request_id,
 +                           mojom::CbfBrowsingContextOpenResultKind::kAborted,
 +                           std::nullopt);
 +        return;
 +      }
-+      const WebPageId target_id = response->target_web_page_id.value();
++      const TabId target_id = response->target_tab_id.value();
 +      if (!context_->tab_manager().GetWebContents(target_id)) {
 +        ResolveOpenRequest(response->request_id,
 +                           mojom::CbfBrowsingContextOpenResultKind::kAborted,
@@ -1419,14 +1419,14 @@ index 5c28f592421d8..5324e3b7bbded 100644
 +void CbfProfilePopupController::ResolveOpenRequest(
 +    uint64_t request_id,
 +    mojom::CbfBrowsingContextOpenResultKind result,
-+    std::optional<uint64_t> target_web_page_id) {
++    std::optional<uint64_t> target_tab_id) {
 +  auto& observer = context_->observer_remote();
 +  if (observer.is_bound()) {
 +    auto event = mojom::CbfBrowsingContextOpenResult::New();
 +    event->request_id = request_id;
 +    event->result = result;
-+    if (target_web_page_id.has_value()) {
-+      event->target_web_page_id = target_web_page_id.value();
++    if (target_tab_id.has_value()) {
++      event->target_tab_id = target_tab_id.value();
 +    }
 +    observer->OnBrowsingContextOpenResolved(std::move(event));
 +  }
@@ -1435,7 +1435,7 @@ index 5c28f592421d8..5324e3b7bbded 100644
  
  void CbfProfilePopupController::MarkCloseWebPageBeforeUnloadReason(
 diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller.h b/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
-index f82c31383dd00..9e6e7669f514f 100644
+index f82c31383dd00..9a5ec351b7f00 100644
 --- a/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
 +++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
 @@ -1,12 +1,14 @@
@@ -1476,7 +1476,7 @@ index f82c31383dd00..9e6e7669f514f 100644
   private:
 +  struct PendingOpenRequest {
 +    uint64_t request_id = 0;
-+    std::optional<uint64_t> source_web_page_id;
++    std::optional<uint64_t> source_tab_id;
 +    GURL target_url;
 +    mojom::CbfBrowsingContextOpenHint hint =
 +        mojom::CbfBrowsingContextOpenHint::kUnknown;
@@ -1487,7 +1487,7 @@ index f82c31383dd00..9e6e7669f514f 100644
 +      WindowOpenDisposition disposition) const;
 +  void ResolveOpenRequest(uint64_t request_id,
 +                          mojom::CbfBrowsingContextOpenResultKind result,
-+                          std::optional<uint64_t> target_web_page_id);
++                          std::optional<uint64_t> target_tab_id);
 +
    base::flat_map<raw_ptr<content::WebContents>, mojom::CbfBeforeUnloadReason>
        beforeunload_reasons_;
@@ -1700,14 +1700,14 @@ index 7d15716086e64..c12cc3f6d7ccd 100644
    AttachExtensionRuntimeHelpers(web_contents, profile);
    AttachPrintingPdfHelpers(web_contents, profile);
 diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
-index b6c8635dbefb1..0aa1be98b51c2 100644
+index 8499d3a33c6df..a6152a3f7d19d 100644
 --- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
 +++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
 @@ -58,9 +58,11 @@ void CbfTestProfileObserver::OnContextMenuRequested(
-     uint64_t web_page_id,
+     uint64_t tab_id,
      cbf::mojom::CbfContextMenuPtr menu) {}
  
--void CbfTestProfileObserver::OnNewWebPageRequested(uint64_t web_page_id,
+-void CbfTestProfileObserver::OnNewWebPageRequested(uint64_t tab_id,
 -                                                   const std::string& target_url,
 -                                                   bool is_popup) {}
 +void CbfTestProfileObserver::OnBrowsingContextOpenRequested(
@@ -1716,7 +1716,7 @@ index b6c8635dbefb1..0aa1be98b51c2 100644
 +void CbfTestProfileObserver::OnBrowsingContextOpenResolved(
 +    cbf::mojom::CbfBrowsingContextOpenResultPtr result) {}
  
- void CbfTestProfileObserver::OnTitleUpdated(uint64_t web_page_id,
+ void CbfTestProfileObserver::OnTitleUpdated(uint64_t tab_id,
                                              const std::string& title) {}
 @@ -94,24 +96,31 @@ void CbfTestProfileObserver::OnExtensionsListed(
      const std::string& profile_id,
@@ -1724,7 +1724,7 @@ index b6c8635dbefb1..0aa1be98b51c2 100644
  
 -void CbfTestProfileObserver::OnExtensionInstallPromptRequested(
 +void CbfTestProfileObserver::OnAuxiliaryWindowOpenRequested(
-     uint64_t web_page_id,
+     uint64_t tab_id,
 -    uint64_t request_id,
 -    const std::string& extension_id,
 -    const std::string& extension_name,
@@ -1733,7 +1733,7 @@ index b6c8635dbefb1..0aa1be98b51c2 100644
  
 -void CbfTestProfileObserver::OnExtensionInstallPromptResolved(
 +void CbfTestProfileObserver::OnAuxiliaryWindowResolved(
-     uint64_t web_page_id,
+     uint64_t tab_id,
 -    uint64_t request_id,
 -    const std::string& extension_id,
 -    cbf::mojom::CbfExtensionInstallPromptResult result,
@@ -1741,18 +1741,18 @@ index b6c8635dbefb1..0aa1be98b51c2 100644
 +    cbf::mojom::CbfAuxiliaryWindowResolutionPtr resolution) {}
  
  void CbfTestProfileObserver::OnExtensionRuntimeWarning(
-     uint64_t web_page_id,
+     uint64_t tab_id,
      const std::string& detail) {}
  
 +void CbfTestProfileObserver::OnAuxiliaryWindowOpened(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t window_id,
 +    cbf::mojom::CbfAuxiliaryWindowKind kind,
 +    const std::string& title,
 +    bool modal) {}
 +
 +void CbfTestProfileObserver::OnAuxiliaryWindowClosed(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t window_id,
 +    cbf::mojom::CbfAuxiliaryWindowKind kind,
 +    cbf::mojom::CbfAuxiliaryWindowCloseReason reason) {}
@@ -1761,22 +1761,22 @@ index b6c8635dbefb1..0aa1be98b51c2 100644
    if (quit_wait_loop_.is_null()) {
      return;
 diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
-index 919f248c1dcc9..11befb97e9df6 100644
+index 422859de232e4..9b80caecc006f 100644
 --- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
 +++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
 @@ -47,9 +47,10 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
    void OnContextMenuRequested(
-       uint64_t web_page_id,
+       uint64_t tab_id,
        cbf::mojom::CbfContextMenuPtr menu) override;
--  void OnNewWebPageRequested(uint64_t web_page_id,
+-  void OnNewWebPageRequested(uint64_t tab_id,
 -                             const std::string& target_url,
 -                             bool is_popup) override;
 +  void OnBrowsingContextOpenRequested(
 +      cbf::mojom::CbfBrowsingContextOpenRequestPtr request) override;
 +  void OnBrowsingContextOpenResolved(
 +      cbf::mojom::CbfBrowsingContextOpenResultPtr result) override;
-   void OnTitleUpdated(uint64_t web_page_id, const std::string& title) override;
-   void OnFaviconUrlUpdated(uint64_t web_page_id,
+   void OnTitleUpdated(uint64_t tab_id, const std::string& title) override;
+   void OnFaviconUrlUpdated(uint64_t tab_id,
                             const std::string& url) override;
 @@ -71,20 +72,24 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
    void OnExtensionsListed(
@@ -1784,7 +1784,7 @@ index 919f248c1dcc9..11befb97e9df6 100644
        std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions) override;
 -  void OnExtensionInstallPromptRequested(
 +  void OnAuxiliaryWindowOpenRequested(
-       uint64_t web_page_id,
+       uint64_t tab_id,
 -      uint64_t request_id,
 -      const std::string& extension_id,
 -      const std::string& extension_name,
@@ -1792,21 +1792,21 @@ index 919f248c1dcc9..11befb97e9df6 100644
 -  void OnExtensionInstallPromptResolved(
 +      cbf::mojom::CbfAuxiliaryWindowRequestPtr request) override;
 +  void OnAuxiliaryWindowResolved(
-       uint64_t web_page_id,
+       uint64_t tab_id,
 -      uint64_t request_id,
 -      const std::string& extension_id,
 -      cbf::mojom::CbfExtensionInstallPromptResult result,
 -      const std::string& detail) override;
 +      cbf::mojom::CbfAuxiliaryWindowResolutionPtr resolution) override;
-   void OnExtensionRuntimeWarning(uint64_t web_page_id,
+   void OnExtensionRuntimeWarning(uint64_t tab_id,
                                   const std::string& detail) override;
-+  void OnAuxiliaryWindowOpened(uint64_t web_page_id,
++  void OnAuxiliaryWindowOpened(uint64_t tab_id,
 +                               uint64_t window_id,
 +                               cbf::mojom::CbfAuxiliaryWindowKind kind,
 +                               const std::string& title,
 +                               bool modal) override;
 +  void OnAuxiliaryWindowClosed(
-+      uint64_t web_page_id,
++      uint64_t tab_id,
 +      uint64_t window_id,
 +      cbf::mojom::CbfAuxiliaryWindowKind kind,
 +      cbf::mojom::CbfAuxiliaryWindowCloseReason reason) override;

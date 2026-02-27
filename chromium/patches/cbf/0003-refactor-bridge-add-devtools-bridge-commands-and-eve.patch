@@ -1,4 +1,4 @@
-From 5de1c1d41dccbe90d6cc6b1fa6c156a93a3e6f7f Mon Sep 17 00:00:00 2001
+From bb06a9b9185da75afd9e5471a3b5017f3ba48c67 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 21 Feb 2026 17:32:17 +0900
 Subject: [PATCH 3/9] refactor(bridge): add devtools bridge commands and event
@@ -15,109 +15,109 @@ Subject: [PATCH 3/9] refactor(bridge): add devtools bridge commands and event
  7 files changed, 117 insertions(+)
 
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
-index c341496212316..02c3f5c76ca6e 100644
+index 0992ef3b21893..c5fab9290a17f 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge.h
 @@ -93,6 +93,14 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_confirm_beforeunload(
-     uint64_t web_page_id,
+     uint64_t tab_id,
      uint64_t request_id,
      bool proceed);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_open_dev_tools(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id);
++    uint64_t tab_id);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_inspect_element(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    int32_t x,
 +    int32_t y);
  CBF_BRIDGE_EXPORT void cbf_bridge_client_shutdown(CbfBridgeClientHandle* client);
  CBF_BRIDGE_EXPORT bool cbf_bridge_client_request_shutdown(
      CbfBridgeClientHandle* client,
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
-index cfe0feca413d7..6789c42105de0 100644
+index 6bd2a2b166fed..1d3283218d16c 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
 @@ -50,6 +50,8 @@ class CbfBridgeClient {
-   bool GoBack(uint64_t web_page_id);
-   bool GoForward(uint64_t web_page_id);
-   bool Reload(uint64_t web_page_id, bool ignore_cache);
-+  bool OpenDevTools(uint64_t web_page_id);
-+  bool InspectElement(uint64_t web_page_id, int32_t x, int32_t y);
-   bool GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id);
+   bool GoBack(uint64_t tab_id);
+   bool GoForward(uint64_t tab_id);
+   bool Reload(uint64_t tab_id, bool ignore_cache);
++  bool OpenDevTools(uint64_t tab_id);
++  bool InspectElement(uint64_t tab_id, int32_t x, int32_t y);
+   bool GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id);
    void Shutdown();
  
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
-index ee8f470bd34f3..7135cca04c0e6 100644
+index ab1635f2b4ff1..e3b7007e782d4 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
 @@ -96,6 +96,7 @@ void CbfBridgeClientImpl::Observer::OnSurfaceHandleUpdated(
  
- void CbfBridgeClientImpl::Observer::OnWebPageCreated(uint64_t web_page_id,
+ void CbfBridgeClientImpl::Observer::OnWebPageCreated(uint64_t tab_id,
                                                      uint64_t request_id) {
-+  impl_->web_page_profiles.emplace(web_page_id, profile_id_);
++  impl_->web_page_profiles.emplace(tab_id, profile_id_);
    CbfBridgeEventData event;
    event.kind = kEventWebPageCreated;
-   event.web_page_id = web_page_id;
-@@ -105,7 +106,24 @@ void CbfBridgeClientImpl::Observer::OnWebPageCreated(uint64_t web_page_id,
+   event.tab_id = tab_id;
+@@ -105,7 +106,24 @@ void CbfBridgeClientImpl::Observer::OnWebPageCreated(uint64_t tab_id,
    impl_->events.push(std::move(event));
  }
  
 +void CbfBridgeClientImpl::Observer::OnDevToolsOpened(
-+    uint64_t web_page_id,
-+    uint64_t devtools_web_page_id) {
-+  LOG(INFO) << "[CBF][Bridge] OnDevToolsOpened inspected_id=" << web_page_id
-+            << " devtools_id=" << devtools_web_page_id
++    uint64_t tab_id,
++    uint64_t devtools_tab_id) {
++  LOG(INFO) << "[CBF][Bridge] OnDevToolsOpened inspected_id=" << tab_id
++            << " devtools_id=" << devtools_tab_id
 +            << " profile_id=" << profile_id_;
-+  impl_->web_page_profiles.emplace(devtools_web_page_id, profile_id_);
++  impl_->web_page_profiles.emplace(devtools_tab_id, profile_id_);
 +  CbfBridgeEventData event;
 +  event.kind = kEventDevToolsOpened;
-+  event.web_page_id = devtools_web_page_id;
-+  event.inspected_web_page_id = web_page_id;
++  event.tab_id = devtools_tab_id;
++  event.inspected_tab_id = tab_id;
 +  event.profile_id = profile_id_;
 +  std::lock_guard<std::mutex> lock(impl_->events_mutex);
 +  impl_->events.push(std::move(event));
 +}
 +
- void CbfBridgeClientImpl::Observer::OnWebPageClosed(uint64_t web_page_id) {
-+  impl_->web_page_profiles.erase(web_page_id);
+ void CbfBridgeClientImpl::Observer::OnWebPageClosed(uint64_t tab_id) {
++  impl_->web_page_profiles.erase(tab_id);
    CbfBridgeEventData event;
    event.kind = kEventWebPageClosed;
-   event.web_page_id = web_page_id;
+   event.tab_id = tab_id;
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
-index 140df0cf72129..47a7199e008e1 100644
+index 164aaad851d20..8c513148944be 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
 @@ -29,6 +29,7 @@ struct CbfBridgeEventData {
  
    uint8_t kind = kEventNone;
-   uint64_t web_page_id = 0;
-+  uint64_t inspected_web_page_id = 0;
+   uint64_t tab_id = 0;
++  uint64_t inspected_tab_id = 0;
    uint64_t request_id = 0;
    uint8_t beforeunload_reason = kCbfBeforeUnloadReasonUnknown;
    CbfSurfaceHandle surface_handle = {};
 @@ -107,6 +108,8 @@ struct CbfBridgeClientImpl {
-     void OnSurfaceHandleUpdated(uint64_t web_page_id,
+     void OnSurfaceHandleUpdated(uint64_t tab_id,
                                  uint32_t ca_context_id) override;
-     void OnWebPageCreated(uint64_t web_page_id, uint64_t request_id) override;
-+    void OnDevToolsOpened(uint64_t web_page_id,
-+                          uint64_t devtools_web_page_id) override;
-     void OnWebPageClosed(uint64_t web_page_id) override;
-     void OnWebPageResizeAcknowledged(uint64_t web_page_id) override;
+     void OnWebPageCreated(uint64_t tab_id, uint64_t request_id) override;
++    void OnDevToolsOpened(uint64_t tab_id,
++                          uint64_t devtools_tab_id) override;
+     void OnWebPageClosed(uint64_t tab_id) override;
+     void OnWebPageResizeAcknowledged(uint64_t tab_id) override;
      void OnImeBoundsUpdated(cbf::mojom::CbfImeBoundsUpdatePtr update) override;
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
-index 7d0464f7e2ea1..4d55de14d1867 100644
+index 7db9bb36ca00c..6d49f15a9cb50 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
 @@ -201,6 +201,7 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
    CbfBridgeEventData event = std::move(impl_->events.front());
    out_event->kind = event.kind;
-   out_event->web_page_id = event.web_page_id;
-+  out_event->inspected_web_page_id = event.inspected_web_page_id;
+   out_event->tab_id = event.tab_id;
++  out_event->inspected_tab_id = event.inspected_tab_id;
    out_event->request_id = event.request_id;
    out_event->profile_id =
        event.profile_id.empty() ? nullptr : CopyCString(event.profile_id);
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
-index 7d018e346a458..57e5bfd4f863c 100644
+index 19787d95c153a..013f4d9c7ac7d 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 @@ -28,6 +28,7 @@ enum CbfEventKind {
@@ -131,33 +131,33 @@ index 7d018e346a458..57e5bfd4f863c 100644
 @@ -407,6 +408,7 @@ typedef struct CbfContextMenu {
  typedef struct CbfBridgeEvent {
    uint8_t kind;
-   uint64_t web_page_id;
-+  uint64_t inspected_web_page_id;
+   uint64_t tab_id;
++  uint64_t inspected_tab_id;
    uint64_t request_id;
    uint8_t beforeunload_reason;
    uint8_t cursor_type;
 @@ -506,6 +508,12 @@ bool cbf_bridge_client_go_forward(CbfBridgeClientHandle* client,
  bool cbf_bridge_client_reload(CbfBridgeClientHandle* client,
-                                uint64_t web_page_id,
+                                uint64_t tab_id,
                                 bool ignore_cache);
 +bool cbf_bridge_client_open_dev_tools(CbfBridgeClientHandle* client,
-+                                      uint64_t web_page_id);
++                                      uint64_t tab_id);
 +bool cbf_bridge_client_inspect_element(CbfBridgeClientHandle* client,
-+                                       uint64_t web_page_id,
++                                       uint64_t tab_id,
 +                                       int32_t x,
 +                                       int32_t y);
  bool cbf_bridge_client_set_web_page_focus(CbfBridgeClientHandle* client,
-                                           uint64_t web_page_id,
+                                           uint64_t tab_id,
                                            bool focused);
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
-index a2c4fa5255304..04e6a3ac6038d 100644
+index 261daec2306ed..e2bcf1e7ea0ab 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
-@@ -316,6 +316,61 @@ bool CbfBridgeClient::Reload(uint64_t web_page_id, bool ignore_cache) {
+@@ -316,6 +316,61 @@ bool CbfBridgeClient::Reload(uint64_t tab_id, bool ignore_cache) {
    return true;
  }
  
-+bool CbfBridgeClient::OpenDevTools(uint64_t web_page_id) {
++bool CbfBridgeClient::OpenDevTools(uint64_t tab_id) {
 +  if (!impl_) {
 +    return false;
 +  }
@@ -169,8 +169,8 @@ index a2c4fa5255304..04e6a3ac6038d 100644
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id) {
-+            auto it = impl->web_page_profiles.find(web_page_id);
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id) {
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -178,13 +178,13 @@ index a2c4fa5255304..04e6a3ac6038d 100644
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->OpenDevTools(web_page_id);
++            remote_it->second.remote->OpenDevTools(tab_id);
 +          },
-+          impl, web_page_id));
++          impl, tab_id));
 +  return true;
 +}
 +
-+bool CbfBridgeClient::InspectElement(uint64_t web_page_id, int32_t x, int32_t y) {
++bool CbfBridgeClient::InspectElement(uint64_t tab_id, int32_t x, int32_t y) {
 +  if (!impl_) {
 +    return false;
 +  }
@@ -196,9 +196,9 @@ index a2c4fa5255304..04e6a3ac6038d 100644
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id, int32_t x,
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id, int32_t x,
 +             int32_t y) {
-+            auto it = impl->web_page_profiles.find(web_page_id);
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -206,40 +206,40 @@ index a2c4fa5255304..04e6a3ac6038d 100644
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->InspectElement(web_page_id, x, y);
++            remote_it->second.remote->InspectElement(tab_id, x, y);
 +          },
-+          impl, web_page_id, x, y));
++          impl, tab_id, x, y));
 +  return true;
 +}
 +
- bool CbfBridgeClient::GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id) {
+ bool CbfBridgeClient::GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id) {
    if (!impl_) {
      return false;
 @@ -449,3 +504,25 @@ extern "C" bool cbf_bridge_client_get_web_page_dom_html(
    return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-       ->GetWebPageDomHtml(web_page_id, request_id);
+       ->GetWebPageDomHtml(tab_id, request_id);
  }
 +
 +extern "C" bool cbf_bridge_client_open_dev_tools(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id) {
++    uint64_t tab_id) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->OpenDevTools(web_page_id);
++      ->OpenDevTools(tab_id);
 +}
 +
 +extern "C" bool cbf_bridge_client_inspect_element(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    int32_t x,
 +    int32_t y) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->InspectElement(web_page_id, x, y);
++      ->InspectElement(tab_id, x, y);
 +}
 -- 
 2.50.1 (Apple Git-155)

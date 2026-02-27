@@ -181,15 +181,15 @@ pub struct CbfSurfaceHandle {
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfBridgeEvent {
     pub kind: u8,
-    pub web_page_id: u64,
-    pub inspected_web_page_id: u64,
+    pub tab_id: u64,
+    pub inspected_tab_id: u64,
     pub request_id: u64,
     pub beforeunload_reason: u8,
     pub cursor_type: u8,
     pub profile_id: *mut c_char,
     pub surface_handle: CbfSurfaceHandle,
     pub ime_bounds: CbfImeBoundsUpdate,
-    pub dirty_web_page_ids: CbfWebPageIdList,
+    pub dirty_tab_ids: CbfTabIdList,
     pub context_menu: CbfContextMenu,
     pub target_url: *mut c_char,
     pub url: *mut c_char,
@@ -216,10 +216,10 @@ pub struct CbfBridgeEvent {
     pub browsing_context_open_hint: u8,
     pub browsing_context_open_user_gesture: bool,
     pub browsing_context_open_has_source: bool,
-    pub browsing_context_open_source_web_page_id: u64,
+    pub browsing_context_open_source_tab_id: u64,
     pub browsing_context_open_result_kind: u8,
     pub browsing_context_open_has_target: bool,
-    pub browsing_context_open_target_web_page_id: u64,
+    pub browsing_context_open_target_tab_id: u64,
 }
 
 #[repr(C)]
@@ -247,7 +247,7 @@ pub struct CbfCommandList {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfKeyEvent {
-    pub web_page_id: u64,
+    pub tab_id: u64,
     pub type_: u8,
     pub modifiers: u32,
     pub windows_key_code: i32,
@@ -265,7 +265,7 @@ pub struct CbfKeyEvent {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfMouseEvent {
-    pub web_page_id: u64,
+    pub tab_id: u64,
     pub type_: u8,
     pub modifiers: u32,
     pub button: u8,
@@ -283,7 +283,7 @@ pub struct CbfMouseEvent {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfMouseWheelEvent {
-    pub web_page_id: u64,
+    pub tab_id: u64,
     pub modifiers: u32,
     pub position_in_widget_x: f32,
     pub position_in_widget_y: f32,
@@ -381,7 +381,7 @@ pub struct CbfDragImage {
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfDragStartRequest {
     pub session_id: u64,
-    pub web_page_id: u64,
+    pub tab_id: u64,
     pub allowed_operations: u32,
     pub source_origin: *mut c_char,
     pub data: CbfDragData,
@@ -392,7 +392,7 @@ pub struct CbfDragStartRequest {
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfDragUpdate {
     pub session_id: u64,
-    pub web_page_id: u64,
+    pub tab_id: u64,
     pub allowed_operations: u32,
     pub modifiers: u32,
     pub position_in_widget_x: f32,
@@ -405,7 +405,7 @@ pub struct CbfDragUpdate {
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfDragDrop {
     pub session_id: u64,
-    pub web_page_id: u64,
+    pub tab_id: u64,
     pub modifiers: u32,
     pub position_in_widget_x: f32,
     pub position_in_widget_y: f32,
@@ -457,7 +457,7 @@ pub struct CbfImeBoundsUpdate {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
-pub struct CbfWebPageIdList {
+pub struct CbfTabIdList {
     pub items: *const u64,
     pub len: u32,
 }
@@ -489,7 +489,7 @@ pub struct CbfImeTextSpanList {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfImeComposition {
-    pub web_page_id: u64,
+    pub tab_id: u64,
     pub text: *const c_char,
     pub selection_start: i32,
     pub selection_end: i32,
@@ -501,7 +501,7 @@ pub struct CbfImeComposition {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfImeCommitText {
-    pub web_page_id: u64,
+    pub tab_id: u64,
     pub text: *const c_char,
     pub relative_caret_position: i32,
     pub replacement_range_start: i32,
@@ -591,17 +591,17 @@ unsafe extern "C" {
     ) -> bool;
     pub fn cbf_bridge_client_request_close_web_page(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_set_web_page_size(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         width: u32,
         height: u32,
     ) -> bool;
     pub fn cbf_bridge_client_set_web_page_focus(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         focused: bool,
     ) -> bool;
     pub fn cbf_bridge_client_send_key_event(
@@ -628,18 +628,18 @@ unsafe extern "C" {
     pub fn cbf_bridge_client_send_drag_cancel(
         client: *mut CbfBridgeClientHandle,
         session_id: u64,
-        web_page_id: u64,
+        tab_id: u64,
     ) -> bool;
     pub fn cbf_bridge_convert_nsevent(
         nsevent: *mut std::ffi::c_void,
-        web_page_id: u64,
+        tab_id: u64,
         out_event: *mut CbfKeyEvent,
     );
     pub fn cbf_bridge_free_converted_key_event(event: *mut CbfKeyEvent);
     pub fn cbf_bridge_convert_nsevent_to_mouse_event(
         nsevent: *mut std::ffi::c_void,
         nsview: *mut std::ffi::c_void,
-        web_page_id: u64,
+        tab_id: u64,
         pointer_type: u8,
         unaccelerated_movement: bool,
         out_event: *mut CbfMouseEvent,
@@ -647,7 +647,7 @@ unsafe extern "C" {
     pub fn cbf_bridge_convert_nsevent_to_mouse_wheel_event(
         nsevent: *mut std::ffi::c_void,
         nsview: *mut std::ffi::c_void,
-        web_page_id: u64,
+        tab_id: u64,
         out_event: *mut CbfMouseWheelEvent,
     );
     pub fn cbf_bridge_convert_nspasteboard_to_drag_data(
@@ -665,7 +665,7 @@ unsafe extern "C" {
     ) -> bool;
     pub fn cbf_bridge_client_finish_composing_text(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         behavior: u8,
     ) -> bool;
     pub fn cbf_bridge_client_execute_context_menu_command(
@@ -680,65 +680,65 @@ unsafe extern "C" {
     ) -> bool;
     pub fn cbf_bridge_client_confirm_beforeunload(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         request_id: u64,
         proceed: bool,
     ) -> bool;
     pub fn cbf_bridge_client_navigate(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         url: *const c_char,
     ) -> bool;
-    pub fn cbf_bridge_client_go_back(client: *mut CbfBridgeClientHandle, web_page_id: u64) -> bool;
+    pub fn cbf_bridge_client_go_back(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
     pub fn cbf_bridge_client_go_forward(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_reload(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         ignore_cache: bool,
     ) -> bool;
     pub fn cbf_bridge_client_print_preview(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_open_dev_tools(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_inspect_element(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         x: i32,
         y: i32,
     ) -> bool;
     pub fn cbf_bridge_client_get_web_page_dom_html(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         request_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_open_default_auxiliary_window(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         request_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_respond_auxiliary_window(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         request_id: u64,
         proceed: bool,
     ) -> bool;
     pub fn cbf_bridge_client_close_auxiliary_window(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         window_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_respond_browsing_context_open(
         client: *mut CbfBridgeClientHandle,
         request_id: u64,
         response_kind: u8,
-        target_web_page_id: u64,
+        target_tab_id: u64,
         activate: bool,
     ) -> bool;
     pub fn cbf_bridge_client_shutdown(client: *mut CbfBridgeClientHandle);

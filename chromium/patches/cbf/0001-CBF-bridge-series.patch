@@ -1,4 +1,4 @@
-From aae152a3510ed3a5b2361f52975cfd133bafd5f4 Mon Sep 17 00:00:00 2001
+From 01a2bc827c6697a2ce540d16beff5a70e982451a Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Feb 2026 09:47:06 +0900
 Subject: [PATCH 1/9] CBF bridge series
@@ -291,7 +291,7 @@ index 0000000000000..f46e8fa78298d
 +}
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
 new file mode 100644
-index 0000000000000..c341496212316
+index 0000000000000..0992ef3b21893
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge.h
 @@ -0,0 +1,112 @@
@@ -333,15 +333,15 @@ index 0000000000000..c341496212316
 +    const char* profile_id);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_request_close_web_page(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id);
++    uint64_t tab_id);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_web_page_size(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint32_t width,
 +    uint32_t height);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_web_page_focus(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    bool focused);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_send_key_event(
 +    CbfBridgeClientHandle* client,
@@ -362,10 +362,10 @@ index 0000000000000..c341496212316
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_send_drag_cancel(
 +    CbfBridgeClientHandle* client,
 +    uint64_t session_id,
-+    uint64_t web_page_id);
++    uint64_t tab_id);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_send_mac_event(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    void* nsevent);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_composition(
 +    CbfBridgeClientHandle* client,
@@ -375,7 +375,7 @@ index 0000000000000..c341496212316
 +    const CbfImeCommitText* commit);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_finish_composing_text(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint8_t behavior);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_execute_context_menu_command(
 +    CbfBridgeClientHandle* client,
@@ -387,7 +387,7 @@ index 0000000000000..c341496212316
 +    uint64_t menu_id);
 +CBF_BRIDGE_EXPORT bool cbf_bridge_client_confirm_beforeunload(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t request_id,
 +    bool proceed);
 +CBF_BRIDGE_EXPORT void cbf_bridge_client_shutdown(CbfBridgeClientHandle* client);
@@ -531,7 +531,7 @@ index 0000000000000..6a260a8c33bdc
 +}  // namespace cbf_bridge::internal
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
 new file mode 100644
-index 0000000000000..cfe0feca413d7
+index 0000000000000..6bd2a2b166fed
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
 @@ -0,0 +1,63 @@
@@ -560,17 +560,17 @@ index 0000000000000..cfe0feca413d7
 +  bool CreateWebPage(uint64_t request_id,
 +                     const std::string& initial_url,
 +                     const std::string& profile_id);
-+  bool SetWebPageSize(uint64_t web_page_id, uint32_t width, uint32_t height);
-+  bool SetWebPageFocus(uint64_t web_page_id, bool focused);
++  bool SetWebPageSize(uint64_t tab_id, uint32_t width, uint32_t height);
++  bool SetWebPageFocus(uint64_t tab_id, bool focused);
 +  bool SendKeyEvent(const CbfKeyEvent* event, const CbfCommandList* commands);
 +  bool SendMouseEvent(const CbfMouseEvent* event);
 +  bool SendMouseWheelEvent(const CbfMouseWheelEvent* event);
 +  bool SendDragUpdate(const CbfDragUpdate* update);
 +  bool SendDragDrop(const CbfDragDrop* drop);
-+  bool SendDragCancel(uint64_t session_id, uint64_t web_page_id);
++  bool SendDragCancel(uint64_t session_id, uint64_t tab_id);
 +  bool SetComposition(const CbfImeComposition* composition);
 +  bool CommitText(const CbfImeCommitText* commit);
-+  bool FinishComposingText(uint64_t web_page_id, uint8_t behavior);
++  bool FinishComposingText(uint64_t tab_id, uint8_t behavior);
 +  bool ExecuteContextMenuCommand(uint64_t menu_id,
 +                                 int32_t command_id,
 +                                 int32_t event_flags);
@@ -579,15 +579,15 @@ index 0000000000000..cfe0feca413d7
 +  bool ConfirmShutdown(uint64_t request_id, bool proceed);
 +  bool ForceShutdown();
 +
-+  bool RequestCloseWebPage(uint64_t web_page_id);
-+  bool ConfirmBeforeUnload(uint64_t web_page_id,
++  bool RequestCloseWebPage(uint64_t tab_id);
++  bool ConfirmBeforeUnload(uint64_t tab_id,
 +                           uint64_t request_id,
 +                           bool proceed);
-+  bool Navigate(uint64_t web_page_id, const std::string& url);
-+  bool GoBack(uint64_t web_page_id);
-+  bool GoForward(uint64_t web_page_id);
-+  bool Reload(uint64_t web_page_id, bool ignore_cache);
-+  bool GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id);
++  bool Navigate(uint64_t tab_id, const std::string& url);
++  bool GoBack(uint64_t tab_id);
++  bool GoForward(uint64_t tab_id);
++  bool Reload(uint64_t tab_id, bool ignore_cache);
++  bool GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id);
 +  void Shutdown();
 +
 + private:
@@ -600,7 +600,7 @@ index 0000000000000..cfe0feca413d7
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_CLIENT_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
 new file mode 100644
-index 0000000000000..ee8f470bd34f3
+index 0000000000000..ab1635f2b4ff1
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
 @@ -0,0 +1,301 @@
@@ -654,11 +654,11 @@ index 0000000000000..ee8f470bd34f3
 +
 +void CbfBridgeClientImpl::BrowserObserver::OnShutdownBlocked(
 +    uint64_t request_id,
-+    const std::vector<uint64_t>& dirty_web_page_ids) {
++    const std::vector<uint64_t>& dirty_tab_ids) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventShutdownBlocked;
 +  event.request_id = request_id;
-+  event.dirty_web_page_ids = dirty_web_page_ids;
++  event.dirty_tab_ids = dirty_tab_ids;
 +  std::lock_guard<std::mutex> lock(impl_->events_mutex);
 +  impl_->events.push(std::move(event));
 +}
@@ -688,11 +688,11 @@ index 0000000000000..ee8f470bd34f3
 +CbfBridgeClientImpl::Observer::~Observer() = default;
 +
 +void CbfBridgeClientImpl::Observer::OnSurfaceHandleUpdated(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint32_t ca_context_id) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventSurfaceHandleUpdated;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.surface_handle.kind = kSurfaceHandleMacCaContextId;
 +  event.surface_handle.ca_context_id = ca_context_id;
 +  event.profile_id = profile_id_;
@@ -700,30 +700,30 @@ index 0000000000000..ee8f470bd34f3
 +  impl_->events.push(std::move(event));
 +}
 +
-+void CbfBridgeClientImpl::Observer::OnWebPageCreated(uint64_t web_page_id,
++void CbfBridgeClientImpl::Observer::OnWebPageCreated(uint64_t tab_id,
 +                                                    uint64_t request_id) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventWebPageCreated;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.request_id = request_id;
 +  event.profile_id = profile_id_;
 +  std::lock_guard<std::mutex> lock(impl_->events_mutex);
 +  impl_->events.push(std::move(event));
 +}
 +
-+void CbfBridgeClientImpl::Observer::OnWebPageClosed(uint64_t web_page_id) {
++void CbfBridgeClientImpl::Observer::OnWebPageClosed(uint64_t tab_id) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventWebPageClosed;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.profile_id = profile_id_;
 +  std::lock_guard<std::mutex> lock(impl_->events_mutex);
 +  impl_->events.push(std::move(event));
 +}
 +
-+void CbfBridgeClientImpl::Observer::OnWebPageResizeAcknowledged(uint64_t web_page_id) {
++void CbfBridgeClientImpl::Observer::OnWebPageResizeAcknowledged(uint64_t tab_id) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventWebPageResizeAcknowledged;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.profile_id = profile_id_;
 +  std::lock_guard<std::mutex> lock(impl_->events_mutex);
 +  impl_->events.push(std::move(event));
@@ -736,7 +736,7 @@ index 0000000000000..ee8f470bd34f3
 +  }
 +  CbfBridgeEventData event;
 +  event.kind = kEventImeBoundsUpdated;
-+  event.web_page_id = update->web_page_id;
++  event.tab_id = update->tab_id;
 +  event.profile_id = profile_id_;
 +
 +  if (update->composition) {
@@ -780,14 +780,14 @@ index 0000000000000..ee8f470bd34f3
 +}
 +
 +void CbfBridgeClientImpl::Observer::OnContextMenuRequested(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    cbf::mojom::CbfContextMenuPtr menu) {
 +  if (!menu) {
 +    return;
 +  }
 +  CbfBridgeEventData event;
 +  event.kind = kEventContextMenuRequested;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.profile_id = profile_id_;
 +  event.context_menu = std::move(menu);
 +  if (event.context_menu) {
@@ -798,12 +798,12 @@ index 0000000000000..ee8f470bd34f3
 +}
 +
 +void CbfBridgeClientImpl::Observer::OnNewWebPageRequested(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    const std::string& target_url,
 +    bool is_popup) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventNewWebPageRequested;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.profile_id = profile_id_;
 +  event.target_url = target_url;
 +  event.is_popup = is_popup;
@@ -812,12 +812,12 @@ index 0000000000000..ee8f470bd34f3
 +}
 +
 +void CbfBridgeClientImpl::Observer::OnBeforeUnloadDialogRequested(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t request_id,
 +    cbf::mojom::CbfBeforeUnloadReason reason) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventBeforeUnloadDialogRequested;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.request_id = request_id;
 +  event.beforeunload_reason = static_cast<uint8_t>(reason);
 +  event.profile_id = profile_id_;
@@ -826,11 +826,11 @@ index 0000000000000..ee8f470bd34f3
 +}
 +
 +void CbfBridgeClientImpl::Observer::OnCursorChanged(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    cbf::mojom::CbfCursorType cursor_type) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventCursorChanged;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.profile_id = profile_id_;
 +  event.cursor_type = static_cast<uint8_t>(cursor_type);
 +  std::lock_guard<std::mutex> lock(impl_->events_mutex);
@@ -838,11 +838,11 @@ index 0000000000000..ee8f470bd34f3
 +}
 +
 +void CbfBridgeClientImpl::Observer::OnTitleUpdated(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    const std::string& title) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventTitleUpdated;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.profile_id = profile_id_;
 +  event.title = title;
 +  std::lock_guard<std::mutex> lock(impl_->events_mutex);
@@ -850,21 +850,21 @@ index 0000000000000..ee8f470bd34f3
 +}
 +
 +void CbfBridgeClientImpl::Observer::OnFaviconUrlUpdated(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    const std::string& url) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventFaviconUrlUpdated;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.profile_id = profile_id_;
 +  event.favicon_url = url;
 +  std::lock_guard<std::mutex> lock(impl_->events_mutex);
 +  impl_->events.push(std::move(event));
 +}
 +
-+void CbfBridgeClientImpl::Observer::OnNavigationStateChanged(uint64_t web_page_id, const std::string& url, bool can_go_back, bool can_go_forward, bool is_loading) {
++void CbfBridgeClientImpl::Observer::OnNavigationStateChanged(uint64_t tab_id, const std::string& url, bool can_go_back, bool can_go_forward, bool is_loading) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventNavigationStateChanged;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.url = url;
 +  event.profile_id = profile_id_;
 +  event.can_go_back = can_go_back;
@@ -874,12 +874,12 @@ index 0000000000000..ee8f470bd34f3
 +  impl_->events.push(std::move(event));
 +}
 +
-+void CbfBridgeClientImpl::Observer::OnWebPageDomHtmlRead(uint64_t web_page_id,
++void CbfBridgeClientImpl::Observer::OnWebPageDomHtmlRead(uint64_t tab_id,
 +                                                        uint64_t request_id,
 +                                                        const std::string& html) {
 +  CbfBridgeEventData event;
 +  event.kind = kEventWebPageDomHtmlRead;
-+  event.web_page_id = web_page_id;
++  event.tab_id = tab_id;
 +  event.request_id = request_id;
 +  event.profile_id = profile_id_;
 +  event.dom_html = html;
@@ -895,7 +895,7 @@ index 0000000000000..ee8f470bd34f3
 +  CbfBridgeEventData event;
 +  event.kind = kEventDragStartRequested;
 +  event.profile_id = profile_id_;
-+  event.web_page_id = request->web_page_id;
++  event.tab_id = request->tab_id;
 +  event.drag_start_request = std::move(request);
 +  std::lock_guard<std::mutex> lock(impl_->events_mutex);
 +  impl_->events.push(std::move(event));
@@ -907,7 +907,7 @@ index 0000000000000..ee8f470bd34f3
 +}  // namespace cbf_bridge::internal
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
 new file mode 100644
-index 0000000000000..140df0cf72129
+index 0000000000000..164aaad851d20
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
 @@ -0,0 +1,159 @@
@@ -941,7 +941,7 @@ index 0000000000000..140df0cf72129
 +  ~CbfBridgeEventData();
 +
 +  uint8_t kind = kEventNone;
-+  uint64_t web_page_id = 0;
++  uint64_t tab_id = 0;
 +  uint64_t request_id = 0;
 +  uint8_t beforeunload_reason = kCbfBeforeUnloadReasonUnknown;
 +  CbfSurfaceHandle surface_handle = {};
@@ -956,7 +956,7 @@ index 0000000000000..140df0cf72129
 +  std::string title;
 +  std::string favicon_url;
 +  uint8_t cursor_type = 0;
-+  std::vector<uint64_t> dirty_web_page_ids;
++  std::vector<uint64_t> dirty_tab_ids;
 +  cbf::mojom::CbfContextMenuPtr context_menu;
 +  cbf::mojom::CbfDragStartRequestPtr drag_start_request;
 +
@@ -1004,7 +1004,7 @@ index 0000000000000..140df0cf72129
 +    ~BrowserObserver() override;
 +
 +    void OnShutdownBlocked(uint64_t request_id,
-+                           const std::vector<uint64_t>& dirty_web_page_ids) override;
++                           const std::vector<uint64_t>& dirty_tab_ids) override;
 +    void OnShutdownProceeding(uint64_t request_id) override;
 +    void OnShutdownCancelled(uint64_t request_id) override;
 +
@@ -1017,28 +1017,28 @@ index 0000000000000..140df0cf72129
 +    Observer(CbfBridgeClientImpl* impl, std::string profile_id);
 +    ~Observer() override;
 +
-+    void OnSurfaceHandleUpdated(uint64_t web_page_id,
++    void OnSurfaceHandleUpdated(uint64_t tab_id,
 +                                uint32_t ca_context_id) override;
-+    void OnWebPageCreated(uint64_t web_page_id, uint64_t request_id) override;
-+    void OnWebPageClosed(uint64_t web_page_id) override;
-+    void OnWebPageResizeAcknowledged(uint64_t web_page_id) override;
++    void OnWebPageCreated(uint64_t tab_id, uint64_t request_id) override;
++    void OnWebPageClosed(uint64_t tab_id) override;
++    void OnWebPageResizeAcknowledged(uint64_t tab_id) override;
 +    void OnImeBoundsUpdated(cbf::mojom::CbfImeBoundsUpdatePtr update) override;
-+    void OnContextMenuRequested(uint64_t web_page_id,
++    void OnContextMenuRequested(uint64_t tab_id,
 +                                cbf::mojom::CbfContextMenuPtr menu) override;
-+    void OnNewWebPageRequested(uint64_t web_page_id,
++    void OnNewWebPageRequested(uint64_t tab_id,
 +                               const std::string& target_url,
 +                               bool is_popup) override;
 +    void OnBeforeUnloadDialogRequested(
-+        uint64_t web_page_id,
++        uint64_t tab_id,
 +        uint64_t request_id,
 +        cbf::mojom::CbfBeforeUnloadReason reason) override;
-+    void OnCursorChanged(uint64_t web_page_id,
++    void OnCursorChanged(uint64_t tab_id,
 +                         cbf::mojom::CbfCursorType cursor_type) override;
-+    void OnTitleUpdated(uint64_t web_page_id, const std::string& title) override;
-+    void OnFaviconUrlUpdated(uint64_t web_page_id,
++    void OnTitleUpdated(uint64_t tab_id, const std::string& title) override;
++    void OnFaviconUrlUpdated(uint64_t tab_id,
 +                             const std::string& url) override;
-+    void OnNavigationStateChanged(uint64_t web_page_id, const std::string& url, bool can_go_back, bool can_go_forward, bool is_loading) override;
-+    void OnWebPageDomHtmlRead(uint64_t web_page_id,
++    void OnNavigationStateChanged(uint64_t tab_id, const std::string& url, bool can_go_back, bool can_go_forward, bool is_loading) override;
++    void OnWebPageDomHtmlRead(uint64_t tab_id,
 +                              uint64_t request_id,
 +                              const std::string& html) override;
 +    void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
@@ -1399,7 +1399,7 @@ index 0000000000000..3a89ad677dc90
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_CONVERTERS_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
 new file mode 100644
-index 0000000000000..7d0464f7e2ea1
+index 0000000000000..7db9bb36ca00c
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
 @@ -0,0 +1,461 @@
@@ -1605,7 +1605,7 @@ index 0000000000000..7d0464f7e2ea1
 +  }
 +  CbfBridgeEventData event = std::move(impl_->events.front());
 +  out_event->kind = event.kind;
-+  out_event->web_page_id = event.web_page_id;
++  out_event->tab_id = event.tab_id;
 +  out_event->request_id = event.request_id;
 +  out_event->profile_id =
 +      event.profile_id.empty() ? nullptr : CopyCString(event.profile_id);
@@ -1615,8 +1615,8 @@ index 0000000000000..7d0464f7e2ea1
 +  out_event->ime_bounds.has_selection = false;
 +  out_event->ime_bounds.composition.character_bounds.items = nullptr;
 +  out_event->ime_bounds.composition.character_bounds.len = 0;
-+  out_event->dirty_web_page_ids.items = nullptr;
-+  out_event->dirty_web_page_ids.len = 0;
++  out_event->dirty_tab_ids.items = nullptr;
++  out_event->dirty_tab_ids.len = 0;
 +  out_event->context_menu = {};
 +  out_event->target_url = nullptr;
 +  out_event->url = nullptr;
@@ -1662,15 +1662,15 @@ index 0000000000000..7d0464f7e2ea1
 +    }
 +  }
 +  if (event.kind == kEventShutdownBlocked) {
-+    const size_t list_len = event.dirty_web_page_ids.size();
++    const size_t list_len = event.dirty_tab_ids.size();
 +    if (list_len > 0) {
 +      uint64_t* ids = new uint64_t[list_len];
 +      auto out_ids = UNSAFE_BUFFERS(base::span(ids, list_len));
 +      for (size_t i = 0; i < out_ids.size(); ++i) {
-+        out_ids[i] = event.dirty_web_page_ids[i];
++        out_ids[i] = event.dirty_tab_ids[i];
 +      }
-+      out_event->dirty_web_page_ids.items = ids;
-+      out_event->dirty_web_page_ids.len = static_cast<uint32_t>(list_len);
++      out_event->dirty_tab_ids.items = ids;
++      out_event->dirty_tab_ids.len = static_cast<uint32_t>(list_len);
 +    }
 +  }
 +  if (event.kind == kEventContextMenuRequested) {
@@ -1711,8 +1711,8 @@ index 0000000000000..7d0464f7e2ea1
 +    if (event.drag_start_request) {
 +      out_event->drag_start_request.session_id =
 +          event.drag_start_request->session_id;
-+      out_event->drag_start_request.web_page_id =
-+          event.drag_start_request->web_page_id;
++      out_event->drag_start_request.tab_id =
++          event.drag_start_request->tab_id;
 +      out_event->drag_start_request.allowed_operations =
 +          event.drag_start_request->allowed_operations;
 +      out_event->drag_start_request.source_origin =
@@ -1828,10 +1828,10 @@ index 0000000000000..7d0464f7e2ea1
 +    event->ime_bounds.composition.character_bounds.items = nullptr;
 +    event->ime_bounds.composition.character_bounds.len = 0;
 +  }
-+  if (event->dirty_web_page_ids.items) {
-+    delete[] event->dirty_web_page_ids.items;
-+    event->dirty_web_page_ids.items = nullptr;
-+    event->dirty_web_page_ids.len = 0;
++  if (event->dirty_tab_ids.items) {
++    delete[] event->dirty_tab_ids.items;
++    event->dirty_tab_ids.items = nullptr;
++    event->dirty_tab_ids.len = 0;
 +  }
 +  if (event->kind == kEventContextMenuRequested) {
 +    FreeContextMenuItemList(event->context_menu.items);
@@ -1866,7 +1866,7 @@ index 0000000000000..7d0464f7e2ea1
 +}
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 new file mode 100644
-index 0000000000000..7d018e346a458
+index 0000000000000..19787d95c153a
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 @@ -0,0 +1,521 @@
@@ -2057,7 +2057,7 @@ index 0000000000000..7d018e346a458
 +} CbfCommandList;
 +
 +typedef struct CbfKeyEvent {
-+  uint64_t web_page_id;
++  uint64_t tab_id;
 +
 +  uint8_t type;
 +  uint32_t modifiers;
@@ -2078,7 +2078,7 @@ index 0000000000000..7d018e346a458
 +} CbfKeyEvent;
 +
 +typedef struct CbfMouseEvent {
-+  uint64_t web_page_id;
++  uint64_t tab_id;
 +
 +  uint8_t type;
 +  uint32_t modifiers;
@@ -2099,7 +2099,7 @@ index 0000000000000..7d018e346a458
 +} CbfMouseEvent;
 +
 +typedef struct CbfMouseWheelEvent {
-+  uint64_t web_page_id;
++  uint64_t tab_id;
 +
 +  uint32_t modifiers;
 +
@@ -2169,7 +2169,7 @@ index 0000000000000..7d018e346a458
 +
 +typedef struct CbfDragStartRequest {
 +  uint64_t session_id;
-+  uint64_t web_page_id;
++  uint64_t tab_id;
 +  uint32_t allowed_operations;
 +  char* source_origin;
 +  CbfDragData data;
@@ -2178,7 +2178,7 @@ index 0000000000000..7d018e346a458
 +
 +typedef struct CbfDragUpdate {
 +  uint64_t session_id;
-+  uint64_t web_page_id;
++  uint64_t tab_id;
 +  uint32_t allowed_operations;
 +  uint32_t modifiers;
 +  float position_in_widget_x;
@@ -2189,7 +2189,7 @@ index 0000000000000..7d018e346a458
 +
 +typedef struct CbfDragDrop {
 +  uint64_t session_id;
-+  uint64_t web_page_id;
++  uint64_t tab_id;
 +  uint32_t modifiers;
 +  float position_in_widget_x;
 +  float position_in_widget_y;
@@ -2229,10 +2229,10 @@ index 0000000000000..7d018e346a458
 +  CbfTextSelectionBounds selection;
 +} CbfImeBoundsUpdate;
 +
-+typedef struct CbfWebPageIdList {
++typedef struct CbfTabIdList {
 +  const uint64_t* items;
 +  uint32_t len;
-+} CbfWebPageIdList;
++} CbfTabIdList;
 +
 +typedef struct CbfContextMenuIcon {
 +  const uint8_t* png_bytes;
@@ -2278,14 +2278,14 @@ index 0000000000000..7d018e346a458
 +
 +typedef struct CbfBridgeEvent {
 +  uint8_t kind;
-+  uint64_t web_page_id;
++  uint64_t tab_id;
 +  uint64_t request_id;
 +  uint8_t beforeunload_reason;
 +  uint8_t cursor_type;
 +  char* profile_id;
 +  CbfSurfaceHandle surface_handle;
 +  CbfImeBoundsUpdate ime_bounds;
-+  CbfWebPageIdList dirty_web_page_ids;
++  CbfTabIdList dirty_tab_ids;
 +  CbfContextMenu context_menu;
 +  char* target_url;
 +  char* url;
@@ -2320,7 +2320,7 @@ index 0000000000000..7d018e346a458
 +} CbfImeTextSpanList;
 +
 +typedef struct CbfImeComposition {
-+  uint64_t web_page_id;
++  uint64_t tab_id;
 +  const char* text;
 +  int32_t selection_start;
 +  int32_t selection_end;
@@ -2331,7 +2331,7 @@ index 0000000000000..7d018e346a458
 +} CbfImeComposition;
 +
 +typedef struct CbfImeCommitText {
-+  uint64_t web_page_id;
++  uint64_t tab_id;
 +  const char* text;
 +  int32_t relative_caret_position;
 +  // (-1, -1) means "no replacement range".
@@ -2342,20 +2342,20 @@ index 0000000000000..7d018e346a458
 +
 +void cbf_bridge_convert_nsevent(
 +    void* nsevent,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    CbfKeyEvent* out_event);
 +void cbf_bridge_free_converted_key_event(CbfKeyEvent* event);
 +void cbf_bridge_convert_nsevent_to_mouse_event(
 +    void* nsevent,
 +    void* nsview,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint8_t pointer_type,
 +    bool unaccelerated_movement,
 +    CbfMouseEvent* out_event);
 +void cbf_bridge_convert_nsevent_to_mouse_wheel_event(
 +    void* nsevent,
 +    void* nsview,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    CbfMouseWheelEvent* out_event);
 +void cbf_bridge_convert_nspasteboard_to_drag_data(
 +    void* nspasteboard,
@@ -2369,21 +2369,21 @@ index 0000000000000..7d018e346a458
 +bool cbf_bridge_client_dismiss_context_menu(CbfBridgeClientHandle* client,
 +                                            uint64_t menu_id);
 +bool cbf_bridge_client_navigate(CbfBridgeClientHandle* client,
-+                                uint64_t web_page_id,
++                                uint64_t tab_id,
 +                                const char* url);
 +bool cbf_bridge_client_go_back(CbfBridgeClientHandle* client,
-+                               uint64_t web_page_id);
++                               uint64_t tab_id);
 +bool cbf_bridge_client_go_forward(CbfBridgeClientHandle* client,
-+                                  uint64_t web_page_id);
++                                  uint64_t tab_id);
 +bool cbf_bridge_client_reload(CbfBridgeClientHandle* client,
-+                               uint64_t web_page_id,
++                               uint64_t tab_id,
 +                               bool ignore_cache);
 +bool cbf_bridge_client_set_web_page_focus(CbfBridgeClientHandle* client,
-+                                          uint64_t web_page_id,
++                                          uint64_t tab_id,
 +                                          bool focused);
 +bool cbf_bridge_client_get_web_page_dom_html(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t request_id);
 +
 +#ifdef __cplusplus
@@ -2393,7 +2393,7 @@ index 0000000000000..7d018e346a458
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_FFI_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_input.cc b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
 new file mode 100644
-index 0000000000000..11d2486bcbcd9
+index 0000000000000..b5df2f11377e7
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
 @@ -0,0 +1,813 @@
@@ -2434,7 +2434,7 @@ index 0000000000000..11d2486bcbcd9
 +  }
 +
 +  auto key_event = cbf::mojom::CbfKeyEvent::New();
-+  key_event->web_page_id = event->web_page_id;
++  key_event->tab_id = event->tab_id;
 +  key_event->type = ToMojomKeyEventType(event->type);
 +  key_event->modifiers = event->modifiers;
 +  key_event->windows_key_code = event->windows_key_code;
@@ -2467,7 +2467,7 @@ index 0000000000000..11d2486bcbcd9
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(event->web_page_id);
++            auto it = impl->web_page_profiles.find(event->tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -2499,7 +2499,7 @@ index 0000000000000..11d2486bcbcd9
 +  }
 +
 +  auto mouse_event = cbf::mojom::CbfMouseEvent::New();
-+  mouse_event->web_page_id = event->web_page_id;
++  mouse_event->tab_id = event->tab_id;
 +  mouse_event->type = ToMojomMouseEventType(event->type);
 +  mouse_event->modifiers = event->modifiers;
 +  mouse_event->button = ToMojomMouseButton(event->button);
@@ -2520,7 +2520,7 @@ index 0000000000000..11d2486bcbcd9
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(event->web_page_id);
++            auto it = impl->web_page_profiles.find(event->tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -2551,7 +2551,7 @@ index 0000000000000..11d2486bcbcd9
 +  }
 +
 +  auto wheel_event = cbf::mojom::CbfMouseWheelEvent::New();
-+  wheel_event->web_page_id = event->web_page_id;
++  wheel_event->tab_id = event->tab_id;
 +  wheel_event->modifiers = event->modifiers;
 +  wheel_event->position_in_widget_x = event->position_in_widget_x;
 +  wheel_event->position_in_widget_y = event->position_in_widget_y;
@@ -2576,7 +2576,7 @@ index 0000000000000..11d2486bcbcd9
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(event->web_page_id);
++            auto it = impl->web_page_profiles.find(event->tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -2605,7 +2605,7 @@ index 0000000000000..11d2486bcbcd9
 +
 +  auto mojom_update = cbf::mojom::CbfDragUpdate::New();
 +  mojom_update->session_id = update->session_id;
-+  mojom_update->web_page_id = update->web_page_id;
++  mojom_update->tab_id = update->tab_id;
 +  mojom_update->allowed_operations = update->allowed_operations;
 +  mojom_update->modifiers = update->modifiers;
 +  mojom_update->position_in_widget_x = update->position_in_widget_x;
@@ -2620,7 +2620,7 @@ index 0000000000000..11d2486bcbcd9
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(update->web_page_id);
++            auto it = impl->web_page_profiles.find(update->tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -2649,7 +2649,7 @@ index 0000000000000..11d2486bcbcd9
 +
 +  auto mojom_drop = cbf::mojom::CbfDragDrop::New();
 +  mojom_drop->session_id = drop->session_id;
-+  mojom_drop->web_page_id = drop->web_page_id;
++  mojom_drop->tab_id = drop->tab_id;
 +  mojom_drop->modifiers = drop->modifiers;
 +  mojom_drop->position_in_widget_x = drop->position_in_widget_x;
 +  mojom_drop->position_in_widget_y = drop->position_in_widget_y;
@@ -2663,7 +2663,7 @@ index 0000000000000..11d2486bcbcd9
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(drop->web_page_id);
++            auto it = impl->web_page_profiles.find(drop->tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -2677,7 +2677,7 @@ index 0000000000000..11d2486bcbcd9
 +  return true;
 +}
 +
-+bool CbfBridgeClient::SendDragCancel(uint64_t session_id, uint64_t web_page_id) {
++bool CbfBridgeClient::SendDragCancel(uint64_t session_id, uint64_t tab_id) {
 +  if (!impl_) {
 +    return false;
 +  }
@@ -2693,11 +2693,11 @@ index 0000000000000..11d2486bcbcd9
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t session_id, uint64_t web_page_id) {
++          [](CbfBridgeClientImpl* impl, uint64_t session_id, uint64_t tab_id) {
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(web_page_id);
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -2705,9 +2705,9 @@ index 0000000000000..11d2486bcbcd9
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->SendDragCancel(session_id, web_page_id);
++            remote_it->second.remote->SendDragCancel(session_id, tab_id);
 +          },
-+          impl, session_id, web_page_id));
++          impl, session_id, tab_id));
 +  return true;
 +}
 +
@@ -2728,7 +2728,7 @@ index 0000000000000..11d2486bcbcd9
 +  }
 +
 +  auto mojom_composition = cbf::mojom::CbfImeComposition::New();
-+  mojom_composition->web_page_id = composition->web_page_id;
++  mojom_composition->tab_id = composition->tab_id;
 +  mojom_composition->text = MaybeCopyString(composition->text);
 +  mojom_composition->selection_start = composition->selection_start;
 +  mojom_composition->selection_end = composition->selection_end;
@@ -2746,7 +2746,7 @@ index 0000000000000..11d2486bcbcd9
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(composition->web_page_id);
++            auto it = impl->web_page_profiles.find(composition->tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -2777,7 +2777,7 @@ index 0000000000000..11d2486bcbcd9
 +  }
 +
 +  auto mojom_commit = cbf::mojom::CbfImeCommitText::New();
-+  mojom_commit->web_page_id = commit->web_page_id;
++  mojom_commit->tab_id = commit->tab_id;
 +  mojom_commit->text = MaybeCopyString(commit->text);
 +  mojom_commit->relative_caret_position = commit->relative_caret_position;
 +  mojom_commit->replacement_range_start = commit->replacement_range_start;
@@ -2792,7 +2792,7 @@ index 0000000000000..11d2486bcbcd9
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(commit->web_page_id);
++            auto it = impl->web_page_profiles.find(commit->tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -2806,7 +2806,7 @@ index 0000000000000..11d2486bcbcd9
 +  return true;
 +}
 +
-+bool CbfBridgeClient::FinishComposingText(uint64_t web_page_id,
++bool CbfBridgeClient::FinishComposingText(uint64_t tab_id,
 +                                         uint8_t behavior) {
 +  if (!impl_) {
 +    return false;
@@ -2824,12 +2824,12 @@ index 0000000000000..11d2486bcbcd9
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id,
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id,
 +             cbf::mojom::CbfConfirmCompositionBehavior behavior) {
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(web_page_id);
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -2837,10 +2837,10 @@ index 0000000000000..11d2486bcbcd9
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->FinishComposingText(web_page_id,
++            remote_it->second.remote->FinishComposingText(tab_id,
 +                                                          behavior);
 +          },
-+          impl, web_page_id, mojom_behavior));
++          impl, tab_id, mojom_behavior));
 +  return true;
 +}
 +
@@ -2900,12 +2900,12 @@ index 0000000000000..11d2486bcbcd9
 +extern "C" bool cbf_bridge_client_send_drag_cancel(
 +    CbfBridgeClientHandle* client,
 +    uint64_t session_id,
-+    uint64_t web_page_id) {
++    uint64_t tab_id) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->SendDragCancel(session_id, web_page_id);
++      ->SendDragCancel(session_id, tab_id);
 +}
 +
 +extern "C" bool cbf_bridge_client_set_composition(
@@ -2929,27 +2929,27 @@ index 0000000000000..11d2486bcbcd9
 +
 +extern "C" bool cbf_bridge_client_finish_composing_text(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint8_t behavior) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->FinishComposingText(web_page_id, behavior);
++      ->FinishComposingText(tab_id, behavior);
 +}
 +
 +extern "C" void cbf_bridge_convert_nsevent(
 +    void* nsevent,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    CbfKeyEvent* out_event) {
 +#if defined(__APPLE__)
 +  if (!nsevent || !out_event) {
 +    return;
 +  }
 +  // Convert on the current thread (Main Thread)
-+  auto mojom_event = cbf::ConvertNSEventToMojom(nsevent, web_page_id);
++  auto mojom_event = cbf::ConvertNSEventToMojom(nsevent, tab_id);
 +
-+  out_event->web_page_id = mojom_event->web_page_id;
++  out_event->tab_id = mojom_event->tab_id;
 +  out_event->type = static_cast<uint8_t>(mojom_event->type);
 +  out_event->modifiers = mojom_event->modifiers;
 +  out_event->windows_key_code = mojom_event->windows_key_code;
@@ -2981,7 +2981,7 @@ index 0000000000000..11d2486bcbcd9
 +extern "C" void cbf_bridge_convert_nsevent_to_mouse_event(
 +    void* nsevent,
 +    void* nsview,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint8_t pointer_type,
 +    bool unaccelerated_movement,
 +    CbfMouseEvent* out_event) {
@@ -2990,11 +2990,11 @@ index 0000000000000..11d2486bcbcd9
 +    return;
 +  }
 +  auto mojom_event = cbf::ConvertNSEventToMouseMojom(
-+      nsevent, nsview, web_page_id, pointer_type, unaccelerated_movement);
++      nsevent, nsview, tab_id, pointer_type, unaccelerated_movement);
 +  if (!mojom_event) {
 +    return;
 +  }
-+  out_event->web_page_id = mojom_event->web_page_id;
++  out_event->tab_id = mojom_event->tab_id;
 +  out_event->type = static_cast<uint8_t>(mojom_event->type);
 +  out_event->modifiers = mojom_event->modifiers;
 +  out_event->button = static_cast<uint8_t>(mojom_event->button);
@@ -3013,18 +3013,18 @@ index 0000000000000..11d2486bcbcd9
 +extern "C" void cbf_bridge_convert_nsevent_to_mouse_wheel_event(
 +    void* nsevent,
 +    void* nsview,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    CbfMouseWheelEvent* out_event) {
 +#if defined(__APPLE__)
 +  if (!nsevent || !nsview || !out_event) {
 +    return;
 +  }
 +  auto mojom_event =
-+      cbf::ConvertNSEventToMouseWheelMojom(nsevent, nsview, web_page_id);
++      cbf::ConvertNSEventToMouseWheelMojom(nsevent, nsview, tab_id);
 +  if (!mojom_event) {
 +    return;
 +  }
-+  out_event->web_page_id = mojom_event->web_page_id;
++  out_event->tab_id = mojom_event->tab_id;
 +  out_event->modifiers = mojom_event->modifiers;
 +  out_event->position_in_widget_x = mojom_event->position_in_widget_x;
 +  out_event->position_in_widget_y = mojom_event->position_in_widget_y;
@@ -3212,7 +3212,7 @@ index 0000000000000..11d2486bcbcd9
 +}
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_internal.h b/chrome/browser/cbf/bridge/cbf_bridge_internal.h
 new file mode 100644
-index 0000000000000..2396f6646fc3c
+index 0000000000000..43007139f4f84
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_internal.h
 @@ -0,0 +1,28 @@
@@ -3226,17 +3226,17 @@ index 0000000000000..2396f6646fc3c
 +namespace cbf {
 +// Converts an NSEvent (passed as void*) to a CbfKeyEvent Mojom struct.
 +// Implemented in cbf_bridge_mac.mm.
-+cbf::mojom::CbfKeyEventPtr ConvertNSEventToMojom(void* nsevent, uint64_t web_page_id);
++cbf::mojom::CbfKeyEventPtr ConvertNSEventToMojom(void* nsevent, uint64_t tab_id);
 +cbf::mojom::CbfMouseEventPtr ConvertNSEventToMouseMojom(
 +    void* nsevent,
 +    void* nsview,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint8_t pointer_type,
 +    bool unaccelerated_movement);
 +cbf::mojom::CbfMouseWheelEventPtr ConvertNSEventToMouseWheelMojom(
 +    void* nsevent,
 +    void* nsview,
-+    uint64_t web_page_id);
++    uint64_t tab_id);
 +cbf::mojom::CbfDragDataPtr ConvertNSPasteboardToMojomDragData(
 +    void* nspasteboard);
 +void ReleaseNSEvent(void* nsevent);
@@ -3246,7 +3246,7 @@ index 0000000000000..2396f6646fc3c
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_INTERNAL_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_mac.mm b/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
 new file mode 100644
-index 0000000000000..5458a164de593
+index 0000000000000..3de19602ab836
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
 @@ -0,0 +1,293 @@
@@ -3362,12 +3362,12 @@ index 0000000000000..5458a164de593
 +
 +}  // namespace
 +
-+mojom::CbfKeyEventPtr ConvertNSEventToMojom(void* nsevent, uint64_t web_page_id) {
++mojom::CbfKeyEventPtr ConvertNSEventToMojom(void* nsevent, uint64_t tab_id) {
 +  NSEvent* event = (__bridge NSEvent*)(nsevent);
 +  input::NativeWebKeyboardEvent web_event((base::apple::OwnedNSEvent(event)));
 +
 +  auto mojom_event = mojom::CbfKeyEvent::New();
-+  mojom_event->web_page_id = web_page_id;
++  mojom_event->tab_id = tab_id;
 +  mojom_event->type = ToMojomKeyEventType(web_event.GetType());
 +  mojom_event->modifiers = web_event.GetModifiers();
 +  mojom_event->windows_key_code = web_event.windows_key_code;
@@ -3401,7 +3401,7 @@ index 0000000000000..5458a164de593
 +mojom::CbfMouseEventPtr ConvertNSEventToMouseMojom(
 +    void* nsevent,
 +    void* nsview,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint8_t pointer_type,
 +    bool unaccelerated_movement) {
 +  NSEvent* event = (__bridge NSEvent*)(nsevent);
@@ -3416,7 +3416,7 @@ index 0000000000000..5458a164de593
 +      unaccelerated_movement);
 +
 +  auto mojom_event = mojom::CbfMouseEvent::New();
-+  mojom_event->web_page_id = web_page_id;
++  mojom_event->tab_id = tab_id;
 +  mojom_event->type = ToMojomMouseEventType(web_event.GetType());
 +  mojom_event->modifiers = web_event.GetModifiers();
 +  mojom_event->button = ToMojomMouseButton(web_event.button);
@@ -3436,7 +3436,7 @@ index 0000000000000..5458a164de593
 +mojom::CbfMouseWheelEventPtr ConvertNSEventToMouseWheelMojom(
 +    void* nsevent,
 +    void* nsview,
-+    uint64_t web_page_id) {
++    uint64_t tab_id) {
 +  NSEvent* event = (__bridge NSEvent*)(nsevent);
 +  NSView* view = (__bridge NSView*)(nsview);
 +  if (!event || !view) {
@@ -3447,7 +3447,7 @@ index 0000000000000..5458a164de593
 +      input::WebMouseWheelEventBuilder::Build(event, view);
 +
 +  auto mojom_event = mojom::CbfMouseWheelEvent::New();
-+  mojom_event->web_page_id = web_page_id;
++  mojom_event->tab_id = tab_id;
 +  mojom_event->modifiers = web_event.GetModifiers();
 +  mojom_event->position_in_widget_x = web_event.PositionInWidget().x();
 +  mojom_event->position_in_widget_y = web_event.PositionInWidget().y();
@@ -3860,7 +3860,7 @@ index 0000000000000..c45b162c656a2
 +#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_SUPPORT_H_
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
 new file mode 100644
-index 0000000000000..a2c4fa5255304
+index 0000000000000..261daec2306ed
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
 @@ -0,0 +1,451 @@
@@ -3921,8 +3921,8 @@ index 0000000000000..a2c4fa5255304
 +                request_id,
 +                base::BindOnce(
 +                    [](CbfBridgeClientImpl* impl, std::string profile_id,
-+                       uint64_t web_page_id) {
-+                      impl->web_page_profiles.emplace(web_page_id,
++                       uint64_t tab_id) {
++                      impl->web_page_profiles.emplace(tab_id,
 +                                                      std::move(profile_id));
 +                    },
 +                    impl, profile));
@@ -3931,7 +3931,7 @@ index 0000000000000..a2c4fa5255304
 +  return true;
 +}
 +
-+bool CbfBridgeClient::SetWebPageSize(const uint64_t web_page_id,
++bool CbfBridgeClient::SetWebPageSize(const uint64_t tab_id,
 +                                    const uint32_t width,
 +                                    const uint32_t height) {
 +  if (!impl_) {
@@ -3948,12 +3948,12 @@ index 0000000000000..a2c4fa5255304
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, const uint64_t web_page_id,
++          [](CbfBridgeClientImpl* impl, const uint64_t tab_id,
 +             const uint32_t width, const uint32_t height) {
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(web_page_id);
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -3961,14 +3961,14 @@ index 0000000000000..a2c4fa5255304
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->SetWebPageSize(web_page_id, width,
++            remote_it->second.remote->SetWebPageSize(tab_id, width,
 +                                                     height, base::DoNothing());
 +          },
-+          impl, web_page_id, width, height));
++          impl, tab_id, width, height));
 +  return true;
 +}
 +
-+bool CbfBridgeClient::SetWebPageFocus(const uint64_t web_page_id,
++bool CbfBridgeClient::SetWebPageFocus(const uint64_t tab_id,
 +                                      const bool focused) {
 +  if (!impl_) {
 +    return false;
@@ -3984,12 +3984,12 @@ index 0000000000000..a2c4fa5255304
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, const uint64_t web_page_id,
++          [](CbfBridgeClientImpl* impl, const uint64_t tab_id,
 +             const bool focused) {
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(web_page_id);
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -3997,13 +3997,13 @@ index 0000000000000..a2c4fa5255304
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->SetWebPageFocus(web_page_id, focused);
++            remote_it->second.remote->SetWebPageFocus(tab_id, focused);
 +          },
-+          impl, web_page_id, focused));
++          impl, tab_id, focused));
 +  return true;
 +}
 +
-+bool CbfBridgeClient::RequestCloseWebPage(const uint64_t web_page_id) {
++bool CbfBridgeClient::RequestCloseWebPage(const uint64_t tab_id) {
 +  if (!impl_) {
 +    return false;
 +  }
@@ -4018,11 +4018,11 @@ index 0000000000000..a2c4fa5255304
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, const uint64_t web_page_id) {
++          [](CbfBridgeClientImpl* impl, const uint64_t tab_id) {
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(web_page_id);
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -4030,13 +4030,13 @@ index 0000000000000..a2c4fa5255304
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->RequestCloseWebPage(web_page_id);
++            remote_it->second.remote->RequestCloseWebPage(tab_id);
 +          },
-+          impl, web_page_id));
++          impl, tab_id));
 +  return true;
 +}
 +
-+bool CbfBridgeClient::ConfirmBeforeUnload(const uint64_t web_page_id,
++bool CbfBridgeClient::ConfirmBeforeUnload(const uint64_t tab_id,
 +                                          const uint64_t request_id,
 +                                          const bool proceed) {
 +  if (!impl_) {
@@ -4054,13 +4054,13 @@ index 0000000000000..a2c4fa5255304
 +      FROM_HERE,
 +      base::BindOnce(
 +          [](CbfBridgeClientImpl* impl,
-+             const uint64_t web_page_id,
++             const uint64_t tab_id,
 +             const uint64_t request_id,
 +             const bool proceed) {
 +            if (!impl->browser_remote.is_bound()) {
 +              return;
 +            }
-+            auto it = impl->web_page_profiles.find(web_page_id);
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -4070,11 +4070,11 @@ index 0000000000000..a2c4fa5255304
 +            }
 +            remote_it->second.remote->ConfirmBeforeUnload(request_id, proceed);
 +          },
-+          impl, web_page_id, request_id, proceed));
++          impl, tab_id, request_id, proceed));
 +  return true;
 +}
 +
-+bool CbfBridgeClient::Navigate(uint64_t web_page_id, const std::string& url) {
++bool CbfBridgeClient::Navigate(uint64_t tab_id, const std::string& url) {
 +  if (!impl_) {
 +    return false;
 +  }
@@ -4086,8 +4086,8 @@ index 0000000000000..a2c4fa5255304
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id, std::string url) {
-+            auto it = impl->web_page_profiles.find(web_page_id);
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id, std::string url) {
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -4095,13 +4095,13 @@ index 0000000000000..a2c4fa5255304
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->Navigate(web_page_id, url);
++            remote_it->second.remote->Navigate(tab_id, url);
 +          },
-+          impl, web_page_id, url));
++          impl, tab_id, url));
 +  return true;
 +}
 +
-+bool CbfBridgeClient::GoBack(uint64_t web_page_id) {
++bool CbfBridgeClient::GoBack(uint64_t tab_id) {
 +  if (!impl_) {
 +    return false;
 +  }
@@ -4113,8 +4113,8 @@ index 0000000000000..a2c4fa5255304
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id) {
-+            auto it = impl->web_page_profiles.find(web_page_id);
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id) {
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -4122,13 +4122,13 @@ index 0000000000000..a2c4fa5255304
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->GoBack(web_page_id);
++            remote_it->second.remote->GoBack(tab_id);
 +          },
-+          impl, web_page_id));
++          impl, tab_id));
 +  return true;
 +}
 +
-+bool CbfBridgeClient::GoForward(uint64_t web_page_id) {
++bool CbfBridgeClient::GoForward(uint64_t tab_id) {
 +  if (!impl_) {
 +    return false;
 +  }
@@ -4140,8 +4140,8 @@ index 0000000000000..a2c4fa5255304
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id) {
-+            auto it = impl->web_page_profiles.find(web_page_id);
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id) {
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -4149,13 +4149,13 @@ index 0000000000000..a2c4fa5255304
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->GoForward(web_page_id);
++            remote_it->second.remote->GoForward(tab_id);
 +          },
-+          impl, web_page_id));
++          impl, tab_id));
 +  return true;
 +}
 +
-+bool CbfBridgeClient::Reload(uint64_t web_page_id, bool ignore_cache) {
++bool CbfBridgeClient::Reload(uint64_t tab_id, bool ignore_cache) {
 +  if (!impl_) {
 +    return false;
 +  }
@@ -4167,8 +4167,8 @@ index 0000000000000..a2c4fa5255304
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id, bool ignore_cache) {
-+            auto it = impl->web_page_profiles.find(web_page_id);
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id, bool ignore_cache) {
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -4176,13 +4176,13 @@ index 0000000000000..a2c4fa5255304
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->Reload(web_page_id, ignore_cache);
++            remote_it->second.remote->Reload(tab_id, ignore_cache);
 +          },
-+          impl, web_page_id, ignore_cache));
++          impl, tab_id, ignore_cache));
 +  return true;
 +}
 +
-+bool CbfBridgeClient::GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id) {
++bool CbfBridgeClient::GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id) {
 +  if (!impl_) {
 +    return false;
 +  }
@@ -4194,8 +4194,8 @@ index 0000000000000..a2c4fa5255304
 +  task_runner->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](CbfBridgeClientImpl* impl, uint64_t web_page_id, uint64_t request_id) {
-+            auto it = impl->web_page_profiles.find(web_page_id);
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id, uint64_t request_id) {
++            auto it = impl->web_page_profiles.find(tab_id);
 +            if (it == impl->web_page_profiles.end()) {
 +              return;
 +            }
@@ -4203,9 +4203,9 @@ index 0000000000000..a2c4fa5255304
 +            if (remote_it == impl->profile_connections.end()) {
 +              return;
 +            }
-+            remote_it->second.remote->GetWebPageDomHtml(web_page_id, request_id);
++            remote_it->second.remote->GetWebPageDomHtml(tab_id, request_id);
 +          },
-+          impl, web_page_id, request_id));
++          impl, tab_id, request_id));
 +  return true;
 +}
 +
@@ -4224,100 +4224,100 @@ index 0000000000000..a2c4fa5255304
 +
 +extern "C" bool cbf_bridge_client_request_close_web_page(
 +    CbfBridgeClientHandle* client,
-+    const uint64_t web_page_id) {
++    const uint64_t tab_id) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->RequestCloseWebPage(web_page_id);
++      ->RequestCloseWebPage(tab_id);
 +}
 +
 +extern "C" bool cbf_bridge_client_set_web_page_size(
 +    CbfBridgeClientHandle* client,
-+    const uint64_t web_page_id,
++    const uint64_t tab_id,
 +    const uint32_t width,
 +    const uint32_t height) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->SetWebPageSize(web_page_id, width, height);
++      ->SetWebPageSize(tab_id, width, height);
 +}
 +
 +extern "C" bool cbf_bridge_client_set_web_page_focus(
 +    CbfBridgeClientHandle* client,
-+    const uint64_t web_page_id,
++    const uint64_t tab_id,
 +    const bool focused) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->SetWebPageFocus(web_page_id, focused);
++      ->SetWebPageFocus(tab_id, focused);
 +}
 +
 +extern "C" bool cbf_bridge_client_confirm_beforeunload(
 +    CbfBridgeClientHandle* client,
-+    const uint64_t web_page_id,
++    const uint64_t tab_id,
 +    const uint64_t request_id,
 +    const bool proceed) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->ConfirmBeforeUnload(web_page_id, request_id, proceed);
++      ->ConfirmBeforeUnload(tab_id, request_id, proceed);
 +}
 +
 +extern "C" bool cbf_bridge_client_navigate(CbfBridgeClientHandle* client,
-+                                            uint64_t web_page_id,
++                                            uint64_t tab_id,
 +                                            const char* url) {
 +  if (!client || !url) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->Navigate(web_page_id, url);
++      ->Navigate(tab_id, url);
 +}
 +
 +extern "C" bool cbf_bridge_client_go_back(CbfBridgeClientHandle* client,
-+                                          uint64_t web_page_id) {
++                                          uint64_t tab_id) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->GoBack(web_page_id);
++      ->GoBack(tab_id);
 +}
 +
 +extern "C" bool cbf_bridge_client_go_forward(CbfBridgeClientHandle* client,
-+                                             uint64_t web_page_id) {
++                                             uint64_t tab_id) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->GoForward(web_page_id);
++      ->GoForward(tab_id);
 +}
 +
 +extern "C" bool cbf_bridge_client_reload(CbfBridgeClientHandle* client,
-+                                         uint64_t web_page_id,
++                                         uint64_t tab_id,
 +                                         bool ignore_cache) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->Reload(web_page_id, ignore_cache);
++      ->Reload(tab_id, ignore_cache);
 +}
 +
 +extern "C" bool cbf_bridge_client_get_web_page_dom_html(
 +    CbfBridgeClientHandle* client,
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t request_id) {
 +  if (!client) {
 +    return false;
 +  }
 +  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->GetWebPageDomHtml(web_page_id, request_id);
++      ->GetWebPageDomHtml(tab_id, request_id);
 +}
 diff --git a/chrome/browser/cbf/cbf_browser_service.cc b/chrome/browser/cbf/cbf_browser_service.cc
 new file mode 100644
-index 0000000000000..5e686ca39c5a7
+index 0000000000000..152cbbaa59856
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_browser_service.cc
 @@ -0,0 +1,300 @@
@@ -4416,7 +4416,7 @@ index 0000000000000..5e686ca39c5a7
 +
 +  for (const auto& entry : profile_services_) {
 +    const auto& service = entry.second;
-+    const auto ids = service->GetAllWebPageIds();
++    const auto ids = service->GetAllTabIds();
 +    pending_beforeunload_pages_.insert(ids.begin(), ids.end());
 +  }
 +
@@ -4504,19 +4504,19 @@ index 0000000000000..5e686ca39c5a7
 +}
 +
 +void CbfBrowserService::NotifyBeforeUnloadDialogRequested(
-+    WebPageId web_page_id) {
++    TabId tab_id) {
 +  if (shutdown_state_ != ShutdownState::kWaitingBeforeUnload &&
 +      shutdown_state_ != ShutdownState::kBlocked) {
 +    return;
 +  }
-+  beforeunload_dialog_pages_.insert(web_page_id);
-+  MarkBeforeUnloadDispatchComplete(web_page_id);
++  beforeunload_dialog_pages_.insert(tab_id);
++  MarkBeforeUnloadDispatchComplete(tab_id);
 +}
 +
-+void CbfBrowserService::NotifyBeforeUnloadFired(WebPageId web_page_id,
++void CbfBrowserService::NotifyBeforeUnloadFired(TabId tab_id,
 +                                                bool proceed) {
 +  if (shutdown_state_ == ShutdownState::kWaitingBeforeUnload) {
-+    MarkBeforeUnloadDispatchComplete(web_page_id);
++    MarkBeforeUnloadDispatchComplete(tab_id);
 +    return;
 +  }
 +  if (shutdown_state_ == ShutdownState::kBlocked && !proceed) {
@@ -4525,8 +4525,8 @@ index 0000000000000..5e686ca39c5a7
 +}
 +
 +void CbfBrowserService::MarkBeforeUnloadDispatchComplete(
-+    WebPageId web_page_id) {
-+  const auto it = pending_beforeunload_pages_.find(web_page_id);
++    TabId tab_id) {
++  const auto it = pending_beforeunload_pages_.find(tab_id);
 +  if (it == pending_beforeunload_pages_.end()) {
 +    return;
 +  }
@@ -4623,7 +4623,7 @@ index 0000000000000..5e686ca39c5a7
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/cbf_browser_service.h b/chrome/browser/cbf/cbf_browser_service.h
 new file mode 100644
-index 0000000000000..8df7b2292b4dc
+index 0000000000000..2cef30622fc54
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_browser_service.h
 @@ -0,0 +1,74 @@
@@ -4647,7 +4647,7 @@ index 0000000000000..8df7b2292b4dc
 +
 +class CbfProfileService;
 +
-+using WebPageId = std::uint64_t;
++using TabId = std::uint64_t;
 +
 +class CbfBrowserService final : public mojom::CbfBrowserService {
 + public:
@@ -4667,8 +4667,8 @@ index 0000000000000..8df7b2292b4dc
 +  void ForceShutdown() override;
 +  void NotifyWebPageClosed();
 +  bool IsShutdownRequested() const;
-+  void NotifyBeforeUnloadDialogRequested(WebPageId web_page_id);
-+  void NotifyBeforeUnloadFired(WebPageId web_page_id, bool proceed);
++  void NotifyBeforeUnloadDialogRequested(TabId tab_id);
++  void NotifyBeforeUnloadFired(TabId tab_id, bool proceed);
 +
 + private:
 +  enum class ShutdownState {
@@ -4680,7 +4680,7 @@ index 0000000000000..8df7b2292b4dc
 +
 +  void StartShutdown(uint64_t request_id);
 +  void CancelShutdown(uint64_t request_id);
-+  void MarkBeforeUnloadDispatchComplete(WebPageId web_page_id);
++  void MarkBeforeUnloadDispatchComplete(TabId tab_id);
 +  void MaybeFinalizeShutdownRequest();
 +  bool HasOpenWebPages() const;
 +  void RebuildProfileCache();
@@ -4690,8 +4690,8 @@ index 0000000000000..8df7b2292b4dc
 +  base::flat_map<std::string, base::FilePath> profile_paths_;
 +  std::optional<uint64_t> shutdown_request_id_;
 +  ShutdownState shutdown_state_ = ShutdownState::kIdle;
-+  std::set<WebPageId> pending_beforeunload_pages_;
-+  std::set<WebPageId> beforeunload_dialog_pages_;
++  std::set<TabId> pending_beforeunload_pages_;
++  std::set<TabId> beforeunload_dialog_pages_;
 +  bool shutdown_in_progress_ = false;
 +  base::flat_map<std::string, std::unique_ptr<CbfProfileService>>
 +      profile_services_;
@@ -5167,7 +5167,7 @@ index 0000000000000..8087933b94555
 +#endif  // CHROME_BROWSER_CBF_CBF_JAVA_SCRIPT_DIALOG_MANAGER_H_
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
 new file mode 100644
-index 0000000000000..bd2ef698284c8
+index 0000000000000..2cee1e3799ec4
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
 @@ -0,0 +1,1702 @@
@@ -5797,7 +5797,7 @@ index 0000000000000..bd2ef698284c8
 +
 +void CbfProfileService::RegisterTextInputManager(
 +    content::WebContents* web_contents,
-+    WebPageId web_page_id) {
++    TabId tab_id) {
 +  if (!web_contents) {
 +    return;
 +  }
@@ -5811,7 +5811,7 @@ index 0000000000000..bd2ef698284c8
 +  if (text_input_map_.find(text_input_manager) == text_input_map_.end()) {
 +    text_input_observations_.AddObservation(text_input_manager);
 +  }
-+  text_input_map_[text_input_manager] = web_page_id;
++  text_input_map_[text_input_manager] = tab_id;
 +}
 +
 +void CbfProfileService::NotifyImeBoundsUpdated(
@@ -5827,7 +5827,7 @@ index 0000000000000..bd2ef698284c8
 +  }
 +
 +  auto update = cbf::mojom::CbfImeBoundsUpdate::New();
-+  update->web_page_id = it->second;
++  update->tab_id = it->second;
 +
 +  if (include_composition) {
 +    const auto* composition_info =
@@ -5874,55 +5874,55 @@ index 0000000000000..bd2ef698284c8
 +                                      uint64_t request_id,
 +                                      CreateWebPageCallback callback) {
 +  const GURL url(initial_url);
-+  const WebPageId web_page_id = tab_manager_.CreateWebPage(url);
-+  RegisterTextInputManager(tab_manager_.GetWebContents(web_page_id),
-+                           web_page_id);
-+  if (observer_ && web_page_id != kInvalidWebPageId) {
-+    observer_->OnWebPageCreated(web_page_id, request_id);
++  const TabId tab_id = tab_manager_.CreateWebPage(url);
++  RegisterTextInputManager(tab_manager_.GetWebContents(tab_id),
++                           tab_id);
++  if (observer_ && tab_id != kInvalidTabId) {
++    observer_->OnWebPageCreated(tab_id, request_id);
 +  }
-+  std::move(callback).Run(web_page_id);
++  std::move(callback).Run(tab_id);
 +}
 +
-+void CbfProfileService::RequestCloseWebPage(WebPageId web_page_id) {
-+  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++void CbfProfileService::RequestCloseWebPage(TabId tab_id) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
 +  beforeunload_reasons_[web_contents] =
 +      mojom::CbfBeforeUnloadReason::kCloseWebPage;
-+  tab_manager_.RequestCloseWebPage(web_page_id);
++  tab_manager_.RequestCloseWebPage(tab_id);
 +}
 +
-+void CbfProfileService::SetWebPageSize(const WebPageId web_page_id,
++void CbfProfileService::SetWebPageSize(const TabId tab_id,
 +                                       std::uint32_t width,
 +                                       std::uint32_t height,
 +                                       SetWebPageSizeCallback callback) {
 +  tab_manager_.SetWebPageSize(
-+      web_page_id, width, height,
++      tab_id, width, height,
 +      base::BindOnce(
-+          [](base::WeakPtr<CbfProfileService> self, WebPageId web_page_id,
++          [](base::WeakPtr<CbfProfileService> self, TabId tab_id,
 +             SetWebPageSizeCallback callback) {
 +            std::move(callback).Run();
 +            if (self && self->observer_.is_bound()) {
-+              self->observer_->OnWebPageResizeAcknowledged(web_page_id);
++              self->observer_->OnWebPageResizeAcknowledged(tab_id);
 +            }
 +          },
-+          weak_factory_.GetWeakPtr(), web_page_id, std::move(callback)));
++          weak_factory_.GetWeakPtr(), tab_id, std::move(callback)));
 +}
 +
 +void CbfProfileService::SendKeyEvent(
 +    mojom::CbfKeyEventPtr event,
 +    const std::optional<std::vector<std::string>>& commands) {
 +  content::WebContents* web_contents =
-+      tab_manager_.GetWebContents(event->web_page_id);
++      tab_manager_.GetWebContents(event->tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
 +  content::RenderWidgetHost* widget_host =
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
-+    DVLOG(1) << "SendKeyEvent dropped: no input widget host for web_page_id="
-+             << event->web_page_id;
++    DVLOG(1) << "SendKeyEvent dropped: no input widget host for tab_id="
++             << event->tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -5967,7 +5967,7 @@ index 0000000000000..bd2ef698284c8
 +
 +void CbfProfileService::SendMouseEvent(mojom::CbfMouseEventPtr event) {
 +  content::WebContents* web_contents =
-+      tab_manager_.GetWebContents(event->web_page_id);
++      tab_manager_.GetWebContents(event->tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -5993,8 +5993,8 @@ index 0000000000000..bd2ef698284c8
 +  content::RenderWidgetHost* widget_host =
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
-+    DVLOG(1) << "SendMouseEvent dropped: no input widget host for web_page_id="
-+             << event->web_page_id;
++    DVLOG(1) << "SendMouseEvent dropped: no input widget host for tab_id="
++             << event->tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -6007,7 +6007,7 @@ index 0000000000000..bd2ef698284c8
 +void CbfProfileService::SendMouseWheelEvent(
 +    mojom::CbfMouseWheelEventPtr event) {
 +  content::WebContents* web_contents =
-+      tab_manager_.GetWebContents(event->web_page_id);
++      tab_manager_.GetWebContents(event->tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -6033,7 +6033,7 @@ index 0000000000000..bd2ef698284c8
 +      event->momentum_phase);
 +  wheel_event.delta_units = ToScrollGranularity(event->delta_units);
 +  if (!HasWheelPhase(wheel_event)) {
-+    auto& phase_state_ptr = wheel_phase_states_[event->web_page_id];
++    auto& phase_state_ptr = wheel_phase_states_[event->tab_id];
 +    if (!phase_state_ptr) {
 +      phase_state_ptr = std::make_unique<WheelPhaseState>();
 +    }
@@ -6050,9 +6050,9 @@ index 0000000000000..bd2ef698284c8
 +    phase_state.end_timer.Start(
 +        FROM_HERE, kSyntheticWheelPhaseGap,
 +        base::BindOnce(&CbfProfileService::SendSyntheticWheelEndedEvent,
-+                       weak_factory_.GetWeakPtr(), event->web_page_id));
++                       weak_factory_.GetWeakPtr(), event->tab_id));
 +  } else {
-+    wheel_phase_states_.erase(event->web_page_id);
++    wheel_phase_states_.erase(event->tab_id);
 +  }
 +
 +  ui::LatencyInfo latency_info;
@@ -6065,8 +6065,8 @@ index 0000000000000..bd2ef698284c8
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
 +    DVLOG(1)
-+        << "SendMouseWheelEvent dropped: no input widget host for web_page_id="
-+        << event->web_page_id;
++        << "SendMouseWheelEvent dropped: no input widget host for tab_id="
++        << event->tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -6076,8 +6076,8 @@ index 0000000000000..bd2ef698284c8
 +  widget_impl->ForwardWheelEventWithLatencyInfo(wheel_event, latency_info);
 +}
 +
-+void CbfProfileService::SendSyntheticWheelEndedEvent(WebPageId web_page_id) {
-+  const auto state_it = wheel_phase_states_.find(web_page_id);
++void CbfProfileService::SendSyntheticWheelEndedEvent(TabId tab_id) {
++  const auto state_it = wheel_phase_states_.find(tab_id);
 +  if (state_it == wheel_phase_states_.end()) {
 +    return;
 +  }
@@ -6088,7 +6088,7 @@ index 0000000000000..bd2ef698284c8
 +    return;
 +  }
 +
-+  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 +  if (!web_contents) {
 +    wheel_phase_states_.erase(state_it);
 +    return;
@@ -6129,7 +6129,7 @@ index 0000000000000..bd2ef698284c8
 +  }
 +
 +  DragSessionState& session = it->second;
-+  if (session.web_page_id != update->web_page_id || !session.source_rwh) {
++  if (session.tab_id != update->tab_id || !session.source_rwh) {
 +    return;
 +  }
 +
@@ -6193,7 +6193,7 @@ index 0000000000000..bd2ef698284c8
 +  DragSessionState session = std::move(it->second);
 +  drag_sessions_.erase(it);
 +
-+  if (session.web_page_id != drop->web_page_id || !session.source_rwh) {
++  if (session.tab_id != drop->tab_id || !session.source_rwh) {
 +    return;
 +  }
 +
@@ -6210,7 +6210,7 @@ index 0000000000000..bd2ef698284c8
 +  session.source_rwh->DragSourceSystemDragEnded();
 +}
 +
-+void CbfProfileService::SendDragCancel(uint64_t session_id, uint64_t web_page_id) {
++void CbfProfileService::SendDragCancel(uint64_t session_id, uint64_t tab_id) {
 +  const auto it = drag_sessions_.find(session_id);
 +  if (it == drag_sessions_.end()) {
 +    return;
@@ -6219,7 +6219,7 @@ index 0000000000000..bd2ef698284c8
 +  DragSessionState session = std::move(it->second);
 +  drag_sessions_.erase(it);
 +
-+  if (session.web_page_id != web_page_id || !session.source_rwh) {
++  if (session.tab_id != tab_id || !session.source_rwh) {
 +    return;
 +  }
 +
@@ -6236,15 +6236,15 @@ index 0000000000000..bd2ef698284c8
 +void CbfProfileService::SetComposition(
 +    mojom::CbfImeCompositionPtr composition) {
 +  content::WebContents* web_contents =
-+      tab_manager_.GetWebContents(composition->web_page_id);
++      tab_manager_.GetWebContents(composition->tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
 +  content::RenderWidgetHost* widget_host =
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
-+    DVLOG(1) << "SetComposition dropped: no input widget host for web_page_id="
-+             << composition->web_page_id;
++    DVLOG(1) << "SetComposition dropped: no input widget host for tab_id="
++             << composition->tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -6263,15 +6263,15 @@ index 0000000000000..bd2ef698284c8
 +
 +void CbfProfileService::CommitText(mojom::CbfImeCommitTextPtr commit) {
 +  content::WebContents* web_contents =
-+      tab_manager_.GetWebContents(commit->web_page_id);
++      tab_manager_.GetWebContents(commit->tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
 +  content::RenderWidgetHost* widget_host =
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
-+    DVLOG(1) << "CommitText dropped: no input widget host for web_page_id="
-+             << commit->web_page_id;
++    DVLOG(1) << "CommitText dropped: no input widget host for tab_id="
++             << commit->tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -6289,9 +6289,9 @@ index 0000000000000..bd2ef698284c8
 +}
 +
 +void CbfProfileService::FinishComposingText(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    mojom::CbfConfirmCompositionBehavior behavior) {
-+  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -6299,8 +6299,8 @@ index 0000000000000..bd2ef698284c8
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
 +    DVLOG(1)
-+        << "FinishComposingText dropped: no input widget host for web_page_id="
-+        << web_page_id;
++        << "FinishComposingText dropped: no input widget host for tab_id="
++        << tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -6348,8 +6348,8 @@ index 0000000000000..bd2ef698284c8
 +  dialog_manager_.ResolvePendingBeforeUnloadRequest(request_id, proceed);
 +}
 +
-+void CbfProfileService::Navigate(uint64_t web_page_id, const std::string& url) {
-+  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++void CbfProfileService::Navigate(uint64_t tab_id, const std::string& url) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -6361,22 +6361,22 @@ index 0000000000000..bd2ef698284c8
 +      gurl, content::Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
 +}
 +
-+void CbfProfileService::GoBack(uint64_t web_page_id) {
-+  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++void CbfProfileService::GoBack(uint64_t tab_id) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 +  if (web_contents && web_contents->GetController().CanGoBack()) {
 +    web_contents->GetController().GoBack();
 +  }
 +}
 +
-+void CbfProfileService::GoForward(uint64_t web_page_id) {
-+  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++void CbfProfileService::GoForward(uint64_t tab_id) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 +  if (web_contents && web_contents->GetController().CanGoForward()) {
 +    web_contents->GetController().GoForward();
 +  }
 +}
 +
-+void CbfProfileService::Reload(uint64_t web_page_id, bool ignore_cache) {
-+  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++void CbfProfileService::Reload(uint64_t tab_id, bool ignore_cache) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -6386,8 +6386,8 @@ index 0000000000000..bd2ef698284c8
 +  web_contents->GetController().Reload(type, true);
 +}
 +
-+void CbfProfileService::SetWebPageFocus(uint64_t web_page_id, bool focused) {
-+  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++void CbfProfileService::SetWebPageFocus(uint64_t tab_id, bool focused) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -6410,16 +6410,16 @@ index 0000000000000..bd2ef698284c8
 +  }
 +}
 +
-+void CbfProfileService::GetWebPageDomHtml(uint64_t web_page_id,
++void CbfProfileService::GetWebPageDomHtml(uint64_t tab_id,
 +                                          uint64_t request_id) {
-+  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 +  if (!web_contents || !observer_) {
 +    return;
 +  }
 +  content::RenderFrameHost* main_frame = web_contents->GetPrimaryMainFrame();
 +  if (!main_frame || !main_frame->IsRenderFrameLive()) {
 +    if (observer_) {
-+      observer_->OnWebPageDomHtmlRead(web_page_id, request_id, "");
++      observer_->OnWebPageDomHtmlRead(tab_id, request_id, "");
 +    }
 +    return;
 +  }
@@ -6427,7 +6427,7 @@ index 0000000000000..bd2ef698284c8
 +  main_frame->ExecuteJavaScriptInIsolatedWorld(
 +      u"document.documentElement.outerHTML",
 +      base::BindOnce(
-+          [](base::WeakPtr<CbfProfileService> self, uint64_t web_page_id,
++          [](base::WeakPtr<CbfProfileService> self, uint64_t tab_id,
 +             uint64_t request_id, base::Value value) {
 +            if (!self || !self->observer_) {
 +              return;
@@ -6436,10 +6436,10 @@ index 0000000000000..bd2ef698284c8
 +            if (value.is_string()) {
 +              html = value.GetString();
 +            }
-+            self->observer_->OnWebPageDomHtmlRead(web_page_id, request_id,
++            self->observer_->OnWebPageDomHtmlRead(tab_id, request_id,
 +                                                   html);
 +          },
-+          weak_factory_.GetWeakPtr(), web_page_id, request_id),
++          weak_factory_.GetWeakPtr(), tab_id, request_id),
 +      content::ISOLATED_WORLD_ID_CONTENT_END);
 +}
 +
@@ -6459,12 +6459,12 @@ index 0000000000000..bd2ef698284c8
 +  dialog_manager_.ResolvePendingBeforeUnload(proceed);
 +}
 +
-+std::vector<WebPageId> CbfProfileService::GetDirtyWebPageIds() const {
-+  return tab_manager_.GetDirtyWebPageIds();
++std::vector<TabId> CbfProfileService::GetDirtyTabIds() const {
++  return tab_manager_.GetDirtyTabIds();
 +}
 +
-+std::vector<WebPageId> CbfProfileService::GetAllWebPageIds() const {
-+  return tab_manager_.GetAllWebPageIds();
++std::vector<TabId> CbfProfileService::GetAllTabIds() const {
++  return tab_manager_.GetAllTabIds();
 +}
 +
 +size_t CbfProfileService::GetWebPageCount() const {
@@ -6477,11 +6477,11 @@ index 0000000000000..bd2ef698284c8
 +
 +void CbfProfileService::CloseWebContents(content::WebContents* web_contents) {
 +  beforeunload_reasons_.erase(web_contents);
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id != kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id != kInvalidTabId) {
 +    for (auto it = drag_sessions_.begin(); it != drag_sessions_.end();) {
-+      if (it->second.web_page_id == web_page_id) {
++      if (it->second.tab_id == tab_id) {
 +        it = drag_sessions_.erase(it);
 +      } else {
 +        ++it;
@@ -6492,30 +6492,30 @@ index 0000000000000..bd2ef698284c8
 +  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
 +      FROM_HERE,
 +      base::BindOnce(
-+          [](base::WeakPtr<CbfProfileService> self, WebPageId web_page_id) {
++          [](base::WeakPtr<CbfProfileService> self, TabId tab_id) {
 +            if (!self) {
 +              return;
 +            }
-+            if (web_page_id != kInvalidWebPageId) {
-+              self->tab_manager_.CloseWebPage(web_page_id);
++            if (tab_id != kInvalidTabId) {
++              self->tab_manager_.CloseWebPage(tab_id);
 +            }
 +            if (self->browser_service_) {
 +              self->browser_service_->NotifyWebPageClosed();
 +            }
-+            if (web_page_id != kInvalidWebPageId) {
-+              self->NotifyWebPageClosed(web_page_id);
++            if (tab_id != kInvalidTabId) {
++              self->NotifyWebPageClosed(tab_id);
 +            }
 +          },
-+          weak_factory_.GetWeakPtr(), web_page_id));
++          weak_factory_.GetWeakPtr(), tab_id));
 +}
 +
 +content::WebContentsDelegate* CbfProfileService::GetWebContentsDelegate() {
 +  return &web_contents_delegate_;
 +}
 +
-+WebPageId CbfProfileService::GetWebPageIdForWebContents(
++TabId CbfProfileService::GetTabIdForWebContents(
 +    content::WebContents* web_contents) const {
-+  return tab_manager_.GetWebPageIdForWebContents(web_contents);
++  return tab_manager_.GetTabIdForWebContents(web_contents);
 +}
 +
 +bool CbfProfileService::HandleContextMenu(
@@ -6531,9 +6531,9 @@ index 0000000000000..bd2ef698284c8
 +    return true;
 +  }
 +
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return true;
 +  }
 +
@@ -6558,11 +6558,11 @@ index 0000000000000..bd2ef698284c8
 +  menu_payload->items = BuildMenuItems(menu->menu_model_mutable(), profile);
 +
 +  auto entry = std::make_unique<ContextMenuEntry>();
-+  entry->web_page_id = web_page_id;
++  entry->tab_id = tab_id;
 +  entry->menu = std::move(menu);
 +  context_menus_[menu_id] = std::move(entry);
 +
-+  observer_->OnContextMenuRequested(web_page_id, std::move(menu_payload));
++  observer_->OnContextMenuRequested(tab_id, std::move(menu_payload));
 +  return true;
 +}
 +
@@ -6574,29 +6574,29 @@ index 0000000000000..bd2ef698284c8
 +    return;
 +  }
 +
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(source);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(source);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
 +
 +  const bool is_popup = disposition == WindowOpenDisposition::NEW_POPUP;
-+  observer_->OnNewWebPageRequested(web_page_id, target_url.spec(), is_popup);
++  observer_->OnNewWebPageRequested(tab_id, target_url.spec(), is_popup);
 +}
 +
-+void CbfProfileService::NotifyWebPageClosed(WebPageId web_page_id) {
-+  wheel_phase_states_.erase(web_page_id);
-+  if (!observer_ || web_page_id == kInvalidWebPageId) {
++void CbfProfileService::NotifyWebPageClosed(TabId tab_id) {
++  wheel_phase_states_.erase(tab_id);
++  if (!observer_ || tab_id == kInvalidTabId) {
 +    return;
 +  }
 +  for (auto it = drag_sessions_.begin(); it != drag_sessions_.end();) {
-+    if (it->second.web_page_id == web_page_id) {
++    if (it->second.tab_id == tab_id) {
 +      it = drag_sessions_.erase(it);
 +    } else {
 +      ++it;
 +    }
 +  }
-+  observer_->OnWebPageClosed(web_page_id);
++  observer_->OnWebPageClosed(tab_id);
 +}
 +
 +void CbfProfileService::OnBeforeUnloadDialogRequested(
@@ -6604,12 +6604,12 @@ index 0000000000000..bd2ef698284c8
 +  if (!browser_service_ || !web_contents) {
 +    return;
 +  }
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
-+  browser_service_->NotifyBeforeUnloadDialogRequested(web_page_id);
++  browser_service_->NotifyBeforeUnloadDialogRequested(tab_id);
 +}
 +
 +void CbfProfileService::OnBeforeUnloadFired(
@@ -6618,9 +6618,9 @@ index 0000000000000..bd2ef698284c8
 +  if (!browser_service_ || !web_contents) {
 +    return;
 +  }
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
 +
@@ -6632,24 +6632,24 @@ index 0000000000000..bd2ef698284c8
 +    beforeunload_reasons_.erase(it);
 +  }
 +
-+  browser_service_->NotifyBeforeUnloadFired(web_page_id, proceed);
++  browser_service_->NotifyBeforeUnloadFired(tab_id, proceed);
 +
 +  if (proceed && is_close_request) {
 +    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
 +        FROM_HERE, base::BindOnce(
 +                       [](base::WeakPtr<CbfProfileService> self,
-+                          WebPageId web_page_id) {
++                          TabId tab_id) {
 +                         if (!self) {
 +                           return;
 +                         }
 +                         content::WebContents* target =
-+                             self->tab_manager_.GetWebContents(web_page_id);
++                             self->tab_manager_.GetWebContents(tab_id);
 +                         if (!target) {
 +                           return;
 +                         }
 +                         target->Close();
 +                       },
-+                       weak_factory_.GetWeakPtr(), web_page_id));
++                       weak_factory_.GetWeakPtr(), tab_id));
 +  }
 +}
 +
@@ -6660,12 +6660,12 @@ index 0000000000000..bd2ef698284c8
 +  if (!observer_ || !web_contents) {
 +    return;
 +  }
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
-+  observer_->OnBeforeUnloadDialogRequested(web_page_id, request_id, reason);
++  observer_->OnBeforeUnloadDialogRequested(tab_id, request_id, reason);
 +}
 +
 +mojom::CbfBeforeUnloadReason CbfProfileService::ResolveBeforeUnloadReason(
@@ -6704,12 +6704,12 @@ index 0000000000000..bd2ef698284c8
 +void CbfProfileService::NotifySurfaceHandleUpdated(
 +    content::WebContents* web_contents,
 +    std::uint32_t ca_context_id) {
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId || !observer_) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId || !observer_) {
 +    return;
 +  }
-+  observer_->OnSurfaceHandleUpdated(web_page_id, ca_context_id);
++  observer_->OnSurfaceHandleUpdated(tab_id, ca_context_id);
 +}
 +
 +void CbfProfileService::NotifyCursorChanged(
@@ -6719,13 +6719,13 @@ index 0000000000000..bd2ef698284c8
 +    return;
 +  }
 +
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
 +
-+  observer_->OnCursorChanged(web_page_id, ToCbfCursorType(cursor_type));
++  observer_->OnCursorChanged(tab_id, ToCbfCursorType(cursor_type));
 +}
 +
 +void CbfProfileService::NotifyNavigationStateChanged(
@@ -6735,14 +6735,14 @@ index 0000000000000..bd2ef698284c8
 +    return;
 +  }
 +
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
 +
 +  content::NavigationController& controller = web_contents->GetController();
-+  observer_->OnNavigationStateChanged(web_page_id, web_contents->GetVisibleURL().spec(), controller.CanGoBack(),
++  observer_->OnNavigationStateChanged(tab_id, web_contents->GetVisibleURL().spec(), controller.CanGoBack(),
 +                                      controller.CanGoForward(), is_loading);
 +}
 +
@@ -6751,13 +6751,13 @@ index 0000000000000..bd2ef698284c8
 +    return;
 +  }
 +
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
 +
-+  observer_->OnTitleUpdated(web_page_id,
++  observer_->OnTitleUpdated(tab_id,
 +                            base::UTF16ToUTF8(web_contents->GetTitle()));
 +}
 +
@@ -6768,13 +6768,13 @@ index 0000000000000..bd2ef698284c8
 +    return;
 +  }
 +
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
 +
-+  observer_->OnFaviconUrlUpdated(web_page_id, favicon_url);
++  observer_->OnFaviconUrlUpdated(tab_id, favicon_url);
 +}
 +
 +void CbfProfileService::NotifyDragStartRequested(
@@ -6796,15 +6796,15 @@ index 0000000000000..bd2ef698284c8
 +    return;
 +  }
 +
-+  const WebPageId web_page_id =
-+      tab_manager_.GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
 +
 +  const uint64_t session_id = next_drag_session_id_++;
 +  DragSessionState session;
-+  session.web_page_id = web_page_id;
++  session.tab_id = tab_id;
 +  session.source_rwh = source_rwh_impl->GetWeakPtr();
 +  session.drop_data = drop_data;
 +  // Match Chromium's native drag path: set view_id and sanitize drop payload
@@ -6814,7 +6814,7 @@ index 0000000000000..bd2ef698284c8
 +
 +  auto request = mojom::CbfDragStartRequest::New();
 +  request->session_id = session_id;
-+  request->web_page_id = web_page_id;
++  request->tab_id = tab_id;
 +  request->allowed_operations = static_cast<uint32_t>(allowed_ops);
 +  request->source_origin = source_origin.Serialize();
 +
@@ -6875,7 +6875,7 @@ index 0000000000000..bd2ef698284c8
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
 new file mode 100644
-index 0000000000000..56967234332b1
+index 0000000000000..7c5158ba41fa1
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_profile_service.h
 @@ -0,0 +1,214 @@
@@ -6944,8 +6944,8 @@ index 0000000000000..56967234332b1
 +  void CreateWebPage(const std::string& initial_url,
 +                     uint64_t request_id,
 +                     CreateWebPageCallback callback) override;
-+  void RequestCloseWebPage(WebPageId web_page_id) override;
-+  void SetWebPageSize(const WebPageId web_page_id,
++  void RequestCloseWebPage(TabId tab_id) override;
++  void SetWebPageSize(const TabId tab_id,
 +                      std::uint32_t width,
 +                      std::uint32_t height,
 +                      SetWebPageSizeCallback callback) override;
@@ -6956,10 +6956,10 @@ index 0000000000000..56967234332b1
 +  void SendMouseWheelEvent(mojom::CbfMouseWheelEventPtr event) override;
 +  void SendDragUpdate(mojom::CbfDragUpdatePtr update) override;
 +  void SendDragDrop(mojom::CbfDragDropPtr drop) override;
-+  void SendDragCancel(uint64_t session_id, uint64_t web_page_id) override;
++  void SendDragCancel(uint64_t session_id, uint64_t tab_id) override;
 +  void SetComposition(mojom::CbfImeCompositionPtr composition) override;
 +  void CommitText(mojom::CbfImeCommitTextPtr commit) override;
-+  void FinishComposingText(uint64_t web_page_id,
++  void FinishComposingText(uint64_t tab_id,
 +                           mojom::CbfConfirmCompositionBehavior behavior) override;
 +  void ExecuteContextMenuCommand(uint64_t menu_id,
 +                                 int32_t command_id,
@@ -6967,32 +6967,32 @@ index 0000000000000..56967234332b1
 +  void DismissContextMenu(uint64_t menu_id) override;
 +  void ConfirmBeforeUnload(uint64_t request_id, bool proceed) override;
 +
-+  void Navigate(uint64_t web_page_id, const std::string& url) override;
-+  void GoBack(uint64_t web_page_id) override;
-+  void GoForward(uint64_t web_page_id) override;
-+  void Reload(uint64_t web_page_id, bool ignore_cache) override;
-+  void SetWebPageFocus(uint64_t web_page_id, bool focused) override;
++  void Navigate(uint64_t tab_id, const std::string& url) override;
++  void GoBack(uint64_t tab_id) override;
++  void GoForward(uint64_t tab_id) override;
++  void Reload(uint64_t tab_id, bool ignore_cache) override;
++  void SetWebPageFocus(uint64_t tab_id, bool focused) override;
 +
-+  void GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id) override;
++  void GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id) override;
 +
 +  bool IsShutdownRequested() const;
 +  void SetShutdownDialogAutoConfirm(bool enabled);
 +  void DispatchBeforeUnloadForShutdown();
 +  void ResolveBeforeUnloadForShutdown(bool proceed);
-+  std::vector<WebPageId> GetDirtyWebPageIds() const;
-+  std::vector<WebPageId> GetAllWebPageIds() const;
++  std::vector<TabId> GetDirtyTabIds() const;
++  std::vector<TabId> GetAllTabIds() const;
 +  size_t GetWebPageCount() const;
 +  void CloseAllWebPages();
 +  void CloseWebContents(content::WebContents* web_contents);
 +  content::WebContentsDelegate* GetWebContentsDelegate();
-+  WebPageId GetWebPageIdForWebContents(content::WebContents* web_contents) const;
++  TabId GetTabIdForWebContents(content::WebContents* web_contents) const;
 +
 +  bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
 +                         const content::ContextMenuParams& params);
 +  void NotifyNewWebPageRequested(content::WebContents* source,
 +                                 const GURL& target_url,
 +                                 WindowOpenDisposition disposition);
-+  void NotifyWebPageClosed(WebPageId web_page_id);
++  void NotifyWebPageClosed(TabId tab_id);
 +
 +  void OnBeforeUnloadDialogRequested(content::WebContents* web_contents);
 +  void OnBeforeUnloadFired(content::WebContents* web_contents, bool proceed);
@@ -7024,7 +7024,7 @@ index 0000000000000..56967234332b1
 +
 + private:
 +  struct ContextMenuEntry {
-+    WebPageId web_page_id = kInvalidWebPageId;
++    TabId tab_id = kInvalidTabId;
 +    std::unique_ptr<CbfRenderViewContextMenu> menu;
 +    ContextMenuEntry();
 +    ~ContextMenuEntry();
@@ -7038,7 +7038,7 @@ index 0000000000000..56967234332b1
 +    DragSessionState& operator=(DragSessionState&&);
 +    ~DragSessionState();
 +
-+    WebPageId web_page_id = kInvalidWebPageId;
++    TabId tab_id = kInvalidTabId;
 +    base::WeakPtr<content::RenderWidgetHostImpl> source_rwh;
 +    content::DropData drop_data;
 +    bool entered = false;
@@ -7056,11 +7056,11 @@ index 0000000000000..56967234332b1
 +  };
 +
 +  void RegisterTextInputManager(content::WebContents* web_contents,
-+                                WebPageId web_page_id);
++                                TabId tab_id);
 +  void NotifyImeBoundsUpdated(content::TextInputManager* text_input_manager,
 +                              bool include_composition,
 +                              bool include_selection);
-+  void SendSyntheticWheelEndedEvent(WebPageId web_page_id);
++  void SendSyntheticWheelEndedEvent(TabId tab_id);
 +
 +  void OnSelectionBoundsChanged(content::TextInputManager* text_input_manager,
 +                                content::RenderWidgetHostViewBase* updated_view) override;
@@ -7077,7 +7077,7 @@ index 0000000000000..56967234332b1
 +  base::ScopedMultiSourceObservation<content::TextInputManager,
 +                                     content::TextInputManager::Observer>
 +      text_input_observations_{this};
-+  base::flat_map<raw_ptr<content::TextInputManager>, WebPageId> text_input_map_;
++  base::flat_map<raw_ptr<content::TextInputManager>, TabId> text_input_map_;
 +  std::uint64_t next_context_menu_id_ = 1;
 +  base::flat_map<std::uint64_t, std::unique_ptr<ContextMenuEntry>>
 +      context_menus_;
@@ -7085,7 +7085,7 @@ index 0000000000000..56967234332b1
 +      beforeunload_reasons_;
 +  uint64_t next_drag_session_id_ = 1;
 +  base::flat_map<uint64_t, DragSessionState> drag_sessions_;
-+  base::flat_map<WebPageId, std::unique_ptr<WheelPhaseState>> wheel_phase_states_;
++  base::flat_map<TabId, std::unique_ptr<WheelPhaseState>> wheel_phase_states_;
 +
 +  base::WeakPtrFactory<CbfProfileService> weak_factory_{this};
 +};
@@ -7325,7 +7325,7 @@ index 0000000000000..357a612ba14ab
 +#endif  // CHROME_BROWSER_CBF_CBF_SWITCHES_H_
 diff --git a/chrome/browser/cbf/cbf_tab_manager.cc b/chrome/browser/cbf/cbf_tab_manager.cc
 new file mode 100644
-index 0000000000000..cb9f6acca5fff
+index 0000000000000..d619db88a39ee
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_tab_manager.cc
 @@ -0,0 +1,242 @@
@@ -7366,9 +7366,9 @@ index 0000000000000..cb9f6acca5fff
 +
 +CbfTabManager::~CbfTabManager() = default;
 +
-+WebPageId CbfTabManager::CreateWebPage(const GURL& initial_url) {
++TabId CbfTabManager::CreateWebPage(const GURL& initial_url) {
 +  if (!profile_) {
-+    return kInvalidWebPageId;
++    return kInvalidTabId;
 +  }
 +
 +  content::WebContents::CreateParams params(profile_);
@@ -7379,9 +7379,9 @@ index 0000000000000..cb9f6acca5fff
 +    web_contents_ptr->SetDelegate(profile_service_->GetWebContentsDelegate());
 +  }
 +
-+  const WebPageId web_page_id = next_web_page_id_++;
-+  pages_.emplace(web_page_id, std::move(web_contents));
-+  reverse_lookup_.emplace(web_contents_ptr, web_page_id);
++  const TabId tab_id = next_tab_id_++;
++  pages_.emplace(tab_id, std::move(web_contents));
++  reverse_lookup_.emplace(web_contents_ptr, tab_id);
 +
 +  web_contents_ptr->Resize(gfx::Rect(0, 0, 1, 1));
 +  CbfCaContextIdObserver::CreateForWebContents(web_contents_ptr,
@@ -7396,44 +7396,44 @@ index 0000000000000..cb9f6acca5fff
 +  web_contents_ptr->WasShown();
 +  web_contents_ptr->Focus();
 +
-+  return web_page_id;
++  return tab_id;
 +}
 +
 +content::WebContents* CbfTabManager::GetWebContents(
-+    WebPageId web_page_id) const {
-+  auto it = pages_.find(web_page_id);
++    TabId tab_id) const {
++  auto it = pages_.find(tab_id);
 +  if (it == pages_.end()) {
 +    return nullptr;
 +  }
 +  return it->second.get();
 +}
 +
-+WebPageId CbfTabManager::GetWebPageIdForWebContents(
++TabId CbfTabManager::GetTabIdForWebContents(
 +    content::WebContents* web_contents) const {
 +  auto it = reverse_lookup_.find(web_contents);
 +  if (it == reverse_lookup_.end()) {
-+    return kInvalidWebPageId;
++    return kInvalidTabId;
 +  }
 +  return it->second;
 +}
 +
-+std::vector<WebPageId> CbfTabManager::GetDirtyWebPageIds() const {
-+  std::vector<WebPageId> ids;
++std::vector<TabId> CbfTabManager::GetDirtyTabIds() const {
++  std::vector<TabId> ids;
 +  ids.reserve(pages_.size());
-+  for (const auto& [web_page_id, web_contents] : pages_) {
++  for (const auto& [tab_id, web_contents] : pages_) {
 +    if (web_contents && NeedToFireBeforeUnloadOrUnload(web_contents.get())) {
-+      ids.push_back(web_page_id);
++      ids.push_back(tab_id);
 +    }
 +  }
 +  return ids;
 +}
 +
-+std::vector<WebPageId> CbfTabManager::GetAllWebPageIds() const {
-+  std::vector<WebPageId> ids;
++std::vector<TabId> CbfTabManager::GetAllTabIds() const {
++  std::vector<TabId> ids;
 +  ids.reserve(pages_.size());
-+  for (const auto& [web_page_id, web_contents] : pages_) {
++  for (const auto& [tab_id, web_contents] : pages_) {
 +    if (web_contents) {
-+      ids.push_back(web_page_id);
++      ids.push_back(tab_id);
 +    }
 +  }
 +  return ids;
@@ -7452,8 +7452,8 @@ index 0000000000000..cb9f6acca5fff
 +  }
 +}
 +
-+void CbfTabManager::RequestCloseWebPage(WebPageId web_page_id) {
-+  auto it = pages_.find(web_page_id);
++void CbfTabManager::RequestCloseWebPage(TabId tab_id) {
++  auto it = pages_.find(tab_id);
 +  if (it == pages_.end()) {
 +    return;
 +  }
@@ -7464,15 +7464,15 @@ index 0000000000000..cb9f6acca5fff
 +  web_contents->DispatchBeforeUnload(false);
 +}
 +
-+void CbfTabManager::CloseWebPage(WebPageId web_page_id) {
-+  auto it = pages_.find(web_page_id);
++void CbfTabManager::CloseWebPage(TabId tab_id) {
++  auto it = pages_.find(tab_id);
 +  if (it == pages_.end()) {
 +    return;
 +  }
-+  pending_resizes_.erase(web_page_id);
-+  in_flight_resizes_.erase(web_page_id);
++  pending_resizes_.erase(tab_id);
++  in_flight_resizes_.erase(tab_id);
 +
-+  auto cb_it = pending_callbacks_.find(web_page_id);
++  auto cb_it = pending_callbacks_.find(tab_id);
 +  if (cb_it != pending_callbacks_.end()) {
 +    for (auto& cb : cb_it->second) {
 +      std::move(cb).Run();
@@ -7496,16 +7496,16 @@ index 0000000000000..cb9f6acca5fff
 +}
 +
 +void CbfTabManager::CloseAllWebPages() {
-+  std::vector<WebPageId> targets;
++  std::vector<TabId> targets;
 +  targets.reserve(pages_.size());
-+  for (const auto& [web_page_id, web_contents] : pages_) {
++  for (const auto& [tab_id, web_contents] : pages_) {
 +    if (!web_contents) {
 +      continue;
 +    }
-+    targets.push_back(web_page_id);
++    targets.push_back(tab_id);
 +  }
-+  for (const auto web_page_id : targets) {
-+    auto it = pages_.find(web_page_id);
++  for (const auto tab_id : targets) {
++    auto it = pages_.find(tab_id);
 +    if (it == pages_.end() || !it->second) {
 +      continue;
 +    }
@@ -7513,47 +7513,47 @@ index 0000000000000..cb9f6acca5fff
 +  }
 +}
 +
-+void CbfTabManager::SetWebPageSize(WebPageId web_page_id,
++void CbfTabManager::SetWebPageSize(TabId tab_id,
 +                                   std::uint32_t width,
 +                                   std::uint32_t height,
 +                                   base::OnceClosure callback) {
-+  auto it = pages_.find(web_page_id);
++  auto it = pages_.find(tab_id);
 +  if (it == pages_.end()) {
 +    std::move(callback).Run();
 +    return;
 +  }
 +
-+  pending_callbacks_[web_page_id].push_back(std::move(callback));
++  pending_callbacks_[tab_id].push_back(std::move(callback));
 +
-+  if (in_flight_resizes_.contains(web_page_id)) {
-+    pending_resizes_[web_page_id] = gfx::Size(width, height);
++  if (in_flight_resizes_.contains(tab_id)) {
++    pending_resizes_[tab_id] = gfx::Size(width, height);
 +    return;
 +  }
 +
-+  PerformResize(web_page_id, width, height);
++  PerformResize(tab_id, width, height);
 +}
 +
-+void CbfTabManager::PerformResize(WebPageId web_page_id,
++void CbfTabManager::PerformResize(TabId tab_id,
 +                                 std::uint32_t width,
 +                                 std::uint32_t height) {
-+  auto it = pages_.find(web_page_id);
++  auto it = pages_.find(tab_id);
 +  if (it == pages_.end()) {
 +    return;
 +  }
 +
 +  content::WebContents* web_contents = it->second.get();
-+  in_flight_resizes_.insert(web_page_id);
++  in_flight_resizes_.insert(tab_id);
 +  web_contents->Resize(gfx::Rect(0, 0, width, height));
 +
 +  web_contents->GetPrimaryMainFrame()->InsertVisualStateCallback(
 +      base::BindOnce(&CbfTabManager::OnResizeFinished,
-+                     weak_factory_.GetWeakPtr(), web_page_id));
++                     weak_factory_.GetWeakPtr(), tab_id));
 +}
 +
-+void CbfTabManager::OnResizeFinished(WebPageId web_page_id, bool success) {
-+  in_flight_resizes_.erase(web_page_id);
++void CbfTabManager::OnResizeFinished(TabId tab_id, bool success) {
++  in_flight_resizes_.erase(tab_id);
 +
-+  auto cb_it = pending_callbacks_.find(web_page_id);
++  auto cb_it = pending_callbacks_.find(tab_id);
 +  if (cb_it != pending_callbacks_.end()) {
 +    auto callbacks = std::move(cb_it->second);
 +    pending_callbacks_.erase(cb_it);
@@ -7562,18 +7562,18 @@ index 0000000000000..cb9f6acca5fff
 +    }
 +  }
 +
-+  auto it = pending_resizes_.find(web_page_id);
++  auto it = pending_resizes_.find(tab_id);
 +  if (it != pending_resizes_.end()) {
 +    gfx::Size size = it->second;
 +    pending_resizes_.erase(it);
-+    PerformResize(web_page_id, size.width(), size.height());
++    PerformResize(tab_id, size.width(), size.height());
 +  }
 +}
 +
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/cbf_tab_manager.h b/chrome/browser/cbf/cbf_tab_manager.h
 new file mode 100644
-index 0000000000000..e16d04a6ed17f
+index 0000000000000..ba161317d65be
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_tab_manager.h
 @@ -0,0 +1,73 @@
@@ -7600,8 +7600,8 @@ index 0000000000000..e16d04a6ed17f
 +
 +namespace cbf {
 +
-+using WebPageId = std::uint64_t;
-+inline constexpr WebPageId kInvalidWebPageId = 0;
++using TabId = std::uint64_t;
++inline constexpr TabId kInvalidTabId = 0;
 +
 +class CbfProfileService;
 +
@@ -7612,37 +7612,37 @@ index 0000000000000..e16d04a6ed17f
 +  CbfTabManager& operator=(const CbfTabManager&) = delete;
 +  ~CbfTabManager();
 +
-+  WebPageId CreateWebPage(const GURL& initial_url);
-+  content::WebContents* GetWebContents(WebPageId web_page_id) const;
-+  WebPageId GetWebPageIdForWebContents(content::WebContents* web_contents) const;
-+  std::vector<WebPageId> GetDirtyWebPageIds() const;
-+  std::vector<WebPageId> GetAllWebPageIds() const;
++  TabId CreateWebPage(const GURL& initial_url);
++  content::WebContents* GetWebContents(TabId tab_id) const;
++  TabId GetTabIdForWebContents(content::WebContents* web_contents) const;
++  std::vector<TabId> GetDirtyTabIds() const;
++  std::vector<TabId> GetAllTabIds() const;
 +  size_t GetWebPageCount() const;
 +  void DispatchBeforeUnloadForAll();
-+  void RequestCloseWebPage(WebPageId web_page_id);
-+  void CloseWebPage(WebPageId web_page_id);
++  void RequestCloseWebPage(TabId tab_id);
++  void CloseWebPage(TabId tab_id);
 +  void CloseWebContents(content::WebContents* web_contents);
 +  void CloseAllWebPages();
-+  void SetWebPageSize(WebPageId web_page_id,
++  void SetWebPageSize(TabId tab_id,
 +                      std::uint32_t width,
 +                      std::uint32_t height,
 +                      base::OnceClosure callback);
 +
 + private:
-+  void PerformResize(WebPageId web_page_id,
++  void PerformResize(TabId tab_id,
 +                     std::uint32_t width,
 +                     std::uint32_t height);
-+  void OnResizeFinished(WebPageId web_page_id, bool success);
++  void OnResizeFinished(TabId tab_id, bool success);
 +
 +  raw_ptr<::Profile> profile_;
 +  raw_ptr<CbfProfileService> profile_service_;
-+  WebPageId next_web_page_id_ = 1;
-+  base::flat_map<WebPageId, std::unique_ptr<content::WebContents>> pages_;
-+  base::flat_map<raw_ptr<content::WebContents>, WebPageId> reverse_lookup_;
++  TabId next_tab_id_ = 1;
++  base::flat_map<TabId, std::unique_ptr<content::WebContents>> pages_;
++  base::flat_map<raw_ptr<content::WebContents>, TabId> reverse_lookup_;
 +
-+  base::flat_map<WebPageId, gfx::Size> pending_resizes_;
-+  base::flat_set<WebPageId> in_flight_resizes_;
-+  base::flat_map<WebPageId, std::vector<base::OnceClosure>> pending_callbacks_;
++  base::flat_map<TabId, gfx::Size> pending_resizes_;
++  base::flat_set<TabId> in_flight_resizes_;
++  base::flat_map<TabId, std::vector<base::OnceClosure>> pending_callbacks_;
 +
 +  base::WeakPtrFactory<CbfTabManager> weak_factory_{this};
 +};
@@ -7876,7 +7876,7 @@ index 0000000000000..7988899d6c927
 +#endif  // CHROME_BROWSER_CBF_CBF_WEB_CONTENTS_DELEGATE_H_
 diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
 new file mode 100644
-index 0000000000000..fc2fe244d885f
+index 0000000000000..119414b0b114d
 --- /dev/null
 +++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
 @@ -0,0 +1,423 @@
@@ -8001,7 +8001,7 @@ index 0000000000000..fc2fe244d885f
 +};
 +
 +struct CbfKeyEvent {
-+  uint64 web_page_id;
++  uint64 tab_id;
 +
 +  CbfKeyEventType type;
 +  uint32 modifiers;
@@ -8022,7 +8022,7 @@ index 0000000000000..fc2fe244d885f
 +};
 +
 +struct CbfMouseEvent {
-+  uint64 web_page_id;
++  uint64 tab_id;
 +
 +  CbfMouseEventType type;
 +  uint32 modifiers;
@@ -8043,7 +8043,7 @@ index 0000000000000..fc2fe244d885f
 +};
 +
 +struct CbfMouseWheelEvent {
-+  uint64 web_page_id;
++  uint64 tab_id;
 +
 +  uint32 modifiers;
 +
@@ -8097,7 +8097,7 @@ index 0000000000000..fc2fe244d885f
 +
 +struct CbfDragStartRequest {
 +  uint64 session_id;
-+  uint64 web_page_id;
++  uint64 tab_id;
 +  uint32 allowed_operations;
 +  string source_origin;
 +  CbfDragData data;
@@ -8106,7 +8106,7 @@ index 0000000000000..fc2fe244d885f
 +
 +struct CbfDragUpdate {
 +  uint64 session_id;
-+  uint64 web_page_id;
++  uint64 tab_id;
 +  uint32 allowed_operations;
 +  uint32 modifiers;
 +  float position_in_widget_x;
@@ -8117,7 +8117,7 @@ index 0000000000000..fc2fe244d885f
 +
 +struct CbfDragDrop {
 +  uint64 session_id;
-+  uint64 web_page_id;
++  uint64 tab_id;
 +  uint32 modifiers;
 +  float position_in_widget_x;
 +  float position_in_widget_y;
@@ -8146,7 +8146,7 @@ index 0000000000000..fc2fe244d885f
 +};
 +
 +struct CbfImeBoundsUpdate {
-+  uint64 web_page_id;
++  uint64 tab_id;
 +  CbfImeCompositionBounds? composition;
 +  CbfTextSelectionBounds? selection;
 +};
@@ -8167,7 +8167,7 @@ index 0000000000000..fc2fe244d885f
 +};
 +
 +struct CbfImeComposition {
-+  uint64 web_page_id;
++  uint64 tab_id;
 +  string text;
 +  int32 selection_start;
 +  int32 selection_end;
@@ -8178,7 +8178,7 @@ index 0000000000000..fc2fe244d885f
 +};
 +
 +struct CbfImeCommitText {
-+  uint64 web_page_id;
++  uint64 tab_id;
 +  string text;
 +  int32 relative_caret_position;
 +  // (-1, -1) means "no replacement range".
@@ -8239,59 +8239,59 @@ index 0000000000000..fc2fe244d885f
 +};
 +
 +interface CbfBrowserObserver {
-+  OnShutdownBlocked(uint64 request_id, array<uint64> dirty_web_page_ids);
++  OnShutdownBlocked(uint64 request_id, array<uint64> dirty_tab_ids);
 +  OnShutdownProceeding(uint64 request_id);
 +  OnShutdownCancelled(uint64 request_id);
 +};
 +
 +interface CbfProfileObserver {
-+  OnSurfaceHandleUpdated(uint64 web_page_id, uint32 ca_context_id);
-+  OnWebPageCreated(uint64 web_page_id, uint64 request_id);
-+  OnWebPageClosed(uint64 web_page_id);
-+  OnWebPageResizeAcknowledged(uint64 web_page_id);
++  OnSurfaceHandleUpdated(uint64 tab_id, uint32 ca_context_id);
++  OnWebPageCreated(uint64 tab_id, uint64 request_id);
++  OnWebPageClosed(uint64 tab_id);
++  OnWebPageResizeAcknowledged(uint64 tab_id);
 +  OnImeBoundsUpdated(CbfImeBoundsUpdate update);
-+  OnContextMenuRequested(uint64 web_page_id, CbfContextMenu menu);
-+  OnNewWebPageRequested(uint64 web_page_id, string target_url, bool is_popup);
-+  OnTitleUpdated(uint64 web_page_id, string title);
-+  OnFaviconUrlUpdated(uint64 web_page_id, string url);
-+  OnBeforeUnloadDialogRequested(uint64 web_page_id,
++  OnContextMenuRequested(uint64 tab_id, CbfContextMenu menu);
++  OnNewWebPageRequested(uint64 tab_id, string target_url, bool is_popup);
++  OnTitleUpdated(uint64 tab_id, string title);
++  OnFaviconUrlUpdated(uint64 tab_id, string url);
++  OnBeforeUnloadDialogRequested(uint64 tab_id,
 +                                uint64 request_id,
 +                                CbfBeforeUnloadReason reason);
-+  OnCursorChanged(uint64 web_page_id, CbfCursorType cursor_type);
-+  OnNavigationStateChanged(uint64 web_page_id,
++  OnCursorChanged(uint64 tab_id, CbfCursorType cursor_type);
++  OnNavigationStateChanged(uint64 tab_id,
 +                           string url,
 +                           bool can_go_back,
 +                           bool can_go_forward,
 +                           bool is_loading);
-+  OnWebPageDomHtmlRead(uint64 web_page_id, uint64 request_id, string html);
++  OnWebPageDomHtmlRead(uint64 tab_id, uint64 request_id, string html);
 +  OnDragStartRequested(CbfDragStartRequest request);
 +};
 +
 +interface CbfProfileService {
 +  SetObserver(pending_remote<CbfProfileObserver> observer);
-+  CreateWebPage(string initial_url, uint64 request_id) => (uint64 web_page_id);
-+  RequestCloseWebPage(uint64 web_page_id);
-+  SetWebPageSize(uint64 web_page_id, uint32 width, uint32 height) => ();
++  CreateWebPage(string initial_url, uint64 request_id) => (uint64 tab_id);
++  RequestCloseWebPage(uint64 tab_id);
++  SetWebPageSize(uint64 tab_id, uint32 width, uint32 height) => ();
 +  SendKeyEvent(CbfKeyEvent event, array<string>? commands);
 +  SendMouseEvent(CbfMouseEvent event);
 +  SendMouseWheelEvent(CbfMouseWheelEvent event);
 +  SendDragUpdate(CbfDragUpdate update);
 +  SendDragDrop(CbfDragDrop drop);
-+  SendDragCancel(uint64 session_id, uint64 web_page_id);
++  SendDragCancel(uint64 session_id, uint64 tab_id);
 +  SetComposition(CbfImeComposition composition);
 +  CommitText(CbfImeCommitText commit);
-+  FinishComposingText(uint64 web_page_id, CbfConfirmCompositionBehavior behavior);
++  FinishComposingText(uint64 tab_id, CbfConfirmCompositionBehavior behavior);
 +  ExecuteContextMenuCommand(uint64 menu_id, int32 command_id, int32 event_flags);
 +  DismissContextMenu(uint64 menu_id);
 +  ConfirmBeforeUnload(uint64 request_id, bool proceed);
 +
-+  Navigate(uint64 web_page_id, string url);
-+  GoBack(uint64 web_page_id);
-+  GoForward(uint64 web_page_id);
-+  Reload(uint64 web_page_id, bool ignore_cache);
-+  SetWebPageFocus(uint64 web_page_id, bool focused);
++  Navigate(uint64 tab_id, string url);
++  GoBack(uint64 tab_id);
++  GoForward(uint64 tab_id);
++  Reload(uint64 tab_id, bool ignore_cache);
++  SetWebPageFocus(uint64 tab_id, bool focused);
 +
-+  GetWebPageDomHtml(uint64 web_page_id, uint64 request_id);
++  GetWebPageDomHtml(uint64 tab_id, uint64 request_id);
 +};
 +
 +interface CbfBrowserService {

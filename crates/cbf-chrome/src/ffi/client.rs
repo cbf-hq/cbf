@@ -516,7 +516,7 @@ impl IpcClient {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
-        let (response_kind, target_web_page_id, activate) = match response {
+        let (response_kind, target_tab_id, activate) = match response {
             BrowsingContextOpenResponse::AllowNewContext { activate } => (
                 CBF_BROWSING_CONTEXT_OPEN_RESPONSE_ALLOW_NEW_CONTEXT,
                 0,
@@ -537,7 +537,7 @@ impl IpcClient {
         debug!(
             request_id,
             response_kind,
-            target_web_page_id,
+            target_tab_id,
             activate,
             ?response,
             "ffi respond_browsing_context_open"
@@ -547,7 +547,7 @@ impl IpcClient {
                 self.inner,
                 request_id,
                 response_kind,
-                target_web_page_id,
+                target_tab_id,
                 activate,
             )
         } {
@@ -610,7 +610,7 @@ impl IpcClient {
             command_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
 
         let ffi_event = CbfKeyEvent {
-            web_page_id: browsing_context_id.get(),
+            tab_id: browsing_context_id.get(),
             type_: key_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             windows_key_code: event.windows_key_code,
@@ -652,7 +652,7 @@ impl IpcClient {
         }
 
         let ffi_event = CbfMouseEvent {
-            web_page_id: browsing_context_id.get(),
+            tab_id: browsing_context_id.get(),
             type_: mouse_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             button: mouse_button_to_ffi(event.button),
@@ -695,7 +695,7 @@ impl IpcClient {
         }
 
         let ffi_event = CbfMouseWheelEvent {
-            web_page_id: browsing_context_id.get(),
+            tab_id: browsing_context_id.get(),
             modifiers: event.modifiers,
             position_in_widget_x: event.position_in_widget_x,
             position_in_widget_y: event.position_in_widget_y,
@@ -728,7 +728,7 @@ impl IpcClient {
 
         let ffi_update = CbfDragUpdate {
             session_id: update.session_id,
-            web_page_id: update.browsing_context_id.get(),
+            tab_id: update.browsing_context_id.get(),
             allowed_operations: update.allowed_operations.bits(),
             modifiers: update.modifiers,
             position_in_widget_x: update.position_in_widget_x,
@@ -752,7 +752,7 @@ impl IpcClient {
 
         let ffi_drop = CbfDragDrop {
             session_id: drop.session_id,
-            web_page_id: drop.browsing_context_id.get(),
+            tab_id: drop.browsing_context_id.get(),
             modifiers: drop.modifiers,
             position_in_widget_x: drop.position_in_widget_x,
             position_in_widget_y: drop.position_in_widget_y,
@@ -805,7 +805,7 @@ impl IpcClient {
         let (replacement_start, replacement_end) = ime_range_to_ffi(&composition.replacement_range);
 
         let ffi_composition = CbfImeComposition {
-            web_page_id: composition.browsing_context_id.get(),
+            tab_id: composition.browsing_context_id.get(),
             text: text.as_ptr(),
             selection_start: composition.selection_start,
             selection_end: composition.selection_end,
@@ -840,7 +840,7 @@ impl IpcClient {
         let (replacement_start, replacement_end) = ime_range_to_ffi(&commit.replacement_range);
 
         let ffi_commit = CbfImeCommitText {
-            web_page_id: commit.browsing_context_id.get(),
+            tab_id: commit.browsing_context_id.get(),
             text: text.as_ptr(),
             relative_caret_position: commit.relative_caret_position,
             replacement_range_start: replacement_start,

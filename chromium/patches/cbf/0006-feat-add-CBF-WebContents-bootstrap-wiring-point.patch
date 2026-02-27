@@ -1,4 +1,4 @@
-From 342d183205beebdfd3be1785f8a28b0db67a53d3 Mon Sep 17 00:00:00 2001
+From 0e307e830a42872f61123354019ca8032c26133d Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 24 Feb 2026 11:43:25 +0900
 Subject: [PATCH 6/9] feat:add-CBF-WebContents-bootstrap-wiring-point
@@ -39,7 +39,7 @@ index 148c9638bf486..86f9ec022ad58 100644
      "//testing/gtest",
    ]
 diff --git a/chrome/browser/cbf/cbf_tab_manager.cc b/chrome/browser/cbf/cbf_tab_manager.cc
-index cb9f6acca5fff..241d934af2a9f 100644
+index d619db88a39ee..5abf3e78076b9 100644
 --- a/chrome/browser/cbf/cbf_tab_manager.cc
 +++ b/chrome/browser/cbf/cbf_tab_manager.cc
 @@ -8,6 +8,7 @@
@@ -50,16 +50,16 @@ index cb9f6acca5fff..241d934af2a9f 100644
  #include "content/public/browser/navigation_controller.h"
  #include "content/public/browser/render_frame_host.h"
  #include "content/public/browser/web_contents.h"
-@@ -47,6 +48,7 @@ WebPageId CbfTabManager::CreateWebPage(const GURL& initial_url) {
+@@ -47,6 +48,7 @@ TabId CbfTabManager::CreateWebPage(const GURL& initial_url) {
    if (profile_service_) {
      web_contents_ptr->SetDelegate(profile_service_->GetWebContentsDelegate());
    }
 +  BootstrapCbfWebContents(web_contents_ptr, profile_);
  
-   const WebPageId web_page_id = next_web_page_id_++;
-   pages_.emplace(web_page_id, std::move(web_contents));
+   const TabId tab_id = next_tab_id_++;
+   pages_.emplace(tab_id, std::move(web_contents));
 diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
-index 181b77e50941b..f8df7aec96c3a 100644
+index 610674f6fbaa9..054ae903c6662 100644
 --- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
 +++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
 @@ -6,6 +6,7 @@

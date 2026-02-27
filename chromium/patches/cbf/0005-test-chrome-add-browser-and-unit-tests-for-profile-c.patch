@@ -1,4 +1,4 @@
-From 597af2ec589698b0367d54438b4cd1221ec486c4 Mon Sep 17 00:00:00 2001
+From f381f23c64828fb144849e91b36df82fd84f72a3 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 23 Feb 2026 17:16:20 +0900
 Subject: [PATCH 5/9] test(chrome): add browser and unit tests for profile
@@ -78,7 +78,7 @@ index c1881f8606098..148c9638bf486 100644
 +}
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 new file mode 100644
-index 0000000000000..8ea9a622fe11c
+index 0000000000000..1b815c419088b
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 @@ -0,0 +1,56 @@
@@ -111,25 +111,25 @@ index 0000000000000..8ea9a622fe11c
 +};
 +
 +IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
-+  profile_service_->RequestCloseWebPage(kInvalidWebPageId);
-+  profile_service_->SendDragCancel(9999, kInvalidWebPageId);
-+  profile_service_->OpenDevTools(kInvalidWebPageId);
++  profile_service_->RequestCloseWebPage(kInvalidTabId);
++  profile_service_->SendDragCancel(9999, kInvalidTabId);
++  profile_service_->OpenDevTools(kInvalidTabId);
 +}
 +
 +IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
 +                       NotifyWebPageClosedEmitsObserverEvent) {
-+  WebPageId created_id = kInvalidWebPageId;
++  TabId created_id = kInvalidTabId;
 +  base::RunLoop run_loop;
 +  profile_service_->CreateWebPage(
 +      "about:blank", 1,
 +      base::BindOnce(
-+          [](WebPageId* out_id, base::RunLoop* run_loop, WebPageId web_page_id) {
-+            *out_id = web_page_id;
++          [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
++            *out_id = tab_id;
 +            run_loop->Quit();
 +          },
 +          &created_id, &run_loop));
 +  run_loop.Run();
-+  ASSERT_NE(created_id, kInvalidWebPageId);
++  ASSERT_NE(created_id, kInvalidTabId);
 +
 +  profile_service_->NotifyWebPageClosed(created_id);
 +  observer_.WaitForWebPageClosedCount(1);
@@ -140,7 +140,7 @@ index 0000000000000..8ea9a622fe11c
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
 new file mode 100644
-index 0000000000000..64cbf7c2c1df3
+index 0000000000000..13b9afe7a324b
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
 @@ -0,0 +1,57 @@
@@ -168,14 +168,14 @@ index 0000000000000..64cbf7c2c1df3
 +    profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
 +  }
 +
-+  WebPageId CreatePage() {
-+    WebPageId created_id = kInvalidWebPageId;
++  TabId CreatePage() {
++    TabId created_id = kInvalidTabId;
 +    base::RunLoop run_loop;
 +    profile_service_->CreateWebPage(
 +        "about:blank", 1,
 +        base::BindOnce(
-+            [](WebPageId* out_id, base::RunLoop* run_loop, WebPageId web_page_id) {
-+              *out_id = web_page_id;
++            [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
++              *out_id = tab_id;
 +              run_loop->Quit();
 +            },
 +            &created_id, &run_loop));
@@ -189,21 +189,21 @@ index 0000000000000..64cbf7c2c1df3
 +
 +IN_PROC_BROWSER_TEST_F(CbfProfileDevToolsControllerBrowserTest,
 +                       OpenDevToolsAndCloseRaceDoesNotCrash) {
-+  const WebPageId web_page_id = CreatePage();
-+  ASSERT_NE(web_page_id, kInvalidWebPageId);
++  const TabId tab_id = CreatePage();
++  ASSERT_NE(tab_id, kInvalidTabId);
 +
-+  profile_service_->OpenDevTools(web_page_id);
++  profile_service_->OpenDevTools(tab_id);
 +  observer_.WaitForDevToolsOpenedCount(1);
 +
-+  profile_service_->NotifyWebPageClosed(web_page_id);
-+  profile_service_->OpenDevTools(web_page_id);
++  profile_service_->NotifyWebPageClosed(tab_id);
++  profile_service_->OpenDevTools(tab_id);
 +}
 +
 +}  // namespace
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
 new file mode 100644
-index 0000000000000..181b77e50941b
+index 0000000000000..610674f6fbaa9
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
 @@ -0,0 +1,41 @@
@@ -240,7 +240,7 @@ index 0000000000000..181b77e50941b
 +};
 +
 +TEST_F(CbfProfileDevToolsControllerTest, CloseDuringAttachRetryIsSafe) {
-+  controller_.OpenDevTools(kInvalidWebPageId);
++  controller_.OpenDevTools(kInvalidTabId);
 +  controller_.OnWebPageClosed(42);
 +  controller_.OnWebPageClosed(42);
 +  task_environment_.FastForwardBy(base::Milliseconds(2000));
@@ -250,7 +250,7 @@ index 0000000000000..181b77e50941b
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
 new file mode 100644
-index 0000000000000..c234730d69213
+index 0000000000000..1d9761a0e2257
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
 @@ -0,0 +1,50 @@
@@ -286,15 +286,15 @@ index 0000000000000..c234730d69213
 +TEST_F(CbfProfileDragControllerTest, InvalidSessionOperationsAreNoOp) {
 +  auto update = mojom::CbfDragUpdate::New();
 +  update->session_id = 9999;
-+  update->web_page_id = kInvalidWebPageId;
++  update->tab_id = kInvalidTabId;
 +  controller_.SendDragUpdate(std::move(update));
 +
 +  auto drop = mojom::CbfDragDrop::New();
 +  drop->session_id = 9999;
-+  drop->web_page_id = kInvalidWebPageId;
++  drop->tab_id = kInvalidTabId;
 +  controller_.SendDragDrop(std::move(drop));
 +
-+  controller_.SendDragCancel(9999, kInvalidWebPageId);
++  controller_.SendDragCancel(9999, kInvalidTabId);
 +}
 +
 +TEST_F(CbfProfileDragControllerTest, DuplicateCloseIsSafe) {
@@ -306,7 +306,7 @@ index 0000000000000..c234730d69213
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
 new file mode 100644
-index 0000000000000..6be8e1684d7fc
+index 0000000000000..f86cf063707b1
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
 @@ -0,0 +1,61 @@
@@ -344,21 +344,21 @@ index 0000000000000..6be8e1684d7fc
 +  CbfProfileInputController controller_;
 +};
 +
-+TEST_F(CbfProfileInputControllerTest, InvalidWebPageIdInputEventsAreNoOp) {
++TEST_F(CbfProfileInputControllerTest, InvalidTabIdInputEventsAreNoOp) {
 +  auto key_event = mojom::CbfKeyEvent::New();
-+  key_event->web_page_id = kInvalidWebPageId;
++  key_event->tab_id = kInvalidTabId;
 +  key_event->type = mojom::CbfKeyEventType::kKeyDown;
 +  controller_.SendKeyEvent(std::move(key_event), std::nullopt);
 +
 +  auto mouse_event = mojom::CbfMouseEvent::New();
-+  mouse_event->web_page_id = kInvalidWebPageId;
++  mouse_event->tab_id = kInvalidTabId;
 +  mouse_event->type = mojom::CbfMouseEventType::kMouseMove;
 +  mouse_event->button = mojom::CbfMouseButton::kNoButton;
 +  mouse_event->pointer_type = mojom::CbfPointerType::kPointerMouse;
 +  controller_.SendMouseEvent(std::move(mouse_event));
 +
 +  auto wheel_event = mojom::CbfMouseWheelEvent::New();
-+  wheel_event->web_page_id = kInvalidWebPageId;
++  wheel_event->tab_id = kInvalidTabId;
 +  wheel_event->delta_units = mojom::CbfScrollGranularity::kScrollByPixel;
 +  controller_.SendMouseWheelEvent(std::move(wheel_event));
 +}
@@ -423,7 +423,7 @@ index 0000000000000..fbb63065c7779
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
 new file mode 100644
-index 0000000000000..50bfe996cb244
+index 0000000000000..4c7a0fb44ab43
 --- /dev/null
 +++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
 @@ -0,0 +1,108 @@
@@ -461,58 +461,58 @@ index 0000000000000..50bfe996cb244
 +  quit_wait_loop_.Reset();
 +}
 +
-+void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t web_page_id,
++void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t tab_id,
 +                                                    uint32_t ca_context_id) {}
 +
-+void CbfTestProfileObserver::OnWebPageCreated(uint64_t web_page_id,
++void CbfTestProfileObserver::OnWebPageCreated(uint64_t tab_id,
 +                                              uint64_t request_id) {}
 +
-+void CbfTestProfileObserver::OnDevToolsOpened(uint64_t web_page_id,
-+                                              uint64_t devtools_web_page_id) {
-+  devtools_opened_events_.emplace_back(web_page_id, devtools_web_page_id);
++void CbfTestProfileObserver::OnDevToolsOpened(uint64_t tab_id,
++                                              uint64_t devtools_tab_id) {
++  devtools_opened_events_.emplace_back(tab_id, devtools_tab_id);
 +  MaybeQuitWaitLoop();
 +}
 +
-+void CbfTestProfileObserver::OnWebPageClosed(uint64_t web_page_id) {
-+  web_page_closed_events_.push_back(web_page_id);
++void CbfTestProfileObserver::OnWebPageClosed(uint64_t tab_id) {
++  web_page_closed_events_.push_back(tab_id);
 +  MaybeQuitWaitLoop();
 +}
 +
-+void CbfTestProfileObserver::OnWebPageResizeAcknowledged(uint64_t web_page_id) {}
++void CbfTestProfileObserver::OnWebPageResizeAcknowledged(uint64_t tab_id) {}
 +
 +void CbfTestProfileObserver::OnImeBoundsUpdated(
 +    cbf::mojom::CbfImeBoundsUpdatePtr update) {}
 +
 +void CbfTestProfileObserver::OnContextMenuRequested(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    cbf::mojom::CbfContextMenuPtr menu) {}
 +
-+void CbfTestProfileObserver::OnNewWebPageRequested(uint64_t web_page_id,
++void CbfTestProfileObserver::OnNewWebPageRequested(uint64_t tab_id,
 +                                                   const std::string& target_url,
 +                                                   bool is_popup) {}
 +
-+void CbfTestProfileObserver::OnTitleUpdated(uint64_t web_page_id,
++void CbfTestProfileObserver::OnTitleUpdated(uint64_t tab_id,
 +                                            const std::string& title) {}
 +
-+void CbfTestProfileObserver::OnFaviconUrlUpdated(uint64_t web_page_id,
++void CbfTestProfileObserver::OnFaviconUrlUpdated(uint64_t tab_id,
 +                                                 const std::string& url) {}
 +
 +void CbfTestProfileObserver::OnBeforeUnloadDialogRequested(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    uint64_t request_id,
 +    cbf::mojom::CbfBeforeUnloadReason reason) {}
 +
 +void CbfTestProfileObserver::OnCursorChanged(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    cbf::mojom::CbfCursorType cursor_type) {}
 +
-+void CbfTestProfileObserver::OnNavigationStateChanged(uint64_t web_page_id,
++void CbfTestProfileObserver::OnNavigationStateChanged(uint64_t tab_id,
 +                                                      const std::string& url,
 +                                                      bool can_go_back,
 +                                                      bool can_go_forward,
 +                                                      bool is_loading) {}
 +
-+void CbfTestProfileObserver::OnWebPageDomHtmlRead(uint64_t web_page_id,
++void CbfTestProfileObserver::OnWebPageDomHtmlRead(uint64_t tab_id,
 +                                                  uint64_t request_id,
 +                                                  const std::string& html) {}
 +
@@ -537,7 +537,7 @@ index 0000000000000..50bfe996cb244
 +}  // namespace cbf::test
 diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
 new file mode 100644
-index 0000000000000..c86d70cc38407
+index 0000000000000..f7103d73fff5a
 --- /dev/null
 +++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
 @@ -0,0 +1,86 @@
@@ -579,35 +579,35 @@ index 0000000000000..c86d70cc38407
 +  void WaitForDevToolsOpenedCount(size_t expected_count);
 +
 +  // cbf::mojom::CbfProfileObserver
-+  void OnSurfaceHandleUpdated(uint64_t web_page_id,
++  void OnSurfaceHandleUpdated(uint64_t tab_id,
 +                              uint32_t ca_context_id) override;
-+  void OnWebPageCreated(uint64_t web_page_id, uint64_t request_id) override;
-+  void OnDevToolsOpened(uint64_t web_page_id,
-+                        uint64_t devtools_web_page_id) override;
-+  void OnWebPageClosed(uint64_t web_page_id) override;
-+  void OnWebPageResizeAcknowledged(uint64_t web_page_id) override;
++  void OnWebPageCreated(uint64_t tab_id, uint64_t request_id) override;
++  void OnDevToolsOpened(uint64_t tab_id,
++                        uint64_t devtools_tab_id) override;
++  void OnWebPageClosed(uint64_t tab_id) override;
++  void OnWebPageResizeAcknowledged(uint64_t tab_id) override;
 +  void OnImeBoundsUpdated(cbf::mojom::CbfImeBoundsUpdatePtr update) override;
 +  void OnContextMenuRequested(
-+      uint64_t web_page_id,
++      uint64_t tab_id,
 +      cbf::mojom::CbfContextMenuPtr menu) override;
-+  void OnNewWebPageRequested(uint64_t web_page_id,
++  void OnNewWebPageRequested(uint64_t tab_id,
 +                             const std::string& target_url,
 +                             bool is_popup) override;
-+  void OnTitleUpdated(uint64_t web_page_id, const std::string& title) override;
-+  void OnFaviconUrlUpdated(uint64_t web_page_id,
++  void OnTitleUpdated(uint64_t tab_id, const std::string& title) override;
++  void OnFaviconUrlUpdated(uint64_t tab_id,
 +                           const std::string& url) override;
 +  void OnBeforeUnloadDialogRequested(
-+      uint64_t web_page_id,
++      uint64_t tab_id,
 +      uint64_t request_id,
 +      cbf::mojom::CbfBeforeUnloadReason reason) override;
-+  void OnCursorChanged(uint64_t web_page_id,
++  void OnCursorChanged(uint64_t tab_id,
 +                       cbf::mojom::CbfCursorType cursor_type) override;
-+  void OnNavigationStateChanged(uint64_t web_page_id,
++  void OnNavigationStateChanged(uint64_t tab_id,
 +                                const std::string& url,
 +                                bool can_go_back,
 +                                bool can_go_forward,
 +                                bool is_loading) override;
-+  void OnWebPageDomHtmlRead(uint64_t web_page_id,
++  void OnWebPageDomHtmlRead(uint64_t tab_id,
 +                            uint64_t request_id,
 +                            const std::string& html) override;
 +  void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;

@@ -1,4 +1,4 @@
-From 23979acb1c1867c325d9434f2d50c7ac47f6ed27 Mon Sep 17 00:00:00 2001
+From f27de2e6fa8a5bb52fe68382642c958c5a3c87e3 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 21 Feb 2026 17:31:42 +0900
 Subject: [PATCH 2/9] refactor(chrome): split profile service into focused
@@ -91,7 +91,7 @@ index 0f455322b5cb2..c1881f8606098 100644
      "//chrome/browser/profiles:profile_util",
      "//chrome/browser/themes:themes",
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
-index bd2ef698284c8..bcc78e16d2c88 100644
+index 2cee1e3799ec4..47e4f29a5e892 100644
 --- a/chrome/browser/cbf/cbf_profile_service.cc
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
 @@ -1,587 +1,30 @@
@@ -740,21 +740,21 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 +      devtools_controller_(std::make_unique<CbfProfileDevToolsController>(
 +          service_context_.get())) {
 +  context_menu_controller_->SetInspectElementHandler(base::BindRepeating(
-+      [](base::WeakPtr<CbfProfileService> self, WebPageId web_page_id,
++      [](base::WeakPtr<CbfProfileService> self, TabId tab_id,
 +         int32_t x, int32_t y) {
 +        if (!self) {
 +          return;
 +        }
-+        self->InspectElement(web_page_id, x, y);
++        self->InspectElement(tab_id, x, y);
 +      },
 +      weak_factory_.GetWeakPtr()));
 +  devtools_controller_->SetRegisterImeHandler(base::BindRepeating(
-+      [](base::WeakPtr<CbfProfileService> self, WebPageId web_page_id,
++      [](base::WeakPtr<CbfProfileService> self, TabId tab_id,
 +         content::WebContents* web_contents) {
 +        if (!self) {
 +          return;
 +        }
-+        self->ime_controller_->RegisterWebContents(web_page_id, web_contents);
++        self->ime_controller_->RegisterWebContents(tab_id, web_contents);
 +      },
 +      weak_factory_.GetWeakPtr()));
 +}
@@ -772,7 +772,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -
 -void CbfProfileService::RegisterTextInputManager(
 -    content::WebContents* web_contents,
--    WebPageId web_page_id) {
+-    TabId tab_id) {
 -  if (!web_contents) {
 -    return;
 -  }
@@ -786,7 +786,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -  if (text_input_map_.find(text_input_manager) == text_input_map_.end()) {
 -    text_input_observations_.AddObservation(text_input_manager);
 -  }
--  text_input_map_[text_input_manager] = web_page_id;
+-  text_input_map_[text_input_manager] = tab_id;
 -}
 -
 -void CbfProfileService::NotifyImeBoundsUpdated(
@@ -804,7 +804,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
    }
 -
 -  auto update = cbf::mojom::CbfImeBoundsUpdate::New();
--  update->web_page_id = it->second;
+-  update->tab_id = it->second;
 -
 -  if (include_composition) {
 -    const auto* composition_info =
@@ -852,41 +852,41 @@ index bd2ef698284c8..bcc78e16d2c88 100644
                                        uint64_t request_id,
                                        CreateWebPageCallback callback) {
 -  const GURL url(initial_url);
--  const WebPageId web_page_id = tab_manager_.CreateWebPage(url);
--  RegisterTextInputManager(tab_manager_.GetWebContents(web_page_id),
--                           web_page_id);
-+  const WebPageId web_page_id = page_controller_->CreateWebPage(initial_url);
+-  const TabId tab_id = tab_manager_.CreateWebPage(url);
+-  RegisterTextInputManager(tab_manager_.GetWebContents(tab_id),
+-                           tab_id);
++  const TabId tab_id = page_controller_->CreateWebPage(initial_url);
 +  ime_controller_->RegisterWebContents(
-+      web_page_id, tab_manager_.GetWebContents(web_page_id));
-   if (observer_ && web_page_id != kInvalidWebPageId) {
-     observer_->OnWebPageCreated(web_page_id, request_id);
++      tab_id, tab_manager_.GetWebContents(tab_id));
+   if (observer_ && tab_id != kInvalidTabId) {
+     observer_->OnWebPageCreated(tab_id, request_id);
    }
-@@ -715,9 +107,8 @@ void CbfProfileService::RequestCloseWebPage(WebPageId web_page_id) {
+@@ -715,9 +107,8 @@ void CbfProfileService::RequestCloseWebPage(TabId tab_id) {
    if (!web_contents) {
      return;
    }
 -  beforeunload_reasons_[web_contents] =
 -      mojom::CbfBeforeUnloadReason::kCloseWebPage;
--  tab_manager_.RequestCloseWebPage(web_page_id);
+-  tab_manager_.RequestCloseWebPage(tab_id);
 +  popup_controller_->MarkCloseWebPageBeforeUnloadReason(web_contents);
-+  page_controller_->RequestCloseWebPage(web_page_id);
++  page_controller_->RequestCloseWebPage(tab_id);
  }
  
- void CbfProfileService::SetWebPageSize(const WebPageId web_page_id,
-@@ -740,435 +131,54 @@ void CbfProfileService::SetWebPageSize(const WebPageId web_page_id,
+ void CbfProfileService::SetWebPageSize(const TabId tab_id,
+@@ -740,435 +131,54 @@ void CbfProfileService::SetWebPageSize(const TabId tab_id,
  void CbfProfileService::SendKeyEvent(
      mojom::CbfKeyEventPtr event,
      const std::optional<std::vector<std::string>>& commands) {
 -  content::WebContents* web_contents =
--      tab_manager_.GetWebContents(event->web_page_id);
+-      tab_manager_.GetWebContents(event->tab_id);
 -  if (!web_contents) {
 -    return;
 -  }
 -  content::RenderWidgetHost* widget_host =
 -      ResolveInputRenderWidgetHost(web_contents);
 -  if (!widget_host) {
--    DVLOG(1) << "SendKeyEvent dropped: no input widget host for web_page_id="
--             << event->web_page_id;
+-    DVLOG(1) << "SendKeyEvent dropped: no input widget host for tab_id="
+-             << event->tab_id;
 -    return;
 -  }
 -  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -932,7 +932,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
  
  void CbfProfileService::SendMouseEvent(mojom::CbfMouseEventPtr event) {
 -  content::WebContents* web_contents =
--      tab_manager_.GetWebContents(event->web_page_id);
+-      tab_manager_.GetWebContents(event->tab_id);
 -  if (!web_contents) {
 -    return;
 -  }
@@ -958,8 +958,8 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -  content::RenderWidgetHost* widget_host =
 -      ResolveInputRenderWidgetHost(web_contents);
 -  if (!widget_host) {
--    DVLOG(1) << "SendMouseEvent dropped: no input widget host for web_page_id="
--             << event->web_page_id;
+-    DVLOG(1) << "SendMouseEvent dropped: no input widget host for tab_id="
+-             << event->tab_id;
 -    return;
 -  }
 -  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -973,7 +973,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
  void CbfProfileService::SendMouseWheelEvent(
      mojom::CbfMouseWheelEventPtr event) {
 -  content::WebContents* web_contents =
--      tab_manager_.GetWebContents(event->web_page_id);
+-      tab_manager_.GetWebContents(event->tab_id);
 -  if (!web_contents) {
 -    return;
 -  }
@@ -999,7 +999,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -      event->momentum_phase);
 -  wheel_event.delta_units = ToScrollGranularity(event->delta_units);
 -  if (!HasWheelPhase(wheel_event)) {
--    auto& phase_state_ptr = wheel_phase_states_[event->web_page_id];
+-    auto& phase_state_ptr = wheel_phase_states_[event->tab_id];
 -    if (!phase_state_ptr) {
 -      phase_state_ptr = std::make_unique<WheelPhaseState>();
 -    }
@@ -1016,9 +1016,9 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -    phase_state.end_timer.Start(
 -        FROM_HERE, kSyntheticWheelPhaseGap,
 -        base::BindOnce(&CbfProfileService::SendSyntheticWheelEndedEvent,
--                       weak_factory_.GetWeakPtr(), event->web_page_id));
+-                       weak_factory_.GetWeakPtr(), event->tab_id));
 -  } else {
--    wheel_phase_states_.erase(event->web_page_id);
+-    wheel_phase_states_.erase(event->tab_id);
 -  }
 -
 -  ui::LatencyInfo latency_info;
@@ -1031,8 +1031,8 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -      ResolveInputRenderWidgetHost(web_contents);
 -  if (!widget_host) {
 -    DVLOG(1)
--        << "SendMouseWheelEvent dropped: no input widget host for web_page_id="
--        << event->web_page_id;
+-        << "SendMouseWheelEvent dropped: no input widget host for tab_id="
+-        << event->tab_id;
 -    return;
 -  }
 -  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -1042,8 +1042,8 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -  widget_impl->ForwardWheelEventWithLatencyInfo(wheel_event, latency_info);
 -}
 -
--void CbfProfileService::SendSyntheticWheelEndedEvent(WebPageId web_page_id) {
--  const auto state_it = wheel_phase_states_.find(web_page_id);
+-void CbfProfileService::SendSyntheticWheelEndedEvent(TabId tab_id) {
+-  const auto state_it = wheel_phase_states_.find(tab_id);
 -  if (state_it == wheel_phase_states_.end()) {
 -    return;
 -  }
@@ -1054,7 +1054,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -    return;
 -  }
 -
--  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 -  if (!web_contents) {
 -    wheel_phase_states_.erase(state_it);
 -    return;
@@ -1096,7 +1096,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -  }
 -
 -  DragSessionState& session = it->second;
--  if (session.web_page_id != update->web_page_id || !session.source_rwh) {
+-  if (session.tab_id != update->tab_id || !session.source_rwh) {
 -    return;
 -  }
 -
@@ -1161,7 +1161,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -  DragSessionState session = std::move(it->second);
 -  drag_sessions_.erase(it);
 -
--  if (session.web_page_id != drop->web_page_id || !session.source_rwh) {
+-  if (session.tab_id != drop->tab_id || !session.source_rwh) {
 -    return;
 -  }
 -
@@ -1179,7 +1179,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 +  drag_controller_->SendDragDrop(std::move(drop));
  }
  
- void CbfProfileService::SendDragCancel(uint64_t session_id, uint64_t web_page_id) {
+ void CbfProfileService::SendDragCancel(uint64_t session_id, uint64_t tab_id) {
 -  const auto it = drag_sessions_.find(session_id);
 -  if (it == drag_sessions_.end()) {
 -    return;
@@ -1188,7 +1188,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -  DragSessionState session = std::move(it->second);
 -  drag_sessions_.erase(it);
 -
--  if (session.web_page_id != web_page_id || !session.source_rwh) {
+-  if (session.tab_id != tab_id || !session.source_rwh) {
 -    return;
 -  }
 -
@@ -1200,21 +1200,21 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -                                        ui::mojom::DragOperation::kNone,
 -                                        base::DoNothing());
 -  session.source_rwh->DragSourceSystemDragEnded();
-+  drag_controller_->SendDragCancel(session_id, web_page_id);
++  drag_controller_->SendDragCancel(session_id, tab_id);
  }
  
  void CbfProfileService::SetComposition(
      mojom::CbfImeCompositionPtr composition) {
 -  content::WebContents* web_contents =
--      tab_manager_.GetWebContents(composition->web_page_id);
+-      tab_manager_.GetWebContents(composition->tab_id);
 -  if (!web_contents) {
 -    return;
 -  }
 -  content::RenderWidgetHost* widget_host =
 -      ResolveInputRenderWidgetHost(web_contents);
 -  if (!widget_host) {
--    DVLOG(1) << "SetComposition dropped: no input widget host for web_page_id="
--             << composition->web_page_id;
+-    DVLOG(1) << "SetComposition dropped: no input widget host for tab_id="
+-             << composition->tab_id;
 -    return;
 -  }
 -  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -1234,15 +1234,15 @@ index bd2ef698284c8..bcc78e16d2c88 100644
  
  void CbfProfileService::CommitText(mojom::CbfImeCommitTextPtr commit) {
 -  content::WebContents* web_contents =
--      tab_manager_.GetWebContents(commit->web_page_id);
+-      tab_manager_.GetWebContents(commit->tab_id);
 -  if (!web_contents) {
 -    return;
 -  }
 -  content::RenderWidgetHost* widget_host =
 -      ResolveInputRenderWidgetHost(web_contents);
 -  if (!widget_host) {
--    DVLOG(1) << "CommitText dropped: no input widget host for web_page_id="
--             << commit->web_page_id;
+-    DVLOG(1) << "CommitText dropped: no input widget host for tab_id="
+-             << commit->tab_id;
 -    return;
 -  }
 -  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -1261,9 +1261,9 @@ index bd2ef698284c8..bcc78e16d2c88 100644
  }
  
  void CbfProfileService::FinishComposingText(
-     uint64_t web_page_id,
+     uint64_t tab_id,
      mojom::CbfConfirmCompositionBehavior behavior) {
--  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 -  if (!web_contents) {
 -    return;
 -  }
@@ -1271,8 +1271,8 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -      ResolveInputRenderWidgetHost(web_contents);
 -  if (!widget_host) {
 -    DVLOG(1)
--        << "FinishComposingText dropped: no input widget host for web_page_id="
--        << web_page_id;
+-        << "FinishComposingText dropped: no input widget host for tab_id="
+-        << tab_id;
 -    return;
 -  }
 -  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -1283,7 +1283,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -  const bool keep_selection =
 -      behavior == mojom::CbfConfirmCompositionBehavior::kKeepSelection;
 -  widget_impl->ImeFinishComposingText(keep_selection);
-+  ime_controller_->FinishComposingText(web_page_id, behavior);
++  ime_controller_->FinishComposingText(tab_id, behavior);
  }
  
  void CbfProfileService::ExecuteContextMenuCommand(uint64_t menu_id,
@@ -1324,8 +1324,8 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 @@ -1176,65 +186,31 @@ void CbfProfileService::ConfirmBeforeUnload(uint64_t request_id, bool proceed) {
  }
  
- void CbfProfileService::Navigate(uint64_t web_page_id, const std::string& url) {
--  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+ void CbfProfileService::Navigate(uint64_t tab_id, const std::string& url) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 -  if (!web_contents) {
 -    return;
 -  }
@@ -1335,27 +1335,27 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -  }
 -  web_contents->GetController().LoadURL(
 -      gurl, content::Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-+  navigation_controller_->Navigate(web_page_id, url);
++  navigation_controller_->Navigate(tab_id, url);
  }
  
- void CbfProfileService::GoBack(uint64_t web_page_id) {
--  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+ void CbfProfileService::GoBack(uint64_t tab_id) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 -  if (web_contents && web_contents->GetController().CanGoBack()) {
 -    web_contents->GetController().GoBack();
 -  }
-+  navigation_controller_->GoBack(web_page_id);
++  navigation_controller_->GoBack(tab_id);
  }
  
- void CbfProfileService::GoForward(uint64_t web_page_id) {
--  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+ void CbfProfileService::GoForward(uint64_t tab_id) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 -  if (web_contents && web_contents->GetController().CanGoForward()) {
 -    web_contents->GetController().GoForward();
 -  }
-+  navigation_controller_->GoForward(web_page_id);
++  navigation_controller_->GoForward(tab_id);
  }
  
- void CbfProfileService::Reload(uint64_t web_page_id, bool ignore_cache) {
--  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+ void CbfProfileService::Reload(uint64_t tab_id, bool ignore_cache) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 -  if (!web_contents) {
 -    return;
 -  }
@@ -1363,19 +1363,19 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -                                       ? content::ReloadType::BYPASSING_CACHE
 -                                       : content::ReloadType::NORMAL;
 -  web_contents->GetController().Reload(type, true);
-+  navigation_controller_->Reload(web_page_id, ignore_cache);
++  navigation_controller_->Reload(tab_id, ignore_cache);
  }
  
--void CbfProfileService::SetWebPageFocus(uint64_t web_page_id, bool focused) {
--  content::WebContents* web_contents = tab_manager_.GetWebContents(web_page_id);
+-void CbfProfileService::SetWebPageFocus(uint64_t tab_id, bool focused) {
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
 -  if (!web_contents) {
 -    return;
 -  }
 -
 -  auto* widget_impl = content::RenderWidgetHostImpl::From(
 -      ResolveInputRenderWidgetHost(web_contents));
-+void CbfProfileService::OpenDevTools(uint64_t web_page_id) {
-+  devtools_controller_->OpenDevTools(web_page_id);
++void CbfProfileService::OpenDevTools(uint64_t tab_id) {
++  devtools_controller_->OpenDevTools(tab_id);
 +}
  
 -  if (focused) {
@@ -1386,19 +1386,19 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -    web_contents->RestoreFocus();
 -    return;
 -  }
-+void CbfProfileService::InspectElement(uint64_t web_page_id, int32_t x, int32_t y) {
-+  devtools_controller_->InspectElement(web_page_id, x, y);
++void CbfProfileService::InspectElement(uint64_t tab_id, int32_t x, int32_t y) {
++  devtools_controller_->InspectElement(tab_id, x, y);
 +}
  
 -  web_contents->StoreFocus();
 -  if (widget_impl) {
 -    widget_impl->SetPageFocus(false);
 -  }
-+void CbfProfileService::SetWebPageFocus(uint64_t web_page_id, bool focused) {
-+  navigation_controller_->SetWebPageFocus(web_page_id, focused);
++void CbfProfileService::SetWebPageFocus(uint64_t tab_id, bool focused) {
++  navigation_controller_->SetWebPageFocus(tab_id, focused);
  }
  
- void CbfProfileService::GetWebPageDomHtml(uint64_t web_page_id,
+ void CbfProfileService::GetWebPageDomHtml(uint64_t tab_id,
 @@ -1279,7 +255,7 @@ bool CbfProfileService::IsShutdownRequested() const {
  }
  
@@ -1411,14 +1411,14 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 @@ -1287,34 +263,25 @@ void CbfProfileService::ResolveBeforeUnloadForShutdown(bool proceed) {
  }
  
- std::vector<WebPageId> CbfProfileService::GetDirtyWebPageIds() const {
--  return tab_manager_.GetDirtyWebPageIds();
-+  return page_controller_->GetDirtyWebPageIds();
+ std::vector<TabId> CbfProfileService::GetDirtyTabIds() const {
+-  return tab_manager_.GetDirtyTabIds();
++  return page_controller_->GetDirtyTabIds();
  }
  
- std::vector<WebPageId> CbfProfileService::GetAllWebPageIds() const {
--  return tab_manager_.GetAllWebPageIds();
-+  return page_controller_->GetAllWebPageIds();
+ std::vector<TabId> CbfProfileService::GetAllTabIds() const {
+-  return tab_manager_.GetAllTabIds();
++  return page_controller_->GetAllTabIds();
  }
  
  size_t CbfProfileService::GetWebPageCount() const {
@@ -1433,11 +1433,11 @@ index bd2ef698284c8..bcc78e16d2c88 100644
  
  void CbfProfileService::CloseWebContents(content::WebContents* web_contents) {
 -  beforeunload_reasons_.erase(web_contents);
--  const WebPageId web_page_id =
--      tab_manager_.GetWebPageIdForWebContents(web_contents);
--  if (web_page_id != kInvalidWebPageId) {
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
+-  if (tab_id != kInvalidTabId) {
 -    for (auto it = drag_sessions_.begin(); it != drag_sessions_.end();) {
--      if (it->second.web_page_id == web_page_id) {
+-      if (it->second.tab_id == tab_id) {
 -        it = drag_sessions_.erase(it);
 -      } else {
 -        ++it;
@@ -1445,7 +1445,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -    }
 -  }
 +  popup_controller_->ClearBeforeUnloadReason(web_contents);
-+  const WebPageId web_page_id = page_controller_->GetWebPageIdForWebContents(
++  const TabId tab_id = page_controller_->GetTabIdForWebContents(
 +      web_contents);
  
    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
@@ -1453,13 +1453,13 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 @@ -1324,7 +291,7 @@ void CbfProfileService::CloseWebContents(content::WebContents* web_contents) {
                return;
              }
-             if (web_page_id != kInvalidWebPageId) {
--              self->tab_manager_.CloseWebPage(web_page_id);
-+              self->page_controller_->CloseWebPage(web_page_id);
+             if (tab_id != kInvalidTabId) {
+-              self->tab_manager_.CloseWebPage(tab_id);
++              self->page_controller_->CloseWebPage(tab_id);
              }
              if (self->browser_service_) {
                self->browser_service_->NotifyWebPageClosed();
-@@ -1348,81 +315,28 @@ WebPageId CbfProfileService::GetWebPageIdForWebContents(
+@@ -1348,81 +315,28 @@ TabId CbfProfileService::GetTabIdForWebContents(
  bool CbfProfileService::HandleContextMenu(
      content::RenderFrameHost& render_frame_host,
      const content::ContextMenuParams& params) {
@@ -1473,9 +1473,9 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -    return true;
 -  }
 -
--  const WebPageId web_page_id =
--      tab_manager_.GetWebPageIdForWebContents(web_contents);
--  if (web_page_id == kInvalidWebPageId) {
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
+-  if (tab_id == kInvalidTabId) {
 -    return true;
 -  }
 -
@@ -1500,11 +1500,11 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -  menu_payload->items = BuildMenuItems(menu->menu_model_mutable(), profile);
 -
 -  auto entry = std::make_unique<ContextMenuEntry>();
--  entry->web_page_id = web_page_id;
+-  entry->tab_id = tab_id;
 -  entry->menu = std::move(menu);
 -  context_menus_[menu_id] = std::move(entry);
 -
--  observer_->OnContextMenuRequested(web_page_id, std::move(menu_payload));
+-  observer_->OnContextMenuRequested(tab_id, std::move(menu_payload));
 -  return true;
 +  return context_menu_controller_->HandleContextMenu(render_frame_host, params);
  }
@@ -1517,38 +1517,38 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -    return;
 -  }
 -
--  const WebPageId web_page_id =
--      tab_manager_.GetWebPageIdForWebContents(source);
--  if (web_page_id == kInvalidWebPageId) {
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(source);
+-  if (tab_id == kInvalidTabId) {
 -    return;
 -  }
 -
 -  const bool is_popup = disposition == WindowOpenDisposition::NEW_POPUP;
--  observer_->OnNewWebPageRequested(web_page_id, target_url.spec(), is_popup);
+-  observer_->OnNewWebPageRequested(tab_id, target_url.spec(), is_popup);
 +  popup_controller_->NotifyNewWebPageRequested(source, target_url, disposition);
  }
  
- void CbfProfileService::NotifyWebPageClosed(WebPageId web_page_id) {
--  wheel_phase_states_.erase(web_page_id);
-+  if (web_page_id != kInvalidWebPageId) {
-+    context_menu_controller_->OnWebPageClosed(web_page_id);
-+    input_controller_->OnWebPageClosed(web_page_id);
-+    ime_controller_->OnWebPageClosed(web_page_id);
-+    drag_controller_->OnWebPageClosed(web_page_id);
-+    devtools_controller_->OnWebPageClosed(web_page_id);
+ void CbfProfileService::NotifyWebPageClosed(TabId tab_id) {
+-  wheel_phase_states_.erase(tab_id);
++  if (tab_id != kInvalidTabId) {
++    context_menu_controller_->OnWebPageClosed(tab_id);
++    input_controller_->OnWebPageClosed(tab_id);
++    ime_controller_->OnWebPageClosed(tab_id);
++    drag_controller_->OnWebPageClosed(tab_id);
++    devtools_controller_->OnWebPageClosed(tab_id);
 +  }
 +
-   if (!observer_ || web_page_id == kInvalidWebPageId) {
+   if (!observer_ || tab_id == kInvalidTabId) {
      return;
    }
 -  for (auto it = drag_sessions_.begin(); it != drag_sessions_.end();) {
--    if (it->second.web_page_id == web_page_id) {
+-    if (it->second.tab_id == tab_id) {
 -      it = drag_sessions_.erase(it);
 -    } else {
 -      ++it;
 -    }
 -  }
-   observer_->OnWebPageClosed(web_page_id);
+   observer_->OnWebPageClosed(tab_id);
  }
  
 @@ -1451,13 +365,8 @@ void CbfProfileService::OnBeforeUnloadFired(
@@ -1565,7 +1565,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 +  const bool is_close_request =
 +      popup_controller_->ConsumeCloseWebPageBeforeUnloadReason(web_contents);
  
-   browser_service_->NotifyBeforeUnloadFired(web_page_id, proceed);
+   browser_service_->NotifyBeforeUnloadFired(tab_id, proceed);
  
 @@ -1498,34 +407,7 @@ void CbfProfileService::NotifyBeforeUnloadDialogRequested(
  mojom::CbfBeforeUnloadReason CbfProfileService::ResolveBeforeUnloadReason(
@@ -1607,9 +1607,9 @@ index bd2ef698284c8..bcc78e16d2c88 100644
      return;
    }
  
--  observer_->OnCursorChanged(web_page_id, ToCbfCursorType(cursor_type));
+-  observer_->OnCursorChanged(tab_id, ToCbfCursorType(cursor_type));
 +  observer_->OnCursorChanged(
-+      web_page_id, mojo_converters::ToCbfCursorType(cursor_type));
++      tab_id, mojo_converters::ToCbfCursorType(cursor_type));
  }
  
  void CbfProfileService::NotifyNavigationStateChanged(
@@ -1626,15 +1626,15 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -    return;
 -  }
 -
--  const WebPageId web_page_id =
--      tab_manager_.GetWebPageIdForWebContents(web_contents);
--  if (web_page_id == kInvalidWebPageId) {
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
+-  if (tab_id == kInvalidTabId) {
 -    return;
 -  }
 -
 -  const uint64_t session_id = next_drag_session_id_++;
 -  DragSessionState session;
--  session.web_page_id = web_page_id;
+-  session.tab_id = tab_id;
 -  session.source_rwh = source_rwh_impl->GetWeakPtr();
 -  session.drop_data = drop_data;
 -  // Match Chromium's native drag path: set view_id and sanitize drop payload
@@ -1644,7 +1644,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
 -
 -  auto request = mojom::CbfDragStartRequest::New();
 -  request->session_id = session_id;
--  request->web_page_id = web_page_id;
+-  request->tab_id = tab_id;
 -  request->allowed_operations = static_cast<uint32_t>(allowed_ops);
 -  request->source_origin = source_origin.Serialize();
 -
@@ -1707,7 +1707,7 @@ index bd2ef698284c8..bcc78e16d2c88 100644
  
  }  // namespace cbf
 diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
-index 56967234332b1..649b8424ae54c 100644
+index 7c5158ba41fa1..7a2d3e97577db 100644
 --- a/chrome/browser/cbf/cbf_profile_service.h
 +++ b/chrome/browser/cbf/cbf_profile_service.h
 @@ -8,47 +8,47 @@
@@ -1772,20 +1772,20 @@ index 56967234332b1..649b8424ae54c 100644
    CbfProfileService(::Profile* profile, CbfBrowserService* browser_service);
    CbfProfileService(const CbfProfileService&) = delete;
 @@ -90,6 +90,8 @@ class CbfProfileService : public mojom::CbfProfileService,
-   void GoBack(uint64_t web_page_id) override;
-   void GoForward(uint64_t web_page_id) override;
-   void Reload(uint64_t web_page_id, bool ignore_cache) override;
-+  void OpenDevTools(uint64_t web_page_id) override;
-+  void InspectElement(uint64_t web_page_id, int32_t x, int32_t y) override;
-   void SetWebPageFocus(uint64_t web_page_id, bool focused) override;
+   void GoBack(uint64_t tab_id) override;
+   void GoForward(uint64_t tab_id) override;
+   void Reload(uint64_t tab_id, bool ignore_cache) override;
++  void OpenDevTools(uint64_t tab_id) override;
++  void InspectElement(uint64_t tab_id, int32_t x, int32_t y) override;
+   void SetWebPageFocus(uint64_t tab_id, bool focused) override;
  
-   void GetWebPageDomHtml(uint64_t web_page_id, uint64_t request_id) override;
+   void GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id) override;
 @@ -142,69 +144,21 @@ class CbfProfileService : public mojom::CbfProfileService,
                                  content::RenderWidgetHost* source_rwh);
  
   private:
 -  struct ContextMenuEntry {
--    WebPageId web_page_id = kInvalidWebPageId;
+-    TabId tab_id = kInvalidTabId;
 -    std::unique_ptr<CbfRenderViewContextMenu> menu;
 -    ContextMenuEntry();
 -    ~ContextMenuEntry();
@@ -1799,7 +1799,7 @@ index 56967234332b1..649b8424ae54c 100644
 -    DragSessionState& operator=(DragSessionState&&);
 -    ~DragSessionState();
 -
--    WebPageId web_page_id = kInvalidWebPageId;
+-    TabId tab_id = kInvalidTabId;
 -    base::WeakPtr<content::RenderWidgetHostImpl> source_rwh;
 -    content::DropData drop_data;
 -    bool entered = false;
@@ -1817,11 +1817,11 @@ index 56967234332b1..649b8424ae54c 100644
 -  };
 -
 -  void RegisterTextInputManager(content::WebContents* web_contents,
--                                WebPageId web_page_id);
+-                                TabId tab_id);
 -  void NotifyImeBoundsUpdated(content::TextInputManager* text_input_manager,
 -                              bool include_composition,
 -                              bool include_selection);
--  void SendSyntheticWheelEndedEvent(WebPageId web_page_id);
+-  void SendSyntheticWheelEndedEvent(TabId tab_id);
 -
 -  void OnSelectionBoundsChanged(content::TextInputManager* text_input_manager,
 -                                content::RenderWidgetHostViewBase* updated_view) override;
@@ -1847,7 +1847,7 @@ index 56967234332b1..649b8424ae54c 100644
 -  base::ScopedMultiSourceObservation<content::TextInputManager,
 -                                     content::TextInputManager::Observer>
 -      text_input_observations_{this};
--  base::flat_map<raw_ptr<content::TextInputManager>, WebPageId> text_input_map_;
+-  base::flat_map<raw_ptr<content::TextInputManager>, TabId> text_input_map_;
 -  std::uint64_t next_context_menu_id_ = 1;
 -  base::flat_map<std::uint64_t, std::unique_ptr<ContextMenuEntry>>
 -      context_menus_;
@@ -1855,7 +1855,7 @@ index 56967234332b1..649b8424ae54c 100644
 -      beforeunload_reasons_;
 -  uint64_t next_drag_session_id_ = 1;
 -  base::flat_map<uint64_t, DragSessionState> drag_sessions_;
--  base::flat_map<WebPageId, std::unique_ptr<WheelPhaseState>> wheel_phase_states_;
+-  base::flat_map<TabId, std::unique_ptr<WheelPhaseState>> wheel_phase_states_;
  
    base::WeakPtrFactory<CbfProfileService> weak_factory_{this};
  };
@@ -2331,29 +2331,29 @@ index 0000000000000..fea49f3bf019b
 +
 +#endif  // CHROME_BROWSER_CBF_MOJO_CBF_MOJOM_CONVERTERS_H_
 diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
-index fc2fe244d885f..55ec2f8e02c2c 100644
+index 119414b0b114d..96d61c22a34cf 100644
 --- a/chrome/browser/cbf/mojom/cbf_browser.mojom
 +++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
 @@ -365,6 +365,7 @@ interface CbfBrowserObserver {
  interface CbfProfileObserver {
-   OnSurfaceHandleUpdated(uint64 web_page_id, uint32 ca_context_id);
-   OnWebPageCreated(uint64 web_page_id, uint64 request_id);
-+  OnDevToolsOpened(uint64 web_page_id, uint64 devtools_web_page_id);
-   OnWebPageClosed(uint64 web_page_id);
-   OnWebPageResizeAcknowledged(uint64 web_page_id);
+   OnSurfaceHandleUpdated(uint64 tab_id, uint32 ca_context_id);
+   OnWebPageCreated(uint64 tab_id, uint64 request_id);
++  OnDevToolsOpened(uint64 tab_id, uint64 devtools_tab_id);
+   OnWebPageClosed(uint64 tab_id);
+   OnWebPageResizeAcknowledged(uint64 tab_id);
    OnImeBoundsUpdated(CbfImeBoundsUpdate update);
 @@ -407,6 +408,8 @@ interface CbfProfileService {
-   GoBack(uint64 web_page_id);
-   GoForward(uint64 web_page_id);
-   Reload(uint64 web_page_id, bool ignore_cache);
-+  OpenDevTools(uint64 web_page_id);
-+  InspectElement(uint64 web_page_id, int32 x, int32 y);
-   SetWebPageFocus(uint64 web_page_id, bool focused);
+   GoBack(uint64 tab_id);
+   GoForward(uint64 tab_id);
+   Reload(uint64 tab_id, bool ignore_cache);
++  OpenDevTools(uint64 tab_id);
++  InspectElement(uint64 tab_id, int32 x, int32 y);
+   SetWebPageFocus(uint64 tab_id, bool focused);
  
-   GetWebPageDomHtml(uint64 web_page_id, uint64 request_id);
+   GetWebPageDomHtml(uint64 tab_id, uint64 request_id);
 diff --git a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
 new file mode 100644
-index 0000000000000..674e40ad0d769
+index 0000000000000..49fd62b50ee41
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
 @@ -0,0 +1,166 @@
@@ -2413,7 +2413,7 @@ index 0000000000000..674e40ad0d769
 +CbfProfileContextMenuController::~CbfProfileContextMenuController() = default;
 +
 +void CbfProfileContextMenuController::SetInspectElementHandler(
-+    base::RepeatingCallback<void(WebPageId, int32_t, int32_t)>
++    base::RepeatingCallback<void(TabId, int32_t, int32_t)>
 +        inspect_element_handler) {
 +  inspect_element_handler_ = std::move(inspect_element_handler);
 +}
@@ -2432,9 +2432,9 @@ index 0000000000000..674e40ad0d769
 +    return true;
 +  }
 +
-+  const WebPageId web_page_id =
-+      context_->tab_manager().GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      context_->tab_manager().GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return true;
 +  }
 +
@@ -2460,13 +2460,13 @@ index 0000000000000..674e40ad0d769
 +      mojo_converters::BuildMenuItems(menu->menu_model_mutable(), profile);
 +
 +  auto entry = std::make_unique<ContextMenuEntry>();
-+  entry->web_page_id = web_page_id;
++  entry->tab_id = tab_id;
 +  entry->x = enriched_params.x;
 +  entry->y = enriched_params.y;
 +  entry->menu = std::move(menu);
 +  context_menus_[menu_id] = std::move(entry);
 +
-+  observer->OnContextMenuRequested(web_page_id, std::move(menu_payload));
++  observer->OnContextMenuRequested(tab_id, std::move(menu_payload));
 +  return true;
 +}
 +
@@ -2484,7 +2484,7 @@ index 0000000000000..674e40ad0d769
 +    if (command_id == IDC_CONTENT_CONTEXT_INSPECTELEMENT ||
 +        command_id == IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS) {
 +      if (inspect_element_handler_) {
-+        inspect_element_handler_.Run(entry->web_page_id, entry->x, entry->y);
++        inspect_element_handler_.Run(entry->tab_id, entry->x, entry->y);
 +      }
 +    } else {
 +      entry->menu->ExecuteCommand(command_id, event_flags);
@@ -2509,9 +2509,9 @@ index 0000000000000..674e40ad0d769
 +  context_menus_.erase(it);
 +}
 +
-+void CbfProfileContextMenuController::OnWebPageClosed(WebPageId web_page_id) {
++void CbfProfileContextMenuController::OnWebPageClosed(TabId tab_id) {
 +  for (auto it = context_menus_.begin(); it != context_menus_.end();) {
-+    if (it->second && it->second->web_page_id == web_page_id) {
++    if (it->second && it->second->tab_id == tab_id) {
 +      if (it->second->menu) {
 +        it->second->menu->MenuClosed(it->second->menu->menu_model_mutable());
 +      }
@@ -2525,7 +2525,7 @@ index 0000000000000..674e40ad0d769
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
 new file mode 100644
-index 0000000000000..969c9384b7cd1
+index 0000000000000..21ce4b337795a
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
 @@ -0,0 +1,57 @@
@@ -2555,7 +2555,7 @@ index 0000000000000..969c9384b7cd1
 +  ~CbfProfileContextMenuController();
 +
 +  void SetInspectElementHandler(
-+      base::RepeatingCallback<void(WebPageId, int32_t, int32_t)>
++      base::RepeatingCallback<void(TabId, int32_t, int32_t)>
 +          inspect_element_handler);
 +  bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
 +                         const content::ContextMenuParams& params);
@@ -2563,11 +2563,11 @@ index 0000000000000..969c9384b7cd1
 +                                 int32_t command_id,
 +                                 int32_t event_flags);
 +  void DismissContextMenu(uint64_t menu_id);
-+  void OnWebPageClosed(WebPageId web_page_id);
++  void OnWebPageClosed(TabId tab_id);
 +
 + private:
 +  struct ContextMenuEntry {
-+    WebPageId web_page_id = kInvalidWebPageId;
++    TabId tab_id = kInvalidTabId;
 +    int32_t x = 0;
 +    int32_t y = 0;
 +    std::unique_ptr<CbfRenderViewContextMenu> menu;
@@ -2578,7 +2578,7 @@ index 0000000000000..969c9384b7cd1
 +  std::uint64_t next_context_menu_id_ = 1;
 +  base::flat_map<std::uint64_t, std::unique_ptr<ContextMenuEntry>>
 +      context_menus_;
-+  base::RepeatingCallback<void(WebPageId, int32_t, int32_t)>
++  base::RepeatingCallback<void(TabId, int32_t, int32_t)>
 +      inspect_element_handler_;
 +  raw_ptr<CbfProfileServiceContext> context_;
 +};
@@ -2588,7 +2588,7 @@ index 0000000000000..969c9384b7cd1
 +#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_CONTEXT_MENU_CONTROLLER_H_
 diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
 new file mode 100644
-index 0000000000000..10af4e385ddaa
+index 0000000000000..4ab9549833bf0
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
 @@ -0,0 +1,335 @@
@@ -2733,59 +2733,59 @@ index 0000000000000..10af4e385ddaa
 +CbfProfileDevToolsController::~CbfProfileDevToolsController() = default;
 +
 +void CbfProfileDevToolsController::SetRegisterImeHandler(
-+    base::RepeatingCallback<void(WebPageId, content::WebContents*)>
++    base::RepeatingCallback<void(TabId, content::WebContents*)>
 +        register_ime_handler) {
 +  register_ime_handler_ = std::move(register_ime_handler);
 +}
 +
-+void CbfProfileDevToolsController::OpenDevTools(WebPageId inspected_web_page_id) {
++void CbfProfileDevToolsController::OpenDevTools(TabId inspected_tab_id) {
 +  content::WebContents* inspected_contents =
-+      context_->tab_manager().GetWebContents(inspected_web_page_id);
++      context_->tab_manager().GetWebContents(inspected_tab_id);
 +  if (!inspected_contents) {
 +    LOG(INFO) << "[CBF][DevTools] OpenDevTools ignored: inspected page not found id="
-+              << inspected_web_page_id;
++              << inspected_tab_id;
 +    return;
 +  }
 +  LOG(INFO) << "[CBF][DevTools] OpenDevTools requested inspected_id="
-+            << inspected_web_page_id;
++            << inspected_tab_id;
 +
-+  WebPageId devtools_web_page_id = kInvalidWebPageId;
-+  auto existing_it = inspected_to_devtools_.find(inspected_web_page_id);
++  TabId devtools_tab_id = kInvalidTabId;
++  auto existing_it = inspected_to_devtools_.find(inspected_tab_id);
 +  if (existing_it != inspected_to_devtools_.end()) {
-+    devtools_web_page_id = existing_it->second;
-+    if (!context_->tab_manager().GetWebContents(devtools_web_page_id)) {
-+      devtools_to_inspected_.erase(devtools_web_page_id);
-+      devtools_sessions_.erase(devtools_web_page_id);
++    devtools_tab_id = existing_it->second;
++    if (!context_->tab_manager().GetWebContents(devtools_tab_id)) {
++      devtools_to_inspected_.erase(devtools_tab_id);
++      devtools_sessions_.erase(devtools_tab_id);
 +      inspected_to_devtools_.erase(existing_it);
-+      devtools_web_page_id = kInvalidWebPageId;
++      devtools_tab_id = kInvalidTabId;
 +    }
 +  }
 +
-+  if (devtools_web_page_id == kInvalidWebPageId) {
-+    devtools_web_page_id = context_->tab_manager().CreateWebPage(GURL());
-+    if (devtools_web_page_id == kInvalidWebPageId) {
++  if (devtools_tab_id == kInvalidTabId) {
++    devtools_tab_id = context_->tab_manager().CreateWebPage(GURL());
++    if (devtools_tab_id == kInvalidTabId) {
 +      LOG(INFO) << "[CBF][DevTools] Failed to create devtools page for inspected_id="
-+                << inspected_web_page_id;
++                << inspected_tab_id;
 +      return;
 +    }
 +
 +    content::WebContents* devtools_contents =
-+        context_->tab_manager().GetWebContents(devtools_web_page_id);
++        context_->tab_manager().GetWebContents(devtools_tab_id);
 +    if (!devtools_contents) {
 +      LOG(INFO) << "[CBF][DevTools] Created devtools id="
-+                << devtools_web_page_id << " but WebContents lookup failed";
-+      context_->tab_manager().CloseWebPage(devtools_web_page_id);
++                << devtools_tab_id << " but WebContents lookup failed";
++      context_->tab_manager().CloseWebPage(devtools_tab_id);
 +      return;
 +    }
 +
 +    const GURL devtools_frontend_url = BuildDevToolsFrontendUrl();
 +    LOG(INFO) << "[CBF][DevTools] Created devtools page id="
-+              << devtools_web_page_id
-+              << " for inspected_id=" << inspected_web_page_id
++              << devtools_tab_id
++              << " for inspected_id=" << inspected_tab_id
 +              << " url=" << devtools_frontend_url;
 +
 +    if (register_ime_handler_) {
-+      register_ime_handler_.Run(devtools_web_page_id, devtools_contents);
++      register_ime_handler_.Run(devtools_tab_id, devtools_contents);
 +    }
 +
 +    auto session = std::make_unique<DevToolsSession>();
@@ -2795,41 +2795,41 @@ index 0000000000000..10af4e385ddaa
 +        devtools_frontend_url, content::Referrer(),
 +        ui::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
 +    LOG(INFO) << "[CBF][DevTools] Navigated devtools page id="
-+              << devtools_web_page_id << " to url=" << devtools_frontend_url;
++              << devtools_tab_id << " to url=" << devtools_frontend_url;
 +
-+    devtools_sessions_[devtools_web_page_id] = std::move(session);
-+    inspected_to_devtools_[inspected_web_page_id] = devtools_web_page_id;
-+    devtools_to_inspected_[devtools_web_page_id] = inspected_web_page_id;
++    devtools_sessions_[devtools_tab_id] = std::move(session);
++    inspected_to_devtools_[inspected_tab_id] = devtools_tab_id;
++    devtools_to_inspected_[devtools_tab_id] = inspected_tab_id;
 +  } else {
 +    LOG(INFO) << "[CBF][DevTools] Reusing existing devtools page id="
-+              << devtools_web_page_id
-+              << " for inspected_id=" << inspected_web_page_id;
++              << devtools_tab_id
++              << " for inspected_id=" << inspected_tab_id;
 +  }
 +
-+  TryAttachSession(inspected_web_page_id, devtools_web_page_id, 0);
++  TryAttachSession(inspected_tab_id, devtools_tab_id, 0);
 +
 +  auto& observer = context_->observer_remote();
 +  if (observer.is_bound()) {
 +    LOG(INFO) << "[CBF][DevTools] Notifying OnDevToolsOpened inspected_id="
-+              << inspected_web_page_id << " devtools_id=" << devtools_web_page_id;
-+    observer->OnDevToolsOpened(inspected_web_page_id, devtools_web_page_id);
++              << inspected_tab_id << " devtools_id=" << devtools_tab_id;
++    observer->OnDevToolsOpened(inspected_tab_id, devtools_tab_id);
 +  }
 +}
 +
-+void CbfProfileDevToolsController::InspectElement(WebPageId inspected_web_page_id,
++void CbfProfileDevToolsController::InspectElement(TabId inspected_tab_id,
 +                                                  int32_t x,
 +                                                  int32_t y) {
 +  content::WebContents* inspected_contents =
-+      context_->tab_manager().GetWebContents(inspected_web_page_id);
++      context_->tab_manager().GetWebContents(inspected_tab_id);
 +  if (!inspected_contents) {
 +    LOG(INFO) << "[CBF][DevTools] InspectElement ignored: inspected page not found id="
-+              << inspected_web_page_id;
++              << inspected_tab_id;
 +    return;
 +  }
 +
 +  LOG(INFO) << "[CBF][DevTools] InspectElement requested inspected_id="
-+            << inspected_web_page_id << " x=" << x << " y=" << y;
-+  OpenDevTools(inspected_web_page_id);
++            << inspected_tab_id << " x=" << x << " y=" << y;
++  OpenDevTools(inspected_tab_id);
 +
 +  scoped_refptr<content::DevToolsAgentHost> agent_host =
 +      content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
@@ -2844,44 +2844,44 @@ index 0000000000000..10af4e385ddaa
 +  agent_host->InspectElement(frame, x, y);
 +}
 +
-+void CbfProfileDevToolsController::OnWebPageClosed(WebPageId web_page_id) {
-+  auto inspected_it = inspected_to_devtools_.find(web_page_id);
++void CbfProfileDevToolsController::OnWebPageClosed(TabId tab_id) {
++  auto inspected_it = inspected_to_devtools_.find(tab_id);
 +  if (inspected_it != inspected_to_devtools_.end()) {
-+    const WebPageId devtools_web_page_id = inspected_it->second;
++    const TabId devtools_tab_id = inspected_it->second;
 +    inspected_to_devtools_.erase(inspected_it);
-+    devtools_to_inspected_.erase(devtools_web_page_id);
-+    devtools_sessions_.erase(devtools_web_page_id);
++    devtools_to_inspected_.erase(devtools_tab_id);
++    devtools_sessions_.erase(devtools_tab_id);
 +  }
 +
-+  auto devtools_it = devtools_to_inspected_.find(web_page_id);
++  auto devtools_it = devtools_to_inspected_.find(tab_id);
 +  if (devtools_it != devtools_to_inspected_.end()) {
-+    const WebPageId inspected_web_page_id = devtools_it->second;
++    const TabId inspected_tab_id = devtools_it->second;
 +    devtools_to_inspected_.erase(devtools_it);
-+    inspected_to_devtools_.erase(inspected_web_page_id);
-+    devtools_sessions_.erase(web_page_id);
++    inspected_to_devtools_.erase(inspected_tab_id);
++    devtools_sessions_.erase(tab_id);
 +  }
 +}
 +
 +void CbfProfileDevToolsController::TryAttachSession(
-+    WebPageId inspected_web_page_id,
-+    WebPageId devtools_web_page_id,
++    TabId inspected_tab_id,
++    TabId devtools_tab_id,
 +    int attempt) {
 +  constexpr int kMaxAttempts = 50;
 +  constexpr base::TimeDelta kRetryDelay = base::Milliseconds(20);
 +
-+  auto session_it = devtools_sessions_.find(devtools_web_page_id);
++  auto session_it = devtools_sessions_.find(devtools_tab_id);
 +  if (session_it == devtools_sessions_.end()) {
 +    return;
 +  }
 +
 +  content::WebContents* inspected_contents =
-+      context_->tab_manager().GetWebContents(inspected_web_page_id);
++      context_->tab_manager().GetWebContents(inspected_tab_id);
 +  content::WebContents* devtools_contents =
-+      context_->tab_manager().GetWebContents(devtools_web_page_id);
++      context_->tab_manager().GetWebContents(devtools_tab_id);
 +  if (!inspected_contents || !devtools_contents) {
 +    LOG(INFO) << "[CBF][DevTools] Attach skipped: missing contents inspected_id="
-+              << inspected_web_page_id
-+              << " devtools_id=" << devtools_web_page_id;
++              << inspected_tab_id
++              << " devtools_id=" << devtools_tab_id;
 +    return;
 +  }
 +
@@ -2890,16 +2890,16 @@ index 0000000000000..10af4e385ddaa
 +  if (!bindings) {
 +    if (attempt >= kMaxAttempts) {
 +      LOG(INFO) << "[CBF][DevTools] Attach failed: bindings not found"
-+                << " inspected_id=" << inspected_web_page_id
-+                << " devtools_id=" << devtools_web_page_id;
++                << " inspected_id=" << inspected_tab_id
++                << " devtools_id=" << devtools_tab_id;
 +      return;
 +    }
 +
 +    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
 +        FROM_HERE,
 +        base::BindOnce(&CbfProfileDevToolsController::TryAttachSession,
-+                       weak_factory_.GetWeakPtr(), inspected_web_page_id,
-+                       devtools_web_page_id, attempt + 1),
++                       weak_factory_.GetWeakPtr(), inspected_tab_id,
++                       devtools_tab_id, attempt + 1),
 +        kRetryDelay);
 +    return;
 +  }
@@ -2915,13 +2915,13 @@ index 0000000000000..10af4e385ddaa
 +      content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
 +  if (!agent_host) {
 +    LOG(INFO) << "[CBF][DevTools] Attach failed: agent_host unavailable"
-+              << " inspected_id=" << inspected_web_page_id;
++              << " inspected_id=" << inspected_tab_id;
 +    return;
 +  }
 +
 +  bindings->AttachTo(agent_host);
 +  LOG(INFO) << "[CBF][DevTools] Attached session inspected_id="
-+            << inspected_web_page_id << " devtools_id=" << devtools_web_page_id
++            << inspected_tab_id << " devtools_id=" << devtools_tab_id
 +            << " agent_host_id="
 +            << (agent_host ? agent_host->GetId() : std::string("<null>"));
 +}
@@ -2929,7 +2929,7 @@ index 0000000000000..10af4e385ddaa
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
 new file mode 100644
-index 0000000000000..c54ffb7c47357
+index 0000000000000..4f4fef1a38586
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
 @@ -0,0 +1,54 @@
@@ -2962,23 +2962,23 @@ index 0000000000000..c54ffb7c47357
 +  ~CbfProfileDevToolsController();
 +
 +  void SetRegisterImeHandler(
-+      base::RepeatingCallback<void(WebPageId, content::WebContents*)>
++      base::RepeatingCallback<void(TabId, content::WebContents*)>
 +          register_ime_handler);
-+  void OpenDevTools(WebPageId inspected_web_page_id);
-+  void InspectElement(WebPageId inspected_web_page_id, int32_t x, int32_t y);
-+  void OnWebPageClosed(WebPageId web_page_id);
++  void OpenDevTools(TabId inspected_tab_id);
++  void InspectElement(TabId inspected_tab_id, int32_t x, int32_t y);
++  void OnWebPageClosed(TabId tab_id);
 +
 + private:
 +  struct DevToolsSession;
 +
-+  void TryAttachSession(WebPageId inspected_web_page_id,
-+                        WebPageId devtools_web_page_id,
++  void TryAttachSession(TabId inspected_tab_id,
++                        TabId devtools_tab_id,
 +                        int attempt);
 +
-+  base::flat_map<WebPageId, std::unique_ptr<DevToolsSession>> devtools_sessions_;
-+  base::flat_map<WebPageId, WebPageId> inspected_to_devtools_;
-+  base::flat_map<WebPageId, WebPageId> devtools_to_inspected_;
-+  base::RepeatingCallback<void(WebPageId, content::WebContents*)>
++  base::flat_map<TabId, std::unique_ptr<DevToolsSession>> devtools_sessions_;
++  base::flat_map<TabId, TabId> inspected_to_devtools_;
++  base::flat_map<TabId, TabId> devtools_to_inspected_;
++  base::RepeatingCallback<void(TabId, content::WebContents*)>
 +      register_ime_handler_;
 +  raw_ptr<CbfProfileServiceContext> context_;
 +  base::WeakPtrFactory<CbfProfileDevToolsController> weak_factory_{this};
@@ -2989,7 +2989,7 @@ index 0000000000000..c54ffb7c47357
 +#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_DEVTOOLS_CONTROLLER_H_
 diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc b/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
 new file mode 100644
-index 0000000000000..d2dce69c325a8
+index 0000000000000..3ab196c947252
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
 @@ -0,0 +1,248 @@
@@ -3047,15 +3047,15 @@ index 0000000000000..d2dce69c325a8
 +    return;
 +  }
 +
-+  const WebPageId web_page_id =
-+      context_->tab_manager().GetWebPageIdForWebContents(web_contents);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      context_->tab_manager().GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
 +
 +  const uint64_t session_id = next_drag_session_id_++;
 +  DragSessionState session;
-+  session.web_page_id = web_page_id;
++  session.tab_id = tab_id;
 +  session.source_rwh = source_rwh_impl->GetWeakPtr();
 +  session.drop_data = drop_data;
 +  source_rwh_impl->FilterDropData(&session.drop_data);
@@ -3063,7 +3063,7 @@ index 0000000000000..d2dce69c325a8
 +
 +  auto request = mojom::CbfDragStartRequest::New();
 +  request->session_id = session_id;
-+  request->web_page_id = web_page_id;
++  request->tab_id = tab_id;
 +  request->allowed_operations = static_cast<uint32_t>(allowed_ops);
 +  request->source_origin = source_origin.Serialize();
 +
@@ -3126,7 +3126,7 @@ index 0000000000000..d2dce69c325a8
 +  }
 +
 +  DragSessionState& session = it->second;
-+  if (session.web_page_id != update->web_page_id || !session.source_rwh) {
++  if (session.tab_id != update->tab_id || !session.source_rwh) {
 +    return;
 +  }
 +
@@ -3190,7 +3190,7 @@ index 0000000000000..d2dce69c325a8
 +  DragSessionState session = std::move(it->second);
 +  drag_sessions_.erase(it);
 +
-+  if (session.web_page_id != drop->web_page_id || !session.source_rwh) {
++  if (session.tab_id != drop->tab_id || !session.source_rwh) {
 +    return;
 +  }
 +
@@ -3207,7 +3207,7 @@ index 0000000000000..d2dce69c325a8
 +}
 +
 +void CbfProfileDragController::SendDragCancel(uint64_t session_id,
-+                                              uint64_t web_page_id) {
++                                              uint64_t tab_id) {
 +  const auto it = drag_sessions_.find(session_id);
 +  if (it == drag_sessions_.end()) {
 +    return;
@@ -3216,7 +3216,7 @@ index 0000000000000..d2dce69c325a8
 +  DragSessionState session = std::move(it->second);
 +  drag_sessions_.erase(it);
 +
-+  if (session.web_page_id != web_page_id || !session.source_rwh) {
++  if (session.tab_id != tab_id || !session.source_rwh) {
 +    return;
 +  }
 +
@@ -3230,9 +3230,9 @@ index 0000000000000..d2dce69c325a8
 +  session.source_rwh->DragSourceSystemDragEnded();
 +}
 +
-+void CbfProfileDragController::OnWebPageClosed(WebPageId web_page_id) {
++void CbfProfileDragController::OnWebPageClosed(TabId tab_id) {
 +  for (auto it = drag_sessions_.begin(); it != drag_sessions_.end();) {
-+    if (it->second.web_page_id == web_page_id) {
++    if (it->second.tab_id == tab_id) {
 +      it = drag_sessions_.erase(it);
 +    } else {
 +      ++it;
@@ -3243,7 +3243,7 @@ index 0000000000000..d2dce69c325a8
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller.h b/chrome/browser/cbf/profile/cbf_profile_drag_controller.h
 new file mode 100644
-index 0000000000000..a081a46a32902
+index 0000000000000..69c90c10e0e2a
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller.h
 @@ -0,0 +1,78 @@
@@ -3296,8 +3296,8 @@ index 0000000000000..a081a46a32902
 +                                content::RenderWidgetHost* source_rwh);
 +  void SendDragUpdate(mojom::CbfDragUpdatePtr update);
 +  void SendDragDrop(mojom::CbfDragDropPtr drop);
-+  void SendDragCancel(uint64_t session_id, uint64_t web_page_id);
-+  void OnWebPageClosed(WebPageId web_page_id);
++  void SendDragCancel(uint64_t session_id, uint64_t tab_id);
++  void OnWebPageClosed(TabId tab_id);
 +
 + private:
 +  struct DragSessionState {
@@ -3308,7 +3308,7 @@ index 0000000000000..a081a46a32902
 +    DragSessionState& operator=(DragSessionState&&);
 +    ~DragSessionState();
 +
-+    WebPageId web_page_id = kInvalidWebPageId;
++    TabId tab_id = kInvalidTabId;
 +    base::WeakPtr<content::RenderWidgetHostImpl> source_rwh;
 +    content::DropData drop_data;
 +    bool entered = false;
@@ -3327,7 +3327,7 @@ index 0000000000000..a081a46a32902
 +#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_DRAG_CONTROLLER_H_
 diff --git a/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc b/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc
 new file mode 100644
-index 0000000000000..4945b104132e9
+index 0000000000000..21455e89d8fc2
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc
 @@ -0,0 +1,231 @@
@@ -3386,9 +3386,9 @@ index 0000000000000..4945b104132e9
 +}
 +
 +void CbfProfileImeController::RegisterWebContents(
-+    WebPageId web_page_id,
++    TabId tab_id,
 +    content::WebContents* web_contents) {
-+  if (!web_contents || web_page_id == kInvalidWebPageId) {
++  if (!web_contents || tab_id == kInvalidTabId) {
 +    return;
 +  }
 +  auto* web_contents_impl = static_cast<content::WebContentsImpl*>(web_contents);
@@ -3400,12 +3400,12 @@ index 0000000000000..4945b104132e9
 +  if (text_input_map_.find(text_input_manager) == text_input_map_.end()) {
 +    text_input_observations_.AddObservation(text_input_manager);
 +  }
-+  text_input_map_[text_input_manager] = web_page_id;
++  text_input_map_[text_input_manager] = tab_id;
 +}
 +
-+void CbfProfileImeController::OnWebPageClosed(WebPageId web_page_id) {
++void CbfProfileImeController::OnWebPageClosed(TabId tab_id) {
 +  for (auto it = text_input_map_.begin(); it != text_input_map_.end();) {
-+    if (it->second != web_page_id) {
++    if (it->second != tab_id) {
 +      ++it;
 +      continue;
 +    }
@@ -3417,15 +3417,15 @@ index 0000000000000..4945b104132e9
 +void CbfProfileImeController::SetComposition(
 +    mojom::CbfImeCompositionPtr composition) {
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(composition->web_page_id);
++      context_->tab_manager().GetWebContents(composition->tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
 +  content::RenderWidgetHost* widget_host =
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
-+    DVLOG(1) << "SetComposition dropped: no input widget host for web_page_id="
-+             << composition->web_page_id;
++    DVLOG(1) << "SetComposition dropped: no input widget host for tab_id="
++             << composition->tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -3443,15 +3443,15 @@ index 0000000000000..4945b104132e9
 +
 +void CbfProfileImeController::CommitText(mojom::CbfImeCommitTextPtr commit) {
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(commit->web_page_id);
++      context_->tab_manager().GetWebContents(commit->tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
 +  content::RenderWidgetHost* widget_host =
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
-+    DVLOG(1) << "CommitText dropped: no input widget host for web_page_id="
-+             << commit->web_page_id;
++    DVLOG(1) << "CommitText dropped: no input widget host for tab_id="
++             << commit->tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -3467,9 +3467,9 @@ index 0000000000000..4945b104132e9
 +}
 +
 +void CbfProfileImeController::FinishComposingText(
-+    uint64_t web_page_id,
++    uint64_t tab_id,
 +    mojom::CbfConfirmCompositionBehavior behavior) {
-+  content::WebContents* web_contents = context_->tab_manager().GetWebContents(web_page_id);
++  content::WebContents* web_contents = context_->tab_manager().GetWebContents(tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -3477,8 +3477,8 @@ index 0000000000000..4945b104132e9
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
 +    DVLOG(1)
-+        << "FinishComposingText dropped: no input widget host for web_page_id="
-+        << web_page_id;
++        << "FinishComposingText dropped: no input widget host for tab_id="
++        << tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -3504,7 +3504,7 @@ index 0000000000000..4945b104132e9
 +  }
 +
 +  auto update = cbf::mojom::CbfImeBoundsUpdate::New();
-+  update->web_page_id = it->second;
++  update->tab_id = it->second;
 +
 +  if (include_composition) {
 +    const auto* composition_info = text_input_manager->GetCompositionRangeInfo();
@@ -3564,7 +3564,7 @@ index 0000000000000..4945b104132e9
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_ime_controller.h b/chrome/browser/cbf/profile/cbf_profile_ime_controller.h
 new file mode 100644
-index 0000000000000..f0e0dea0da3c3
+index 0000000000000..45c7e7096a83e
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_ime_controller.h
 @@ -0,0 +1,57 @@
@@ -3597,12 +3597,12 @@ index 0000000000000..f0e0dea0da3c3
 +  CbfProfileImeController& operator=(const CbfProfileImeController&) = delete;
 +  ~CbfProfileImeController();
 +
-+  void RegisterWebContents(WebPageId web_page_id, content::WebContents* web_contents);
-+  void OnWebPageClosed(WebPageId web_page_id);
++  void RegisterWebContents(TabId tab_id, content::WebContents* web_contents);
++  void OnWebPageClosed(TabId tab_id);
 +
 +  void SetComposition(mojom::CbfImeCompositionPtr composition);
 +  void CommitText(mojom::CbfImeCommitTextPtr commit);
-+  void FinishComposingText(uint64_t web_page_id,
++  void FinishComposingText(uint64_t tab_id,
 +                           mojom::CbfConfirmCompositionBehavior behavior);
 +
 + private:
@@ -3619,7 +3619,7 @@ index 0000000000000..f0e0dea0da3c3
 +  base::ScopedMultiSourceObservation<content::TextInputManager,
 +                                     content::TextInputManager::Observer>
 +      text_input_observations_{this};
-+  base::flat_map<raw_ptr<content::TextInputManager>, WebPageId> text_input_map_;
++  base::flat_map<raw_ptr<content::TextInputManager>, TabId> text_input_map_;
 +};
 +
 +}  // namespace cbf
@@ -3627,7 +3627,7 @@ index 0000000000000..f0e0dea0da3c3
 +#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_IME_CONTROLLER_H_
 diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
 new file mode 100644
-index 0000000000000..967d9c0a7fc2b
+index 0000000000000..27dade06ebdad
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
 @@ -0,0 +1,344 @@
@@ -3762,15 +3762,15 @@ index 0000000000000..967d9c0a7fc2b
 +    mojom::CbfKeyEventPtr event,
 +    const std::optional<std::vector<std::string>>& commands) {
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(event->web_page_id);
++      context_->tab_manager().GetWebContents(event->tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
 +  content::RenderWidgetHost* widget_host =
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
-+    DVLOG(1) << "SendKeyEvent dropped: no input widget host for web_page_id="
-+             << event->web_page_id;
++    DVLOG(1) << "SendKeyEvent dropped: no input widget host for tab_id="
++             << event->tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -3814,7 +3814,7 @@ index 0000000000000..967d9c0a7fc2b
 +
 +void CbfProfileInputController::SendMouseEvent(mojom::CbfMouseEventPtr event) {
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(event->web_page_id);
++      context_->tab_manager().GetWebContents(event->tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -3840,8 +3840,8 @@ index 0000000000000..967d9c0a7fc2b
 +  content::RenderWidgetHost* widget_host =
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
-+    DVLOG(1) << "SendMouseEvent dropped: no input widget host for web_page_id="
-+             << event->web_page_id;
++    DVLOG(1) << "SendMouseEvent dropped: no input widget host for tab_id="
++             << event->tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -3854,7 +3854,7 @@ index 0000000000000..967d9c0a7fc2b
 +void CbfProfileInputController::SendMouseWheelEvent(
 +    mojom::CbfMouseWheelEventPtr event) {
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(event->web_page_id);
++      context_->tab_manager().GetWebContents(event->tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -3879,7 +3879,7 @@ index 0000000000000..967d9c0a7fc2b
 +      static_cast<blink::WebMouseWheelEvent::Phase>(event->momentum_phase);
 +  wheel_event.delta_units = mojo_converters::ToScrollGranularity(event->delta_units);
 +  if (!HasWheelPhase(wheel_event)) {
-+    auto& phase_state_ptr = wheel_phase_states_[event->web_page_id];
++    auto& phase_state_ptr = wheel_phase_states_[event->tab_id];
 +    if (!phase_state_ptr) {
 +      phase_state_ptr = std::make_unique<WheelPhaseState>();
 +    }
@@ -3896,9 +3896,9 @@ index 0000000000000..967d9c0a7fc2b
 +    phase_state.end_timer.Start(
 +        FROM_HERE, kSyntheticWheelPhaseGap,
 +        base::BindOnce(&CbfProfileInputController::SendSyntheticWheelEndedEvent,
-+                       weak_factory_.GetWeakPtr(), event->web_page_id));
++                       weak_factory_.GetWeakPtr(), event->tab_id));
 +  } else {
-+    wheel_phase_states_.erase(event->web_page_id);
++    wheel_phase_states_.erase(event->tab_id);
 +  }
 +
 +  ui::LatencyInfo latency_info;
@@ -3911,8 +3911,8 @@ index 0000000000000..967d9c0a7fc2b
 +      ResolveInputRenderWidgetHost(web_contents);
 +  if (!widget_host) {
 +    DVLOG(1)
-+        << "SendMouseWheelEvent dropped: no input widget host for web_page_id="
-+        << event->web_page_id;
++        << "SendMouseWheelEvent dropped: no input widget host for tab_id="
++        << event->tab_id;
 +    return;
 +  }
 +  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
@@ -3922,13 +3922,13 @@ index 0000000000000..967d9c0a7fc2b
 +  widget_impl->ForwardWheelEventWithLatencyInfo(wheel_event, latency_info);
 +}
 +
-+void CbfProfileInputController::OnWebPageClosed(WebPageId web_page_id) {
-+  wheel_phase_states_.erase(web_page_id);
++void CbfProfileInputController::OnWebPageClosed(TabId tab_id) {
++  wheel_phase_states_.erase(tab_id);
 +}
 +
 +void CbfProfileInputController::SendSyntheticWheelEndedEvent(
-+    WebPageId web_page_id) {
-+  const auto state_it = wheel_phase_states_.find(web_page_id);
++    TabId tab_id) {
++  const auto state_it = wheel_phase_states_.find(tab_id);
 +  if (state_it == wheel_phase_states_.end()) {
 +    return;
 +  }
@@ -3940,7 +3940,7 @@ index 0000000000000..967d9c0a7fc2b
 +  }
 +
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(web_page_id);
++      context_->tab_manager().GetWebContents(tab_id);
 +  if (!web_contents) {
 +    wheel_phase_states_.erase(state_it);
 +    return;
@@ -3977,7 +3977,7 @@ index 0000000000000..967d9c0a7fc2b
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.h b/chrome/browser/cbf/profile/cbf_profile_input_controller.h
 new file mode 100644
-index 0000000000000..895c7609c175b
+index 0000000000000..f036c1d824513
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.h
 @@ -0,0 +1,54 @@
@@ -4013,7 +4013,7 @@ index 0000000000000..895c7609c175b
 +      const std::optional<std::vector<std::string>>& commands);
 +  void SendMouseEvent(mojom::CbfMouseEventPtr event);
 +  void SendMouseWheelEvent(mojom::CbfMouseWheelEventPtr event);
-+  void OnWebPageClosed(WebPageId web_page_id);
++  void OnWebPageClosed(TabId tab_id);
 +
 + private:
 +  struct WheelPhaseState {
@@ -4025,10 +4025,10 @@ index 0000000000000..895c7609c175b
 +    bool in_progress = false;
 +  };
 +
-+  void SendSyntheticWheelEndedEvent(WebPageId web_page_id);
++  void SendSyntheticWheelEndedEvent(TabId tab_id);
 +
 +  raw_ptr<CbfProfileServiceContext> context_;
-+  base::flat_map<WebPageId, std::unique_ptr<WheelPhaseState>> wheel_phase_states_;
++  base::flat_map<TabId, std::unique_ptr<WheelPhaseState>> wheel_phase_states_;
 +  base::WeakPtrFactory<CbfProfileInputController> weak_factory_{this};
 +};
 +
@@ -4037,7 +4037,7 @@ index 0000000000000..895c7609c175b
 +#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_INPUT_CONTROLLER_H_
 diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
 new file mode 100644
-index 0000000000000..0d7b89edf1347
+index 0000000000000..7d0d4de40412c
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
 @@ -0,0 +1,125 @@
@@ -4092,10 +4092,10 @@ index 0000000000000..0d7b89edf1347
 +
 +CbfProfileNavigationController::~CbfProfileNavigationController() = default;
 +
-+void CbfProfileNavigationController::Navigate(WebPageId web_page_id,
++void CbfProfileNavigationController::Navigate(TabId tab_id,
 +                                              const std::string& url) {
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(web_page_id);
++      context_->tab_manager().GetWebContents(tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -4109,26 +4109,26 @@ index 0000000000000..0d7b89edf1347
 +      gurl, content::Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
 +}
 +
-+void CbfProfileNavigationController::GoBack(WebPageId web_page_id) {
++void CbfProfileNavigationController::GoBack(TabId tab_id) {
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(web_page_id);
++      context_->tab_manager().GetWebContents(tab_id);
 +  if (web_contents && web_contents->GetController().CanGoBack()) {
 +    web_contents->GetController().GoBack();
 +  }
 +}
 +
-+void CbfProfileNavigationController::GoForward(WebPageId web_page_id) {
++void CbfProfileNavigationController::GoForward(TabId tab_id) {
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(web_page_id);
++      context_->tab_manager().GetWebContents(tab_id);
 +  if (web_contents && web_contents->GetController().CanGoForward()) {
 +    web_contents->GetController().GoForward();
 +  }
 +}
 +
-+void CbfProfileNavigationController::Reload(WebPageId web_page_id,
++void CbfProfileNavigationController::Reload(TabId tab_id,
 +                                            bool ignore_cache) {
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(web_page_id);
++      context_->tab_manager().GetWebContents(tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -4139,10 +4139,10 @@ index 0000000000000..0d7b89edf1347
 +  web_contents->GetController().Reload(type, true);
 +}
 +
-+void CbfProfileNavigationController::SetWebPageFocus(WebPageId web_page_id,
++void CbfProfileNavigationController::SetWebPageFocus(TabId tab_id,
 +                                                     bool focused) {
 +  content::WebContents* web_contents =
-+      context_->tab_manager().GetWebContents(web_page_id);
++      context_->tab_manager().GetWebContents(tab_id);
 +  if (!web_contents) {
 +    return;
 +  }
@@ -4168,7 +4168,7 @@ index 0000000000000..0d7b89edf1347
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
 new file mode 100644
-index 0000000000000..8272adaea1052
+index 0000000000000..e5814f08b18c0
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
 @@ -0,0 +1,33 @@
@@ -4192,11 +4192,11 @@ index 0000000000000..8272adaea1052
 +  CbfProfileNavigationController& operator=(const CbfProfileNavigationController&) = delete;
 +  ~CbfProfileNavigationController();
 +
-+  void Navigate(WebPageId web_page_id, const std::string& url);
-+  void GoBack(WebPageId web_page_id);
-+  void GoForward(WebPageId web_page_id);
-+  void Reload(WebPageId web_page_id, bool ignore_cache);
-+  void SetWebPageFocus(WebPageId web_page_id, bool focused);
++  void Navigate(TabId tab_id, const std::string& url);
++  void GoBack(TabId tab_id);
++  void GoForward(TabId tab_id);
++  void Reload(TabId tab_id, bool ignore_cache);
++  void SetWebPageFocus(TabId tab_id, bool focused);
 +
 + private:
 +  raw_ptr<CbfProfileServiceContext> context_;
@@ -4207,7 +4207,7 @@ index 0000000000000..8272adaea1052
 +#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_NAVIGATION_CONTROLLER_H_
 diff --git a/chrome/browser/cbf/profile/cbf_profile_page_controller.cc b/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
 new file mode 100644
-index 0000000000000..53af147ce3590
+index 0000000000000..9d7f89e5e09dc
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
 @@ -0,0 +1,52 @@
@@ -4225,24 +4225,24 @@ index 0000000000000..53af147ce3590
 +
 +CbfProfilePageController::~CbfProfilePageController() = default;
 +
-+WebPageId CbfProfilePageController::CreateWebPage(const std::string& initial_url) {
++TabId CbfProfilePageController::CreateWebPage(const std::string& initial_url) {
 +  return context_->tab_manager().CreateWebPage(GURL(initial_url));
 +}
 +
-+void CbfProfilePageController::RequestCloseWebPage(WebPageId web_page_id) {
-+  context_->tab_manager().RequestCloseWebPage(web_page_id);
++void CbfProfilePageController::RequestCloseWebPage(TabId tab_id) {
++  context_->tab_manager().RequestCloseWebPage(tab_id);
 +}
 +
 +void CbfProfilePageController::DispatchBeforeUnloadForShutdown() {
 +  context_->tab_manager().DispatchBeforeUnloadForAll();
 +}
 +
-+std::vector<WebPageId> CbfProfilePageController::GetDirtyWebPageIds() const {
-+  return context_->tab_manager().GetDirtyWebPageIds();
++std::vector<TabId> CbfProfilePageController::GetDirtyTabIds() const {
++  return context_->tab_manager().GetDirtyTabIds();
 +}
 +
-+std::vector<WebPageId> CbfProfilePageController::GetAllWebPageIds() const {
-+  return context_->tab_manager().GetAllWebPageIds();
++std::vector<TabId> CbfProfilePageController::GetAllTabIds() const {
++  return context_->tab_manager().GetAllTabIds();
 +}
 +
 +size_t CbfProfilePageController::GetWebPageCount() const {
@@ -4253,19 +4253,19 @@ index 0000000000000..53af147ce3590
 +  context_->tab_manager().CloseAllWebPages();
 +}
 +
-+WebPageId CbfProfilePageController::GetWebPageIdForWebContents(
++TabId CbfProfilePageController::GetTabIdForWebContents(
 +    content::WebContents* web_contents) const {
-+  return context_->tab_manager().GetWebPageIdForWebContents(web_contents);
++  return context_->tab_manager().GetTabIdForWebContents(web_contents);
 +}
 +
-+void CbfProfilePageController::CloseWebPage(WebPageId web_page_id) {
-+  context_->tab_manager().CloseWebPage(web_page_id);
++void CbfProfilePageController::CloseWebPage(TabId tab_id) {
++  context_->tab_manager().CloseWebPage(tab_id);
 +}
 +
 +}  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_page_controller.h b/chrome/browser/cbf/profile/cbf_profile_page_controller.h
 new file mode 100644
-index 0000000000000..601a1865b5624
+index 0000000000000..1798af2ba4287
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_page_controller.h
 @@ -0,0 +1,44 @@
@@ -4296,15 +4296,15 @@ index 0000000000000..601a1865b5624
 +  CbfProfilePageController& operator=(const CbfProfilePageController&) = delete;
 +  ~CbfProfilePageController();
 +
-+  WebPageId CreateWebPage(const std::string& initial_url);
-+  void RequestCloseWebPage(WebPageId web_page_id);
++  TabId CreateWebPage(const std::string& initial_url);
++  void RequestCloseWebPage(TabId tab_id);
 +  void DispatchBeforeUnloadForShutdown();
-+  std::vector<WebPageId> GetDirtyWebPageIds() const;
-+  std::vector<WebPageId> GetAllWebPageIds() const;
++  std::vector<TabId> GetDirtyTabIds() const;
++  std::vector<TabId> GetAllTabIds() const;
 +  size_t GetWebPageCount() const;
 +  void CloseAllWebPages();
-+  WebPageId GetWebPageIdForWebContents(content::WebContents* web_contents) const;
-+  void CloseWebPage(WebPageId web_page_id);
++  TabId GetTabIdForWebContents(content::WebContents* web_contents) const;
++  void CloseWebPage(TabId tab_id);
 +
 + private:
 +  raw_ptr<CbfProfileServiceContext> context_;
@@ -4315,7 +4315,7 @@ index 0000000000000..601a1865b5624
 +#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_PAGE_CONTROLLER_H_
 diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
 new file mode 100644
-index 0000000000000..5c28f592421d8
+index 0000000000000..142fbd9eac0a6
 --- /dev/null
 +++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
 @@ -0,0 +1,83 @@
@@ -4343,14 +4343,14 @@ index 0000000000000..5c28f592421d8
 +    return;
 +  }
 +
-+  const WebPageId web_page_id =
-+      context_->tab_manager().GetWebPageIdForWebContents(source);
-+  if (web_page_id == kInvalidWebPageId) {
++  const TabId tab_id =
++      context_->tab_manager().GetTabIdForWebContents(source);
++  if (tab_id == kInvalidTabId) {
 +    return;
 +  }
 +
 +  const bool is_popup = disposition == WindowOpenDisposition::NEW_POPUP;
-+  observer->OnNewWebPageRequested(web_page_id, target_url.spec(), is_popup);
++  observer->OnNewWebPageRequested(tab_id, target_url.spec(), is_popup);
 +}
 +
 +void CbfProfilePopupController::MarkCloseWebPageBeforeUnloadReason(
