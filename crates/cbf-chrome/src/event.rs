@@ -74,7 +74,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             request_id,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::Created {
                 request_id: *request_id,
             }),
@@ -86,7 +86,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             update,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::ImeBoundsUpdated {
                 update: update.clone(),
             }),
@@ -97,7 +97,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             menu,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::ContextMenuRequested { menu: menu.clone() }),
         }),
         IpcEvent::BrowsingContextOpenRequested {
@@ -115,7 +115,8 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                         request_id: *request_id,
                         reason: WindowOpenReason::Navigation,
                         opener_window_id: None,
-                        opener_browsing_context_id: *source_browsing_context_id,
+                        opener_browsing_context_id: source_browsing_context_id
+                            .map(|id| id.to_browsing_context_id()),
                         target_url: Some(target_url.clone()),
                         requested_kind: if matches!(open_hint, BrowsingContextOpenHint::Popup) {
                             WindowKind::Popup
@@ -129,7 +130,8 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             _ => Some(BrowserEvent::BrowsingContextOpenRequested {
                 profile_id: profile_id.clone(),
                 request_id: *request_id,
-                source_browsing_context_id: *source_browsing_context_id,
+                source_browsing_context_id: source_browsing_context_id
+                    .map(|id| id.to_browsing_context_id()),
                 target_url: target_url.clone(),
                 open_hint: *open_hint,
                 user_gesture: *user_gesture,
@@ -168,7 +170,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             is_loading,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::NavigationStateChanged {
                 url: url.clone(),
                 can_go_back: *can_go_back,
@@ -182,7 +184,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             cursor_type,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::CursorChanged {
                 cursor_type: *cursor_type,
             }),
@@ -193,7 +195,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             title,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::TitleUpdated {
                 title: title.clone(),
             }),
@@ -204,7 +206,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             url,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::FaviconUrlUpdated { url: url.clone() }),
         }),
         IpcEvent::BeforeUnloadDialogRequested {
@@ -214,7 +216,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             reason,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::JavaScriptDialogRequested {
                 request_id: *request_id,
                 message: String::new(),
@@ -236,7 +238,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             browsing_context_id,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::Closed),
         }),
         IpcEvent::WebContentsResizeAcknowledged { .. } => None,
@@ -247,7 +249,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             html,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::DomHtmlRead {
                 request_id: *request_id,
                 html: html.clone(),
@@ -259,7 +261,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             request,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::DragStartRequested {
                 request: request.clone(),
             }),
@@ -269,7 +271,11 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             dirty_browsing_context_ids,
         } => Some(BrowserEvent::ShutdownBlocked {
             request_id: *request_id,
-            dirty_browsing_context_ids: dirty_browsing_context_ids.clone(),
+            dirty_browsing_context_ids: dirty_browsing_context_ids
+                .iter()
+                .copied()
+                .map(|id| id.to_browsing_context_id())
+                .collect(),
         }),
         IpcEvent::ShutdownProceeding { request_id } => Some(BrowserEvent::ShutdownProceeding {
             request_id: *request_id,
@@ -291,7 +297,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             kind,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::AuxiliaryWindowOpenRequested {
                 request_id: *request_id,
                 kind: kind.clone(),
@@ -304,7 +310,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             resolution,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::AuxiliaryWindowResolved {
                 request_id: *request_id,
                 resolution: resolution.clone(),
@@ -316,7 +322,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             detail,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::ExtensionRuntimeWarning {
                 detail: detail.clone(),
             }),
@@ -330,7 +336,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             modal,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::AuxiliaryWindowOpened {
                 window_id: *window_id,
                 kind: kind.clone(),
@@ -346,7 +352,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             reason,
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
-            browsing_context_id: *browsing_context_id,
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::AuxiliaryWindowClosed {
                 window_id: *window_id,
                 kind: kind.clone(),
@@ -374,5 +380,54 @@ fn synthetic_window_descriptor(
             width: 1280,
             height: 720,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cbf::{
+        data::ids::BrowsingContextId,
+        event::{BrowserEvent, BrowsingContextEvent},
+    };
+
+    use super::map_ipc_event_to_generic;
+    use crate::{data::ids::TabId, ffi::IpcEvent};
+
+    #[test]
+    fn web_contents_created_maps_tab_id_into_browsing_context_id() {
+        let event = IpcEvent::WebContentsCreated {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(7),
+            request_id: 1,
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::BrowsingContext {
+                browsing_context_id,
+                event,
+                ..
+            } if browsing_context_id == BrowsingContextId::new(7)
+                && matches!(*event, BrowsingContextEvent::Created { request_id: 1 })
+        ));
+    }
+
+    #[test]
+    fn shutdown_blocked_maps_dirty_tab_ids_into_browsing_context_ids() {
+        let event = IpcEvent::ShutdownBlocked {
+            request_id: 9,
+            dirty_browsing_context_ids: vec![TabId::new(2), TabId::new(3)],
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::ShutdownBlocked {
+                request_id: 9,
+                dirty_browsing_context_ids
+            } if dirty_browsing_context_ids
+                == vec![BrowsingContextId::new(2), BrowsingContextId::new(3)]
+        ));
     }
 }

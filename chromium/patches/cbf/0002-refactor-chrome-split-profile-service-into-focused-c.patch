@@ -1,7 +1,7 @@
 From f27de2e6fa8a5bb52fe68382642c958c5a3c87e3 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 21 Feb 2026 17:31:42 +0900
-Subject: [PATCH 2/9] refactor(chrome): split profile service into focused
+Subject: [PATCH 02/10] refactor(chrome): split profile service into focused
  controllers
 
 ---

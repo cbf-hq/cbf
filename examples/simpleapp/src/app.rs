@@ -4,8 +4,8 @@ use std::{
 };
 
 use cbf::{
-    browser::RawOpaqueEventExt,
-    browser::{BrowserHandle, EventStream},
+    browser::{BrowserHandle, EventStream, RawOpaqueEventExt},
+    data::ids::BrowsingContextId,
     event::BrowserEvent,
     middleware::{
         MiddlewareBuilder, error_guard::ErrorGuardLayer, lifecycle::LifecycleLayer,
@@ -39,12 +39,12 @@ use cbf::data::ids::WindowId as HostWindowId;
 pub(crate) enum UserEvent {
     Browser(BrowserEvent),
     SurfaceHandleUpdated {
-        browsing_context_id: cbf::data::ids::BrowsingContextId,
+        browsing_context_id: BrowsingContextId,
         handle: SurfaceHandle,
     },
     DevToolsOpened {
-        browsing_context_id: cbf::data::ids::BrowsingContextId,
-        inspected_browsing_context_id: cbf::data::ids::BrowsingContextId,
+        browsing_context_id: BrowsingContextId,
+        inspected_browsing_context_id: BrowsingContextId,
     },
 }
 
@@ -69,7 +69,7 @@ pub(crate) fn spawn_browser_event_forwarder(
                         } = *ipc_event
                         && proxy
                             .send_event(UserEvent::SurfaceHandleUpdated {
-                                browsing_context_id,
+                                browsing_context_id: browsing_context_id.into(),
                                 handle,
                             })
                             .is_err()
@@ -84,8 +84,8 @@ pub(crate) fn spawn_browser_event_forwarder(
                         } = *ipc_event
                         && proxy
                             .send_event(UserEvent::DevToolsOpened {
-                                browsing_context_id,
-                                inspected_browsing_context_id,
+                                browsing_context_id: browsing_context_id.into(),
+                                inspected_browsing_context_id: inspected_browsing_context_id.into(),
                             })
                             .is_err()
                     {

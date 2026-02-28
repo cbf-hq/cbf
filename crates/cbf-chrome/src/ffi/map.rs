@@ -34,6 +34,7 @@ use cbf::{
 
 use super::{Error, IpcEvent, utils::c_string_to_string};
 use crate::data::{
+    ids::TabId,
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
     surface::SurfaceHandle,
 };
@@ -45,23 +46,23 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
 
             Ok(IpcEvent::SurfaceHandleUpdated {
                 profile_id: c_string_to_string(event.profile_id),
-                browsing_context_id: BrowsingContextId::new(event.tab_id),
+                browsing_context_id: TabId::new(event.tab_id),
                 handle,
             })
         }
         CBF_EVENT_WEB_PAGE_CREATED => Ok(IpcEvent::WebContentsCreated {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
         }),
         CBF_EVENT_DEVTOOLS_OPENED => Ok(IpcEvent::DevToolsOpened {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
-            inspected_browsing_context_id: BrowsingContextId::new(event.inspected_tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            inspected_browsing_context_id: TabId::new(event.inspected_tab_id),
         }),
         CBF_EVENT_IME_BOUNDS_UPDATED => Ok(IpcEvent::ImeBoundsUpdated {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             update: parse_ime_bounds(event.ime_bounds),
         }),
         CBF_EVENT_SHUTDOWN_BLOCKED => Ok(IpcEvent::ShutdownBlocked {
@@ -76,16 +77,14 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_CONTEXT_MENU_REQUESTED => Ok(IpcEvent::ContextMenuRequested {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             menu: parse_context_menu(event.context_menu),
         }),
         CBF_EVENT_BROWSING_CONTEXT_OPEN_REQUESTED => Ok(IpcEvent::BrowsingContextOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
             request_id: event.request_id,
             source_browsing_context_id: if event.browsing_context_open_has_source {
-                Some(BrowsingContextId::new(
-                    event.browsing_context_open_source_tab_id,
-                ))
+                Some(TabId::new(event.browsing_context_open_source_tab_id))
             } else {
                 None
             },
@@ -104,7 +103,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_NAVIGATION_STATE_CHANGED => Ok(IpcEvent::NavigationStateChanged {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             url: c_string_to_string(event.url),
             can_go_back: event.can_go_back,
             can_go_forward: event.can_go_forward,
@@ -112,22 +111,22 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_CURSOR_CHANGED => Ok(IpcEvent::CursorChanged {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             cursor_type: cursor_icon_from_ffi(event.cursor_type),
         }),
         CBF_EVENT_TITLE_UPDATED => Ok(IpcEvent::TitleUpdated {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             title: c_string_to_string(event.title),
         }),
         CBF_EVENT_FAVICON_URL_UPDATED => Ok(IpcEvent::FaviconUrlUpdated {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             url: c_string_to_string(event.favicon_url),
         }),
         CBF_EVENT_BEFOREUNLOAD_DIALOG_REQUESTED => {
             let profile_id = c_string_to_string(event.profile_id);
-            let browsing_context_id = BrowsingContextId::new(event.tab_id);
+            let browsing_context_id = TabId::new(event.tab_id);
             let reason = beforeunload_reason_from_ffi(event.beforeunload_reason);
             debug!(
                 ?profile_id,
@@ -145,15 +144,15 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }
         CBF_EVENT_WEB_PAGE_CLOSED => Ok(IpcEvent::WebContentsClosed {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
         }),
         CBF_EVENT_WEB_PAGE_RESIZE_ACKNOWLEDGED => Ok(IpcEvent::WebContentsResizeAcknowledged {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
         }),
         CBF_EVENT_WEB_PAGE_DOM_HTML_READ => Ok(IpcEvent::WebContentsDomHtmlRead {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
             html: c_string_to_string(event.dom_html),
         }),
@@ -161,7 +160,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             let profile_id = c_string_to_string(event.profile_id);
             let request = parse_drag_start_request(event.drag_start_request);
             Ok(IpcEvent::DragStartRequested {
-                browsing_context_id: request.browsing_context_id,
+                browsing_context_id: request.browsing_context_id.into(),
                 profile_id,
                 request,
             })
@@ -172,7 +171,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_AUXILIARY_WINDOW_OPEN_REQUESTED => Ok(IpcEvent::AuxiliaryWindowOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
             kind: auxiliary_window_kind_from_ffi(
                 event.auxiliary_window_kind,
@@ -183,7 +182,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_AUXILIARY_WINDOW_RESOLVED => Ok(IpcEvent::AuxiliaryWindowResolved {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
             resolution: auxiliary_window_resolution_from_ffi(
                 event.auxiliary_window_kind,
@@ -194,12 +193,12 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_EXTENSION_RUNTIME_WARNING => Ok(IpcEvent::ExtensionRuntimeWarning {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             detail: c_string_to_string(event.extension_runtime_warning),
         }),
         CBF_EVENT_AUXILIARY_WINDOW_OPENED => Ok(IpcEvent::AuxiliaryWindowOpened {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             window_id: AuxiliaryWindowId::new(event.auxiliary_window_id),
             kind: auxiliary_window_kind_from_ffi(
                 event.auxiliary_window_kind,
@@ -215,7 +214,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_AUXILIARY_WINDOW_CLOSED => Ok(IpcEvent::AuxiliaryWindowClosed {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: BrowsingContextId::new(event.tab_id),
+            browsing_context_id: TabId::new(event.tab_id),
             window_id: AuxiliaryWindowId::new(event.auxiliary_window_id),
             kind: auxiliary_window_kind_from_ffi(
                 event.auxiliary_window_kind,
@@ -398,13 +397,13 @@ fn parse_ime_bounds(update: CbfImeBoundsUpdate) -> ImeBoundsUpdate {
     }
 }
 
-fn parse_browsing_context_ids(list: CbfTabIdList) -> Vec<BrowsingContextId> {
+fn parse_browsing_context_ids(list: CbfTabIdList) -> Vec<TabId> {
     if list.len == 0 || list.items.is_null() {
         return Vec::new();
     }
 
     let ids = unsafe { std::slice::from_raw_parts(list.items, list.len as usize) };
-    ids.iter().copied().map(BrowsingContextId::new).collect()
+    ids.iter().copied().map(TabId::new).collect()
 }
 
 fn parse_context_menu(menu: CbfContextMenu) -> ContextMenu {

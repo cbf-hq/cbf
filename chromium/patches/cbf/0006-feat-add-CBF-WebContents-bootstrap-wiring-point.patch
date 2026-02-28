@@ -1,7 +1,7 @@
 From 0e307e830a42872f61123354019ca8032c26133d Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 24 Feb 2026 11:43:25 +0900
-Subject: [PATCH 6/9] feat:add-CBF-WebContents-bootstrap-wiring-point
+Subject: [PATCH 06/10] feat:add-CBF-WebContents-bootstrap-wiring-point
 
 ---
  chrome/browser/cbf/BUILD.gn                                 | 4 ++++

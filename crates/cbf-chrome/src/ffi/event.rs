@@ -8,12 +8,11 @@ use cbf::data::{
         AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
         AuxiliaryWindowResolution, ExtensionInfo,
     },
-    ids::BrowsingContextId,
     ime::ImeBoundsUpdate,
 };
 use cbf::event::BeforeUnloadReason;
 
-use crate::data::surface::SurfaceHandle;
+use crate::data::{ids::TabId, surface::SurfaceHandle};
 
 /// Low-level IPC events emitted by the Chromium bridge.
 #[derive(Debug, Clone, PartialEq)]
@@ -25,7 +24,7 @@ pub enum IpcEvent {
     /// this information should subscribe to the raw `ChromeEvent` stream.
     SurfaceHandleUpdated {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         handle: SurfaceHandle,
     },
     /// A new web page was created by the backend.
@@ -33,7 +32,7 @@ pub enum IpcEvent {
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::Created`.
     WebContentsCreated {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
     },
     /// DevTools was opened for a page.
@@ -42,15 +41,15 @@ pub enum IpcEvent {
     /// currently exposed via the Chrome-specific raw event stream only.
     DevToolsOpened {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
-        inspected_browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
+        inspected_browsing_context_id: TabId,
     },
     /// IME bounds information changed.
     ///
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::ImeBoundsUpdated`.
     ImeBoundsUpdated {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         update: ImeBoundsUpdate,
     },
     /// The backend requested a context menu.
@@ -58,7 +57,7 @@ pub enum IpcEvent {
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::ContextMenuRequested`.
     ContextMenuRequested {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         menu: ContextMenu,
     },
     /// Host-mediated open request for browsing context.
@@ -67,7 +66,7 @@ pub enum IpcEvent {
     BrowsingContextOpenRequested {
         profile_id: String,
         request_id: u64,
-        source_browsing_context_id: Option<BrowsingContextId>,
+        source_browsing_context_id: Option<TabId>,
         target_url: String,
         open_hint: BrowsingContextOpenHint,
         user_gesture: bool,
@@ -85,7 +84,7 @@ pub enum IpcEvent {
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::NavigationStateChanged`.
     NavigationStateChanged {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         url: String,
         can_go_back: bool,
         can_go_forward: bool,
@@ -96,7 +95,7 @@ pub enum IpcEvent {
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::CursorChanged`.
     CursorChanged {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         cursor_type: CursorIcon,
     },
     /// The page title changed for a page.
@@ -104,7 +103,7 @@ pub enum IpcEvent {
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::TitleUpdated`.
     TitleUpdated {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         title: String,
     },
     /// The page favicon URL changed for a page.
@@ -112,7 +111,7 @@ pub enum IpcEvent {
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::FaviconUrlUpdated`.
     FaviconUrlUpdated {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         url: String,
     },
     /// A beforeunload dialog was requested.
@@ -121,7 +120,7 @@ pub enum IpcEvent {
     /// with `DialogType::BeforeUnload`.
     BeforeUnloadDialogRequested {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
         reason: BeforeUnloadReason,
     },
@@ -130,7 +129,7 @@ pub enum IpcEvent {
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::Closed`.
     WebContentsClosed {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
     },
     /// A resize acknowledgement was received for a page.
     ///
@@ -138,14 +137,14 @@ pub enum IpcEvent {
     /// acknowledgement with no semantic value for browser-generic consumers.
     WebContentsResizeAcknowledged {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
     },
     /// The DOM HTML was read for a page.
     ///
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::DomHtmlRead`.
     WebContentsDomHtmlRead {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
         html: String,
     },
@@ -154,7 +153,7 @@ pub enum IpcEvent {
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::DragStartRequested`.
     DragStartRequested {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request: DragStartRequest,
     },
     /// Shutdown is blocked by dirty pages.
@@ -162,7 +161,7 @@ pub enum IpcEvent {
     /// Maps to `BrowserEvent::ShutdownBlocked`.
     ShutdownBlocked {
         request_id: u64,
-        dirty_browsing_context_ids: Vec<BrowsingContextId>,
+        dirty_browsing_context_ids: Vec<TabId>,
     },
     /// Shutdown has started.
     ///
@@ -182,14 +181,14 @@ pub enum IpcEvent {
     /// Auxiliary window open was requested and host must choose flow.
     AuxiliaryWindowOpenRequested {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
         kind: AuxiliaryWindowKind,
     },
     /// Auxiliary request was resolved.
     AuxiliaryWindowResolved {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
         resolution: AuxiliaryWindowResolution,
     },
@@ -198,13 +197,13 @@ pub enum IpcEvent {
     /// Maps to `BrowsingContextEvent::ExtensionRuntimeWarning`.
     ExtensionRuntimeWarning {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         detail: String,
     },
     /// Backend-managed auxiliary window/dialog was opened.
     AuxiliaryWindowOpened {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         window_id: AuxiliaryWindowId,
         kind: AuxiliaryWindowKind,
         title: Option<String>,
@@ -213,7 +212,7 @@ pub enum IpcEvent {
     /// Backend-managed auxiliary window/dialog was closed.
     AuxiliaryWindowClosed {
         profile_id: String,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         window_id: AuxiliaryWindowId,
         kind: AuxiliaryWindowKind,
         reason: AuxiliaryWindowCloseReason,

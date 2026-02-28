@@ -4,14 +4,16 @@ use cbf::{
         browsing_context_open::BrowsingContextOpenResponse,
         drag::{DragDrop, DragUpdate},
         extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
-        ids::BrowsingContextId,
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         mouse::MouseEvent,
         window_open::WindowOpenResponse,
     },
 };
 
-use crate::data::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
+use crate::data::{
+    ids::TabId,
+    input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+};
 
 /// Chromium-specific transport command vocabulary.
 #[derive(Debug, Clone, PartialEq)]
@@ -25,12 +27,12 @@ pub enum ChromeCommand {
     },
     ForceShutdown,
     ConfirmBeforeUnload {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
         proceed: bool,
     },
     ConfirmPermission {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
         allow: bool,
     },
@@ -41,57 +43,57 @@ pub enum ChromeCommand {
     },
     ListProfiles,
     RequestCloseWebContents {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
     },
     SetWebContentsSize {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         width: u32,
         height: u32,
     },
     Navigate {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         url: String,
     },
     GoBack {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
     },
     GoForward {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
     },
     Reload {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         ignore_cache: bool,
     },
     PrintPreview {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
     },
     OpenDevTools {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
     },
     InspectElement {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         x: i32,
         y: i32,
     },
     GetWebContentsDomHtml {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
     },
     SetWebContentsFocus {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         focused: bool,
     },
     SendKeyEvent {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         event: ChromeKeyEvent,
         commands: Vec<String>,
     },
     SendMouseEvent {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         event: MouseEvent,
     },
     SendMouseWheelEvent {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         event: ChromeMouseWheelEvent,
     },
     SendDragUpdate {
@@ -102,7 +104,7 @@ pub enum ChromeCommand {
     },
     SendDragCancel {
         session_id: u64,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
     },
     SetImeComposition {
         composition: ImeComposition,
@@ -111,7 +113,7 @@ pub enum ChromeCommand {
         commit: ImeCommitText,
     },
     FinishComposingText {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         behavior: ConfirmCompositionBehavior,
     },
     ExecuteContextMenuCommand {
@@ -126,16 +128,16 @@ pub enum ChromeCommand {
         profile_id: Option<String>,
     },
     OpenDefaultAuxiliaryWindow {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
     },
     RespondAuxiliaryWindow {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
         response: AuxiliaryWindowResponse,
     },
     CloseAuxiliaryWindow {
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         window_id: AuxiliaryWindowId,
     },
     RespondBrowsingContextOpen {
@@ -165,7 +167,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 request_id,
                 proceed,
             } => Self::ConfirmBeforeUnload {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 request_id,
                 proceed,
             },
@@ -174,7 +176,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 request_id,
                 allow,
             } => Self::ConfirmPermission {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 request_id,
                 allow,
             },
@@ -191,14 +193,14 @@ impl From<BrowserCommand> for ChromeCommand {
             BrowserCommand::RequestCloseBrowsingContext {
                 browsing_context_id,
             } => Self::RequestCloseWebContents {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
             },
             BrowserCommand::ResizeBrowsingContext {
                 browsing_context_id,
                 width,
                 height,
             } => Self::SetWebContentsSize {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 width,
                 height,
             },
@@ -206,43 +208,43 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id,
                 url,
             } => Self::Navigate {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 url,
             },
             BrowserCommand::GoBack {
                 browsing_context_id,
             } => Self::GoBack {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
             },
             BrowserCommand::GoForward {
                 browsing_context_id,
             } => Self::GoForward {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
             },
             BrowserCommand::Reload {
                 browsing_context_id,
                 ignore_cache,
             } => Self::Reload {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 ignore_cache,
             },
             BrowserCommand::PrintPreview {
                 browsing_context_id,
             } => Self::PrintPreview {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
             },
             BrowserCommand::GetBrowsingContextDomHtml {
                 browsing_context_id,
                 request_id,
             } => Self::GetWebContentsDomHtml {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 request_id,
             },
             BrowserCommand::SetBrowsingContextFocus {
                 browsing_context_id,
                 focused,
             } => Self::SetWebContentsFocus {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 focused,
             },
             BrowserCommand::SendKeyEvent {
@@ -250,7 +252,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 event,
                 commands,
             } => Self::SendKeyEvent {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 event: event.into(),
                 commands,
             },
@@ -258,14 +260,14 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id,
                 event,
             } => Self::SendMouseEvent {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 event,
             },
             BrowserCommand::SendMouseWheelEvent {
                 browsing_context_id,
                 event,
             } => Self::SendMouseWheelEvent {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 event: event.into(),
             },
             BrowserCommand::SendDragUpdate { update } => Self::SendDragUpdate { update },
@@ -275,7 +277,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id,
             } => Self::SendDragCancel {
                 session_id,
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
             },
             BrowserCommand::SetComposition { composition } => {
                 Self::SetImeComposition { composition }
@@ -285,7 +287,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id,
                 behavior,
             } => Self::FinishComposingText {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 behavior,
             },
             BrowserCommand::ExecuteContextMenuCommand {
@@ -303,7 +305,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id,
                 request_id,
             } => Self::OpenDefaultAuxiliaryWindow {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 request_id,
             },
             BrowserCommand::RespondAuxiliaryWindow {
@@ -311,7 +313,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 request_id,
                 response,
             } => Self::RespondAuxiliaryWindow {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 request_id,
                 response,
             },
@@ -319,7 +321,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id,
                 window_id,
             } => Self::CloseAuxiliaryWindow {
-                browsing_context_id,
+                browsing_context_id: browsing_context_id.into(),
                 window_id,
             },
             BrowserCommand::RespondBrowsingContextOpen {
@@ -337,5 +339,28 @@ impl From<BrowserCommand> for ChromeCommand {
                 response,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cbf::{command::BrowserCommand, data::ids::BrowsingContextId};
+
+    use super::ChromeCommand;
+    use crate::data::ids::TabId;
+
+    #[test]
+    fn create_close_command_converts_browsing_context_id_into_tab_id() {
+        let command = BrowserCommand::RequestCloseBrowsingContext {
+            browsing_context_id: BrowsingContextId::new(42),
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::RequestCloseWebContents {
+                browsing_context_id
+            } if browsing_context_id == TabId::new(42)
+        ));
     }
 }

@@ -4,7 +4,6 @@ use cbf::data::{
     browsing_context_open::BrowsingContextOpenResponse,
     drag::{DragDrop, DragUpdate},
     extension::{AuxiliaryWindowId, AuxiliaryWindowResponse, ExtensionInfo},
-    ids::BrowsingContextId,
     ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
@@ -20,7 +19,10 @@ use super::map::{
 };
 use super::utils::{c_string_to_string, to_optional_cstring};
 use super::{Error, IpcEvent};
-use crate::data::input::{ChromeKeyEvent, ChromeMouseWheelEvent};
+use crate::data::{
+    ids::TabId,
+    input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+};
 
 /// Client wrapper for the CBF IPC bridge.
 pub struct IpcClient {
@@ -201,7 +203,7 @@ impl IpcClient {
     /// Request closing the specified web page.
     pub fn request_close_web_contents(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
@@ -219,7 +221,7 @@ impl IpcClient {
     /// Update the surface size of the specified web page.
     pub fn set_web_contents_size(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         width: u32,
         height: u32,
     ) -> Result<(), Error> {
@@ -244,7 +246,7 @@ impl IpcClient {
     /// Update whether the specified web page should receive text input focus.
     pub fn set_web_contents_focus(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         focused: bool,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -263,7 +265,7 @@ impl IpcClient {
     /// Respond to a beforeunload confirmation request.
     pub fn confirm_beforeunload(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
         proceed: bool,
     ) -> Result<(), Error> {
@@ -288,7 +290,7 @@ impl IpcClient {
     /// Navigate the page to the provided URL.
     pub fn navigate(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         url: &str,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -307,7 +309,7 @@ impl IpcClient {
     }
 
     /// Navigate back in history for the page.
-    pub fn go_back(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+    pub fn go_back(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -320,7 +322,7 @@ impl IpcClient {
     }
 
     /// Navigate forward in history for the page.
-    pub fn go_forward(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+    pub fn go_forward(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -335,7 +337,7 @@ impl IpcClient {
     /// Reload the page, optionally ignoring caches.
     pub fn reload(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         ignore_cache: bool,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -351,7 +353,7 @@ impl IpcClient {
     }
 
     /// Open print preview for the page.
-    pub fn print_preview(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+    pub fn print_preview(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -364,7 +366,7 @@ impl IpcClient {
     }
 
     /// Open DevTools for the specified page.
-    pub fn open_dev_tools(&mut self, browsing_context_id: BrowsingContextId) -> Result<(), Error> {
+    pub fn open_dev_tools(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -379,7 +381,7 @@ impl IpcClient {
     /// Open DevTools and inspect the element at the given coordinates.
     pub fn inspect_element(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         x: i32,
         y: i32,
     ) -> Result<(), Error> {
@@ -398,7 +400,7 @@ impl IpcClient {
     /// Request the DOM HTML for the specified page.
     pub fn get_web_contents_dom_html(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -421,7 +423,7 @@ impl IpcClient {
     /// Open Chromium default auxiliary window UI for pending request.
     pub fn open_default_auxiliary_window(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -448,7 +450,7 @@ impl IpcClient {
     /// Respond to a pending auxiliary request.
     pub fn respond_auxiliary_window(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         request_id: u64,
         response: &AuxiliaryWindowResponse,
     ) -> Result<(), Error> {
@@ -483,7 +485,7 @@ impl IpcClient {
     /// Close a backend-managed auxiliary window/dialog.
     pub fn close_auxiliary_window(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         window_id: AuxiliaryWindowId,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -578,7 +580,7 @@ impl IpcClient {
     /// Send a keyboard event to the page.
     pub fn send_key_event(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         event: &KeyEvent,
         commands: &[String],
     ) -> Result<(), Error> {
@@ -589,7 +591,7 @@ impl IpcClient {
     /// Send a Chromium-shaped keyboard event to the page.
     pub fn send_key_event_raw(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         event: &ChromeKeyEvent,
         commands: &[String],
     ) -> Result<(), Error> {
@@ -644,7 +646,7 @@ impl IpcClient {
     /// Send a mouse event to the page.
     pub fn send_mouse_event(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         event: &MouseEvent,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -677,7 +679,7 @@ impl IpcClient {
     /// Send a mouse wheel event to the page.
     pub fn send_mouse_wheel_event(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         event: &MouseWheelEvent,
     ) -> Result<(), Error> {
         let chrome_event = ChromeMouseWheelEvent::from(event.clone());
@@ -687,7 +689,7 @@ impl IpcClient {
     /// Send a Chromium-shaped mouse wheel event to the page.
     pub fn send_mouse_wheel_event_raw(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         event: &ChromeMouseWheelEvent,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -771,7 +773,7 @@ impl IpcClient {
     pub fn send_drag_cancel(
         &mut self,
         session_id: u64,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
@@ -858,7 +860,7 @@ impl IpcClient {
     /// Finish composing IME text with the specified behavior.
     pub fn finish_composing_text(
         &mut self,
-        browsing_context_id: BrowsingContextId,
+        browsing_context_id: TabId,
         behavior: ConfirmCompositionBehavior,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
