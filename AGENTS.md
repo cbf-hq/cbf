@@ -90,6 +90,11 @@ Chromium side (from `chromium/src`):
 
 - `autoninja -C out/Default chrome`
 - `autoninja -C out/Default cbf_bridge`
+- Do not use plain `ninja` for Chromium builds.
+- Use exactly one of these two build paths for Chromium-side builds:
+- `just patch build -t <target>`
+- `source depot_tools.sh` and then `autoninja -C out/Default <target>`
+- This avoids downgrading the output directory from Siso back to Ninja and prevents forcing the next `autoninja` build to restart from scratch.
 
 Tooling helpers:
 
