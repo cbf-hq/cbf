@@ -18,7 +18,7 @@ It provides a stable, application-agnostic API surface for controlling browsing 
 
 | Target  | Linux | macOS | Windows |
 | ------- | ----- | ----- | ------- |
-| x86_64  | ❌    | ✅    | ❌      |
+| x86_64  | ❌    | ❌    | ❌      |
 | aarch64 | ❌    | ✅    | ❌      |
 
 ## Vision
