@@ -30,6 +30,10 @@ Available commands:
 - `tool patch verify`
 - `tool patch build`
 
+`tool patch apply` uses the current `chromium/src` checkout by default. Pass
+`--branch <name>` only when you want the tool to reset/create a work branch at
+the selected base commit before applying patches.
+
 `tool patch build` supports `--out-dir` to override `series.toml` output dir:
 
 ```bash

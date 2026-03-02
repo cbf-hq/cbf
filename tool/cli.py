@@ -43,7 +43,7 @@ def _common_depot_tools_option[FS: Callable[..., Any]](func: FS) -> FS:
     )(func)
 
 
-def cmd_chromium_apply(*, series: str, base: str | None, branch: str) -> int:
+def cmd_chromium_apply(*, series: str, base: str | None, branch: str | None) -> int:
     root = repo_root()
     patches = apply_series(
         root=root,
@@ -51,7 +51,10 @@ def cmd_chromium_apply(*, series: str, base: str | None, branch: str) -> int:
         base_commit=base,
         branch=branch,
     )
-    click.echo(f"Applied {len(patches)} patches to branch {branch!r}.")
+    if branch is None:
+        click.echo(f"Applied {len(patches)} patches to the current checkout.")
+    else:
+        click.echo(f"Applied {len(patches)} patches to branch {branch!r}.")
 
     return 0
 
@@ -211,11 +214,10 @@ def _warn_if_chromium_alias(ctx: click.Context) -> None:
 )
 @click.option(
     "--branch",
-    default="work/cbf",
-    show_default=True,
-    help="Work branch name to reset/create",
+    default=None,
+    help="Work branch name to reset/create (defaults to current checkout)",
 )
-def patch_apply(*, series: str, base: str | None, branch: str) -> None:
+def patch_apply(*, series: str, base: str | None, branch: str | None) -> None:
     cmd_chromium_apply(series=series, base=base, branch=branch)
 
 
@@ -228,9 +230,8 @@ def patch_apply(*, series: str, base: str | None, branch: str) -> None:
 )
 @click.option(
     "--branch",
-    default="work/cbf",
-    show_default=True,
-    help="Work branch name to reset/create",
+    default=None,
+    help="Work branch name to reset/create (defaults to current checkout)",
 )
 @click.pass_context
 def chromium_apply(
@@ -238,7 +239,7 @@ def chromium_apply(
     *,
     series: str,
     base: str | None,
-    branch: str,
+    branch: str | None,
 ) -> None:
     _warn_if_chromium_alias(ctx)
     cmd_chromium_apply(series=series, base=base, branch=branch)

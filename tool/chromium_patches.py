@@ -140,7 +140,7 @@ def apply_series(
     root: Path,
     series: str,
     base_commit: str | None,
-    branch: str,
+    branch: str | None,
 ) -> list[Path]:
     chromium_src = chromium_src_dir(root)
     cfg = load_series_config(root, series)
@@ -152,7 +152,8 @@ def apply_series(
         )
 
     ensure_clean(chromium_src)
-    checkout_work_branch(chromium_src, branch, chosen_base)
+    if branch is not None:
+        checkout_work_branch(chromium_src, branch, chosen_base)
 
     patches = list_patches(cfg.patch_dir)
     git_am(chromium_src, patches)
