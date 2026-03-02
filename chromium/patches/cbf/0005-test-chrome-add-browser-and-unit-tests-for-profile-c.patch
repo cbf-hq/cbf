@@ -1,7 +1,7 @@
 From f381f23c64828fb144849e91b36df82fd84f72a3 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 23 Feb 2026 17:16:20 +0900
-Subject: [PATCH 05/10] test(chrome): add browser and unit tests for profile
+Subject: [PATCH 05/11] test(chrome): add browser and unit tests for profile
  controllers
 
 ---

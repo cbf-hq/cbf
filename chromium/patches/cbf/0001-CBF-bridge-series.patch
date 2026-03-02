@@ -1,7 +1,7 @@
 From 01a2bc827c6697a2ce540d16beff5a70e982451a Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Feb 2026 09:47:06 +0900
-Subject: [PATCH 01/10] CBF bridge series
+Subject: [PATCH 01/11] CBF bridge series
 
 ---
  chrome/browser/BUILD.gn                       |    2 +

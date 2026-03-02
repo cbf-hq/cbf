@@ -1,7 +1,7 @@
 From e7e0acfdfc5d9ba180d43dc48091ef128ef95c26 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Feb 2026 10:14:42 +0900
-Subject: [PATCH 08/10] feat(chrome): wire extension runtime and auxiliary
+Subject: [PATCH 08/11] feat(chrome): wire extension runtime and auxiliary
  window flow
 
 ---

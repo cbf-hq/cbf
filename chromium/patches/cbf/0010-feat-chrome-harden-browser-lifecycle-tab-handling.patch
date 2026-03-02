@@ -1,7 +1,7 @@
 From 91e9cdac122d52bedfd346c1c2c55ffbaae10964 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 28 Feb 2026 11:20:04 +0900
-Subject: [PATCH 10/10] feat(chrome): harden browser lifecycle tab handling
+Subject: [PATCH 10/11] feat(chrome): harden browser lifecycle tab handling
 
 ---
  chrome/browser/cbf/BUILD.gn                   |  4 ++++
