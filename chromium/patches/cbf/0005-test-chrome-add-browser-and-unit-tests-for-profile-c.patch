@@ -1,7 +1,7 @@
-From f381f23c64828fb144849e91b36df82fd84f72a3 Mon Sep 17 00:00:00 2001
+From 097570e8911f41de85daefcb9cdf9ef905c60535 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 23 Feb 2026 17:16:20 +0900
-Subject: [PATCH 05/11] test(chrome): add browser and unit tests for profile
+Subject: [PATCH 05/10] test(chrome): add browser and unit tests for profile
  controllers
 
 ---
@@ -628,10 +628,10 @@ index 0000000000000..f7103d73fff5a
 +
 +#endif  // CHROME_BROWSER_CBF_TEST_CBF_TEST_PROFILE_OBSERVER_H_
 diff --git a/chrome/test/BUILD.gn b/chrome/test/BUILD.gn
-index 1bc07507f5889..7ba07532324c0 100644
+index dbe8f32f53ff9..0eb708ff73c1a 100644
 --- a/chrome/test/BUILD.gn
 +++ b/chrome/test/BUILD.gn
-@@ -2494,6 +2494,7 @@ if (!is_android) {
+@@ -2498,6 +2498,7 @@ if (!is_android) {
        "//chrome/browser/breadcrumbs:browser_tests",
        "//chrome/browser/browsing_data:constants",
        "//chrome/browser/btm:browser_tests",
@@ -639,7 +639,7 @@ index 1bc07507f5889..7ba07532324c0 100644
        "//chrome/browser/chooser_controller:browser_tests",
        "//chrome/browser/client_hints:browser_tests",
        "//chrome/browser/content_extraction",
-@@ -7035,6 +7036,7 @@ test("unit_tests") {
+@@ -7038,6 +7039,7 @@ test("unit_tests") {
      "//chrome/browser/breadcrumbs:unit_tests",
      "//chrome/browser/browsing_data:constants",
      "//chrome/browser/btm:unit_tests",

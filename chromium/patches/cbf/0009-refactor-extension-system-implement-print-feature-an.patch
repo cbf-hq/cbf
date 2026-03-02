@@ -1,7 +1,7 @@
-From 1fbcdf5d2ea4ebf4524b6aea3821d68c0381eb1e Mon Sep 17 00:00:00 2001
+From 4476a242feb83fb7a3f2b1e91e36fe5268f749a9 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Feb 2026 14:04:11 +0900
-Subject: [PATCH 09/11] refactor extension system, implement print feature and
+Subject: [PATCH 09/10] refactor extension system, implement print feature and
  fix devtools
 
 ---
@@ -1355,7 +1355,7 @@ index 556a9c5a4c986..817d418aae4ae 100644
  }
  
 diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
-index 21f332160b77c..3892bb1526bee 100644
+index e8006adbcb41c..9bf97561a7c7d 100644
 --- a/chrome/browser/devtools/devtools_ui_bindings.cc
 +++ b/chrome/browser/devtools/devtools_ui_bindings.cc
 @@ -860,8 +860,6 @@ DevToolsUIBindings::~DevToolsUIBindings() {

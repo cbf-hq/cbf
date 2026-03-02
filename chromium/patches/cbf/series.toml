@@ -2,7 +2,7 @@
 #
 # This is the Chromium commit the patch series was originally authored against.
 # Update this when you rebase/refresh patches onto a new Chromium roll.
-base_commit = "278d5a3e94b22f47c84cfeb9a8a9851e8e68fa3d"
+base_commit = "4d3225104176d18430bb7bef9f67394686316c2f"
 
 # Relative to chromium/src
 out_dir = "out/Default"

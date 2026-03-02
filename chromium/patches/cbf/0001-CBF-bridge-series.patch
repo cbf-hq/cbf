@@ -1,7 +1,7 @@
-From 01a2bc827c6697a2ce540d16beff5a70e982451a Mon Sep 17 00:00:00 2001
+From c1b6c68e86934312480f2cdc177949f346bc3b59 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Feb 2026 09:47:06 +0900
-Subject: [PATCH 01/11] CBF bridge series
+Subject: [PATCH 01/10] CBF bridge series
 
 ---
  chrome/browser/BUILD.gn                       |    2 +
@@ -113,7 +113,7 @@ Subject: [PATCH 01/11] CBF bridge series
  create mode 100644 content/public/browser/render_widget_host_view.cc
 
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index 6c52fec136dcc..5c1fd05c73d1f 100644
+index 2fc3a991d8909..5b6199531f677 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
 @@ -1542,6 +1542,7 @@ static_library("browser") {
@@ -124,7 +124,7 @@ index 6c52fec136dcc..5c1fd05c73d1f 100644
      "//chrome/browser/commerce:impl",
      "//chrome/browser/content_settings:content_settings_factory_impl",
      "//chrome/browser/content_settings:content_settings_util_impl",
-@@ -1793,6 +1794,7 @@ static_library("browser") {
+@@ -1792,6 +1793,7 @@ static_library("browser") {
      "//chrome/browser/browsing_data:constants",
      "//chrome/browser/btm",
      "//chrome/browser/btm:impl",
@@ -8370,7 +8370,7 @@ index f43d0d97cedb7..d0ee364478aea 100644
  #if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
    std::unique_ptr<installer_downloader::InstallerDownloaderController>
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 7e098f0f1d1fd..b4494f6b701ce 100644
+index dac5e9152bb28..19b7445c58a58 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
 @@ -275,6 +275,7 @@ static_library("ui") {
@@ -8550,10 +8550,10 @@ index cf8652cb6ddbf..ff3d012ad3db3 100644
  // views::AccessibilityFocusOverrider::Client:
  id RenderWidgetHostViewMac::GetAccessibilityFocusedUIElement() {
 diff --git a/content/browser/web_contents/web_contents_impl.cc b/content/browser/web_contents/web_contents_impl.cc
-index 3f3759fb1de4f..63a9c94363b11 100644
+index 345951d78dab3..d7b40a328ef33 100644
 --- a/content/browser/web_contents/web_contents_impl.cc
 +++ b/content/browser/web_contents/web_contents_impl.cc
-@@ -215,6 +215,7 @@
+@@ -216,6 +216,7 @@
  #include "ui/accessibility/platform/browser_accessibility.h"
  #include "ui/accessibility/platform/browser_accessibility_manager.h"
  #include "ui/base/clipboard/clipboard_metadata.h"
@@ -8561,7 +8561,7 @@ index 3f3759fb1de4f..63a9c94363b11 100644
  #include "ui/base/ime/mojom/virtual_keyboard_types.mojom.h"
  #include "ui/base/mojom/window_show_state.mojom.h"
  #include "ui/base/pointer/pointer_device.h"
-@@ -4508,6 +4509,15 @@ bool WebContentsImpl::HandleMouseEvent(const blink::WebMouseEvent& event) {
+@@ -4510,6 +4511,15 @@ bool WebContentsImpl::HandleMouseEvent(const blink::WebMouseEvent& event) {
    return false;
  }
  

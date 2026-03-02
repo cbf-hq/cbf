@@ -1,14 +1,14 @@
-From 6c346308e6a01dcfecb6fa1d6d5b78361754e953 Mon Sep 17 00:00:00 2001
+From 0fe28ef17034a92069b77330cbaf5c8f4a66eb3e Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 21 Feb 2026 17:32:32 +0900
-Subject: [PATCH 04/11] chore(chrome): add devtools ui bindings diagnostics
+Subject: [PATCH 04/10] chore(chrome): add devtools ui bindings diagnostics
 
 ---
  .../browser/devtools/devtools_ui_bindings.cc  | 25 +++++++++++++++++++
  1 file changed, 25 insertions(+)
 
 diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
-index bca7234c606be..21f332160b77c 100644
+index 098abfad07fb1..e8006adbcb41c 100644
 --- a/chrome/browser/devtools/devtools_ui_bindings.cc
 +++ b/chrome/browser/devtools/devtools_ui_bindings.cc
 @@ -860,6 +860,8 @@ DevToolsUIBindings::~DevToolsUIBindings() {

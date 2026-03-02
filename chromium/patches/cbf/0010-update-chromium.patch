@@ -1,0 +1,40 @@
+From c5c8d093b4f0814fbdf2ab9da2151e24ffb31e4d Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Tue, 3 Mar 2026 08:10:00 +0900
+Subject: [PATCH 10/10] update chromium
+
+---
+ chrome/browser/cbf/BUILD.gn                    | 4 ++++
+ chrome/browser/extensions/api/runtime/BUILD.gn | 1 +
+ 2 files changed, 5 insertions(+)
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index db0de55a52c51..30fab24143ca3 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -49,6 +49,10 @@ source_set("cbf") {
+   ]
+ 
+   public_deps = [ "//chrome/browser:browser_public_dependencies" ]
++  allow_circular_includes_from = [
++    "//chrome/browser/devtools",
++    "//chrome/browser/extensions",
++  ]
+   # CBF uses a subset of content/browser internals for IME and text input
+   # bridging. Keep dependency surface explicit in deps while skipping include
+   # layering checks for this integration target.
+diff --git a/chrome/browser/extensions/api/runtime/BUILD.gn b/chrome/browser/extensions/api/runtime/BUILD.gn
+index 9311af3d4cedb..564084d7621ee 100644
+--- a/chrome/browser/extensions/api/runtime/BUILD.gn
++++ b/chrome/browser/extensions/api/runtime/BUILD.gn
+@@ -23,6 +23,7 @@ source_set("runtime") {
+ 
+   deps = [
+     "//build:chromeos_buildflags",
++    "//chrome/browser/cbf:cbf",
+     "//chrome/browser/devtools",
+     "//chrome/browser/extensions",
+     "//chrome/browser/profiles:profile",
+-- 
+2.50.1 (Apple Git-155)
+

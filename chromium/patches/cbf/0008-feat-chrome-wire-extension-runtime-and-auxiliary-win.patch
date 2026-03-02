@@ -1,7 +1,7 @@
-From e7e0acfdfc5d9ba180d43dc48091ef128ef95c26 Mon Sep 17 00:00:00 2001
+From 9a9b404586bb20115a79cf61295c34ad020e4986 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Feb 2026 10:14:42 +0900
-Subject: [PATCH 08/11] feat(chrome): wire extension runtime and auxiliary
+Subject: [PATCH 08/10] feat(chrome): wire extension runtime and auxiliary
  window flow
 
 ---
@@ -1845,7 +1845,7 @@ index e4ad4c22bb2db..4e28eacc477d9 100644
    Browser* browser = chrome::FindLastActiveWithProfile(profile);
    if (!browser) {
 diff --git a/chrome/browser/extensions/api/tabs/tabs_api.cc b/chrome/browser/extensions/api/tabs/tabs_api.cc
-index 3145a89c0f535..daf09c79a8414 100644
+index 86caef00d10aa..f44a6d2e31473 100644
 --- a/chrome/browser/extensions/api/tabs/tabs_api.cc
 +++ b/chrome/browser/extensions/api/tabs/tabs_api.cc
 @@ -12,6 +12,8 @@
@@ -1897,7 +1897,7 @@ index 3145a89c0f535..daf09c79a8414 100644
    BrowserWindowCreateParams create_params(window_type, *window_profile,
                                            user_gesture());
  
-@@ -1932,6 +1960,16 @@ ExtensionFunction::ResponseAction TabsCreateFunction::Run() {
+@@ -1931,6 +1959,16 @@ ExtensionFunction::ResponseAction TabsCreateFunction::Run() {
    // TODO(https://crbug.com/468223125): This isn't consistent, since sometimes
    // we *will* create a new browser below.
    if (!browser) {
@@ -1914,7 +1914,7 @@ index 3145a89c0f535..daf09c79a8414 100644
      return RespondNow(Error(std::move(error)));
    }
  
-@@ -2012,6 +2050,17 @@ ExtensionFunction::ResponseAction TabsCreateFunction::Run() {
+@@ -2011,6 +2049,17 @@ ExtensionFunction::ResponseAction TabsCreateFunction::Run() {
      return RespondNow(Error(ExtensionTabUtil::kBrowserWindowNotAllowed));
    }
  
@@ -1979,7 +1979,7 @@ index ccd8989a25e64..8eb065c9c4875 100644
        ExtensionInstallPrompt::INSTALL_PROMPT);
  
 diff --git a/chrome/browser/extensions/extension_tab_util.cc b/chrome/browser/extensions/extension_tab_util.cc
-index 2fdab006bd433..6a33dc762a578 100644
+index 2b5f1e30a5e09..c251f40666f75 100644
 --- a/chrome/browser/extensions/extension_tab_util.cc
 +++ b/chrome/browser/extensions/extension_tab_util.cc
 @@ -20,6 +20,8 @@
@@ -2029,7 +2029,7 @@ index 2fdab006bd433..6a33dc762a578 100644
  #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
  
 diff --git a/chrome/browser/extensions/open_tab_helper.cc b/chrome/browser/extensions/open_tab_helper.cc
-index 4591ee08e0ddc..a362b529607cc 100644
+index f10726ff003db..701935227d891 100644
 --- a/chrome/browser/extensions/open_tab_helper.cc
 +++ b/chrome/browser/extensions/open_tab_helper.cc
 @@ -4,6 +4,8 @@
