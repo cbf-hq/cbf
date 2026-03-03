@@ -1,4 +1,4 @@
-From c7dce4e4fbb8fa803a80745194f321fc72c7de23 Mon Sep 17 00:00:00 2001
+From 69e7f040020aa1c32d07a41ea03c1a79bd9d28fa Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 3 Mar 2026 11:44:19 +0900
 Subject: [PATCH 12/12] fix(chrome): preserve embedded rendering for
@@ -6,7 +6,7 @@ Subject: [PATCH 12/12] fix(chrome): preserve embedded rendering for
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   5 +
- .../cbf/cbf_embedded_browser_window.cc        | 480 ++++++++++++++++++
+ .../cbf/cbf_embedded_browser_window.cc        | 483 ++++++++++++++++++
  .../browser/cbf/cbf_embedded_browser_window.h |  15 +
  chrome/browser/cbf/cbf_profile_service.cc     |   5 +
  chrome/browser/cbf/cbf_profile_service.h      |   1 +
@@ -19,7 +19,7 @@ Subject: [PATCH 12/12] fix(chrome): preserve embedded rendering for
  .../browser/ui/browser_command_controller.cc  |  15 +
  chrome/browser/ui/browser_commands.cc         |   3 +-
  .../read_anything_side_panel_controller.cc    |   4 +
- 14 files changed, 668 insertions(+), 17 deletions(-)
+ 14 files changed, 671 insertions(+), 17 deletions(-)
  create mode 100644 chrome/browser/cbf/cbf_embedded_browser_window.cc
  create mode 100644 chrome/browser/cbf/cbf_embedded_browser_window.h
 
@@ -56,10 +56,10 @@ index 30fab24143ca3..a45e93af269e1 100644
    ]
 diff --git a/chrome/browser/cbf/cbf_embedded_browser_window.cc b/chrome/browser/cbf/cbf_embedded_browser_window.cc
 new file mode 100644
-index 0000000000000..c3b40f19ee671
+index 0000000000000..da2dd78c8556d
 --- /dev/null
 +++ b/chrome/browser/cbf/cbf_embedded_browser_window.cc
-@@ -0,0 +1,480 @@
+@@ -0,0 +1,483 @@
 +#include "chrome/browser/cbf/cbf_embedded_browser_window.h"
 +
 +#include <memory>
@@ -273,6 +273,9 @@ index 0000000000000..c3b40f19ee671
 +  bool IsVisible() const override { return true; }
 +  void SetBounds(const gfx::Rect& bounds) override {}
 +  void Close() override {
++    if (browser_) {
++      browser_->OnWindowClosing();
++    }
 +    if (close_callback_) {
 +      std::move(close_callback_).Run();
 +    }

@@ -1,6 +1,6 @@
 # ADR 0007: Embedded Rendering Invariant for Browser-Backed Chrome Context
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-03-03
 
 ## Context
