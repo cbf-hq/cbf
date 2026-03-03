@@ -14,36 +14,30 @@ uv run tool ...
 
 ## Commands
 
-Use the `patch` command group:
-
 ```bash
-tool patch --help
+uv run tool --help
 ```
 
 Available commands:
 
-- `tool patch apply`
-- `tool patch export`
-- `tool patch clean`
-- `tool patch commit`
-- `tool patch git`
-- `tool patch verify`
-- `tool patch build`
+- `uv run tool apply`
+- `uv run tool export`
+- `uv run tool clean`
+- `uv run tool commit`
+- `uv run tool git`
+- `uv run tool verify`
+- `uv run tool build`
+- `uv run tool run`
 
-`tool patch apply` uses the current `chromium/src` checkout by default. Pass
+`uv run tool apply` uses the current `chromium/src` checkout by default. Pass
 `--branch <name>` only when you want the tool to reset/create a work branch at
 the selected base commit before applying patches.
 
-`tool patch build` supports `--out-dir` to override `series.toml` output dir:
+`uv run tool build` supports `--out-dir` to override `series.toml` output dir:
 
 ```bash
-tool patch build -t chrome --out-dir out/Release
+uv run tool build -t chrome --out-dir out/Release
 ```
-
-## Deprecated Alias
-
-`tool chromium ...` is still available as a compatibility alias, but it is deprecated.
-Use `tool patch ...` for new scripts.
 
 ## Common Options
 
@@ -62,7 +56,7 @@ Priority:
 Example:
 
 ```bash
-tool patch verify --depot-tools ~/dev/depot_tools
+uv run tool verify --depot-tools ~/dev/depot_tools
 ```
 
 ## Commit Workflow
@@ -72,14 +66,14 @@ tool patch verify --depot-tools ~/dev/depot_tools
 Examples:
 
 ```bash
-tool patch commit -m "cbf: fix bridge callback race"
-tool patch commit -a -m "cbf: stage tracked changes and commit"
-tool patch commit --amend -m "cbf: revise patch message"
+uv run tool commit -m "cbf: fix bridge callback race"
+uv run tool commit -a -m "cbf: stage tracked changes and commit"
+uv run tool commit --amend -m "cbf: revise patch message"
 ```
 
 ## Git Passthrough
 
-`tool patch git` is an alias for:
+`uv run tool git` is an alias for:
 
 ```bash
 cd chromium/src && git <args...>
@@ -88,6 +82,14 @@ cd chromium/src && git <args...>
 Examples:
 
 ```bash
-tool patch git status
-tool patch git log --oneline -n 10
+uv run tool git status
+uv run tool git log --oneline -n 10
+```
+
+## Running Chromium
+
+`uv run tool run` launches Chromium with CBF-specific flags:
+
+```bash
+uv run tool run --enable-features=Cbf --cbf-ipc-channel=my-channel
 ```

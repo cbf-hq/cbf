@@ -26,8 +26,8 @@ autoninja -C out/Default chrome
 autoninja -C out/Default cbf_bridge
 ```
 
-- For routine local builds, prefer `uv run tool patch build -t <target>` or
-  `just patch build -t <target>`. Those flows resolve `depot_tools`
+- For routine local builds, prefer `uv run tool build -t <target>` or
+  `just build -t <target>`. Those flows resolve `depot_tools`
   automatically, so you do not need to modify `PATH` manually.
 - `autoninja` is the direct fallback when you need to run Chromium builds
   yourself. It requires `depot_tools` on `PATH`.
@@ -42,9 +42,9 @@ autoninja -C out/Default cbf_bridge
   exported patch titles use short imperative English, and patch refinements
   should be folded with `fixup` / `squash` instead of appended as new fix
   patches.
-- Prefer `uv run tool patch apply` to replay the exported patch queue onto
+- Prefer `uv run tool apply` to replay the exported patch queue onto
   `chromium/src`.
-- Prefer `uv run tool patch export` after curating the `chromium/src` commit
+- Prefer `uv run tool export` after curating the `chromium/src` commit
   stack so `chromium/patches/cbf` stays aligned with the current history.
 - When Chromium updates break bridge behavior, update contracts and repin known-good revisions.
 - Avoid mixing product-domain behavior into fork patches; keep changes backend-generic for CBF.

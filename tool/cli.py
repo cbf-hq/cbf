@@ -183,29 +183,7 @@ def cli() -> None:
     return None
 
 
-@cli.group("patch", help="Chromium patch/build helpers.")
-def patch() -> None:
-    return None
-
-
-@cli.group(help="Deprecated alias for `patch`.")
-def chromium() -> None:
-    return None
-
-
-def _warn_if_chromium_alias(ctx: click.Context) -> None:
-    parent = ctx.parent
-    if parent is None or parent.info_name != "chromium":
-        return None
-
-    click.echo(
-        "warning: `tool chromium ...` is deprecated; use `tool patch ...` instead.",
-        err=True,
-    )
-    return None
-
-
-@patch.command("apply", help="Apply patch series via git am.")
+@cli.command("apply", help="Apply patch series via git am.")
 @_common_series_options
 @click.option(
     "--base",
@@ -217,115 +195,43 @@ def _warn_if_chromium_alias(ctx: click.Context) -> None:
     default=None,
     help="Work branch name to reset/create (defaults to current checkout)",
 )
-def patch_apply(*, series: str, base: str | None, branch: str | None) -> None:
+def apply(*, series: str, base: str | None, branch: str | None) -> None:
     cmd_chromium_apply(series=series, base=base, branch=branch)
 
 
-@chromium.command("apply", help="Apply patch series via git am.")
-@_common_series_options
-@click.option(
-    "--base",
-    default=None,
-    help="Base commit to apply onto (overrides series.toml)",
-)
-@click.option(
-    "--branch",
-    default=None,
-    help="Work branch name to reset/create (defaults to current checkout)",
-)
-@click.pass_context
-def chromium_apply(
-    ctx: click.Context,
-    *,
-    series: str,
-    base: str | None,
-    branch: str | None,
-) -> None:
-    _warn_if_chromium_alias(ctx)
-    cmd_chromium_apply(series=series, base=base, branch=branch)
-
-
-@patch.command("export", help="Export patch series via git format-patch.")
+@cli.command("export", help="Export patch series via git format-patch.")
 @_common_series_options
 @click.option(
     "--base",
     default=None,
     help="Base commit to export from (overrides series.toml)",
 )
-def patch_export(*, series: str, base: str | None) -> None:
+def export(*, series: str, base: str | None) -> None:
     cmd_chromium_export(series=series, base=base)
 
 
-@chromium.command("export", help="Export patch series via git format-patch.")
-@_common_series_options
-@click.option(
-    "--base",
-    default=None,
-    help="Base commit to export from (overrides series.toml)",
-)
-@click.pass_context
-def chromium_export(
-    ctx: click.Context,
-    *,
-    series: str,
-    base: str | None,
-) -> None:
-    _warn_if_chromium_alias(ctx)
-    cmd_chromium_export(series=series, base=base)
-
-
-@patch.command("clean", help="Clean chromium/src (reset and clean).")
+@cli.command("clean", help="Clean chromium/src (reset and clean).")
 @_common_series_options
 @click.option(
     "--base",
     default=None,
     help="Base commit to clean to (overrides series.toml)",
 )
-def patch_clean(*, series: str, base: str | None) -> None:
+def clean(*, series: str, base: str | None) -> None:
     cmd_chromium_clean(series=series, base=base)
 
 
-@chromium.command("clean", help="Clean chromium/src (reset and clean).")
-@_common_series_options
-@click.option(
-    "--base",
-    default=None,
-    help="Base commit to clean to (overrides series.toml)",
-)
-@click.pass_context
-def chromium_clean(
-    ctx: click.Context,
-    *,
-    series: str,
-    base: str | None,
-) -> None:
-    _warn_if_chromium_alias(ctx)
-    cmd_chromium_clean(series=series, base=base)
-
-
-@patch.command(
+@cli.command(
     "git",
     help="Run git in chromium/src.",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
 )
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def patch_git(args: tuple[str, ...]) -> int:
+def git(args: tuple[str, ...]) -> int:
     return cmd_chromium_git(args=args)
 
 
-@chromium.command(
-    "git",
-    help="Run git in chromium/src.",
-    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
-)
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
-@click.pass_context
-def chromium_git(ctx: click.Context, args: tuple[str, ...]) -> int:
-    _warn_if_chromium_alias(ctx)
-    return cmd_chromium_git(args=args)
-
-
-@patch.command("commit", help="Commit chromium/src changes.")
+@cli.command("commit", help="Commit chromium/src changes.")
 @_common_series_options
 @click.option(
     "-m",
@@ -345,7 +251,7 @@ def chromium_git(ctx: click.Context, args: tuple[str, ...]) -> int:
     is_flag=True,
     help="Stage all tracked modifications before commit",
 )
-def patch_commit(
+def commit(
     *,
     series: str,
     message: str,
@@ -360,66 +266,14 @@ def patch_commit(
     )
 
 
-@chromium.command("commit", help="Commit chromium/src changes.")
-@_common_series_options
-@click.option(
-    "-m",
-    "--message",
-    required=True,
-    help="Commit message",
-)
-@click.option(
-    "--amend",
-    is_flag=True,
-    help="Amend the previous commit",
-)
-@click.option(
-    "-a",
-    "--all",
-    "stage_all",
-    is_flag=True,
-    help="Stage all tracked modifications before commit",
-)
-@click.pass_context
-def chromium_commit(
-    ctx: click.Context,
-    *,
-    series: str,
-    message: str,
-    amend: bool,
-    stage_all: bool,
-) -> None:
-    _warn_if_chromium_alias(ctx)
-    cmd_chromium_commit(
-        series=series,
-        message=message,
-        amend=amend,
-        stage_all=stage_all,
-    )
-
-
-@patch.command("verify", help="Run gn gen --check.")
+@cli.command("verify", help="Run gn gen --check.")
 @_common_series_options
 @_common_depot_tools_option
-def patch_verify(*, series: str, depot_tools: str | None) -> None:
+def verify(*, series: str, depot_tools: str | None) -> None:
     cmd_chromium_verify(series=series, depot_tools=depot_tools)
 
 
-@chromium.command("verify", help="Run gn gen --check.")
-@_common_series_options
-@_common_depot_tools_option
-@click.pass_context
-def chromium_verify(
-    ctx: click.Context,
-    *,
-    series: str,
-    depot_tools: str | None,
-) -> None:
-    _warn_if_chromium_alias(ctx)
-    cmd_chromium_verify(series=series, depot_tools=depot_tools)
-
-
-@patch.command("build", help="Build chrome via autoninja.")
+@cli.command("build", help="Build chrome via autoninja.")
 @_common_series_options
 @click.option(
     "-t",
@@ -439,7 +293,7 @@ def chromium_verify(
     ),
 )
 @_common_depot_tools_option
-def patch_build(
+def build(
     *,
     series: str,
     targets: tuple[str, ...],
@@ -454,41 +308,34 @@ def patch_build(
     )
 
 
-@chromium.command("build", help="Build chrome via autoninja.")
+@cli.command("run", help="Run Chromium with CBF flags.")
 @_common_series_options
 @click.option(
-    "-t",
-    "--target",
-    "targets",
-    multiple=True,
-    default=("chrome",),
-    show_default=True,
-    help="Build target name (repeatable)",
+    "--enable-features",
+    default=None,
+    help="Value for --enable-features flag",
 )
 @click.option(
-    "--out-dir",
+    "--cbf-ipc-channel",
     default=None,
-    help=(
-        "Override GN output directory. Relative paths are resolved from "
-        "chromium/src (e.g. out/Release)."
-    ),
+    help="Value for --cbf-ipc-channel flag",
 )
 @_common_depot_tools_option
-@click.pass_context
-def chromium_build(
-    ctx: click.Context,
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def run(
     *,
     series: str,
-    targets: tuple[str, ...],
-    out_dir: str | None,
+    enable_features: str | None,
+    cbf_ipc_channel: str | None,
     depot_tools: str | None,
+    args: tuple[str, ...],
 ) -> None:
-    _warn_if_chromium_alias(ctx)
-    cmd_chromium_build(
+    cmd_chromium_run(
         series=series,
+        enable_features=enable_features,
+        cbf_ipc_channel=cbf_ipc_channel,
         depot_tools=depot_tools,
-        targets=targets,
-        out_dir=out_dir,
+        args=args,
     )
 
 
