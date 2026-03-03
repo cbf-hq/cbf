@@ -24,3 +24,7 @@ Patches are applied in lexical order:
 - Keep dependency direction explicit in patch ordering.
 - Prefer mechanical moves/refactors before behavior changes.
 - Keep each patch buildable in the target Chromium output directory.
+- Use short imperative English subjects for exported patches; do not use
+  Conventional Commits in patch titles.
+- When refining an existing patch, prefer `fixup` / `squash` into that patch
+  instead of adding a follow-up fix patch.

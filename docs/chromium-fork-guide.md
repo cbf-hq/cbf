@@ -29,6 +29,10 @@ autoninja -C out/Default cbf_bridge
 ## 4. Patch and Drift Policy
 
 - Keep CBF-specific changes traceable in `chromium/patches/cbf`.
+- Follow the patch queue rules in `chromium/patches/cbf/README.md`:
+  exported patch titles use short imperative English, and patch refinements
+  should be folded with `fixup` / `squash` instead of appended as new fix
+  patches.
 - When Chromium updates break bridge behavior, update contracts and repin known-good revisions.
 - Avoid mixing product-domain behavior into fork patches; keep changes backend-generic for CBF.
 
