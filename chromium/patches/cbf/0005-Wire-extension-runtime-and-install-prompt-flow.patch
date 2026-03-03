@@ -1,11 +1,10 @@
-From ab555c1e727ff53908871ce4838d53b0f65aff09 Mon Sep 17 00:00:00 2001
+From 81fb3ba914acfd200d6633a0f3cd3f98fe4d0203 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 24 Feb 2026 14:41:14 +0900
-Subject: [PATCH 07/12] feat(chrome): wire extension runtime and install prompt
- flow
+Subject: [PATCH 05/11] Wire extension runtime and install prompt flow
 
 ---
- chrome/browser/cbf/BUILD.gn                   |   2 +
+ chrome/browser/cbf/BUILD.gn                   |   6 +
  chrome/browser/cbf/bridge/cbf_bridge.h        |  20 ++
  chrome/browser/cbf/bridge/cbf_bridge_client.h |   8 +
  .../cbf/bridge/cbf_bridge_client_impl.cc      |  59 ++++++
@@ -16,22 +15,33 @@ Subject: [PATCH 07/12] feat(chrome): wire extension runtime and install prompt
  .../browser/cbf/bridge/cbf_bridge_web_page.cc |  91 ++++++++
  chrome/browser/cbf/cbf_profile_service.cc     | 196 +++++++++++++++++-
  chrome/browser/cbf/cbf_profile_service.h      |  34 +++
+ chrome/browser/cbf/cbf_tab_manager.cc         |   2 +
  chrome/browser/cbf/mojom/cbf_browser.mojom    |  40 ++++
+ ...bf_profile_devtools_controller_unittest.cc |   6 +
  .../cbf/profile/cbf_web_contents_bootstrap.cc |  91 ++++++++
  .../cbf/profile/cbf_web_contents_bootstrap.h  |  22 ++
  .../cbf_web_contents_bootstrap_unittest.cc    |  52 +++++
  .../cbf/test/cbf_test_profile_observer.cc     |  22 ++
  .../cbf/test/cbf_test_profile_observer.h      |  17 ++
- 17 files changed, 944 insertions(+), 1 deletion(-)
+ 19 files changed, 956 insertions(+), 1 deletion(-)
  create mode 100644 chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
  create mode 100644 chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h
  create mode 100644 chrome/browser/cbf/profile/cbf_web_contents_bootstrap_unittest.cc
 
 diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
-index 86f9ec022ad58..db0de55a52c51 100644
+index 148c9638bf486..db0de55a52c51 100644
 --- a/chrome/browser/cbf/BUILD.gn
 +++ b/chrome/browser/cbf/BUILD.gn
-@@ -69,12 +69,14 @@ source_set("cbf") {
+@@ -44,6 +44,8 @@ source_set("cbf") {
+     "profile/cbf_profile_popup_controller.h",
+     "profile/cbf_profile_service_context.cc",
+     "profile/cbf_profile_service_context.h",
++    "profile/cbf_web_contents_bootstrap.cc",
++    "profile/cbf_web_contents_bootstrap.h",
+   ]
+ 
+   public_deps = [ "//chrome/browser:browser_public_dependencies" ]
+@@ -67,12 +69,14 @@ source_set("cbf") {
      "//chrome/browser:global_features",
      "//chrome/browser:browser_process",
      "//chrome/browser/devtools:devtools",
@@ -46,6 +56,22 @@ index 86f9ec022ad58..db0de55a52c51 100644
      "//mojo/public/cpp/bindings",
      "//third_party/blink/public/common:headers",
      "//ui/base",
+@@ -138,6 +142,7 @@ source_set("cbf_tests") {
+     "profile/cbf_profile_drag_controller_unittest.cc",
+     "profile/cbf_profile_input_controller_unittest.cc",
+     "profile/cbf_profile_popup_controller_unittest.cc",
++    "profile/cbf_web_contents_bootstrap_unittest.cc",
+   ]
+ 
+   deps = [
+@@ -145,6 +150,7 @@ source_set("cbf_tests") {
+     ":mojom",
+     "//base",
+     "//base/test:test_support",
++    "//chrome/test:test_support",
+     "//content/test:test_support",
+     "//testing/gtest",
+   ]
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
 index c5fab9290a17f..677baf355b181 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge.h
@@ -994,6 +1020,26 @@ index 7a2d3e97577db..cc51737e6551a 100644
    mojo::ReceiverSet<mojom::CbfProfileService> receivers_;
  
    base::WeakPtrFactory<CbfProfileService> weak_factory_{this};
+diff --git a/chrome/browser/cbf/cbf_tab_manager.cc b/chrome/browser/cbf/cbf_tab_manager.cc
+index d619db88a39ee..5abf3e78076b9 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.cc
++++ b/chrome/browser/cbf/cbf_tab_manager.cc
+@@ -8,6 +8,7 @@
+ #include "base/logging.h"
+ #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
+ #include "chrome/browser/cbf/cbf_profile_service.h"
++#include "chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+@@ -47,6 +48,7 @@ TabId CbfTabManager::CreateWebPage(const GURL& initial_url) {
+   if (profile_service_) {
+     web_contents_ptr->SetDelegate(profile_service_->GetWebContentsDelegate());
+   }
++  BootstrapCbfWebContents(web_contents_ptr, profile_);
+ 
+   const TabId tab_id = next_tab_id_++;
+   pages_.emplace(tab_id, std::move(web_contents));
 diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
 index 96d61c22a34cf..d6f38058309e2 100644
 --- a/chrome/browser/cbf/mojom/cbf_browser.mojom
@@ -1059,6 +1105,29 @@ index 96d61c22a34cf..d6f38058309e2 100644
  };
  
  interface CbfBrowserService {
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+index 610674f6fbaa9..054ae903c6662 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+@@ -6,6 +6,7 @@
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
+ #include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h"
+ #include "mojo/public/cpp/bindings/remote.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+@@ -37,5 +38,10 @@ TEST_F(CbfProfileDevToolsControllerTest, CloseDuringAttachRetryIsSafe) {
+   task_environment_.FastForwardBy(base::Milliseconds(2000));
+ }
+ 
++TEST_F(CbfProfileDevToolsControllerTest, BootstrapNullWebContentsIsSafeNoOp) {
++  BootstrapCbfWebContents(nullptr, nullptr);
++  EXPECT_FALSE(HasCbfWebContentsBootstrapForTesting(nullptr));
++}
++
+ }  // namespace
+ }  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
 new file mode 100644
 index 0000000000000..7d15716086e64

@@ -1,0 +1,653 @@
+From 68cbe0bbcf1c9409e841133fed12d7d428821ded Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Tue, 3 Mar 2026 18:37:19 +0900
+Subject: [PATCH 07/11] Stabilize DevTools frontend rebinding
+
+---
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |   5 -
+ chrome/browser/cbf/cbf_browser_service.cc     |  19 ++
+ chrome/browser/cbf/cbf_browser_service.h      |   4 +
+ .../cbf_profile_devtools_controller.cc        | 238 +++++++++++-------
+ .../profile/cbf_profile_devtools_controller.h |  13 +-
+ ...bf_profile_devtools_controller_unittest.cc |   4 +
+ .../chrome_devtools_manager_delegate.cc       |   9 +
+ .../browser/devtools/devtools_ui_bindings.cc  |  26 --
+ 8 files changed, 190 insertions(+), 128 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index 0646ac9cc4c46..e1aed35278bcf 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -2,8 +2,6 @@
+ 
+ #include <utility>
+ 
+-#include "base/logging.h"
+-
+ namespace cbf_bridge::internal {
+ 
+ CbfBridgeEventData::CbfBridgeEventData() = default;
+@@ -109,9 +107,6 @@ void CbfBridgeClientImpl::Observer::OnWebPageCreated(uint64_t tab_id,
+ void CbfBridgeClientImpl::Observer::OnDevToolsOpened(
+     uint64_t tab_id,
+     uint64_t devtools_tab_id) {
+-  LOG(INFO) << "[CBF][Bridge] OnDevToolsOpened inspected_id=" << tab_id
+-            << " devtools_id=" << devtools_tab_id
+-            << " profile_id=" << profile_id_;
+   impl_->web_page_profiles.emplace(devtools_tab_id, profile_id_);
+   CbfBridgeEventData event;
+   event.kind = kEventDevToolsOpened;
+diff --git a/chrome/browser/cbf/cbf_browser_service.cc b/chrome/browser/cbf/cbf_browser_service.cc
+index eb34e7ab0fa04..e1bf43758771b 100644
+--- a/chrome/browser/cbf/cbf_browser_service.cc
++++ b/chrome/browser/cbf/cbf_browser_service.cc
+@@ -180,6 +180,25 @@ bool CbfBrowserService::IsShutdownRequested() const {
+          shutdown_state_ == ShutdownState::kBlocked;
+ }
+ 
++bool CbfBrowserService::IsManagedWebContents(
++    content::WebContents* web_contents) const {
++  if (!web_contents) {
++    return false;
++  }
++
++  for (const auto& entry : profile_services_) {
++    const auto& service = entry.second;
++    if (!service) {
++      continue;
++    }
++    if (service->GetTabIdForWebContents(web_contents) !=
++        kInvalidTabId) {
++      return true;
++    }
++  }
++  return false;
++}
++
+ void CbfBrowserService::NotifyBeforeUnloadDialogRequested(
+     TabId tab_id) {
+   if (shutdown_state_ != ShutdownState::kWaitingBeforeUnload &&
+diff --git a/chrome/browser/cbf/cbf_browser_service.h b/chrome/browser/cbf/cbf_browser_service.h
+index 9d110944250cc..3cfba9a466121 100644
+--- a/chrome/browser/cbf/cbf_browser_service.h
++++ b/chrome/browser/cbf/cbf_browser_service.h
+@@ -13,6 +13,9 @@
+ #include "mojo/public/cpp/bindings/remote.h"
+ 
+ class Profile;
++namespace content {
++class WebContents;
++}  // namespace content
+ 
+ namespace cbf {
+ 
+@@ -38,6 +41,7 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+   void ForceShutdown() override;
+   void NotifyWebPageClosed();
+   bool IsShutdownRequested() const;
++  bool IsManagedWebContents(content::WebContents* web_contents) const;
+   void NotifyBeforeUnloadDialogRequested(TabId tab_id);
+   void NotifyBeforeUnloadFired(TabId tab_id, bool proceed);
+   CbfProfileService* GetProfileServiceForProfile(::Profile* profile);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+index 4ab9549833bf0..6eb797618dab1 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+@@ -5,19 +5,17 @@
+ 
+ #include "base/command_line.h"
+ #include "base/functional/bind.h"
+-#include "base/logging.h"
+-#include "base/task/single_thread_task_runner.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "chrome/browser/devtools/devtools_window.h"
+ #include "chrome/browser/devtools/devtools_ui_bindings.h"
++#include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/webui/devtools/devtools_ui.h"
+ #include "chrome/common/chrome_switches.h"
+ #include "content/public/browser/devtools_agent_host.h"
+-#include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_delegate.h"
+-#include "content/public/common/referrer.h"
+-#include "ui/base/page_transition_types.h"
++#include "content/public/browser/web_contents_observer.h"
+ #include "ui/gfx/geometry/rect.h"
+ #include "url/gurl.h"
+ 
+@@ -72,9 +70,7 @@ class CbfDevToolsUIDelegate final : public DevToolsUIBindings::Delegate {
+ 
+   void Inspect(scoped_refptr<content::DevToolsAgentHost> host) override {}
+   void SetInspectedPageBounds(const gfx::Rect& rect) override {}
+-  void InspectElementCompleted() override {
+-    LOG(INFO) << "[CBF][DevTools] InspectElementCompleted";
+-  }
++  void InspectElementCompleted() override {}
+   void SetIsDocked(bool is_docked) override {}
+   void OpenInNewTab(const std::string& url) override {}
+   void OpenSearchResultsInNewTab(const std::string& query) override {}
+@@ -82,16 +78,11 @@ class CbfDevToolsUIDelegate final : public DevToolsUIBindings::Delegate {
+   void SetEyeDropperActive(bool active) override {}
+   void OpenNodeFrontend() override {}
+   void InspectedContentsClosing() override {
+-    LOG(INFO) << "[CBF][DevTools] InspectedContentsClosing";
+     CloseWindow();
+   }
+-  void OnLoadCompleted() override {
+-    LOG(INFO) << "[CBF][DevTools] Frontend OnLoadCompleted";
+-  }
++  void OnLoadCompleted() override {}
+   void ReadyForTest() override {}
+-  void ConnectionReady() override {
+-    LOG(INFO) << "[CBF][DevTools] Frontend ConnectionReady";
+-  }
++  void ConnectionReady() override {}
+   void SetOpenNewWindowForPopups(bool value) override {}
+   infobars::ContentInfoBarManager* GetInfoBarManager() override {
+     return nullptr;
+@@ -118,15 +109,60 @@ content::RenderFrameHost* ResolveInspectFrame(
+   return inspected_contents->GetPrimaryMainFrame();
+ }
+ 
++bool IsDevToolsAllowed(content::WebContents* inspected_contents) {
++  if (!inspected_contents) {
++    return false;
++  }
++  Profile* profile = Profile::FromBrowserContext(
++      inspected_contents->GetBrowserContext());
++  if (!profile) {
++    return false;
++  }
++  return DevToolsWindow::AllowDevToolsFor(profile, inspected_contents);
++}
++
+ }  // namespace
+ 
+ namespace cbf {
+ 
++class CbfProfileDevToolsController::DevToolsFrontendObserver final
++    : public content::WebContentsObserver {
++ public:
++  DevToolsFrontendObserver(
++      content::WebContents* web_contents,
++      base::WeakPtr<CbfProfileDevToolsController> controller,
++      TabId inspected_tab_id,
++      TabId devtools_tab_id)
++      : content::WebContentsObserver(web_contents),
++        controller_(std::move(controller)),
++        inspected_tab_id_(inspected_tab_id),
++        devtools_tab_id_(devtools_tab_id) {}
++  ~DevToolsFrontendObserver() override = default;
++
++  void RenderFrameHostChanged(content::RenderFrameHost* old_frame,
++                              content::RenderFrameHost* new_frame) override {
++    if (!new_frame || !new_frame->IsInPrimaryMainFrame()) {
++      return;
++    }
++    if (!controller_) {
++      return;
++    }
++    controller_->OnDevToolsFrontendFrameChanged(inspected_tab_id_,
++                                                devtools_tab_id_);
++  }
++
++ private:
++  base::WeakPtr<CbfProfileDevToolsController> controller_;
++  TabId inspected_tab_id_ = kInvalidTabId;
++  TabId devtools_tab_id_ = kInvalidTabId;
++};
++
+ struct CbfProfileDevToolsController::DevToolsSession {
+   DevToolsSession();
+   ~DevToolsSession();
+ 
+   raw_ptr<DevToolsUIBindings> bindings = nullptr;
++  std::unique_ptr<DevToolsFrontendObserver> frontend_observer;
+ };
+ 
+ CbfProfileDevToolsController::DevToolsSession::DevToolsSession() = default;
+@@ -148,12 +184,16 @@ void CbfProfileDevToolsController::OpenDevTools(TabId inspected_tab_id) {
+   content::WebContents* inspected_contents =
+       context_->tab_manager().GetWebContents(inspected_tab_id);
+   if (!inspected_contents) {
+-    LOG(INFO) << "[CBF][DevTools] OpenDevTools ignored: inspected page not found id="
+-              << inspected_tab_id;
+     return;
+   }
+-  LOG(INFO) << "[CBF][DevTools] OpenDevTools requested inspected_id="
+-            << inspected_tab_id;
++  if (!IsDevToolsAllowed(inspected_contents)) {
++    auto& observer = context_->observer_remote();
++    if (observer.is_bound()) {
++      observer->OnExtensionRuntimeWarning(inspected_tab_id,
++                                          "DevTools blocked by policy");
++    }
++    return;
++  }
+ 
+   TabId devtools_tab_id = kInvalidTabId;
+   auto existing_it = inspected_to_devtools_.find(inspected_tab_id);
+@@ -168,56 +208,59 @@ void CbfProfileDevToolsController::OpenDevTools(TabId inspected_tab_id) {
+   }
+ 
+   if (devtools_tab_id == kInvalidTabId) {
+-    devtools_tab_id = context_->tab_manager().CreateWebPage(GURL());
++    const GURL devtools_frontend_url = BuildDevToolsFrontendUrl();
++
++    // CreateWebPage navigates to the devtools:// URL internally via LoadURL.
++    // The WebUI system creates DevToolsUIBindings synchronously during
++    // LoadURL, so ForWebContents returns non-null immediately after this call.
++    devtools_tab_id =
++        context_->tab_manager().CreateWebPage(devtools_frontend_url);
+     if (devtools_tab_id == kInvalidTabId) {
+-      LOG(INFO) << "[CBF][DevTools] Failed to create devtools page for inspected_id="
+-                << inspected_tab_id;
+       return;
+     }
+ 
+     content::WebContents* devtools_contents =
+         context_->tab_manager().GetWebContents(devtools_tab_id);
+     if (!devtools_contents) {
+-      LOG(INFO) << "[CBF][DevTools] Created devtools id="
+-                << devtools_tab_id << " but WebContents lookup failed";
+       context_->tab_manager().CloseWebPage(devtools_tab_id);
+       return;
+     }
+ 
+-    const GURL devtools_frontend_url = BuildDevToolsFrontendUrl();
+-    LOG(INFO) << "[CBF][DevTools] Created devtools page id="
+-              << devtools_tab_id
+-              << " for inspected_id=" << inspected_tab_id
+-              << " url=" << devtools_frontend_url;
+-
+     if (register_ime_handler_) {
+       register_ime_handler_.Run(devtools_tab_id, devtools_contents);
+     }
+ 
+-    auto session = std::make_unique<DevToolsSession>();
+-    session->bindings = nullptr;
++    DevToolsUIBindings* bindings =
++        DevToolsUIBindings::ForWebContents(devtools_contents);
++    if (!bindings) {
++      context_->tab_manager().CloseWebPage(devtools_tab_id);
++      return;
++    }
++
++    scoped_refptr<content::DevToolsAgentHost> agent_host =
++        content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
++    if (!agent_host) {
++      context_->tab_manager().CloseWebPage(devtools_tab_id);
++      return;
++    }
+ 
+-    devtools_contents->GetController().LoadURL(
+-        devtools_frontend_url, content::Referrer(),
+-        ui::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
+-    LOG(INFO) << "[CBF][DevTools] Navigated devtools page id="
+-              << devtools_tab_id << " to url=" << devtools_frontend_url;
++    bindings->SetDelegate(
++        new CbfDevToolsUIDelegate(devtools_contents, inspected_contents));
++    bindings->AttachTo(agent_host);
++
++    auto session = std::make_unique<DevToolsSession>();
++    session->bindings = bindings;
++    session->frontend_observer = std::make_unique<DevToolsFrontendObserver>(
++        devtools_contents, weak_factory_.GetWeakPtr(), inspected_tab_id,
++        devtools_tab_id);
+ 
+     devtools_sessions_[devtools_tab_id] = std::move(session);
+     inspected_to_devtools_[inspected_tab_id] = devtools_tab_id;
+     devtools_to_inspected_[devtools_tab_id] = inspected_tab_id;
+-  } else {
+-    LOG(INFO) << "[CBF][DevTools] Reusing existing devtools page id="
+-              << devtools_tab_id
+-              << " for inspected_id=" << inspected_tab_id;
+   }
+ 
+-  TryAttachSession(inspected_tab_id, devtools_tab_id, 0);
+-
+   auto& observer = context_->observer_remote();
+   if (observer.is_bound()) {
+-    LOG(INFO) << "[CBF][DevTools] Notifying OnDevToolsOpened inspected_id="
+-              << inspected_tab_id << " devtools_id=" << devtools_tab_id;
+     observer->OnDevToolsOpened(inspected_tab_id, devtools_tab_id);
+   }
+ }
+@@ -225,28 +268,49 @@ void CbfProfileDevToolsController::OpenDevTools(TabId inspected_tab_id) {
+ void CbfProfileDevToolsController::InspectElement(TabId inspected_tab_id,
+                                                   int32_t x,
+                                                   int32_t y) {
++  InspectElementForFrame(inspected_tab_id, std::nullopt, x, y);
++}
++
++void CbfProfileDevToolsController::InspectElementForFrame(
++    TabId inspected_tab_id,
++    const std::optional<content::GlobalRenderFrameHostId>& inspected_frame_id,
++    int32_t x,
++    int32_t y) {
+   content::WebContents* inspected_contents =
+       context_->tab_manager().GetWebContents(inspected_tab_id);
+   if (!inspected_contents) {
+-    LOG(INFO) << "[CBF][DevTools] InspectElement ignored: inspected page not found id="
+-              << inspected_tab_id;
++    return;
++  }
++  if (!IsDevToolsAllowed(inspected_contents)) {
++    auto& observer = context_->observer_remote();
++    if (observer.is_bound()) {
++      observer->OnExtensionRuntimeWarning(inspected_tab_id,
++                                          "DevTools blocked by policy");
++    }
+     return;
+   }
+ 
+-  LOG(INFO) << "[CBF][DevTools] InspectElement requested inspected_id="
+-            << inspected_tab_id << " x=" << x << " y=" << y;
+   OpenDevTools(inspected_tab_id);
+ 
+   scoped_refptr<content::DevToolsAgentHost> agent_host =
+       content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
+-  content::RenderFrameHost* frame = ResolveInspectFrame(inspected_contents);
++  content::RenderFrameHost* frame = nullptr;
++  if (inspected_frame_id) {
++    content::RenderFrameHost* explicit_frame =
++        content::RenderFrameHost::FromID(*inspected_frame_id);
++    if (explicit_frame &&
++        content::WebContents::FromRenderFrameHost(explicit_frame) ==
++            inspected_contents) {
++      frame = explicit_frame;
++    }
++  }
++  if (!frame) {
++    frame = ResolveInspectFrame(inspected_contents);
++  }
+   if (!agent_host || !frame) {
+-    LOG(INFO) << "[CBF][DevTools] InspectElement aborted: missing agent_host/frame";
+     return;
+   }
+ 
+-  LOG(INFO) << "[CBF][DevTools] Dispatching agent_host->InspectElement id="
+-            << agent_host->GetId();
+   agent_host->InspectElement(frame, x, y);
+ }
+ 
+@@ -268,68 +332,54 @@ void CbfProfileDevToolsController::OnWebPageClosed(TabId tab_id) {
+   }
+ }
+ 
+-void CbfProfileDevToolsController::TryAttachSession(
++void CbfProfileDevToolsController::OnDevToolsFrontendFrameChanged(
+     TabId inspected_tab_id,
+-    TabId devtools_tab_id,
+-    int attempt) {
+-  constexpr int kMaxAttempts = 50;
+-  constexpr base::TimeDelta kRetryDelay = base::Milliseconds(20);
+-
++    TabId devtools_tab_id) {
+   auto session_it = devtools_sessions_.find(devtools_tab_id);
+   if (session_it == devtools_sessions_.end()) {
+     return;
+   }
+ 
+-  content::WebContents* inspected_contents =
+-      context_->tab_manager().GetWebContents(inspected_tab_id);
+   content::WebContents* devtools_contents =
+       context_->tab_manager().GetWebContents(devtools_tab_id);
+-  if (!inspected_contents || !devtools_contents) {
+-    LOG(INFO) << "[CBF][DevTools] Attach skipped: missing contents inspected_id="
+-              << inspected_tab_id
+-              << " devtools_id=" << devtools_tab_id;
++  if (!devtools_contents) {
+     return;
+   }
+ 
+   DevToolsUIBindings* bindings =
+       DevToolsUIBindings::ForWebContents(devtools_contents);
+   if (!bindings) {
+-    if (attempt >= kMaxAttempts) {
+-      LOG(INFO) << "[CBF][DevTools] Attach failed: bindings not found"
+-                << " inspected_id=" << inspected_tab_id
+-                << " devtools_id=" << devtools_tab_id;
+-      return;
+-    }
+-
+-    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+-        FROM_HERE,
+-        base::BindOnce(&CbfProfileDevToolsController::TryAttachSession,
+-                       weak_factory_.GetWeakPtr(), inspected_tab_id,
+-                       devtools_tab_id, attempt + 1),
+-        kRetryDelay);
+     return;
+   }
+ 
+   auto& session = session_it->second;
+-  if (session->bindings != bindings) {
+-    session->bindings = bindings;
+-    bindings->SetDelegate(
+-        new CbfDevToolsUIDelegate(devtools_contents, inspected_contents));
+-  }
+-
+-  scoped_refptr<content::DevToolsAgentHost> agent_host =
+-      content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
+-  if (!agent_host) {
+-    LOG(INFO) << "[CBF][DevTools] Attach failed: agent_host unavailable"
+-              << " inspected_id=" << inspected_tab_id;
++  if (session->bindings == bindings) {
++    // Same bindings instance — no action needed.
++    // DevToolsUIBindings::ReadyToCommitNavigation handles same-RFH reloads
++    // internally (DetachClient + InnerAttach).
+     return;
+   }
+ 
+-  bindings->AttachTo(agent_host);
+-  LOG(INFO) << "[CBF][DevTools] Attached session inspected_id="
+-            << inspected_tab_id << " devtools_id=" << devtools_tab_id
+-            << " agent_host_id="
+-            << (agent_host ? agent_host->GetId() : std::string("<null>"));
++  // Cross-RFH navigation: old DevToolsUIBindings destroyed, new one created.
++  // Transfer the delegate and session from old to new bindings.
++  if (session->bindings) {
++    session->bindings->TransferDelegate(*bindings);
++  } else {
++    // Shouldn't happen — initial attach sets bindings. Recover gracefully.
++    content::WebContents* inspected_contents =
++        context_->tab_manager().GetWebContents(inspected_tab_id);
++    if (!inspected_contents) {
++      return;
++    }
++    bindings->SetDelegate(
++        new CbfDevToolsUIDelegate(devtools_contents, inspected_contents));
++    scoped_refptr<content::DevToolsAgentHost> agent_host =
++        content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
++    if (agent_host) {
++      bindings->AttachTo(agent_host);
++    }
++  }
++  session->bindings = bindings;
+ }
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
+index 4f4fef1a38586..11d9ce1a9358c 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
+@@ -3,12 +3,14 @@
+ 
+ #include <cstdint>
+ #include <memory>
++#include <optional>
+ 
+ #include "base/containers/flat_map.h"
+ #include "base/functional/callback.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "content/public/browser/global_routing_id.h"
+ 
+ namespace content {
+ class WebContents;
+@@ -31,14 +33,19 @@ class CbfProfileDevToolsController {
+           register_ime_handler);
+   void OpenDevTools(TabId inspected_tab_id);
+   void InspectElement(TabId inspected_tab_id, int32_t x, int32_t y);
++  void InspectElementForFrame(
++      TabId inspected_tab_id,
++      const std::optional<content::GlobalRenderFrameHostId>& inspected_frame_id,
++      int32_t x,
++      int32_t y);
+   void OnWebPageClosed(TabId tab_id);
+ 
+  private:
+   struct DevToolsSession;
++  class DevToolsFrontendObserver;
+ 
+-  void TryAttachSession(TabId inspected_tab_id,
+-                        TabId devtools_tab_id,
+-                        int attempt);
++  void OnDevToolsFrontendFrameChanged(TabId inspected_tab_id,
++                                      TabId devtools_tab_id);
+ 
+   base::flat_map<TabId, std::unique_ptr<DevToolsSession>> devtools_sessions_;
+   base::flat_map<TabId, TabId> inspected_to_devtools_;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+index 054ae903c6662..eff7d0cdf3be9 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+@@ -43,5 +43,9 @@ TEST_F(CbfProfileDevToolsControllerTest, BootstrapNullWebContentsIsSafeNoOp) {
+   EXPECT_FALSE(HasCbfWebContentsBootstrapForTesting(nullptr));
+ }
+ 
++TEST_F(CbfProfileDevToolsControllerTest, InspectElementForFrameIsSafeNoOp) {
++  controller_.InspectElementForFrame(kInvalidTabId, std::nullopt, 0, 0);
++}
++
+ }  // namespace
+ }  // namespace cbf
+diff --git a/chrome/browser/devtools/chrome_devtools_manager_delegate.cc b/chrome/browser/devtools/chrome_devtools_manager_delegate.cc
+index 556a9c5a4c986..817d418aae4ae 100644
+--- a/chrome/browser/devtools/chrome_devtools_manager_delegate.cc
++++ b/chrome/browser/devtools/chrome_devtools_manager_delegate.cc
+@@ -14,6 +14,7 @@
+ #include "base/strings/utf_string_conversions.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/browser_features.h"
++#include "chrome/browser/cbf/cbf_service.h"
+ #include "chrome/browser/devtools/chrome_devtools_session.h"
+ #include "chrome/browser/devtools/device/android_device_manager.h"
+ #include "chrome/browser/devtools/device/tcp_device_provider.h"
+@@ -316,6 +317,14 @@ std::string ChromeDevToolsManagerDelegate::GetTargetType(
+     return DevToolsAgentHost::kTypePage;
+   }
+ 
++  if (cbf::CbfService* cbf_service = cbf::CbfService::GetForProcess()) {
++    cbf::CbfBrowserService* cbf_browser_service = cbf_service->browser_service();
++    if (cbf_browser_service &&
++        cbf_browser_service->IsManagedWebContents(web_contents)) {
++      return DevToolsAgentHost::kTypePage;
++    }
++  }
++
+   return DevToolsAgentHost::kTypeOther;
+ }
+ 
+diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
+index e8006adbcb41c..9bf97561a7c7d 100644
+--- a/chrome/browser/devtools/devtools_ui_bindings.cc
++++ b/chrome/browser/devtools/devtools_ui_bindings.cc
+@@ -860,8 +860,6 @@ DevToolsUIBindings::~DevToolsUIBindings() {
+ void DevToolsUIBindings::HandleMessageFromDevToolsFrontend(
+     base::DictValue message) {
+   if (!frontend_host_) {
+-    LOG(INFO) << "[CBF][DevToolsUIBindings] Drop frontend message: "
+-              << "frontend_host is null";
+     return;
+   }
+   const std::string* method = message.FindString(kFrontendHostMethod);
+@@ -871,8 +869,6 @@ void DevToolsUIBindings::HandleMessageFromDevToolsFrontend(
+     return;
+   }
+   int id = message.FindInt(kFrontendHostId).value_or(0);
+-  LOG(INFO) << "[CBF][DevToolsUIBindings] Frontend->Embedder method="
+-            << (method ? *method : std::string("<null>")) << " id=" << id;
+   base::ListValue params_list;
+   if (params) {
+     params_list = std::move(*params).TakeList();
+@@ -895,13 +891,8 @@ void DevToolsUIBindings::DispatchProtocolMessage(
+     base::span<const uint8_t> message) {
+   DCHECK(agent_host == agent_host_.get());
+   if (!frontend_host_) {
+-    LOG(INFO) << "[CBF][DevToolsUIBindings] Drop backend protocol message: "
+-              << "frontend_host is null";
+     return;
+   }
+-  LOG(INFO) << "[CBF][DevToolsUIBindings] Backend->Frontend protocol bytes="
+-            << message.size();
+-
+   std::string_view message_sp(reinterpret_cast<const char*>(message.data()),
+                               message.size());
+   if (message_sp.length() < kMaxMessageChunkSize) {
+@@ -2164,7 +2155,6 @@ void DevToolsUIBindings::ReadyForTest() {
+ }
+ 
+ void DevToolsUIBindings::ConnectionReady() {
+-  LOG(INFO) << "[CBF][DevToolsUIBindings] ConnectionReady delegate call";
+   delegate_->ConnectionReady();
+ }
+ 
+@@ -2175,12 +2165,8 @@ void DevToolsUIBindings::SetOpenNewWindowForPopups(bool value) {
+ void DevToolsUIBindings::DispatchProtocolMessageFromDevToolsFrontend(
+     const std::string& message) {
+   if (!agent_host_) {
+-    LOG(INFO) << "[CBF][DevToolsUIBindings] Drop frontend protocol message: "
+-              << "agent_host is null";
+     return;
+   }
+-  LOG(INFO) << "[CBF][DevToolsUIBindings] Frontend->Backend protocol bytes="
+-            << message.size();
+   agent_host_->DispatchProtocolMessage(this, base::as_byte_span(message));
+ }
+ 
+@@ -2952,11 +2938,6 @@ void DevToolsUIBindings::CallClientMethodImpl(
+ void DevToolsUIBindings::ReadyToCommitNavigation(
+     content::NavigationHandle* navigation_handle) {
+   if (navigation_handle->IsInPrimaryMainFrame()) {
+-    LOG(INFO) << "[CBF][DevToolsUIBindings] ReadyToCommitNavigation url="
+-              << navigation_handle->GetURL()
+-              << " frontend_loaded=" << frontend_loaded_
+-              << " has_agent_host=" << static_cast<bool>(agent_host_.get())
+-              << " has_frontend_host=" << static_cast<bool>(frontend_host_);
+     if (frontend_loaded_ && agent_host_.get()) {
+       agent_host_->DetachClient(this);
+       InnerAttach();
+@@ -2968,8 +2949,6 @@ void DevToolsUIBindings::ReadyToCommitNavigation(
+       return;
+     }
+     if (frontend_host_) {
+-      LOG(INFO) << "[CBF][DevToolsUIBindings] ReadyToCommitNavigation: "
+-                << "frontend_host already exists";
+       return;
+     }
+     if (content::RenderFrameHost* opener = web_contents_->GetOpener()) {
+@@ -2978,9 +2957,6 @@ void DevToolsUIBindings::ReadyToCommitNavigation(
+       DevToolsUIBindings* opener_bindings =
+           opener_wc ? DevToolsUIBindings::ForWebContents(opener_wc) : nullptr;
+       if (!opener_bindings || !opener_bindings->frontend_host_) {
+-        LOG(INFO) << "[CBF][DevToolsUIBindings] ReadyToCommitNavigation: "
+-                  << "waiting for opener frontend host; opener_wc="
+-                  << static_cast<const void*>(opener_wc);
+         return;
+       }
+     }
+@@ -2989,8 +2965,6 @@ void DevToolsUIBindings::ReadyToCommitNavigation(
+         base::BindRepeating(
+             &DevToolsUIBindings::HandleMessageFromDevToolsFrontend,
+             base::Unretained(this)));
+-    LOG(INFO) << "[CBF][DevToolsUIBindings] ReadyToCommitNavigation: "
+-              << "frontend_host created";
+     return;
+   }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

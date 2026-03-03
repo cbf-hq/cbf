@@ -10,13 +10,25 @@ out_dir = "out/Default"
 # Patch order is lexical by filename (0001, 0002, ...).
 # Keep each patch buildable and responsibility-focused.
 #
-# 0001-CBF-bridge-series.patch
+# 0001-Add-CBF-bridge-baseline.patch
 #   Initial CBF bridge integration baseline in Chromium fork.
-# 0002-refactor-chrome-split-profile-service-into-focused-c.patch
+# 0002-Split-profile-service-into-focused-controllers.patch
 #   Split cbf_profile_service into focused controllers and move Mojo converters.
-# 0003-refactor-bridge-add-devtools-bridge-commands-and-eve.patch
-#   Add DevTools bridge commands/events across bridge and mojom mapping.
-# 0004-chore-chrome-add-devtools-ui-bindings-diagnostics.patch
-#   Add temporary diagnostics for DevTools UI bindings lifecycle.
-# 0005-test-chrome-add-browser-and-unit-tests-for-profile-c.patch
-#   Add browser/unit test coverage for refactored profile controllers.
+# 0003-Add-DevTools-bridge-commands-and-event-mapping.patch
+#   Extend the bridge with DevTools commands and event mapping.
+# 0004-Add-browser-and-unit-tests-for-profile-controllers.patch
+#   Add browser/unit test coverage for the refactored profile controllers.
+# 0005-Wire-extension-runtime-and-install-prompt-flow.patch
+#   Add extension runtime wiring and host-visible install prompt flow.
+# 0006-Wire-extension-runtime-and-auxiliary-window-flow.patch
+#   Extend extension runtime handling with auxiliary window integration.
+# 0007-Stabilize-DevTools-frontend-rebinding.patch
+#   Make DevTools frontend rebinding safe across frontend reloads/navigation.
+# 0008-Add-auxiliary-window-and-popup-flow.patch
+#   Add auxiliary window lifecycle and host-mediated popup coordination.
+# 0009-Update-build-deps-for-CBF-DevTools-and-extension-hoo.patch
+#   Update Chromium build dependencies required by the new CBF hooks.
+# 0010-Restore-browser-backed-CBF-tabs-after-roll.patch
+#   Restore browser-backed tab handling after the Chromium roll.
+# 0011-Preserve-embedded-rendering-for-browser-backed-tabs.patch
+#   Preserve embedded rendering while using browser-backed tabs.

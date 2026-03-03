@@ -6,11 +6,17 @@ This directory stores the CBF patch series applied to `chromium/src`.
 
 Patches are applied in lexical order:
 
-1. `0001-CBF-bridge-series.patch`
-2. `0002-refactor-chrome-split-profile-service-into-focused-c.patch`
-3. `0003-refactor-bridge-add-devtools-bridge-commands-and-eve.patch`
-4. `0004-chore-chrome-add-devtools-ui-bindings-diagnostics.patch`
-5. `0005-test-chrome-add-browser-and-unit-tests-for-profile-c.patch`
+1. `0001-Add-CBF-bridge-baseline.patch`
+2. `0002-Split-profile-service-into-focused-controllers.patch`
+3. `0003-Add-DevTools-bridge-commands-and-event-mapping.patch`
+4. `0004-Add-browser-and-unit-tests-for-profile-controllers.patch`
+5. `0005-Wire-extension-runtime-and-install-prompt-flow.patch`
+6. `0006-Wire-extension-runtime-and-auxiliary-window-flow.patch`
+7. `0007-Stabilize-DevTools-frontend-rebinding.patch`
+8. `0008-Add-auxiliary-window-and-popup-flow.patch`
+9. `0009-Update-build-deps-for-CBF-DevTools-and-extension-hoo.patch`
+10. `0010-Restore-browser-backed-CBF-tabs-after-roll.patch`
+11. `0011-Preserve-embedded-rendering-for-browser-backed-tabs.patch`
 
 ## Principles
 

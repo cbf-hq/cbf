@@ -1,7 +1,7 @@
-From dc20a94da673c6131632e2ee7deda98c867b7851 Mon Sep 17 00:00:00 2001
+From a91bdda910a799e2948f7ebb72eb71fe0a270b94 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 3 Mar 2026 08:35:38 +0900
-Subject: [PATCH 11/12] fix(chrome): restore browser-backed cbf tabs after roll
+Subject: [PATCH 10/11] Restore browser-backed CBF tabs after roll
 
 ---
  chrome/browser/cbf/cbf_profile_service.cc     |  17 +-

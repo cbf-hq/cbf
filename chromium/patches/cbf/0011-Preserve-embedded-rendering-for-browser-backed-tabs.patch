@@ -1,8 +1,7 @@
-From 69e7f040020aa1c32d07a41ea03c1a79bd9d28fa Mon Sep 17 00:00:00 2001
+From 26188d729e77f96072c9b583389d215260b01a20 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 3 Mar 2026 11:44:19 +0900
-Subject: [PATCH 12/12] fix(chrome): preserve embedded rendering for
- browser-backed tabs
+Subject: [PATCH 11/11] Preserve embedded rendering for browser-backed tabs
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   5 +
@@ -10,7 +9,7 @@ Subject: [PATCH 12/12] fix(chrome): preserve embedded rendering for
  .../browser/cbf/cbf_embedded_browser_window.h |  15 +
  chrome/browser/cbf/cbf_profile_service.cc     |   5 +
  chrome/browser/cbf/cbf_profile_service.h      |   1 +
- .../cbf/cbf_profile_service_browsertest.cc    |  75 +++
+ .../cbf/cbf_profile_service_browsertest.cc    | 149 ++++++
  chrome/browser/cbf/cbf_tab_manager.cc         |  40 +-
  .../cbf_profile_devtools_controller.cc        |   6 +
  ...profile_devtools_controller_browsertest.cc |  22 +
@@ -19,7 +18,7 @@ Subject: [PATCH 12/12] fix(chrome): preserve embedded rendering for
  .../browser/ui/browser_command_controller.cc  |  15 +
  chrome/browser/ui/browser_commands.cc         |   3 +-
  .../read_anything_side_panel_controller.cc    |   4 +
- 14 files changed, 671 insertions(+), 17 deletions(-)
+ 14 files changed, 745 insertions(+), 17 deletions(-)
  create mode 100644 chrome/browser/cbf/cbf_embedded_browser_window.cc
  create mode 100644 chrome/browser/cbf/cbf_embedded_browser_window.h
 
@@ -593,7 +592,7 @@ index 419b285bf6a6b..35547fe746926 100644
    bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
                           const content::ContextMenuParams& params);
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index 1b815c419088b..ca75443648af0 100644
+index 1b815c419088b..c9160f426b337 100644
 --- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 @@ -1,12 +1,20 @@
@@ -617,7 +616,7 @@ index 1b815c419088b..ca75443648af0 100644
  #include "content/public/test/browser_test.h"
  #include "testing/gtest/include/gtest/gtest.h"
  
-@@ -22,6 +30,21 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -22,6 +30,47 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
      profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
    }
  
@@ -636,10 +635,36 @@ index 1b815c419088b..ca75443648af0 100644
 +    return created_id;
 +  }
 +
++  Browser* GetHostBrowserForTab(TabId tab_id) {
++    content::WebContents* web_contents =
++        profile_service_->GetWebContentsForTesting(tab_id);
++    EXPECT_NE(web_contents, nullptr);
++    if (!web_contents) {
++      return nullptr;
++    }
++
++    BrowserWindowInterface* browser_window_interface =
++        webui::GetBrowserWindowInterface(web_contents);
++    EXPECT_NE(browser_window_interface, nullptr);
++    if (!browser_window_interface) {
++      return nullptr;
++    }
++
++    Browser* host_browser =
++        browser_window_interface->GetBrowserForMigrationOnly();
++    EXPECT_NE(host_browser, nullptr);
++    if (!host_browser) {
++      return nullptr;
++    }
++
++    EXPECT_NE(host_browser->window(), nullptr);
++    return host_browser->window() ? host_browser : nullptr;
++  }
++
    std::unique_ptr<CbfProfileService> profile_service_;
    cbf::test::CbfTestProfileObserver observer_;
  };
-@@ -52,5 +75,57 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+@@ -52,5 +101,105 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
    EXPECT_EQ(observer_.web_page_closed_events().front(), created_id);
  }
  
@@ -680,6 +705,54 @@ index 1b815c419088b..ca75443648af0 100644
 +  EXPECT_EQ(host_browser->window()->AsBrowserView(), nullptr);
 +  EXPECT_EQ(host_browser->window()->GetNativeWindow(), gfx::NativeWindow());
 +  EXPECT_FALSE(host_browser->window()->IsVisibleOnScreen());
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       EmbeddedBrowserWindowNoOpUiCallsAreSafe) {
++  const TabId tab_id = CreatePage("chrome://settings");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  Browser* host_browser = GetHostBrowserForTab(tab_id);
++  ASSERT_NE(host_browser, nullptr);
++
++  host_browser->window()->ShowAppMenu();
++  host_browser->window()->ShowIncognitoClearBrowsingDataDialog();
++  host_browser->window()->ShowIncognitoHistoryDisclaimerDialog();
++
++  EXPECT_NE(profile_service_->GetWebContentsForTesting(tab_id), nullptr);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       EmbeddedBrowserWindowUnavailableDialogHostsReturnNull) {
++  const TabId tab_id = CreatePage("chrome://settings");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  Browser* host_browser = GetHostBrowserForTab(tab_id);
++  ASSERT_NE(host_browser, nullptr);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  EXPECT_EQ(host_browser->window()->GetWebContentsModalDialogHost(), nullptr);
++  EXPECT_EQ(host_browser->window()->GetWebContentsModalDialogHostFor(
++                web_contents),
++            nullptr);
++  EXPECT_NE(profile_service_->GetWebContentsForTesting(tab_id), nullptr);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       EmbeddedBrowserWindowExposesSafeStubHelpers) {
++  const TabId tab_id = CreatePage("chrome://settings");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  Browser* host_browser = GetHostBrowserForTab(tab_id);
++  ASSERT_NE(host_browser, nullptr);
++
++  EXPECT_NE(host_browser->window()->GetLocationBar(), nullptr);
++  EXPECT_NE(host_browser->window()->GetAutofillBubbleHandler(), nullptr);
++  EXPECT_FALSE(host_browser->window()->IsToolbarShowing());
++  EXPECT_FALSE(host_browser->window()->IsLocationBarVisible());
 +}
 +
 +#if BUILDFLAG(IS_MAC)
