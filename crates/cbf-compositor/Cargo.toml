@@ -1,0 +1,22 @@
+[package]
+name = "cbf-compositor"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "GUI composition integration layer for CBF desktop applications"
+repository.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+
+[features]
+default = ["chrome", "winit"]
+chrome = ["dep:cbf-chrome"]
+winit = ["dep:winit"]
+
+[dependencies]
+cbf = { path = "../cbf" }
+cbf-chrome = { path = "../cbf-chrome", optional = true }
+raw-window-handle.workspace = true
+thiserror.workspace = true
+winit = { workspace = true, optional = true }

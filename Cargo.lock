@@ -397,6 +397,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbf-compositor"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "cbf",
+ "cbf-chrome",
+ "raw-window-handle",
+ "thiserror 2.0.18",
+ "winit",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"

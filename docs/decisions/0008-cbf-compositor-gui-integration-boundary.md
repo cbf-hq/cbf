@@ -42,10 +42,12 @@ applications that use `cbf` together with `cbf-chrome`.
 
 Its responsibilities are:
 
-- accept host-created native windows through an extensible `WindowProvider`
-  abstraction
-- start with `WindowProvider::Winit(...)` and keep room for future providers
-  such as tao- or egui-based integrations
+- accept host-created native windows through a `WindowHost` abstraction built
+  on `raw-window-handle`
+- require a narrow host trait instead of a crate-specific window enum so
+  adapters can be provided for multiple GUI runtimes
+- provide a `winit` feature that implements `WindowHost` for
+  `winit::window::Window`
 - manage frame composition for a window, including frame creation requests,
   placement, visibility, movement, resize, and surface attachment state
 - absorb platform-specific surface embedding and focus-routing details required
@@ -70,6 +72,12 @@ crate's primary abstraction is composition state, not browser state.
 but `RequestId` generation must be injectable so applications can preserve a
 single request-correlation strategy across compositor-managed and non-compositor
 operations, including headless flows.
+
+The initial attachment API is top-level window attachment through
+`attach_window(...)`.
+Future child/subview embedding should be added as a separate API such as
+`attach_window_as_child(...)`, not folded into the initial top-level attach
+path.
 
 Development ergonomics such as running a Vite dev server, file watching, and
 automatic Rust restarts are out of scope for `cbf-compositor`. Those concerns
@@ -97,10 +105,12 @@ belong in tooling, such as `cbf-cli`.
   runtime.
 - Public APIs must document precisely which browser and backend events the
   compositor depends on, or integration failures will be hard to diagnose.
-- Supporting multiple window providers over time will require a careful feature
-  and compatibility story.
+- Supporting multiple GUI runtime adapters over time will require a careful
+  feature and compatibility story.
 - The crate adds a new public integration surface that must remain small and
   well-bounded to avoid drifting into a second browser abstraction layer.
+- Child/subview embedding will likely need a separate host abstraction later,
+  so the top-level attachment API should stay narrowly scoped.
 
 ## Alternatives Considered
 
@@ -127,17 +137,25 @@ belong in tooling, such as `cbf-cli`.
 
 ## Notes
 
-- The initial provider will be `WindowProvider::Winit(...)`.
-- Future providers may be added, but the abstraction should remain narrow and
+- The initial host abstraction is `WindowHost`, built on
+  `raw-window-handle::HasWindowHandle` and
+  `raw-window-handle::HasDisplayHandle`.
+- The initial convenience implementation is behind a `winit` feature and
+  targets `winit::window::Window`.
+- Future adapters may be added, but the abstraction should remain narrow and
   focused on native window hosting, not on full UI frameworks.
 - `RequestId` injection should use a small allocator interface so the default
   path is simple while advanced applications can preserve their own request
   strategy.
+- The first stable attach API should describe top-level attachment semantics.
+  Child/subview attachment should remain a separate future API because it
+  changes hosting and layout responsibilities.
 - The API sketch below is non-normative. It illustrates the intended boundary,
   not a final stabilized interface.
 
 ```rust
 use cbf::{BrowserCommand, BrowserEvent, RequestId};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use cbf_chrome::ChromeEvent;
 
 pub struct Compositor<A = DefaultRequestIdAllocator> {
@@ -151,8 +169,12 @@ pub struct CompositorWindowId(u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FrameId(u64);
 
-pub enum WindowProvider {
-    Winit(winit::window::Window),
+pub trait WindowHost: HasWindowHandle + HasDisplayHandle {
+    fn inner_size(&self) -> (u32, u32);
+
+    fn scale_factor(&self) -> f64 {
+        1.0
+    }
 }
 
 pub trait RequestIdAllocator {
@@ -243,12 +265,17 @@ where
 
     pub fn attach_window(
         &mut self,
-        window: WindowProvider,
+        window: impl WindowHost + 'static,
         options: AttachWindowOptions,
         emit: impl FnMut(BrowserCommand),
     ) -> Result<CompositorWindowId, CompositorError> {
         todo!()
     }
+
+    // Future expansion:
+    // pub fn attach_window_as_child(...) -> Result<CompositorWindowId, CompositorError> {
+    //     todo!()
+    // }
 
     pub fn apply(
         &mut self,
@@ -282,7 +309,9 @@ where
   `ChromeEvent` variants must be forwarded into the compositor.
 - Decide the exact browser command shapes emitted for frame creation, movement,
   and teardown.
-- Decide feature-gating and dependency policy for `WindowProvider` variants
-  beyond `Winit`.
+- Decide feature-gating and dependency policy for `WindowHost` adapters beyond
+  `winit`.
+- Design the future child/subview embedding API (`attach_window_as_child(...)`
+  or equivalent) separately from the top-level attach path.
 - Add a companion design note or issue for `cbf-cli` development tooling
   (`vite`, watch, auto-restart), explicitly separate from `cbf-compositor`.
