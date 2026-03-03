@@ -43,16 +43,21 @@ Examples:
 - `feat(cbf): add browser event for ...`
 - `fix(chrome-sys): handle missing bridge library path`
 - `refactor(bridge): move callback ownership to WeakPtr`
-- `chore(chrome): repin fork patch for Mxx`
+- `chore(chromium): repin fork patch for Mxx`
 
 ### Allowed scopes
 
 Core scopes:
 
 - `cbf`
-- `chrome`
+- `chrome` (`cbf-chrome` crate changes)
 - `chrome-sys`
 - `bridge`
+- `chromium` (`chromium/src` patch updates and fork changes)
+
+Use `chromium` for exported patch queue updates from `chromium/src`, even when the tracked
+change exists to support bridge behavior. Use `bridge` when the primary change is in
+`cbf_bridge` code rather than the Chromium fork patch itself.
 
 Additional scopes for non-runtime changes:
 
