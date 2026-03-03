@@ -35,6 +35,23 @@ autoninja -C out/Default cbf_bridge
   `. depot_tools.sh` first to prepend it to `PATH` for the current shell before
   invoking `autoninja` directly.
 
+Common test targets:
+
+```bash
+# Build CBF-specific Chromium-side tests.
+autoninja -C out/Default cbf_tests
+
+# Build Chromium browser test binary.
+autoninja -C out/Default browser_tests
+
+# Build Chromium unit test binary.
+autoninja -C out/Default unit_tests
+```
+
+- For routine local test builds, prefer `uv run tool build -t cbf_tests`,
+  `uv run tool build -t browser_tests`, or
+  `uv run tool build -t unit_tests`.
+
 ## 4. Patch and Drift Policy
 
 - Keep CBF-specific changes traceable in `chromium/patches/cbf`.
@@ -46,6 +63,8 @@ autoninja -C out/Default cbf_bridge
   `chromium/src`.
 - Prefer `uv run tool export` after curating the `chromium/src` commit
   stack so `chromium/patches/cbf` stays aligned with the current history.
+- Use `uv run tool commit ...` for `chromium/src` patch-stack commits so the
+  patch workflow stays consistent with the current tool entrypoints.
 - When Chromium updates break bridge behavior, update contracts and repin known-good revisions.
 - Avoid mixing product-domain behavior into fork patches; keep changes backend-generic for CBF.
 

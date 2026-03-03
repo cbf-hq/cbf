@@ -90,15 +90,21 @@ Chromium side (from `chromium/src`):
 
 - `autoninja -C out/Default chrome`
 - `autoninja -C out/Default cbf_bridge`
+- `autoninja -C out/Default cbf_tests`
+- `autoninja -C out/Default browser_tests`
+- `autoninja -C out/Default unit_tests`
 - Do not use plain `ninja` for Chromium builds.
 - Use exactly one of these two build paths for Chromium-side builds:
-- `just patch build -t <target>`
+- `just build -t <target>`
 - `source depot_tools.sh` and then `autoninja -C out/Default <target>`
 - This avoids downgrading the output directory from Siso back to Ninja and prevents forcing the next `autoninja` build to restart from scratch.
 
 Tooling helpers:
 
 - `uv run tool`: access development tools.
+- `uv run tool apply`: apply the exported Chromium patch queue.
+- `uv run tool export`: export the current curated Chromium patch queue.
+- `uv run tool commit -m "<message>"`: commit `chromium/src` patch-stack changes.
 - `uv run tool build -t <target>`: build a specific target.
 - `uv run tool build -t chrome -t cbf_bridge`: build both targets sequentially.
 
@@ -155,9 +161,10 @@ Use Conventional Commits: `<type>(<scope>): <subject>`.
 Core scopes:
 
 - `cbf`
-- `chrome`
+- `chrome` (`cbf-chrome` crate changes)
 - `chrome-sys`
 - `bridge`
+- `chromium` (`chromium/src` patch updates and fork changes)
 
 ## PR Checklist
 
