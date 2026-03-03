@@ -42,6 +42,10 @@ autoninja -C out/Default cbf_bridge
   exported patch titles use short imperative English, and patch refinements
   should be folded with `fixup` / `squash` instead of appended as new fix
   patches.
+- Prefer `uv run tool patch apply` to replay the exported patch queue onto
+  `chromium/src`.
+- Prefer `uv run tool patch export` after curating the `chromium/src` commit
+  stack so `chromium/patches/cbf` stays aligned with the current history.
 - When Chromium updates break bridge behavior, update contracts and repin known-good revisions.
 - Avoid mixing product-domain behavior into fork patches; keep changes backend-generic for CBF.
 
