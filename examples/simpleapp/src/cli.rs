@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use cbf_chrome::{
     backend::ChromiumBackendOptions,
-    process::{ChromiumProcessOptions, StartChromiumOptions, resolve_chromium_executable},
+    process::{
+        resolve_chromium_executable, ChromiumProcessOptions, RuntimeSelection, StartChromiumOptions,
+    },
 };
 use clap::Parser;
 
@@ -27,6 +29,12 @@ pub(crate) struct Cli {
     /// CBF IPC channel name.
     #[arg(long, default_value = "cbf-simpleapp")]
     pub(crate) channel_name: String,
+
+    /// Runtime selection gate.
+    ///
+    /// `chrome` is the default and the only currently supported runtime.
+    #[arg(long, default_value_t = RuntimeSelection::default(), value_parser = parse_runtime_selection)]
+    pub(crate) runtime: RuntimeSelection,
 
     /// Enable Chromium logging to stderr.
     ///
@@ -78,6 +86,7 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOption
 
     Ok(StartChromiumOptions {
         process: ChromiumProcessOptions {
+            runtime: cli.runtime,
             executable_path: chromium_executable,
             user_data_dir: Some(user_data_dir.to_string_lossy().to_string()),
             enable_logging: if cli.enable_logging_stderr {
@@ -106,4 +115,27 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOption
 /// On most platforms, this is located in the local data directory under "CBF SimpleApp".
 fn default_user_data_dir() -> Option<PathBuf> {
     dirs::data_local_dir().map(|base| base.join("CBF SimpleApp"))
+}
+
+fn parse_runtime_selection(value: &str) -> Result<RuntimeSelection, String> {
+    value.parse()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_runtime_defaults_to_chrome() {
+        let cli = Cli::try_parse_from(["simpleapp"]).unwrap();
+
+        assert_eq!(cli.runtime, RuntimeSelection::Chrome);
+    }
+
+    #[test]
+    fn cli_runtime_accepts_alloy_for_explicit_gating() {
+        let cli = Cli::try_parse_from(["simpleapp", "--runtime", "alloy"]).unwrap();
+
+        assert_eq!(cli.runtime, RuntimeSelection::Alloy);
+    }
 }

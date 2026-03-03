@@ -5,7 +5,7 @@ use std::{env, path::PathBuf, process::ExitStatus};
 use cbf::{
     browser::{BrowserSession, EventStream},
     delegate::BackendDelegate,
-    error::Error,
+    error::{ApiErrorKind, BackendErrorInfo, Error},
 };
 
 use crate::backend::{ChromiumBackend, ChromiumBackendOptions};
@@ -44,9 +44,72 @@ fn resolve_chromium_executable_from_bundle() -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
+/// Runtime selection for Chromium-backed startup.
+///
+/// `Chrome` is the only currently supported runtime. `Alloy` is reserved as an
+/// explicit future selection target, but remains unavailable in this phase.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RuntimeSelection {
+    /// Chrome-backed runtime path used by current CBF integration.
+    #[default]
+    Chrome,
+    /// Reserved for future Alloy runtime work. Selecting this currently fails.
+    Alloy,
+}
+
+impl RuntimeSelection {
+    /// Stable string form for config surfaces and diagnostics.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Chrome => "chrome",
+            Self::Alloy => "alloy",
+        }
+    }
+}
+
+impl std::fmt::Display for RuntimeSelection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for RuntimeSelection {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "chrome" => Ok(Self::Chrome),
+            "alloy" => Ok(Self::Alloy),
+            _ => Err(format!(
+                "unsupported runtime '{value}': expected 'chrome' or 'alloy'"
+            )),
+        }
+    }
+}
+
+fn validate_runtime_selection(runtime: RuntimeSelection) -> Result<(), Error> {
+    if matches!(runtime, RuntimeSelection::Chrome) {
+        return Ok(());
+    }
+
+    Err(Error::BackendFailure(BackendErrorInfo {
+        kind: ApiErrorKind::Unsupported,
+        operation: None,
+        detail: Some(format!(
+            "runtime '{}' is not available in this phase; use 'chrome'",
+            runtime
+        )),
+    }))
+}
+
 /// Options for launching the Chromium process.
 #[derive(Debug, Clone)]
 pub struct ChromiumProcessOptions {
+    /// Runtime path to use for startup.
+    ///
+    /// The default is `chrome`. `alloy` is currently reserved and will be
+    /// rejected by `start_chromium` until that runtime exists.
+    pub runtime: RuntimeSelection,
     /// Path to the browser executable (e.g. "Chromium.app/Contents/MacOS/Chromium").
     pub executable_path: PathBuf,
     /// Path to the user data directory.
@@ -146,6 +209,7 @@ pub fn start_chromium(
     let StartChromiumOptions { process, backend } = options;
 
     let ChromiumProcessOptions {
+        runtime,
         executable_path,
         user_data_dir,
         enable_logging,
@@ -156,6 +220,8 @@ pub fn start_chromium(
         unsafe_enable_startup_default_window,
         extra_args,
     } = process;
+
+    validate_runtime_selection(runtime)?;
 
     let mut command = Command::new(&executable_path);
 
@@ -206,4 +272,37 @@ pub fn start_chromium(
     let (session, events) = BrowserSession::connect(backend, delegate, None)?;
 
     Ok((session, events, ChromiumProcess { child }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_selection_defaults_to_chrome() {
+        assert_eq!(RuntimeSelection::default(), RuntimeSelection::Chrome);
+        assert_eq!(RuntimeSelection::default().to_string(), "chrome");
+    }
+
+    #[test]
+    fn runtime_selection_rejects_alloy_until_implemented() {
+        let err = validate_runtime_selection(RuntimeSelection::Alloy).unwrap_err();
+
+        match err {
+            Error::BackendFailure(info) => {
+                assert_eq!(info.kind, ApiErrorKind::Unsupported);
+                assert_eq!(
+                    info.detail.as_deref(),
+                    Some("runtime 'alloy' is not available in this phase; use 'chrome'")
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn runtime_selection_parses_known_values() {
+        assert_eq!("chrome".parse(), Ok(RuntimeSelection::Chrome));
+        assert_eq!("alloy".parse(), Ok(RuntimeSelection::Alloy));
+    }
 }

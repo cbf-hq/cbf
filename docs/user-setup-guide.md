@@ -45,13 +45,16 @@ Minimal example:
 
 ```rust
 use std::path::PathBuf;
-use cbf_chrome::chromium_backend::ChromiumBackendOptions;
-use cbf_chrome::chromium_process::{start_chromium, ChromiumProcessOptions, StartChromiumOptions};
+use cbf_chrome::backend::ChromiumBackendOptions;
+use cbf_chrome::process::{
+    start_chromium, ChromiumProcessOptions, RuntimeSelection, StartChromiumOptions,
+};
 
 let channel_name = "exampleapp".to_owned();
 let (session, events, mut process) = start_chromium(
     StartChromiumOptions {
         process: ChromiumProcessOptions {
+            runtime: RuntimeSelection::Chrome,
             executable_path: PathBuf::from("/path/to/chromium"),
             user_data_dir: Some("./.cbf-user-data".to_owned()),
             enable_logging: Some("stderr".to_owned()),
@@ -59,6 +62,7 @@ let (session, events, mut process) = start_chromium(
             v: None,
             vmodule: None,
             channel_name: channel_name.clone(),
+            unsafe_enable_startup_default_window: false,
             extra_args: vec![],
         },
         backend: ChromiumBackendOptions::new(channel_name),
@@ -69,6 +73,8 @@ let (session, events, mut process) = start_chromium(
 Important:
 
 - Prefer setting `user_data_dir` explicitly unless you have a strong reason not to.
+- `RuntimeSelection::Chrome` is the default and only supported runtime in the
+  current phase. Selecting `Alloy` is reserved and fails fast.
 - If `user_data_dir` is `None`, Chromium may use a default profile location.
 - Sharing profile data between normal Chromium usage and CBF-driven runs can cause conflicts or data corruption risk (for example, profile/schema version mismatch).
 - Set `executable_path` to the prebuilt Chromium-fork binary published for CBF.

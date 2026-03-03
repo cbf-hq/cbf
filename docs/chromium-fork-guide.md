@@ -35,5 +35,7 @@ autoninja -C out/Default cbf_bridge
 ## 5. Runtime Notes
 
 - CBF behavior depends on `--enable-features=Cbf`.
+- Runtime selection is chrome-only by default. `alloy` may exist as an explicit
+  config value but should fail fast until implemented.
 - IPC channel must match between browser launch args and Rust-side client.
 - In normal library usage, prefer `start_chromium`; manual launch is for debugging only.

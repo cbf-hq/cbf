@@ -23,7 +23,6 @@ decision set and associated implementation track (#38, #39, #40, #41, #42, #43,
 
 Reference:
 
-- `CHROME_RUNTIME_SCOPE_MATRIX.md`
 - `chromium/src/chrome/browser/cbf/cbf_profile_service.cc`
 - `chromium/patches/cbf/`
 
@@ -31,6 +30,9 @@ Reference:
 
 CBF adopts a chrome-only-first runtime strategy for Chromium integration.
 Non-Chrome runtime alternatives (including Alloy runtime design) are deferred.
+Runtime selection is still explicit at the Chromium startup configuration layer:
+`chrome` is the default, and unsupported future runtime selections must fail
+clearly instead of silently changing behavior.
 
 CBF scope is fixed as follows:
 
