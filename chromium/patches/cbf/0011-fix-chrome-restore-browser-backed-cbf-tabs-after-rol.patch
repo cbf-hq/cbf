@@ -1,0 +1,609 @@
+From dc20a94da673c6131632e2ee7deda98c867b7851 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Tue, 3 Mar 2026 08:35:38 +0900
+Subject: [PATCH 11/11] fix(chrome): restore browser-backed cbf tabs after roll
+
+---
+ chrome/browser/cbf/cbf_profile_service.cc     |  17 +-
+ chrome/browser/cbf/cbf_profile_service.h      |   6 +
+ chrome/browser/cbf/cbf_tab_manager.cc         | 271 ++++++++++++++----
+ chrome/browser/cbf/cbf_tab_manager.h          |  28 +-
+ .../cbf/profile/cbf_web_contents_bootstrap.cc |   7 +-
+ .../cbf/profile/cbf_web_contents_bootstrap.h  |   9 +-
+ 6 files changed, 283 insertions(+), 55 deletions(-)
+
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 3c48bbe55d091..463489605e069 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -143,6 +143,9 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+       devtools_controller_(std::make_unique<CbfProfileDevToolsController>(
+           service_context_.get())),
+       print_preview_web_contents_collection_(this) {
++  if (profile_) {
++    profile_observation_.Observe(profile_);
++  }
+   service_context_->SetControllers(page_controller_.get(),
+                                    navigation_controller_.get(),
+                                    ime_controller_.get());
+@@ -181,7 +184,10 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+       weak_factory_.GetWeakPtr()));
+ }
+ 
+-CbfProfileService::~CbfProfileService() = default;
++CbfProfileService::~CbfProfileService() {
++  profile_observation_.Reset();
++  CloseAllWebPages();
++}
+ 
+ void CbfProfileService::BindReceiver(
+     mojo::PendingReceiver<mojom::CbfProfileService> receiver) {
+@@ -1052,6 +1058,15 @@ void CbfProfileService::OnWidgetClosing(views::Widget* widget) {
+   auxiliary_widget_to_window_id_.erase(it);
+ }
+ 
++void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
++  if (profile != profile_) {
++    return;
++  }
++
++  profile_observation_.Reset();
++  CloseAllWebPages();
++}
++
+ void CbfProfileService::WebContentsDestroyed(content::WebContents* web_contents) {
+   auto it = print_preview_dialog_to_window_.find(web_contents);
+   if (it == print_preview_dialog_to_window_.end()) {
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 1d4bdebcf09f4..419b285bf6a6b 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -13,10 +13,12 @@
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/scoped_refptr.h"
+ #include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
+ #include "chrome/browser/cbf/cbf_java_script_dialog_manager.h"
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
+ #include "chrome/browser/cbf/cbf_web_contents_delegate.h"
+ #include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "chrome/browser/profiles/profile_observer.h"
+ #include "chrome/browser/tab_contents/web_contents_collection.h"
+ #include "chrome/browser/extensions/extension_install_prompt.h"
+ #include "content/public/browser/context_menu_params.h"
+@@ -58,6 +60,7 @@ class CbfProfilePopupController;
+ class CbfProfileServiceContext;
+ 
+ class CbfProfileService : public mojom::CbfProfileService,
++                          public ProfileObserver,
+                           public views::WidgetObserver,
+                           public WebContentsCollection::Observer {
+  public:
+@@ -238,6 +241,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+ 
+   // views::WidgetObserver:
+   void OnWidgetClosing(views::Widget* widget) override;
++  // ProfileObserver:
++  void OnProfileWillBeDestroyed(Profile* profile) override;
+   // WebContentsCollection::Observer:
+   void WebContentsDestroyed(content::WebContents* web_contents) override;
+   void RenderProcessGone(content::WebContents* web_contents,
+@@ -271,6 +276,7 @@ class CbfProfileService : public mojom::CbfProfileService,
+   std::set<uint64_t> host_forced_print_preview_windows_;
+   WebContentsCollection print_preview_web_contents_collection_;
+   mojo::ReceiverSet<mojom::CbfProfileService> receivers_;
++  base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
+ 
+   base::WeakPtrFactory<CbfProfileService> weak_factory_{this};
+ };
+diff --git a/chrome/browser/cbf/cbf_tab_manager.cc b/chrome/browser/cbf/cbf_tab_manager.cc
+index 5abf3e78076b9..ed2bb81589640 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.cc
++++ b/chrome/browser/cbf/cbf_tab_manager.cc
+@@ -9,11 +9,15 @@
+ #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ #include "chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/webui/webui_embedding_context.h"
++#include "components/tabs/public/tab_interface.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/referrer.h"
+-#include "chrome/browser/profiles/profile.h"
+ #include "ui/base/page_transition_types.h"
+ #include "ui/gfx/geometry/rect.h"
+ 
+@@ -29,29 +33,109 @@ bool NeedToFireBeforeUnloadOrUnload(content::WebContents* web_contents) {
+ 
+ }  // namespace
+ 
++CbfTabManager::BrowserRecord::BrowserRecord() = default;
++
++CbfTabManager::BrowserRecord::BrowserRecord(const BrowserRecord&) = default;
++
++CbfTabManager::BrowserRecord::BrowserRecord(BrowserRecord&&) = default;
++
++CbfTabManager::BrowserRecord& CbfTabManager::BrowserRecord::operator=(
++    const BrowserRecord&) = default;
++
++CbfTabManager::BrowserRecord& CbfTabManager::BrowserRecord::operator=(
++    BrowserRecord&&) = default;
++
++CbfTabManager::BrowserRecord::~BrowserRecord() = default;
++
+ CbfTabManager::CbfTabManager(::Profile* profile,
+                              CbfProfileService* profile_service)
+     : profile_(profile),
+       profile_service_(profile_service) {}
+ 
+-CbfTabManager::~CbfTabManager() = default;
++CbfTabManager::~CbfTabManager() {
++  profile_service_ = nullptr;
++
++  for (auto& [tab_id, record] : tabs_) {
++    (void)tab_id;
++
++    content::WebContents* web_contents = record.web_contents;
++    Browser* browser = record.browser.get();
++    if (browser && browser->tab_strip_model() &&
++        browser->tab_strip_model()->count() > 0) {
++      tabs::TabInterface* tab_interface =
++          browser->tab_strip_model()->GetActiveTab();
++      if (tab_interface && tab_interface->GetContents()) {
++        web_contents = tab_interface->GetContents();
++      }
++    }
++
++    if (web_contents) {
++      web_contents->SetDelegate(nullptr);
++    }
++
++    if (!browser || !browser->tab_strip_model()) {
++      continue;
++    }
++    if (browser->tab_strip_model()->count() > 0) {
++      DCHECK_LE(browser->tab_strip_model()->count(), 1);
++      browser->tab_strip_model()->DetachAndDeleteWebContentsAt(0);
++    }
++  }
++
++  reverse_lookup_.clear();
++  tabs_.clear();
++}
+ 
+ TabId CbfTabManager::CreateWebPage(const GURL& initial_url) {
+   if (!profile_) {
+     return kInvalidTabId;
+   }
+ 
++  Browser::CreateParams browser_params(profile_, /*user_gesture=*/false);
++  Browser* browser = Browser::Create(browser_params);
++  if (!browser || !browser->tab_strip_model()) {
++    return kInvalidTabId;
++  }
++
+   content::WebContents::CreateParams params(profile_);
+   std::unique_ptr<content::WebContents> web_contents =
+       content::WebContents::Create(params);
+-  content::WebContents* web_contents_ptr = web_contents.get();
++  browser->tab_strip_model()->AppendWebContents(std::move(web_contents),
++                                                /*foreground=*/true);
++
++  tabs::TabInterface* tab_interface =
++      browser->tab_strip_model()->GetActiveTab();
++  if (!tab_interface) {
++    if (browser->tab_strip_model()->count() > 0) {
++      browser->tab_strip_model()->DetachAndDeleteWebContentsAt(0);
++    }
++    return kInvalidTabId;
++  }
++
++  content::WebContents* web_contents_ptr = tab_interface->GetContents();
++  if (!web_contents_ptr) {
++    if (browser->tab_strip_model()->count() > 0) {
++      browser->tab_strip_model()->DetachAndDeleteWebContentsAt(0);
++    }
++    return kInvalidTabId;
++  }
++
+   if (profile_service_) {
+     web_contents_ptr->SetDelegate(profile_service_->GetWebContentsDelegate());
+   }
+-  BootstrapCbfWebContents(web_contents_ptr, profile_);
++  BootstrapCbfWebContents(web_contents_ptr, profile_,
++                          CbfWebContentsBootstrapMode::kBrowserBacked);
++
++  DCHECK(tabs::TabInterface::MaybeGetFromContents(web_contents_ptr));
++  DCHECK(webui::GetBrowserWindowInterface(web_contents_ptr));
++
++  BrowserRecord record;
++  record.browser = browser->AsWeakPtr();
++  record.web_contents = web_contents_ptr;
++  record.tab_interface = tab_interface;
+ 
+   const TabId tab_id = next_tab_id_++;
+-  pages_.emplace(tab_id, std::move(web_contents));
++  tabs_.emplace(tab_id, std::move(record));
+   reverse_lookup_.emplace(web_contents_ptr, tab_id);
+ 
+   web_contents_ptr->Resize(gfx::Rect(0, 0, 1, 1));
+@@ -72,11 +156,7 @@ TabId CbfTabManager::CreateWebPage(const GURL& initial_url) {
+ 
+ content::WebContents* CbfTabManager::GetWebContents(
+     TabId tab_id) const {
+-  auto it = pages_.find(tab_id);
+-  if (it == pages_.end()) {
+-    return nullptr;
+-  }
+-  return it->second.get();
++  return ResolveWebContentsForTab(tab_id);
+ }
+ 
+ TabId CbfTabManager::GetTabIdForWebContents(
+@@ -89,10 +169,18 @@ TabId CbfTabManager::GetTabIdForWebContents(
+ }
+ 
+ std::vector<TabId> CbfTabManager::GetDirtyTabIds() const {
++  std::vector<TabId> tab_ids;
++  tab_ids.reserve(tabs_.size());
++  for (const auto& [tab_id, record] : tabs_) {
++    (void)record;
++    tab_ids.push_back(tab_id);
++  }
++
+   std::vector<TabId> ids;
+-  ids.reserve(pages_.size());
+-  for (const auto& [tab_id, web_contents] : pages_) {
+-    if (web_contents && NeedToFireBeforeUnloadOrUnload(web_contents.get())) {
++  ids.reserve(tab_ids.size());
++  for (const auto tab_id : tab_ids) {
++    if (content::WebContents* web_contents = ResolveWebContentsForTab(tab_id);
++        web_contents && NeedToFireBeforeUnloadOrUnload(web_contents)) {
+       ids.push_back(tab_id);
+     }
+   }
+@@ -100,10 +188,17 @@ std::vector<TabId> CbfTabManager::GetDirtyTabIds() const {
+ }
+ 
+ std::vector<TabId> CbfTabManager::GetAllTabIds() const {
++  std::vector<TabId> tab_ids;
++  tab_ids.reserve(tabs_.size());
++  for (const auto& [tab_id, record] : tabs_) {
++    (void)record;
++    tab_ids.push_back(tab_id);
++  }
++
+   std::vector<TabId> ids;
+-  ids.reserve(pages_.size());
+-  for (const auto& [tab_id, web_contents] : pages_) {
+-    if (web_contents) {
++  ids.reserve(tab_ids.size());
++  for (const auto tab_id : tab_ids) {
++    if (ResolveWebContentsForTab(tab_id)) {
+       ids.push_back(tab_id);
+     }
+   }
+@@ -111,24 +206,20 @@ std::vector<TabId> CbfTabManager::GetAllTabIds() const {
+ }
+ 
+ size_t CbfTabManager::GetWebPageCount() const {
+-  return pages_.size();
++  return GetAllTabIds().size();
+ }
+ 
+ void CbfTabManager::DispatchBeforeUnloadForAll() {
+-  for (const auto& entry : pages_) {
+-    const auto& web_contents = entry.second;
+-    if (web_contents) {
++  const std::vector<TabId> tab_ids = GetAllTabIds();
++  for (const auto tab_id : tab_ids) {
++    if (content::WebContents* web_contents = ResolveWebContentsForTab(tab_id)) {
+       web_contents->DispatchBeforeUnload(false);
+     }
+   }
+ }
+ 
+ void CbfTabManager::RequestCloseWebPage(TabId tab_id) {
+-  auto it = pages_.find(tab_id);
+-  if (it == pages_.end()) {
+-    return;
+-  }
+-  auto* web_contents = it->second.get();
++  auto* web_contents = ResolveWebContentsForTab(tab_id);
+   if (!web_contents) {
+     return;
+   }
+@@ -136,8 +227,8 @@ void CbfTabManager::RequestCloseWebPage(TabId tab_id) {
+ }
+ 
+ void CbfTabManager::CloseWebPage(TabId tab_id) {
+-  auto it = pages_.find(tab_id);
+-  if (it == pages_.end()) {
++  auto it = tabs_.find(tab_id);
++  if (it == tabs_.end()) {
+     return;
+   }
+   pending_resizes_.erase(tab_id);
+@@ -151,8 +242,24 @@ void CbfTabManager::CloseWebPage(TabId tab_id) {
+     pending_callbacks_.erase(cb_it);
+   }
+ 
+-  reverse_lookup_.erase(it->second.get());
+-  pages_.erase(it);
++  content::WebContents* web_contents = ResolveWebContentsForTab(tab_id);
++  auto refreshed = tabs_.find(tab_id);
++  if (refreshed == tabs_.end()) {
++    return;
++  }
++
++  if (web_contents) {
++    web_contents->SetDelegate(nullptr);
++  }
++
++  Browser* browser = refreshed->second.browser.get();
++  if (browser && browser->tab_strip_model() &&
++      browser->tab_strip_model()->count() > 0) {
++    DCHECK_LE(browser->tab_strip_model()->count(), 1);
++    browser->tab_strip_model()->DetachAndDeleteWebContentsAt(0);
++  }
++
++  EraseTabRecord(tab_id);
+ }
+ 
+ void CbfTabManager::CloseWebContents(content::WebContents* web_contents) {
+@@ -167,20 +274,9 @@ void CbfTabManager::CloseWebContents(content::WebContents* web_contents) {
+ }
+ 
+ void CbfTabManager::CloseAllWebPages() {
+-  std::vector<TabId> targets;
+-  targets.reserve(pages_.size());
+-  for (const auto& [tab_id, web_contents] : pages_) {
+-    if (!web_contents) {
+-      continue;
+-    }
+-    targets.push_back(tab_id);
+-  }
++  const std::vector<TabId> targets = GetAllTabIds();
+   for (const auto tab_id : targets) {
+-    auto it = pages_.find(tab_id);
+-    if (it == pages_.end() || !it->second) {
+-      continue;
+-    }
+-    it->second->Close();
++    CloseWebPage(tab_id);
+   }
+ }
+ 
+@@ -188,8 +284,7 @@ void CbfTabManager::SetWebPageSize(TabId tab_id,
+                                    std::uint32_t width,
+                                    std::uint32_t height,
+                                    base::OnceClosure callback) {
+-  auto it = pages_.find(tab_id);
+-  if (it == pages_.end()) {
++  if (!ResolveWebContentsForTab(tab_id)) {
+     std::move(callback).Run();
+     return;
+   }
+@@ -205,14 +300,13 @@ void CbfTabManager::SetWebPageSize(TabId tab_id,
+ }
+ 
+ void CbfTabManager::PerformResize(TabId tab_id,
+-                                 std::uint32_t width,
+-                                 std::uint32_t height) {
+-  auto it = pages_.find(tab_id);
+-  if (it == pages_.end()) {
++                                  std::uint32_t width,
++                                  std::uint32_t height) {
++  content::WebContents* web_contents = ResolveWebContentsForTab(tab_id);
++  if (!web_contents) {
+     return;
+   }
+ 
+-  content::WebContents* web_contents = it->second.get();
+   in_flight_resizes_.insert(tab_id);
+   web_contents->Resize(gfx::Rect(0, 0, width, height));
+ 
+@@ -222,6 +316,7 @@ void CbfTabManager::PerformResize(TabId tab_id,
+ }
+ 
+ void CbfTabManager::OnResizeFinished(TabId tab_id, bool success) {
++  (void)success;
+   in_flight_resizes_.erase(tab_id);
+ 
+   auto cb_it = pending_callbacks_.find(tab_id);
+@@ -241,4 +336,82 @@ void CbfTabManager::OnResizeFinished(TabId tab_id, bool success) {
+   }
+ }
+ 
++tabs::TabInterface* CbfTabManager::ResolveTabInterfaceForTab(
++    TabId tab_id) const {
++  auto it = tabs_.find(tab_id);
++  if (it == tabs_.end()) {
++    return nullptr;
++  }
++
++  Browser* browser = it->second.browser.get();
++  if (!browser || !browser->tab_strip_model() ||
++      browser->tab_strip_model()->count() == 0) {
++    EraseTabRecord(tab_id);
++    return nullptr;
++  }
++
++  tabs::TabInterface* tab_interface =
++      browser->tab_strip_model()->GetActiveTab();
++  if (!tab_interface) {
++    EraseTabRecord(tab_id);
++    return nullptr;
++  }
++
++  content::WebContents* web_contents = tab_interface->GetContents();
++  if (!web_contents) {
++    EraseTabRecord(tab_id);
++    return nullptr;
++  }
++
++  RefreshReverseLookup(tab_id, web_contents, it->second.web_contents);
++  it->second.web_contents = web_contents;
++  it->second.tab_interface = tab_interface;
++  return tab_interface;
++}
++
++content::WebContents* CbfTabManager::ResolveWebContentsForTab(
++    TabId tab_id) const {
++  if (!ResolveTabInterfaceForTab(tab_id)) {
++    return nullptr;
++  }
++
++  auto it = tabs_.find(tab_id);
++  if (it == tabs_.end()) {
++    return nullptr;
++  }
++  return it->second.web_contents;
++}
++
++void CbfTabManager::RefreshReverseLookup(TabId tab_id,
++                                         content::WebContents* new_contents,
++                                         content::WebContents* old_contents)
++    const {
++  if (old_contents && old_contents != new_contents) {
++    auto it = reverse_lookup_.find(old_contents);
++    if (it != reverse_lookup_.end() && it->second == tab_id) {
++      reverse_lookup_.erase(it);
++    }
++  }
++
++  if (new_contents) {
++    reverse_lookup_[new_contents] = tab_id;
++  }
++}
++
++void CbfTabManager::EraseTabRecord(TabId tab_id) const {
++  auto it = tabs_.find(tab_id);
++  if (it == tabs_.end()) {
++    return;
++  }
++
++  if (it->second.web_contents) {
++    auto reverse_it = reverse_lookup_.find(it->second.web_contents);
++    if (reverse_it != reverse_lookup_.end() && reverse_it->second == tab_id) {
++      reverse_lookup_.erase(reverse_it);
++    }
++  }
++
++  tabs_.erase(it);
++}
++
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_tab_manager.h b/chrome/browser/cbf/cbf_tab_manager.h
+index ba161317d65be..b097330543359 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.h
++++ b/chrome/browser/cbf/cbf_tab_manager.h
+@@ -14,11 +14,16 @@
+ #include "url/gurl.h"
+ 
+ class Profile;
++class Browser;
+ 
+ namespace content {
+ class WebContents;
+ }  // namespace content
+ 
++namespace tabs {
++class TabInterface;
++}  // namespace tabs
++
+ namespace cbf {
+ 
+ using TabId = std::uint64_t;
+@@ -50,6 +55,25 @@ class CbfTabManager {
+                       base::OnceClosure callback);
+ 
+  private:
++  struct BrowserRecord {
++    BrowserRecord();
++    BrowserRecord(const BrowserRecord&);
++    BrowserRecord(BrowserRecord&&);
++    BrowserRecord& operator=(const BrowserRecord&);
++    BrowserRecord& operator=(BrowserRecord&&);
++    ~BrowserRecord();
++
++    base::WeakPtr<Browser> browser;
++    raw_ptr<content::WebContents> web_contents = nullptr;
++    raw_ptr<tabs::TabInterface> tab_interface = nullptr;
++  };
++
++  content::WebContents* ResolveWebContentsForTab(TabId tab_id) const;
++  tabs::TabInterface* ResolveTabInterfaceForTab(TabId tab_id) const;
++  void RefreshReverseLookup(TabId tab_id,
++                            content::WebContents* new_contents,
++                            content::WebContents* old_contents) const;
++  void EraseTabRecord(TabId tab_id) const;
+   void PerformResize(TabId tab_id,
+                      std::uint32_t width,
+                      std::uint32_t height);
+@@ -58,8 +82,8 @@ class CbfTabManager {
+   raw_ptr<::Profile> profile_;
+   raw_ptr<CbfProfileService> profile_service_;
+   TabId next_tab_id_ = 1;
+-  base::flat_map<TabId, std::unique_ptr<content::WebContents>> pages_;
+-  base::flat_map<raw_ptr<content::WebContents>, TabId> reverse_lookup_;
++  mutable base::flat_map<TabId, BrowserRecord> tabs_;
++  mutable base::flat_map<raw_ptr<content::WebContents>, TabId> reverse_lookup_;
+ 
+   base::flat_map<TabId, gfx::Size> pending_resizes_;
+   base::flat_set<TabId> in_flight_resizes_;
+diff --git a/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
+index c12cc3f6d7ccd..6e52a5623258d 100644
+--- a/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
++++ b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
+@@ -145,7 +145,8 @@ WEB_CONTENTS_USER_DATA_KEY_IMPL(CbfWebModalDialogHandler);
+ }  // namespace
+ 
+ void BootstrapCbfWebContents(content::WebContents* web_contents,
+-                             ::Profile* profile) {
++                             ::Profile* profile,
++                             CbfWebContentsBootstrapMode mode) {
+   if (!web_contents) {
+     return;
+   }
+@@ -156,7 +157,9 @@ void BootstrapCbfWebContents(content::WebContents* web_contents,
+   CbfWebContentsBootstrapMarker::CreateForWebContents(web_contents);
+   CbfWebModalDialogHandler::CreateForWebContents(web_contents);
+ 
+-  AttachExtensionRuntimeHelpers(web_contents, profile);
++  if (mode == CbfWebContentsBootstrapMode::kStandalone) {
++    AttachExtensionRuntimeHelpers(web_contents, profile);
++  }
+   AttachPrintingPdfHelpers(web_contents, profile);
+   AttachAutofillHelpers(web_contents, profile);
+ }
+diff --git a/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h
+index 5e55bbc22ea51..feaf5862add74 100644
+--- a/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h
++++ b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h
+@@ -9,10 +9,17 @@ class Profile;
+ 
+ namespace cbf {
+ 
++enum class CbfWebContentsBootstrapMode {
++  kStandalone,
++  kBrowserBacked,
++};
++
+ // Runs CBF-scoped WebContents bootstrap for capability helper wiring.
+ // This function is safe to call repeatedly for the same WebContents.
+ void BootstrapCbfWebContents(content::WebContents* web_contents,
+-                             ::Profile* profile);
++                             ::Profile* profile,
++                             CbfWebContentsBootstrapMode mode =
++                                 CbfWebContentsBootstrapMode::kStandalone);
+ 
+ // Returns whether bootstrap has run for the given WebContents.
+ bool HasCbfWebContentsBootstrapForTesting(content::WebContents* web_contents);
+-- 
+2.50.1 (Apple Git-155)
+
