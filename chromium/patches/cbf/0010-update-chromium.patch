@@ -1,7 +1,7 @@
 From c5c8d093b4f0814fbdf2ab9da2151e24ffb31e4d Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 3 Mar 2026 08:10:00 +0900
-Subject: [PATCH 10/11] update chromium
+Subject: [PATCH 10/12] update chromium
 
 ---
  chrome/browser/cbf/BUILD.gn                    | 4 ++++

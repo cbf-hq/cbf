@@ -1,7 +1,7 @@
 From 4476a242feb83fb7a3f2b1e91e36fe5268f749a9 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Feb 2026 14:04:11 +0900
-Subject: [PATCH 09/11] refactor extension system, implement print feature and
+Subject: [PATCH 09/12] refactor extension system, implement print feature and
  fix devtools
 
 ---

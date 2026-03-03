@@ -1,0 +1,957 @@
+From c7dce4e4fbb8fa803a80745194f321fc72c7de23 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Tue, 3 Mar 2026 11:44:19 +0900
+Subject: [PATCH 12/12] fix(chrome): preserve embedded rendering for
+ browser-backed tabs
+
+---
+ chrome/browser/cbf/BUILD.gn                   |   5 +
+ .../cbf/cbf_embedded_browser_window.cc        | 480 ++++++++++++++++++
+ .../browser/cbf/cbf_embedded_browser_window.h |  15 +
+ chrome/browser/cbf/cbf_profile_service.cc     |   5 +
+ chrome/browser/cbf/cbf_profile_service.h      |   1 +
+ .../cbf/cbf_profile_service_browsertest.cc    |  75 +++
+ chrome/browser/cbf/cbf_tab_manager.cc         |  40 +-
+ .../cbf_profile_devtools_controller.cc        |   6 +
+ ...profile_devtools_controller_browsertest.cc |  22 +
+ chrome/browser/ui/browser.cc                  |   3 -
+ chrome/browser/ui/browser.h                   |  11 +-
+ .../browser/ui/browser_command_controller.cc  |  15 +
+ chrome/browser/ui/browser_commands.cc         |   3 +-
+ .../read_anything_side_panel_controller.cc    |   4 +
+ 14 files changed, 668 insertions(+), 17 deletions(-)
+ create mode 100644 chrome/browser/cbf/cbf_embedded_browser_window.cc
+ create mode 100644 chrome/browser/cbf/cbf_embedded_browser_window.h
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index 30fab24143ca3..a45e93af269e1 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -9,6 +9,8 @@ source_set("cbf") {
+   sources = [
+     "cbf_ca_context_id_observer.cc",
+     "cbf_ca_context_id_observer.h",
++    "cbf_embedded_browser_window.cc",
++    "cbf_embedded_browser_window.h",
+     "cbf_features.cc",
+     "cbf_features.h",
+     "cbf_service.cc",
+@@ -84,6 +86,7 @@ source_set("cbf") {
+     "//mojo/public/cpp/bindings",
+     "//third_party/blink/public/common:headers",
+     "//ui/base",
++    "//ui/color",
+     "//ui/events",
+     "//url",
+     "//third_party/blink/public/mojom:mojom_platform",
+@@ -177,7 +180,9 @@ source_set("cbf_browser_tests") {
+     "//base",
+     "//base/test:test_support",
+     "//chrome/browser",
++    "//chrome/browser/ui/webui:webui_util",
+     "//chrome/test:test_support",
++    "//components/tabs:public",
+     "//content/test:test_support",
+     "//testing/gtest",
+   ]
+diff --git a/chrome/browser/cbf/cbf_embedded_browser_window.cc b/chrome/browser/cbf/cbf_embedded_browser_window.cc
+new file mode 100644
+index 0000000000000..c3b40f19ee671
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_embedded_browser_window.cc
+@@ -0,0 +1,480 @@
++#include "chrome/browser/cbf/cbf_embedded_browser_window.h"
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/functional/callback.h"
++#include "base/scoped_observation.h"
++#include "base/time/time.h"
++#include "build/build_config.h"
++#include "build/buildflag.h"
++#include "chrome/browser/ui/autofill/autofill_bubble_handler.h"
++#include "chrome/browser/ui/autofill/save_address_bubble_controller.h"
++#include "chrome/browser/ui/autofill/update_address_bubble_controller.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_list.h"
++#include "chrome/browser/ui/browser_list_observer.h"
++#include "chrome/browser/ui/browser_window.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
++#include "chrome/browser/ui/dialogs/browser_dialogs.h"
++#include "chrome/browser/ui/find_bar/find_bar.h"
++#include "chrome/browser/ui/location_bar/location_bar.h"
++#include "chrome/browser/ui/views/bubble_anchor_util_views.h"
++#include "components/sharing_message/sharing_dialog_data.h"
++#include "content/public/browser/eye_dropper.h"
++#include "content/public/browser/keyboard_event_processing_result.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/common/drop_data.h"
++#include "ui/base/mojom/window_show_state.mojom.h"
++#include "ui/color/color_provider_key.h"
++#include "ui/color/color_provider_manager.h"
++#include "ui/gfx/geometry/point_f.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/gfx/image/image.h"
++
++namespace input {
++struct NativeWebKeyboardEvent;
++}  // namespace input
++
++namespace cbf {
++namespace {
++
++class CbfEmbeddedBrowserWindow final : public BrowserWindow,
++                                       public BrowserListObserver {
++ public:
++  class StubLocationBar final : public LocationBar {
++   public:
++    StubLocationBar() : LocationBar(/*command_updater=*/nullptr) {}
++    StubLocationBar(const StubLocationBar&) = delete;
++    StubLocationBar& operator=(const StubLocationBar&) = delete;
++    ~StubLocationBar() override = default;
++
++    void FocusLocation(bool is_user_initiated) override {}
++    void FocusSearch() override {}
++    void UpdateContentSettingsIcons() override {}
++    void SaveStateToContents(content::WebContents* contents) override {}
++    void Revert() override {}
++    OmniboxView* GetOmniboxView() override { return nullptr; }
++    OmniboxController* GetOmniboxController() override { return nullptr; }
++    content::WebContents* GetWebContents() override { return nullptr; }
++    LocationBarModel* GetLocationBarModel() override { return nullptr; }
++    std::optional<bubble_anchor_util::AnchorConfiguration> GetChipAnchor()
++        override {
++      return {};
++    }
++    ChipController* GetChipController() override { return nullptr; }
++    void OnChanged() override {}
++    void UpdateWithoutTabRestore() override {}
++    ui::TrackedElement* GetAnchorOrNull() override { return nullptr; }
++    Browser* GetBrowser() override { return nullptr; }
++    bool IsVisible() const override { return true; }
++    bool IsDrawn() const override { return true; }
++    bool IsTopLevelFullscreen() const override { return false; }
++    bool IsEditingOrEmpty() const override { return false; }
++    void InvalidateLayout() override {}
++    gfx::Rect Bounds() const override { return gfx::Rect(); }
++    gfx::Size MinimumSize() const override { return gfx::Size(); }
++    gfx::Size PreferredSize() const override { return gfx::Size(); }
++    void Update(content::WebContents* contents) override {}
++    void ResetTabState(content::WebContents* contents) override {}
++    bool HasSecurityStateChanged() override { return false; }
++    LocationBarTesting* GetLocationBarForTesting() override { return nullptr; }
++  };
++
++  class StubAutofillBubbleHandler final : public autofill::AutofillBubbleHandler {
++   public:
++    StubAutofillBubbleHandler() = default;
++    StubAutofillBubbleHandler(const StubAutofillBubbleHandler&) = delete;
++    StubAutofillBubbleHandler& operator=(const StubAutofillBubbleHandler&) =
++        delete;
++    ~StubAutofillBubbleHandler() override = default;
++
++    autofill::AutofillBubbleBase* ShowSaveCreditCardBubble(
++        content::WebContents* web_contents,
++        autofill::SaveCardBubbleController* controller,
++        bool is_user_gesture) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowIbanBubble(
++        content::WebContents* web_contents,
++        autofill::IbanBubbleController* controller,
++        bool is_user_gesture,
++        autofill::IbanBubbleType bubble_type) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowOfferNotificationBubble(
++        content::WebContents* web_contents,
++        autofill::OfferNotificationBubbleController* controller,
++        bool is_user_gesture) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowSaveAutofillAiDataBubble(
++        content::WebContents* web_contents,
++        autofill::AutofillAiImportDataController* controller) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowAutofillAiLocalSaveNotification(
++        content::WebContents* web_contents,
++        autofill::AutofillAiImportDataController* controller) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowSaveAddressProfileBubble(
++        content::WebContents* web_contents,
++        std::unique_ptr<autofill::SaveAddressBubbleController> controller,
++        bool is_user_gesture) override {
++      return nullptr;
++    }
++
++#if BUILDFLAG(ENABLE_DICE_SUPPORT)
++    autofill::AutofillBubbleBase* ShowAddressSignInPromo(
++        content::WebContents* web_contents,
++        const autofill::AutofillProfile& autofill_profile) override {
++      return nullptr;
++    }
++#endif
++
++    autofill::AutofillBubbleBase* ShowUpdateAddressProfileBubble(
++        content::WebContents* web_contents,
++        std::unique_ptr<autofill::UpdateAddressBubbleController> controller,
++        bool is_user_gesture) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowFilledCardInformationBubble(
++        content::WebContents* web_contents,
++        autofill::FilledCardInformationBubbleController* controller,
++        bool is_user_gesture) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowVirtualCardEnrollBubble(
++        content::WebContents* web_contents,
++        autofill::VirtualCardEnrollBubbleController* controller,
++        bool is_user_gesture) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowVirtualCardEnrollConfirmationBubble(
++        content::WebContents* web_contents,
++        autofill::VirtualCardEnrollBubbleController* controller) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowMandatoryReauthBubble(
++        content::WebContents* web_contents,
++        autofill::MandatoryReauthBubbleController* controller,
++        bool is_user_gesture,
++        autofill::MandatoryReauthBubbleType bubble_type) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowSaveCardConfirmationBubble(
++        content::WebContents* web_contents,
++        autofill::SaveCardBubbleController* controller) override {
++      return nullptr;
++    }
++
++    autofill::AutofillBubbleBase* ShowSaveIbanConfirmationBubble(
++        content::WebContents* web_contents,
++        autofill::IbanBubbleController* controller) override {
++      return nullptr;
++    }
++  };
++
++  CbfEmbeddedBrowserWindow() {
++    browser_list_observer_.Observe(BrowserList::GetInstance());
++  }
++
++  CbfEmbeddedBrowserWindow(const CbfEmbeddedBrowserWindow&) = delete;
++  CbfEmbeddedBrowserWindow& operator=(const CbfEmbeddedBrowserWindow&) =
++      delete;
++
++  ~CbfEmbeddedBrowserWindow() override {
++    if (browser_) {
++      browser_->GetFeatures().TearDownPreBrowserWindowDestruction();
++      browser_ = nullptr;
++    }
++  }
++
++  void Show() override {}
++  void ShowInactive() override {}
++  void Hide() override {}
++  bool IsVisible() const override { return true; }
++  void SetBounds(const gfx::Rect& bounds) override {}
++  void Close() override {
++    if (close_callback_) {
++      std::move(close_callback_).Run();
++    }
++    is_closed_ = true;
++  }
++  void Activate() override {}
++  void Deactivate() override {}
++  bool IsActive() const override { return false; }
++  void FlashFrame(bool flash) override {}
++  ui::ZOrderLevel GetZOrderLevel() const override {
++    return ui::ZOrderLevel::kNormal;
++  }
++  void SetZOrderLevel(ui::ZOrderLevel order) override {}
++  gfx::NativeWindow GetNativeWindow() const override {
++    return gfx::NativeWindow();
++  }
++  bool IsOnCurrentWorkspace() const override { return true; }
++  bool IsVisibleOnScreen() const override { return false; }
++  void SetTopControlsShownRatio(content::WebContents* web_contents,
++                                float ratio) override {}
++  bool DoBrowserControlsShrinkRendererSize(
++      const content::WebContents* contents) const override {
++    return false;
++  }
++  ui::NativeTheme* GetNativeTheme() override { return nullptr; }
++  const ui::ThemeProvider* GetThemeProvider() const override {
++    return nullptr;
++  }
++  const ui::ColorProvider* GetColorProvider() const override {
++    return ui::ColorProviderManager::Get().GetColorProviderFor(
++        ui::ColorProviderKey());
++  }
++  int GetTopControlsHeight() const override { return 0; }
++  void SetTopControlsGestureScrollInProgress(bool in_progress) override {}
++  std::vector<StatusBubble*> GetStatusBubbles() override { return {}; }
++  void UpdateTitleBar() override {}
++  void BookmarkBarStateChanged(
++      BookmarkBar::AnimateChangeType change_type) override {}
++  void TemporarilyShowBookmarkBar(base::TimeDelta duration) override {}
++  void UpdateDevTools(content::WebContents* inspected_web_contents) override {}
++  bool CanDockDevTools() const override { return true; }
++  void UpdateLoadingAnimations(bool is_visible) override {}
++  void SetStarredState(bool is_starred) override {}
++  bool IsTabModalPopupDeprecated() const override {
++    return is_tab_modal_popup_deprecated_;
++  }
++  void SetIsTabModalPopupDeprecated(
++      bool is_tab_modal_popup_deprecated) override {
++    is_tab_modal_popup_deprecated_ = is_tab_modal_popup_deprecated;
++  }
++  void OnActiveTabChanged(content::WebContents* old_contents,
++                          content::WebContents* new_contents,
++                          int index,
++                          int reason) override {}
++  void OnTabDetached(content::WebContents* contents, bool was_active) override {
++  }
++  void ZoomChangedForActiveTab(bool can_show_bubble) override {}
++  gfx::Rect GetRestoredBounds() const override { return gfx::Rect(); }
++  ui::mojom::WindowShowState GetRestoredState() const override {
++    return ui::mojom::WindowShowState::kDefault;
++  }
++  gfx::Rect GetBounds() const override { return gfx::Rect(); }
++  gfx::Size GetContentsSize() const override { return gfx::Size(); }
++  void SetContentsSize(const gfx::Size& size) override {}
++  bool IsMaximized() const override { return false; }
++  bool IsMinimized() const override { return false; }
++  void Maximize() override {}
++  void Minimize() override {}
++  void Restore() override {}
++  bool GetCanResize() override { return false; }
++  ui::mojom::WindowShowState GetWindowShowState() const override {
++    return ui::mojom::WindowShowState::kDefault;
++  }
++  bool ShouldHideUIForFullscreen() const override { return false; }
++  bool IsFullscreen() const override { return false; }
++  bool IsFullscreenBubbleVisible() const override { return false; }
++  bool IsForceFullscreen() const override { return false; }
++  void SetForceFullscreen(bool force_fullscreen) override {}
++  LocationBar* GetLocationBar() const override {
++    return const_cast<StubLocationBar*>(&location_bar_);
++  }
++  void UpdatePageActionIcon(PageActionIconType type) override {}
++  autofill::AutofillBubbleHandler* GetAutofillBubbleHandler() override {
++    return &autofill_bubble_handler_;
++  }
++  void ExecutePageActionIconForTesting(PageActionIconType type) override {}
++  void SetFocusToLocationBar(bool is_user_initiated) override {}
++  void UpdateReloadStopState(bool is_loading, bool force) override {}
++  void UpdateToolbar(content::WebContents* contents) override {}
++  bool UpdateToolbarSecurityState() override { return false; }
++  void UpdateCustomTabBarVisibility(bool visible, bool animate) override {}
++  void SetDevToolsScrimVisibility(bool visible) override {}
++  void ResetToolbarTabState(content::WebContents* contents) override {}
++  void FocusToolbar() override {}
++  void ToolbarSizeChanged(bool is_animating) override {}
++  void TabDraggingStatusChanged(bool is_dragging) override {}
++  void LinkOpeningFromGesture(WindowOpenDisposition disposition) override {}
++  void FocusAppMenu() override {}
++  void FocusBookmarksToolbar() override {}
++  void FocusInactivePopupForAccessibility() override {}
++  void RotatePaneFocus(bool forwards) override {}
++  void FocusWebContentsPane() override {}
++  void ShowAppMenu() override {}
++  void PreHandleDragUpdate(const content::DropData& drop_data,
++                           const gfx::PointF& point) override {}
++  void PreHandleDragExit() override {}
++  void HandleDragEnded() override {}
++  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
++      const input::NativeWebKeyboardEvent& event) override {
++    return content::KeyboardEventProcessingResult::NOT_HANDLED;
++  }
++  bool HandleKeyboardEvent(const input::NativeWebKeyboardEvent& event) override {
++    return false;
++  }
++  bool IsBookmarkBarVisible() const override { return false; }
++  bool IsBookmarkBarAnimating() const override { return false; }
++  bool IsTabStripEditable() const override { return false; }
++  void DisableTabStripEditingForTesting() override {}
++  bool IsToolbarVisible() const override { return false; }
++  bool IsLocationBarVisible() const override { return false; }
++  bool IsToolbarShowing() const override { return false; }
++  bool IsBorderlessModeEnabled() const override { return false; }
++  void ShowChromeLabs() override {}
++  BrowserView* AsBrowserView() override { return nullptr; }
++  SharingDialog* ShowSharingDialog(content::WebContents* contents,
++                                   SharingDialogData data) override {
++    return nullptr;
++  }
++  void ShowUpdateChromeDialog() override {}
++  void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) override {}
++  qrcode_generator::QRCodeGeneratorBubbleView* ShowQRCodeGeneratorBubble(
++      content::WebContents* contents,
++      const GURL& url,
++      bool show_back_button) override {
++    return nullptr;
++  }
++#if !BUILDFLAG(IS_ANDROID)
++  sharing_hub::ScreenshotCapturedBubble* ShowScreenshotCapturedBubble(
++      content::WebContents* contents,
++      const gfx::Image& image) override {
++    return nullptr;
++  }
++  void ShowIntentPickerBubble(
++      std::vector<apps::IntentPickerAppInfo> app_info,
++      bool show_stay_in_chrome,
++      bool show_remember_selection,
++      apps::IntentPickerBubbleType bubble_type,
++      const std::optional<url::Origin>& initiating_origin,
++      IntentPickerResponse callback) override {}
++#endif
++  send_tab_to_self::SendTabToSelfBubbleView*
++  ShowSendTabToSelfDevicePickerBubble(content::WebContents* contents) override {
++    return nullptr;
++  }
++  send_tab_to_self::SendTabToSelfBubbleView* ShowSendTabToSelfPromoBubble(
++      content::WebContents* contents,
++      bool show_signin_button) override {
++    return nullptr;
++  }
++#if BUILDFLAG(IS_CHROMEOS)
++  void ToggleMultitaskMenu() override {}
++#else
++  sharing_hub::SharingHubBubbleView* ShowSharingHubBubble(
++      share::ShareAttempt attempt) override {
++    return nullptr;
++  }
++#endif
++  ShowTranslateBubbleResult ShowTranslateBubble(
++      content::WebContents* contents,
++      translate::TranslateStep step,
++      const std::string& source_language,
++      const std::string& target_language,
++      translate::TranslateErrors error_type,
++      bool is_user_gesture) override {
++    return ShowTranslateBubbleResult::kSuccess;
++  }
++  void StartPartialTranslate(const std::string& source_language,
++                             const std::string& target_language,
++                             const std::u16string& text_selection) override {}
++  DownloadBubbleUIController* GetDownloadBubbleUIController() override {
++    return nullptr;
++  }
++  void ConfirmBrowserCloseWithPendingDownloads(
++      int download_count,
++      Browser::DownloadCloseType dialog_type,
++      base::OnceCallback<void(bool)> callback) override {}
++  void UserChangedTheme(BrowserThemeChangeType theme_change_type) override {}
++  std::unique_ptr<FindBar> CreateFindBar() override { return nullptr; }
++  web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost()
++      override {
++    return nullptr;
++  }
++  web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHostFor(
++      content::WebContents* web_contents) override {
++    return nullptr;
++  }
++  void ShowAvatarBubbleFromAvatarButton(bool is_source_keyboard) override {}
++  void MaybeShowProfileSwitchIPH() override {}
++  void MaybeShowSupervisedUserProfileSignInIPH() override {}
++#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_LINUX)
++  void ShowHatsDialog(
++      const std::string& site_id,
++      const std::optional<std::string>& hats_histogram_name,
++      const std::optional<uint64_t> hats_survey_ukm_id,
++      base::OnceClosure success_callback,
++      base::OnceClosure failure_callback,
++      const SurveyBitsData& product_specific_bits_data,
++      const SurveyStringData& product_specific_string_data) override {}
++  void ShowIncognitoClearBrowsingDataDialog() override {}
++  void ShowIncognitoHistoryDisclaimerDialog() override {}
++#endif
++  ExclusiveAccessContext* GetExclusiveAccessContext() override {
++    return nullptr;
++  }
++  std::string GetWorkspace() const override { return std::string(); }
++  bool IsVisibleOnAllWorkspaces() const override { return false; }
++  void ShowEmojiPanel() override {}
++  void ShowCaretBrowsingDialog() override {}
++  std::unique_ptr<content::EyeDropper> OpenEyeDropper(
++      content::RenderFrameHost* frame,
++      content::EyeDropperListener* listener) override {
++    return nullptr;
++  }
++  void CreateTabSearchBubble(
++      tab_search::mojom::TabSearchSection section =
++          tab_search::mojom::TabSearchSection::kSearch,
++      tab_search::mojom::TabOrganizationFeature feature =
++          tab_search::mojom::TabOrganizationFeature::kNone) override {}
++  void CloseTabSearchBubble() override {}
++
++  void SetCloseCallback(base::OnceClosure close_callback) {
++    close_callback_ = std::move(close_callback);
++  }
++
++ protected:
++  void DeleteBrowserWindow() override { delete this; }
++
++ private:
++  void OnBrowserAdded(Browser* browser) override {
++    if (browser->create_params().window == this) {
++      browser_ = browser;
++      browser_list_observer_.Reset();
++    }
++  }
++
++  bool is_closed_ = false;
++  bool is_tab_modal_popup_deprecated_ = false;
++  StubAutofillBubbleHandler autofill_bubble_handler_;
++  StubLocationBar location_bar_;
++  base::ScopedObservation<BrowserList, BrowserListObserver>
++      browser_list_observer_{this};
++  raw_ptr<Browser> browser_ = nullptr;
++  base::OnceClosure close_callback_;
++};
++
++}  // namespace
++
++Browser* CreateCbfEmbeddedBrowser(Profile* profile, bool for_devtools) {
++  Browser::CreateParams params =
++      for_devtools ? Browser::CreateParams::CreateForDevTools(profile)
++                   : Browser::CreateParams(profile, /*user_gesture=*/false);
++  params.window = new CbfEmbeddedBrowserWindow();
++  return Browser::Create(params);
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_embedded_browser_window.h b/chrome/browser/cbf/cbf_embedded_browser_window.h
+new file mode 100644
+index 0000000000000..2560c157d1bfa
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_embedded_browser_window.h
+@@ -0,0 +1,15 @@
++#ifndef CHROME_BROWSER_CBF_CBF_EMBEDDED_BROWSER_WINDOW_H_
++#define CHROME_BROWSER_CBF_CBF_EMBEDDED_BROWSER_WINDOW_H_
++
++class Browser;
++class Profile;
++
++namespace cbf {
++
++// Creates a browser-backed shell for embedded CBF tabs without creating a
++// visible Chromium browser window.
++Browser* CreateCbfEmbeddedBrowser(Profile* profile, bool for_devtools);
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_CBF_EMBEDDED_BROWSER_WINDOW_H_
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 463489605e069..b391256a7b814 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -606,6 +606,11 @@ TabId CbfProfileService::GetTabIdForWebContents(
+   return tab_manager_.GetTabIdForWebContents(web_contents);
+ }
+ 
++content::WebContents* CbfProfileService::GetWebContentsForTesting(
++    TabId tab_id) const {
++  return tab_manager_.GetWebContents(tab_id);
++}
++
+ bool CbfProfileService::HandleContextMenu(
+     content::RenderFrameHost& render_frame_host,
+     const content::ContextMenuParams& params) {
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 419b285bf6a6b..35547fe746926 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -139,6 +139,7 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void CloseWebContents(content::WebContents* web_contents);
+   content::WebContentsDelegate* GetWebContentsDelegate();
+   TabId GetTabIdForWebContents(content::WebContents* web_contents) const;
++  content::WebContents* GetWebContentsForTesting(TabId tab_id) const;
+ 
+   bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
+                          const content::ContextMenuParams& params);
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 1b815c419088b..ca75443648af0 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -1,12 +1,20 @@
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ 
++#include <string>
+ #include <utility>
+ 
++#include "build/build_config.h"
++#include "build/buildflag.h"
+ #include "base/functional/bind.h"
+ #include "base/run_loop.h"
++#include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
+ #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
+ #include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_window.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "chrome/test/base/in_process_browser_test.h"
++#include "components/tabs/public/tab_interface.h"
+ #include "content/public/test/browser_test.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+@@ -22,6 +30,21 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
+   }
+ 
++  TabId CreatePage(const std::string& url = "about:blank") {
++    TabId created_id = kInvalidTabId;
++    base::RunLoop run_loop;
++    profile_service_->CreateWebPage(
++        url, 1,
++        base::BindOnce(
++            [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
++              *out_id = tab_id;
++              run_loop->Quit();
++            },
++            &created_id, &run_loop));
++    run_loop.Run();
++    return created_id;
++  }
++
+   std::unique_ptr<CbfProfileService> profile_service_;
+   cbf::test::CbfTestProfileObserver observer_;
+ };
+@@ -52,5 +75,57 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   EXPECT_EQ(observer_.web_page_closed_events().front(), created_id);
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       BrowserBackedPageExposesTabAndBrowserWindowInterfaces) {
++  const TabId tab_id = CreatePage("chrome://settings");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  tabs::TabInterface* tab = tabs::TabInterface::MaybeGetFromContents(
++      web_contents);
++  ASSERT_NE(tab, nullptr);
++
++  BrowserWindowInterface* browser_window_interface =
++      webui::GetBrowserWindowInterface(web_contents);
++  ASSERT_NE(browser_window_interface, nullptr);
++  EXPECT_EQ(browser_window_interface, tab->GetBrowserWindowInterface());
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, UsesEmbeddedBrowserWindow) {
++  const TabId tab_id = CreatePage();
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  BrowserWindowInterface* browser_window_interface =
++      webui::GetBrowserWindowInterface(web_contents);
++  ASSERT_NE(browser_window_interface, nullptr);
++
++  Browser* host_browser = browser_window_interface->GetBrowserForMigrationOnly();
++  ASSERT_NE(host_browser, nullptr);
++  ASSERT_NE(host_browser->window(), nullptr);
++  EXPECT_EQ(host_browser->window()->AsBrowserView(), nullptr);
++  EXPECT_EQ(host_browser->window()->GetNativeWindow(), gfx::NativeWindow());
++  EXPECT_FALSE(host_browser->window()->IsVisibleOnScreen());
++}
++
++#if BUILDFLAG(IS_MAC)
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       InstallsSurfaceObserverForCreatedPage) {
++  const TabId tab_id = CreatePage();
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  EXPECT_NE(CbfCaContextIdObserver::FromWebContents(web_contents), nullptr);
++}
++#endif
++
+ }  // namespace
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_tab_manager.cc b/chrome/browser/cbf/cbf_tab_manager.cc
+index ed2bb81589640..1e46f6d157d68 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.cc
++++ b/chrome/browser/cbf/cbf_tab_manager.cc
+@@ -7,6 +7,7 @@
+ #include "base/functional/callback.h"
+ #include "base/logging.h"
+ #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
++#include "chrome/browser/cbf/cbf_embedded_browser_window.h"
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ #include "chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -91,8 +92,8 @@ TabId CbfTabManager::CreateWebPage(const GURL& initial_url) {
+     return kInvalidTabId;
+   }
+ 
+-  Browser::CreateParams browser_params(profile_, /*user_gesture=*/false);
+-  Browser* browser = Browser::Create(browser_params);
++  Browser* browser =
++      CreateCbfEmbeddedBrowser(profile_, initial_url.SchemeIs("devtools"));
+   if (!browser || !browser->tab_strip_model()) {
+     return kInvalidTabId;
+   }
+@@ -242,24 +243,41 @@ void CbfTabManager::CloseWebPage(TabId tab_id) {
+     pending_callbacks_.erase(cb_it);
+   }
+ 
+-  content::WebContents* web_contents = ResolveWebContentsForTab(tab_id);
+   auto refreshed = tabs_.find(tab_id);
+   if (refreshed == tabs_.end()) {
+     return;
+   }
+ 
++  base::WeakPtr<Browser> browser = refreshed->second.browser;
++  content::WebContents* web_contents = refreshed->second.web_contents;
++  if (!web_contents) {
++    web_contents = ResolveWebContentsForTab(tab_id);
++  }
++
+   if (web_contents) {
+     web_contents->SetDelegate(nullptr);
+   }
+ 
+-  Browser* browser = refreshed->second.browser.get();
+-  if (browser && browser->tab_strip_model() &&
+-      browser->tab_strip_model()->count() > 0) {
+-    DCHECK_LE(browser->tab_strip_model()->count(), 1);
+-    browser->tab_strip_model()->DetachAndDeleteWebContentsAt(0);
++  EraseTabRecord(tab_id);
++
++  if (!browser || !browser->tab_strip_model()) {
++    return;
+   }
+ 
+-  EraseTabRecord(tab_id);
++  TabStripModel* tab_strip_model = browser->tab_strip_model();
++  int tracked_index = TabStripModel::kNoTab;
++  if (web_contents) {
++    tracked_index = tab_strip_model->GetIndexOfWebContents(web_contents);
++  }
++  if (tracked_index != TabStripModel::kNoTab) {
++    tab_strip_model->DetachAndDeleteWebContentsAt(tracked_index);
++  }
++
++  while (browser && browser->tab_strip_model() &&
++         browser->tab_strip_model()->count() > 0) {
++    browser->tab_strip_model()->DetachAndDeleteWebContentsAt(
++        browser->tab_strip_model()->count() - 1);
++  }
+ }
+ 
+ void CbfTabManager::CloseWebContents(content::WebContents* web_contents) {
+@@ -270,6 +288,10 @@ void CbfTabManager::CloseWebContents(content::WebContents* web_contents) {
+   if (it == reverse_lookup_.end()) {
+     return;
+   }
++  auto tab_it = tabs_.find(it->second);
++  if (tab_it != tabs_.end()) {
++    tab_it->second.web_contents = web_contents;
++  }
+   CloseWebPage(it->second);
+ }
+ 
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+index 6eb797618dab1..baee4aafedf03 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+@@ -5,12 +5,15 @@
+ 
+ #include "base/command_line.h"
+ #include "base/functional/bind.h"
++#include "base/logging.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
+ #include "chrome/browser/devtools/devtools_window.h"
+ #include "chrome/browser/devtools/devtools_ui_bindings.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "chrome/browser/ui/webui/devtools/devtools_ui.h"
+ #include "chrome/common/chrome_switches.h"
++#include "components/tabs/public/tab_interface.h"
+ #include "content/public/browser/devtools_agent_host.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+@@ -226,6 +229,9 @@ void CbfProfileDevToolsController::OpenDevTools(TabId inspected_tab_id) {
+       return;
+     }
+ 
++    DCHECK(tabs::TabInterface::MaybeGetFromContents(devtools_contents));
++    DCHECK(webui::GetBrowserWindowInterface(devtools_contents));
++
+     if (register_ime_handler_) {
+       register_ime_handler_.Run(devtools_tab_id, devtools_contents);
+     }
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+index 13b9afe7a324b..952d00a42fbbe 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+@@ -6,7 +6,9 @@
+ #include "base/run_loop.h"
+ #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
+ #include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "chrome/test/base/in_process_browser_test.h"
++#include "components/tabs/public/tab_interface.h"
+ #include "content/public/test/browser_test.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+@@ -53,5 +55,25 @@ IN_PROC_BROWSER_TEST_F(CbfProfileDevToolsControllerBrowserTest,
+   profile_service_->OpenDevTools(tab_id);
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileDevToolsControllerBrowserTest,
++                       DevToolsFrontendExposesBrowserBackedInterfaces) {
++  const TabId tab_id = CreatePage();
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  profile_service_->OpenDevTools(tab_id);
++  observer_.WaitForDevToolsOpenedCount(1);
++  ASSERT_FALSE(observer_.devtools_opened_events().empty());
++
++  const TabId devtools_tab_id = observer_.devtools_opened_events().back().second;
++  ASSERT_NE(devtools_tab_id, kInvalidTabId);
++
++  content::WebContents* devtools_contents =
++      profile_service_->GetWebContentsForTesting(devtools_tab_id);
++  ASSERT_NE(devtools_contents, nullptr);
++  EXPECT_NE(tabs::TabInterface::MaybeGetFromContents(devtools_contents),
++            nullptr);
++  EXPECT_NE(webui::GetBrowserWindowInterface(devtools_contents), nullptr);
++}
++
+ }  // namespace
+ }  // namespace cbf
+diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
+index ca32d6faace3a..2131162947106 100644
+--- a/chrome/browser/ui/browser.cc
++++ b/chrome/browser/ui/browser.cc
+@@ -643,9 +643,6 @@ Browser::Browser(const CreateParams& params)
+   }
+ #endif  // BUILDFLAG(IS_OZONE)
+ 
+-  if (params.window) {
+-    CHECK_IS_TEST() << "Browser::CreateParams::window is a test-only param";
+-  }
+   window_ =
+       params.window
+           ? std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(params.window)
+diff --git a/chrome/browser/ui/browser.h b/chrome/browser/ui/browser.h
+index 6dead6a78a90f..c085102385f6a 100644
+--- a/chrome/browser/ui/browser.h
++++ b/chrome/browser/ui/browser.h
+@@ -287,8 +287,9 @@ class Browser : public TabStripModelObserver,
+     bool in_tab_dragging = false;
+ 
+     // Supply a custom BrowserWindow implementation, to be used instead of the
+-    // default. Intended for testing. The resulting Browser takes ownership
+-    // of `window`.
++    // default. The resulting Browser takes ownership of `window`.
++    // This is primarily used by tests, but embedders may also supply an
++    // internal BrowserWindow implementation for non-standard hosting flows.
+     // TODO(crbug.com/413168662): CreateParams should be updated to be move-only
+     // and this should become a unique_ptr (or removed completely once
+     // deprecated Browser unit tests are eliminated).
+@@ -354,8 +355,10 @@ class Browser : public TabStripModelObserver,
+   // for the browser - the created BrowserWindow will take the ownership of the
+   // created Browser instance.
+   //
+-  // If |params.window| or |params.skip_window_init_for_testing| are set, the
+-  // caller is expected to take the ownership of the created Browser instance.
++  // If |params.skip_window_init_for_testing| is set, the caller is expected to
++  // take the ownership of the created Browser instance. If |params.window| is
++  // set, the supplied BrowserWindow instance is transferred to the created
++  // Browser.
+   static Browser* Create(const CreateParams& params);
+ 
+   // WARNING: Use of this is DEPRECATED and exists only to support pre-existing
+diff --git a/chrome/browser/ui/browser_command_controller.cc b/chrome/browser/ui/browser_command_controller.cc
+index 977849483f5b8..e04fb5506c9e6 100644
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -2227,6 +2227,16 @@ void BrowserCommandController::UpdatePrintingState() {
+     return;
+   }
+ 
++  content::WebContents* const active_contents =
++      browser_->tab_strip_model()->GetActiveWebContents();
++  if (!active_contents) {
++    UpdateCommandAndActionEnabled(IDC_PRINT, kActionPrint, false);
++#if BUILDFLAG(ENABLE_PRINTING)
++    command_updater_.UpdateCommandEnabled(IDC_BASIC_PRINT, false);
++#endif
++    return;
++  }
++
+   UpdateCommandAndActionEnabled(IDC_PRINT, kActionPrint, CanPrint(browser_));
+ #if BUILDFLAG(ENABLE_PRINTING)
+   command_updater_.UpdateCommandEnabled(IDC_BASIC_PRINT,
+@@ -2253,6 +2263,11 @@ void BrowserCommandController::UpdateSaveAsState() {
+     return;
+   }
+ 
++  if (!browser_->tab_strip_model()->GetActiveWebContents()) {
++    command_updater_.UpdateCommandEnabled(IDC_SAVE_PAGE, false);
++    return;
++  }
++
+   command_updater_.UpdateCommandEnabled(IDC_SAVE_PAGE, CanSavePage(browser_));
+ }
+ 
+diff --git a/chrome/browser/ui/browser_commands.cc b/chrome/browser/ui/browser_commands.cc
+index 3f477375e099d..b8cb6deb65503 100644
+--- a/chrome/browser/ui/browser_commands.cc
++++ b/chrome/browser/ui/browser_commands.cc
+@@ -676,7 +676,8 @@ int GetContentRestrictions(const BrowserWindowInterface* bwi) {
+     content_restrictions = core_tab_helper->content_restrictions();
+     NavigationEntry* last_committed_entry =
+         current_tab->GetController().GetLastCommittedEntry();
+-    if (!content::IsSavableURL(last_committed_entry->GetURL())) {
++    if (!last_committed_entry ||
++        !content::IsSavableURL(last_committed_entry->GetURL())) {
+       content_restrictions |= CONTENT_RESTRICTION_SAVE;
+     }
+   }
+diff --git a/chrome/browser/ui/read_anything/read_anything_side_panel_controller.cc b/chrome/browser/ui/read_anything/read_anything_side_panel_controller.cc
+index 0beca48b95636..745bbfba592b7 100644
+--- a/chrome/browser/ui/read_anything/read_anything_side_panel_controller.cc
++++ b/chrome/browser/ui/read_anything/read_anything_side_panel_controller.cc
+@@ -328,6 +328,10 @@ void ReadAnythingSidePanelController::TabWillDetach(
+   // not create a SidePanelCoordinator. This block will be unnecessary once that
+   // changes.
+   if (!side_panel_ui) {
++    const ui::BaseWindow* const window = browser_window_interface->GetWindow();
++    if (!window || !window->GetNativeWindow()) {
++      return;
++    }
+     // TODO(webium): create a SidePanelCoordinator for WebUIBrowser.
+     // This is a temporary solution to avoid a crash.
+     if (!webui_browser::IsWebUIBrowserEnabled()) {
+-- 
+2.50.1 (Apple Git-155)
+
