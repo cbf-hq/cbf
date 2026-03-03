@@ -8,6 +8,7 @@ from pathlib import Path
 from tool._subprocess import CmdError, run, run_passthrough, run_with_return
 
 _SERIES_NAME_RE = re.compile(r"^[a-zA-Z0-9_.-]+$")
+_PATCH_FILE_GLOB = "[0-9][0-9][0-9][0-9]-*.patch"
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,7 @@ def load_series_config(root: Path, series: str) -> PatchSeriesConfig:
 
 
 def list_patches(patch_dir: Path) -> list[Path]:
-    patches = sorted(patch_dir.glob("000*.patch"))
+    patches = sorted(patch_dir.glob(_PATCH_FILE_GLOB))
     if not patches:
         raise ConfigError(f"No patch files found under: {patch_dir}")
 
@@ -118,7 +119,7 @@ def export_series(
         )
 
     # Clean up old patches first
-    for p in cfg.patch_dir.glob("000*.patch"):
+    for p in cfg.patch_dir.glob(_PATCH_FILE_GLOB):
         p.unlink()
 
     run(
@@ -132,7 +133,7 @@ def export_series(
         cwd=chromium_src,
     )
 
-    return len(list(cfg.patch_dir.glob("000*.patch")))
+    return len(list(cfg.patch_dir.glob(_PATCH_FILE_GLOB)))
 
 
 def apply_series(
