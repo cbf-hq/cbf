@@ -19,12 +19,21 @@ Do not assume stock upstream Chromium has equivalent behavior.
 From `chromium/src`:
 
 ```bash
+# Build chrome browser binary with CBF feature path.
 autoninja -C out/Default chrome
+
+# Build cbf_bridge shared library for cbf-chrome-sys.
 autoninja -C out/Default cbf_bridge
 ```
 
-- `chrome`: browser binary with CBF feature path.
-- `cbf_bridge`: shared library used by `cbf-chrome-sys`.
+- For routine local builds, prefer `uv run tool patch build -t <target>` or
+  `just patch build -t <target>`. Those flows resolve `depot_tools`
+  automatically, so you do not need to modify `PATH` manually.
+- `autoninja` is the direct fallback when you need to run Chromium builds
+  yourself. It requires `depot_tools` on `PATH`.
+- If you keep a local `./depot_tools` checkout at the repository root, run
+  `. depot_tools.sh` first to prepend it to `PATH` for the current shell before
+  invoking `autoninja` directly.
 
 ## 4. Patch and Drift Policy
 
