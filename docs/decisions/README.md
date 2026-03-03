@@ -13,6 +13,8 @@ An ADR is not an implementation design document.
 - [ADR 0004: Chrome Feature Wiring on WebContents Path](./0004-chrome-feature-wiring-on-webcontents-path.md)
 - [ADR 0005: Host-Mediated Browsing Context Open and Disposition Mapping](./0005-host-mediated-browsing-context-open-and-disposition-mapping.md)
 - [ADR 0006: Browser-Backed Ownership Model and ID Boundary for Chrome-Only Runtime](./0006-chrome-only-runtime-and-id-vocabulary-boundary.md)
+- [ADR 0007: Embedded Rendering Invariant for Browser-Backed Chrome Context](./0007-embedded-rendering-invariant-for-browser-backed-context.md)
+- [ADR 0008: cbf-compositor as the GUI Composition Integration Layer](./0008-cbf-compositor-gui-integration-boundary.md)
 
 ## 1. Naming Convention
 
