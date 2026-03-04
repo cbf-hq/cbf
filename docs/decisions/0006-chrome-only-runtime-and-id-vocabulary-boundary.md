@@ -112,6 +112,9 @@ Concretely:
 - This ADR does not change `cbf` public naming (`BrowsingContextId`) or expose
   Chromium internals above `cbf-chrome-sys`.
 - Alloy runtime design remains explicitly out of scope for this ADR.
+- Browser-backed ownership enables Chrome pages such as `chrome://settings`,
+  but support level and user-facing recommendation remain capability-specific
+  and are not implied by this ADR alone.
 
 ## Follow-ups
 

@@ -47,6 +47,10 @@ Non-goals remain explicit:
 
 - CBF will not provide Chrome shell UI surfaces (tab strip, omnibox/URL bar, toolbar, settings shell).
 - CBF will not introduce a general Views abstraction layer.
+- `chrome://settings` may be exposed only as a limited-scope compatibility
+  surface in embedded CBF.
+- In MVP, `chrome://settings` is not a recommended primary user-facing settings
+  surface.
 
 Allowed UI exception:
 
@@ -99,6 +103,16 @@ DevTools policy for this ADR:
 - Failure model remains unchanged: disconnects/crashes/timeouts are surfaced as non-fatal events/errors.
 - ADR 0006 partially supersedes this ADR for ownership/lifecycle semantics.
 - Related implementation track: #40, #41, #42, #43, #44, #45.
+- When Chrome-owned settings pages are made reachable for compatibility, the
+  support contract is "safe to open, safe to degrade", not full UI parity.
+- For MVP, unsupported settings actions that depend on top-level Chrome browser
+  UI, native windows, or browser/OS dialogs must fail safely instead of
+  crashing.
+- Preference persistence alone does not imply recommended product support if
+  CBF host UI/runtime does not meaningfully consume that preference.
+- `chrome://settings` may be used for compatibility and internal validation in
+  MVP, but it should not be treated as the preferred end-user settings
+  experience.
 
 Current DevTools gap themes (relative to Browser-integrated path) include:
 
