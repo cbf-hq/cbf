@@ -18,7 +18,7 @@ use crate::{
 /// Backend implementation that speaks the Chromium IPC protocol.
 #[derive(Debug)]
 pub struct ChromiumBackend {
-    options: ChromiumBackendOptions,
+    _options: ChromiumBackendOptions,
     client: IpcClient,
 }
 
@@ -123,7 +123,7 @@ impl Backend for ChromiumBackend {
     ) -> Result<(CommandSender<Self>, EventStream<Self>), Error> {
         let (command_tx, command_rx) = async_channel::unbounded::<CommandEnvelope<Self>>();
         let (event_tx, event_rx) = async_channel::unbounded::<ChromeEvent>();
-        let ChromiumBackend { options: _, client } = self;
+        let ChromiumBackend { _options: _, client } = self;
         let raw_delegate = raw_delegate.unwrap_or_else(|| Box::<NoopRawDelegate>::default());
 
         thread::spawn(move || {
@@ -140,7 +140,7 @@ impl Backend for ChromiumBackend {
 impl ChromiumBackend {
     /// Create a backend from a pre-connected IPC client.
     pub fn new(options: ChromiumBackendOptions, client: IpcClient) -> Self {
-        Self { options, client }
+        Self { _options: options, client }
     }
 
     fn run_communication(
