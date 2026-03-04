@@ -306,7 +306,7 @@ pub fn start_chromium(
     }
 
     // Complete the Mojo handshake: send the OutgoingInvitation and bind the remote.
-    let client = IpcClient::connect_inherited(inner).map_err(|_| {
+    let client = unsafe { IpcClient::connect_inherited(inner) }.map_err(|_| {
         Error::BackendFailure(cbf::error::BackendErrorInfo {
             kind: cbf::error::ApiErrorKind::ConnectTimeout,
             operation: None,

@@ -82,7 +82,13 @@ impl IpcClient {
     /// `inner` must have been created by `cbf_bridge_client_create()` and the
     /// channel must have been prepared with `prepare_channel()` before calling
     /// this function (after the child process has been spawned).
-    pub fn connect_inherited(inner: *mut CbfBridgeClientHandle) -> Result<Self, Error> {
+    ///
+    /// # Safety
+    ///
+    /// `inner` must be a valid, live `CbfBridgeClientHandle` allocated by
+    /// `cbf_bridge_client_create()`. Ownership is transferred to the returned
+    /// `IpcClient` on success and consumed by this function on failure.
+    pub unsafe fn connect_inherited(inner: *mut CbfBridgeClientHandle) -> Result<Self, Error> {
         if inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
