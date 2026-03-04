@@ -1,0 +1,9 @@
+[book]
+authors = ["CBF contributors"]
+language = "en"
+src = "docs/book/src"
+title = "CBF Book"
+
+[build]
+build-dir = "target/mdbook"
+create-missing = false

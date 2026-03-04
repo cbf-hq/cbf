@@ -3,8 +3,14 @@
 CBF is a Rust-oriented browser backend framework built on Chromium.
 It provides a stable, application-agnostic API surface for controlling browsing contexts and receiving browser events, while isolating Chromium/Mojo implementation details behind an FFI boundary.
 
-## Documentation Index
+## Documentation
 
+Long-form documentation is moving to the mdBook source under `docs/book/src`.
+The repository root stays a short landing page; the book is intended to become the canonical beginner-friendly guide once published.
+
+Current sources:
+
+- mdBook source: `docs/book/src` (reader-facing structure and chapter flow)
 - Setup Guide (Overview): `docs/setup-guide.md` (choose user or contributor path)
 - User Setup Guide: `docs/user-setup-guide.md` (use prebuilt CBF/cbf_bridge artifacts)
 - Developer Setup Guide: `docs/developer-setup-guide.md` (build Chromium/cbf_bridge locally)
