@@ -1,4 +1,4 @@
-From f8499caba1dcbc33abd792fcb203c5ba48ba750c Mon Sep 17 00:00:00 2001
+From c31696f462ff030678166efd80b16f2999a8c376 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 4 Mar 2026 12:31:16 +0900
 Subject: [PATCH 12/13] Replace named channel bootstrap with inherited endpoint
@@ -15,17 +15,17 @@ domain socket) to a Mojo PlatformChannel with inherited endpoint:
 - BUILD.gn: drop //components/named_mojo_ipc_server dependency.
 ---
  chrome/browser/cbf/BUILD.gn                   |  5 +-
- chrome/browser/cbf/bridge/cbf_bridge.cc       | 74 ++++++++++++++++++-
+ chrome/browser/cbf/bridge/cbf_bridge.cc       | 72 +++++++++++++++++--
  chrome/browser/cbf/bridge/cbf_bridge.h        | 10 ++-
- .../browser/cbf/bridge/cbf_bridge_client.cc   | 53 ++++---------
+ .../browser/cbf/bridge/cbf_bridge_client.cc   | 52 ++++----------
  chrome/browser/cbf/bridge/cbf_bridge_client.h |  4 +-
- .../browser/cbf/bridge/cbf_bridge_support.cc  |  8 ++
- .../browser/cbf/bridge/cbf_bridge_support.h   | 21 ++++++
- chrome/browser/cbf/cbf_service.cc             | 62 +++++-----------
- chrome/browser/cbf/cbf_service.h              | 11 +--
+ .../browser/cbf/bridge/cbf_bridge_support.cc  | 10 ++-
+ .../browser/cbf/bridge/cbf_bridge_support.h   | 17 +++++
+ chrome/browser/cbf/cbf_service.cc             | 62 ++++++----------
+ chrome/browser/cbf/cbf_service.h              | 11 ++-
  chrome/browser/cbf/cbf_switches.h             |  2 +-
  chrome/browser/global_features.cc             |  2 +-
- 11 files changed, 154 insertions(+), 98 deletions(-)
+ 11 files changed, 148 insertions(+), 99 deletions(-)
 
 diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
 index a45e93af269e1..2b2761739c1d3 100644
@@ -60,7 +60,7 @@ index a45e93af269e1..2b2761739c1d3 100644
      "//mojo/public/cpp/platform",
      "//mojo/public/cpp/system",
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge.cc b/chrome/browser/cbf/bridge/cbf_bridge.cc
-index f46e8fa78298d..5b31c0608a4d2 100644
+index f46e8fa78298d..80ea14d9c19a6 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge.cc
 @@ -1,7 +1,17 @@
@@ -81,7 +81,7 @@ index f46e8fa78298d..5b31c0608a4d2 100644
  
  extern "C" CbfBridgeClientHandle* cbf_bridge_client_create(void) {
    return reinterpret_cast<CbfBridgeClientHandle*>(
-@@ -16,13 +26,69 @@ extern "C" void cbf_bridge_init(void) {
+@@ -16,13 +26,67 @@ extern "C" void cbf_bridge_init(void) {
    cbf_bridge::internal::EnsureMojoThreadStarted();
  }
  
@@ -91,8 +91,6 @@ index f46e8fa78298d..5b31c0608a4d2 100644
 +extern "C" int cbf_bridge_prepare_channel(char* out_switch_arg,
 +                                           int out_arg_len) {
 +  auto& state = cbf_bridge::internal::GetPendingChannel();
-+
-+  state.pipe = state.invitation.AttachMessagePipe(0u);
 +
 +  base::CommandLine dummy(base::CommandLine::NO_PROGRAM);
 +  state.channel.PrepareToPassRemoteEndpoint(&state.handle_info, &dummy);
@@ -177,7 +175,7 @@ index 346ccece381b0..3ebd5ec9b61bf 100644
                                                      CbfBridgeEvent* out_event);
  CBF_BRIDGE_EXPORT void cbf_bridge_event_free(CbfBridgeEvent* event);
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.cc b/chrome/browser/cbf/bridge/cbf_bridge_client.cc
-index 6a260a8c33bdc..58595d4ca3696 100644
+index 6a260a8c33bdc..ccf1584779c1c 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_client.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client.cc
 @@ -4,11 +4,10 @@
@@ -193,7 +191,7 @@ index 6a260a8c33bdc..58595d4ca3696 100644
  #include "mojo/public/cpp/system/invitation.h"
  #include "mojo/public/cpp/system/message_pipe.h"
  
-@@ -20,66 +19,47 @@ CbfBridgeClient::~CbfBridgeClient() {
+@@ -20,66 +19,46 @@ CbfBridgeClient::~CbfBridgeClient() {
    Shutdown();
  }
  
@@ -225,7 +223,7 @@ index 6a260a8c33bdc..58595d4ca3696 100644
 -                    mojo::NamedPlatformChannel::ServerName(channel));
 -            if (!endpoint.is_valid()) {
 +            auto& state = GetPendingChannel();
-+            if (!state.ready || !state.pipe.is_valid()) {
++            if (!state.ready) {
                *success = false;
                done->Signal();
                return;
@@ -240,9 +238,8 @@ index 6a260a8c33bdc..58595d4ca3696 100644
 -              done->Signal();
 -              return;
 -            }
-+            mojo::OutgoingInvitation::Send(std::move(state.invitation),
-+                                           base::kNullProcessHandle,
-+                                           state.channel.TakeLocalEndpoint());
++            auto pipe = mojo::OutgoingInvitation::SendIsolated(
++                state.channel.TakeLocalEndpoint());
 +
              impl->browser_remote.Bind(
                  mojo::PendingRemote<cbf::mojom::CbfBrowserService>(
@@ -256,7 +253,7 @@ index 6a260a8c33bdc..58595d4ca3696 100644
 -                impl->browser_observer.get(),
 -                observer_remote.InitWithNewPipeAndPassReceiver());
 -            impl->browser_remote->SetObserver(std::move(observer_remote));
-+                    std::move(state.pipe), /*version=*/0));
++                    std::move(pipe), /*version=*/0));
  
              *success = true;
              done->Signal();
@@ -273,7 +270,7 @@ index 6a260a8c33bdc..58595d4ca3696 100644
    return true;
  }
  
-@@ -87,9 +67,8 @@ void CbfBridgeClient::Shutdown() {
+@@ -87,9 +66,8 @@ void CbfBridgeClient::Shutdown() {
    if (impl_) {
      auto task_runner = GetMojoTaskRunner();
      if (task_runner) {
@@ -308,9 +305,18 @@ index a35faf082412e..b64f58e78b739 100644
  };
  
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_support.cc b/chrome/browser/cbf/bridge/cbf_bridge_support.cc
-index 7c851dea20c43..77c44ede3e54f 100644
+index 7c851dea20c43..cc18229443470 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_support.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_support.cc
+@@ -33,7 +33,7 @@ void EnsureMojoThreadStarted() {
+   static std::once_flag once;
+   std::call_once(once, []() {
+     mojo::core::Configuration config;
+-    config.is_broker_process = false;
++    config.is_broker_process = true;
+     mojo::core::Init(config);
+ 
+     base::Thread::Options options;
 @@ -51,4 +51,12 @@ scoped_refptr<base::SingleThreadTaskRunner> GetMojoTaskRunner() {
    return GetMojoThread().task_runner();
  }
@@ -325,17 +331,15 @@ index 7c851dea20c43..77c44ede3e54f 100644
 +
  }  // namespace cbf_bridge::internal
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_support.h b/chrome/browser/cbf/bridge/cbf_bridge_support.h
-index c45b162c656a2..cf8739fc905a4 100644
+index c45b162c656a2..fc24684009226 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_support.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_support.h
-@@ -6,6 +6,14 @@
+@@ -6,6 +6,12 @@
  #include "base/memory/ref_counted.h"
  #include "base/task/single_thread_task_runner.h"
  #include "base/threading/thread.h"
 +#include "mojo/buildflags.h"
 +#include "mojo/public/cpp/platform/platform_channel.h"
-+#include "mojo/public/cpp/system/invitation.h"
-+#include "mojo/public/cpp/system/message_pipe.h"
 +
 +#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
 +#include "base/apple/mach_port_rendezvous.h"
@@ -343,7 +347,7 @@ index c45b162c656a2..cf8739fc905a4 100644
  
  namespace cbf_bridge::internal {
  
-@@ -16,6 +24,19 @@ base::Thread& GetMojoThread();
+@@ -16,6 +22,17 @@ base::Thread& GetMojoThread();
  void EnsureMojoThreadStarted();
  scoped_refptr<base::SingleThreadTaskRunner> GetMojoTaskRunner();
  
@@ -352,8 +356,6 @@ index c45b162c656a2..cf8739fc905a4 100644
 +  ~PendingChannel();
 +
 +  mojo::PlatformChannel channel;
-+  mojo::OutgoingInvitation invitation;
-+  mojo::ScopedMessagePipeHandle pipe;
 +  mojo::PlatformChannel::HandlePassingInfo handle_info;
 +  bool ready = false;
 +};
@@ -364,7 +366,7 @@ index c45b162c656a2..cf8739fc905a4 100644
  
  #endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_SUPPORT_H_
 diff --git a/chrome/browser/cbf/cbf_service.cc b/chrome/browser/cbf/cbf_service.cc
-index b1c61a34d8c34..d50b20d38abe1 100644
+index b1c61a34d8c34..f6332c0c90c24 100644
 --- a/chrome/browser/cbf/cbf_service.cc
 +++ b/chrome/browser/cbf/cbf_service.cc
 @@ -3,18 +3,15 @@
@@ -418,8 +420,8 @@ index b1c61a34d8c34..d50b20d38abe1 100644
 -  const std::string channel_name =
 -    command_line->GetSwitchValueASCII(switches::kCbfIpcChannel);
 -  if (channel_name.empty()) {
-+  auto invitation = mojo::IncomingInvitation::Accept(std::move(endpoint));
-+  mojo::ScopedMessagePipeHandle pipe = invitation.ExtractMessagePipe(0u);
++  mojo::ScopedMessagePipeHandle pipe =
++      mojo::IncomingInvitation::AcceptIsolated(std::move(endpoint));
 +  if (!pipe.is_valid()) {
      return;
    }

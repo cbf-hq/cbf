@@ -1,4 +1,4 @@
-From 9944f27cfdeef11344ff1c668fce8490822f599f Mon Sep 17 00:00:00 2001
+From b52aedd59f7c3ce90f33027a703f7df345ecbe96 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 4 Mar 2026 12:31:51 +0900
 Subject: [PATCH 13/13] Add per-session token handshake for IPC authentication
@@ -14,19 +14,19 @@ call is accepted:
   calls browser_remote_->Authenticate(), then sets up BrowserObserver
   and SetObserver() on success; expose cbf_bridge_client_authenticate.
 ---
- chrome/browser/cbf/bridge/cbf_bridge_auth.cc | 72 ++++++++++++++++++++
- chrome/browser/cbf/cbf_browser_service.cc    | 20 +++++-
+ chrome/browser/cbf/bridge/cbf_bridge_auth.cc | 83 ++++++++++++++++++++
+ chrome/browser/cbf/cbf_browser_service.cc    | 20 ++++-
  chrome/browser/cbf/cbf_browser_service.h     |  7 +-
  chrome/browser/cbf/mojom/cbf_browser.mojom   |  1 +
- 4 files changed, 98 insertions(+), 2 deletions(-)
+ 4 files changed, 109 insertions(+), 2 deletions(-)
  create mode 100644 chrome/browser/cbf/bridge/cbf_bridge_auth.cc
 
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_auth.cc b/chrome/browser/cbf/bridge/cbf_bridge_auth.cc
 new file mode 100644
-index 0000000000000..5db1750e3cf5d
+index 0000000000000..989a8c1694eba
 --- /dev/null
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_auth.cc
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,83 @@
 +#include "chrome/browser/cbf/bridge/cbf_bridge.h"
 +#include "chrome/browser/cbf/bridge/cbf_bridge_client.h"
 +
@@ -62,11 +62,22 @@ index 0000000000000..5db1750e3cf5d
 +              done->Signal();
 +              return;
 +            }
++            // Signal done on disconnect so done.Wait() never blocks forever.
++            impl->browser_remote.set_disconnect_handler(
++                base::BindOnce([](bool* auth_ok,
++                                  base::WaitableEvent* done) {
++                  *auth_ok = false;
++                  done->Signal();
++                }, auth_ok, done));
 +            impl->browser_remote->Authenticate(
 +                token,
 +                base::BindOnce(
 +                    [](CbfBridgeClientImpl* impl, bool* auth_ok,
 +                       base::WaitableEvent* done, bool ok) {
++                      // Clear the disconnect handler so it doesn't fire after
++                      // we've already signaled done.
++                      impl->browser_remote.set_disconnect_handler(
++                          base::OnceClosure());
 +                      if (ok) {
 +                        impl->browser_observer = std::make_unique<
 +                            CbfBridgeClientImpl::BrowserObserver>(impl);

@@ -247,10 +247,7 @@ pub fn start_chromium(
             detail: Some("token generation failed".to_owned()),
         })
     })?;
-    let session_token: String = token_bytes
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let session_token: String = token_bytes.iter().map(|b| format!("{b:02x}")).collect();
 
     let mut command = Command::new(&executable_path);
 
