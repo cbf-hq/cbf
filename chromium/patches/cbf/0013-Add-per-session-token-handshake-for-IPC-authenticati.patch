@@ -1,0 +1,213 @@
+From 9944f27cfdeef11344ff1c668fce8490822f599f Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Wed, 4 Mar 2026 12:31:51 +0900
+Subject: [PATCH 13/13] Add per-session token handshake for IPC authentication
+
+Introduce a session token that must be verified before any Mojo API
+call is accepted:
+
+- cbf_browser.mojom: add Authenticate(string token) => (bool ok) as
+  the first method of CbfBrowserService.
+- CbfBrowserService: accept session token in constructor; gate all
+  methods behind authenticated_ flag; implement Authenticate().
+- cbf_bridge_auth.cc: implement CbfBridgeClient::Authenticate() which
+  calls browser_remote_->Authenticate(), then sets up BrowserObserver
+  and SetObserver() on success; expose cbf_bridge_client_authenticate.
+---
+ chrome/browser/cbf/bridge/cbf_bridge_auth.cc | 72 ++++++++++++++++++++
+ chrome/browser/cbf/cbf_browser_service.cc    | 20 +++++-
+ chrome/browser/cbf/cbf_browser_service.h     |  7 +-
+ chrome/browser/cbf/mojom/cbf_browser.mojom   |  1 +
+ 4 files changed, 98 insertions(+), 2 deletions(-)
+ create mode 100644 chrome/browser/cbf/bridge/cbf_bridge_auth.cc
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_auth.cc b/chrome/browser/cbf/bridge/cbf_bridge_auth.cc
+new file mode 100644
+index 0000000000000..5db1750e3cf5d
+--- /dev/null
++++ b/chrome/browser/cbf/bridge/cbf_bridge_auth.cc
+@@ -0,0 +1,72 @@
++#include "chrome/browser/cbf/bridge/cbf_bridge.h"
++#include "chrome/browser/cbf/bridge/cbf_bridge_client.h"
++
++#include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/synchronization/waitable_event.h"
++#include "chrome/browser/cbf/bridge/cbf_bridge_client_impl.h"
++#include "chrome/browser/cbf/bridge/cbf_bridge_support.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++
++namespace cbf_bridge::internal {
++
++bool CbfBridgeClient::Authenticate(const std::string& token) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++
++  base::WaitableEvent done(base::WaitableEvent::ResetPolicy::MANUAL,
++                            base::WaitableEvent::InitialState::NOT_SIGNALED);
++  bool auth_ok = false;
++
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, std::string token, bool* auth_ok,
++             base::WaitableEvent* done) {
++            if (!impl->browser_remote.is_bound()) {
++              done->Signal();
++              return;
++            }
++            impl->browser_remote->Authenticate(
++                token,
++                base::BindOnce(
++                    [](CbfBridgeClientImpl* impl, bool* auth_ok,
++                       base::WaitableEvent* done, bool ok) {
++                      if (ok) {
++                        impl->browser_observer = std::make_unique<
++                            CbfBridgeClientImpl::BrowserObserver>(impl);
++                        mojo::PendingRemote<cbf::mojom::CbfBrowserObserver>
++                            observer_remote;
++                        impl->browser_observer_receiver = std::make_unique<
++                            mojo::Receiver<cbf::mojom::CbfBrowserObserver>>(
++                            impl->browser_observer.get(),
++                            observer_remote.InitWithNewPipeAndPassReceiver());
++                        impl->browser_remote->SetObserver(
++                            std::move(observer_remote));
++                      }
++                      *auth_ok = ok;
++                      done->Signal();
++                    },
++                    impl, auth_ok, done));
++          },
++          impl_.get(), token, &auth_ok, &done));
++  done.Wait();
++  return auth_ok;
++}
++
++}  // namespace cbf_bridge::internal
++
++extern "C" bool cbf_bridge_client_authenticate(CbfBridgeClientHandle* client,
++                                                const char* token) {
++  if (!client || !token) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->Authenticate(std::string(token));
++}
+diff --git a/chrome/browser/cbf/cbf_browser_service.cc b/chrome/browser/cbf/cbf_browser_service.cc
+index e1bf43758771b..a28dd6369090e 100644
+--- a/chrome/browser/cbf/cbf_browser_service.cc
++++ b/chrome/browser/cbf/cbf_browser_service.cc
+@@ -14,16 +14,30 @@
+ 
+ namespace cbf {
+ 
+-CbfBrowserService::CbfBrowserService() = default;
++CbfBrowserService::CbfBrowserService(std::string session_token)
++    : expected_token_(std::move(session_token)),
++      authenticated_(expected_token_.empty()) {}
+ 
+ CbfBrowserService::~CbfBrowserService() = default;
+ 
++void CbfBrowserService::Authenticate(const std::string& token,
++                                     AuthenticateCallback callback) {
++  if (token == expected_token_) {
++    authenticated_ = true;
++    std::move(callback).Run(true);
++  } else {
++    std::move(callback).Run(false);
++  }
++}
++
+ void CbfBrowserService::SetObserver(
+     mojo::PendingRemote<mojom::CbfBrowserObserver> observer) {
++  if (!authenticated_) { return; }
+   if (observer_.is_bound()) { observer_.reset(); } observer_.Bind(std::move(observer));
+ }
+ 
+ void CbfBrowserService::GetProfiles(GetProfilesCallback callback) {
++  if (!authenticated_) { std::move(callback).Run({}); return; }
+   std::vector<mojom::CbfProfileInfoPtr> profiles;
+   ProfileManager* profile_manager =
+       g_browser_process ? g_browser_process->profile_manager() : nullptr;
+@@ -56,6 +70,7 @@ void CbfBrowserService::GetProfiles(GetProfilesCallback callback) {
+ void CbfBrowserService::BindProfileService(
+     const std::string& profile_id,
+     mojo::PendingReceiver<mojom::CbfProfileService> receiver) {
++  if (!authenticated_) { return; }
+   std::string resolved_id;
+   ::Profile* profile = ResolveProfile(profile_id, &resolved_id);
+   if (!profile) {
+@@ -71,6 +86,7 @@ void CbfBrowserService::BindProfileService(
+ }
+ 
+ void CbfBrowserService::RequestShutdown(uint64_t request_id) {
++  if (!authenticated_) { return; }
+   if (shutdown_state_ == ShutdownState::kProceeding || shutdown_in_progress_) {
+     if (observer_) {
+       observer_->OnShutdownProceeding(request_id);
+@@ -108,6 +124,7 @@ void CbfBrowserService::RequestShutdown(uint64_t request_id) {
+ }
+ 
+ void CbfBrowserService::ConfirmShutdown(uint64_t request_id, bool proceed) {
++  if (!authenticated_) { return; }
+   if (shutdown_state_ != ShutdownState::kBlocked ||
+       !shutdown_request_id_.has_value() ||
+       shutdown_request_id_.value() != request_id) {
+@@ -125,6 +142,7 @@ void CbfBrowserService::ConfirmShutdown(uint64_t request_id, bool proceed) {
+ }
+ 
+ void CbfBrowserService::ForceShutdown() {
++  if (!authenticated_) { return; }
+   chrome::ExitIgnoreUnloadHandlers();
+ }
+ 
+diff --git a/chrome/browser/cbf/cbf_browser_service.h b/chrome/browser/cbf/cbf_browser_service.h
+index 3cfba9a466121..66932900005d7 100644
+--- a/chrome/browser/cbf/cbf_browser_service.h
++++ b/chrome/browser/cbf/cbf_browser_service.h
+@@ -25,11 +25,13 @@ using TabId = std::uint64_t;
+ 
+ class CbfBrowserService final : public mojom::CbfBrowserService {
+  public:
+-  CbfBrowserService();
++  explicit CbfBrowserService(std::string session_token);
+   CbfBrowserService(const CbfBrowserService&) = delete;
+   CbfBrowserService& operator=(const CbfBrowserService&) = delete;
+   ~CbfBrowserService() override;
+ 
++  void Authenticate(const std::string& token,
++                    AuthenticateCallback callback) override;
+   void SetObserver(
+       mojo::PendingRemote<mojom::CbfBrowserObserver> observer) override;
+   void GetProfiles(GetProfilesCallback callback) override;
+@@ -63,6 +65,9 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+   ::Profile* ResolveProfile(const std::string& profile_id,
+                             std::string* resolved_id);
+ 
++  std::string expected_token_;
++  bool authenticated_ = false;
++
+   base::flat_map<std::string, base::FilePath> profile_paths_;
+   std::optional<uint64_t> shutdown_request_id_;
+   ShutdownState shutdown_state_ = ShutdownState::kIdle;
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 11ec52f6a4e65..b705bdd2d2803 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -532,6 +532,7 @@ interface CbfProfileService {
+ };
+ 
+ interface CbfBrowserService {
++  Authenticate(string token) => (bool ok);
+   SetObserver(pending_remote<CbfBrowserObserver> observer);
+   GetProfiles() => (array<CbfProfileInfo> profiles);
+   BindProfileService(string profile_id,
+-- 
+2.50.1 (Apple Git-155)
+

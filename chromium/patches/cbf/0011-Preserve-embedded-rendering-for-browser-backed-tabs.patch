@@ -1,7 +1,7 @@
 From 26188d729e77f96072c9b583389d215260b01a20 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 3 Mar 2026 11:44:19 +0900
-Subject: [PATCH 11/11] Preserve embedded rendering for browser-backed tabs
+Subject: [PATCH 11/13] Preserve embedded rendering for browser-backed tabs
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   5 +

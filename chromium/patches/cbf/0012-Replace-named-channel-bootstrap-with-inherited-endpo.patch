@@ -1,0 +1,521 @@
+From f8499caba1dcbc33abd792fcb203c5ba48ba750c Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Wed, 4 Mar 2026 12:31:16 +0900
+Subject: [PATCH 12/13] Replace named channel bootstrap with inherited endpoint
+
+Switch the CBF IPC bootstrap from NamedMojoIpcServer (named Unix
+domain socket) to a Mojo PlatformChannel with inherited endpoint:
+
+- CbfService: drop NamedMojoIpcServer; add mojo::Receiver bound from
+  PlatformChannel::RecoverPassedEndpointFromCommandLine.
+- bridge: add cbf_bridge_prepare_channel, cbf_bridge_pass_child_pid,
+  cbf_bridge_client_connect_inherited; remove cbf_bridge_client_connect.
+- cbf_bridge_support: add PendingChannel with handle_info for
+  platform-specific handle passing (Mach ports on macOS, fd on Linux).
+- BUILD.gn: drop //components/named_mojo_ipc_server dependency.
+---
+ chrome/browser/cbf/BUILD.gn                   |  5 +-
+ chrome/browser/cbf/bridge/cbf_bridge.cc       | 74 ++++++++++++++++++-
+ chrome/browser/cbf/bridge/cbf_bridge.h        | 10 ++-
+ .../browser/cbf/bridge/cbf_bridge_client.cc   | 53 ++++---------
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |  4 +-
+ .../browser/cbf/bridge/cbf_bridge_support.cc  |  8 ++
+ .../browser/cbf/bridge/cbf_bridge_support.h   | 21 ++++++
+ chrome/browser/cbf/cbf_service.cc             | 62 +++++-----------
+ chrome/browser/cbf/cbf_service.h              | 11 +--
+ chrome/browser/cbf/cbf_switches.h             |  2 +-
+ chrome/browser/global_features.cc             |  2 +-
+ 11 files changed, 154 insertions(+), 98 deletions(-)
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index a45e93af269e1..2b2761739c1d3 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -81,9 +81,10 @@ source_set("cbf") {
+     "//chrome/browser/themes:themes",
+     "//chrome/browser/ui/tab_contents:tab_contents",
+     "//content/public/browser",
+-    "//components/named_mojo_ipc_server",
+     "//extensions/browser",
+     "//mojo/public/cpp/bindings",
++    "//mojo/public/cpp/platform",
++    "//mojo/public/cpp/system",
+     "//third_party/blink/public/common:headers",
+     "//ui/base",
+     "//ui/color",
+@@ -113,6 +114,7 @@ shared_library("cbf_bridge") {
+     "bridge/cbf_bridge_shutdown.cc",
+     "bridge/cbf_bridge_support.cc",
+     "bridge/cbf_bridge_support.h",
++    "bridge/cbf_bridge_auth.cc",
+     "bridge/cbf_bridge_web_page.cc",
+   ]
+ 
+@@ -120,7 +122,6 @@ shared_library("cbf_bridge") {
+     "//base",
+     "//chrome/browser/cbf:mojom",
+     "//components/input",
+-    "//components/named_mojo_ipc_server",
+     "//mojo/public/cpp/bindings",
+     "//mojo/public/cpp/platform",
+     "//mojo/public/cpp/system",
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.cc b/chrome/browser/cbf/bridge/cbf_bridge.cc
+index f46e8fa78298d..5b31c0608a4d2 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge.cc
+@@ -1,7 +1,17 @@
+ #include "chrome/browser/cbf/bridge/cbf_bridge.h"
+ 
++#include "base/command_line.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_util.h"
++#include "build/build_config.h"
+ #include "chrome/browser/cbf/bridge/cbf_bridge_client.h"
+ #include "chrome/browser/cbf/bridge/cbf_bridge_support.h"
++#include "mojo/buildflags.h"
++
++#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
++#include "base/apple/mach_port_rendezvous_mac.h"
++#include "base/synchronization/lock.h"
++#endif
+ 
+ extern "C" CbfBridgeClientHandle* cbf_bridge_client_create(void) {
+   return reinterpret_cast<CbfBridgeClientHandle*>(
+@@ -16,13 +26,69 @@ extern "C" void cbf_bridge_init(void) {
+   cbf_bridge::internal::EnsureMojoThreadStarted();
+ }
+ 
+-extern "C" bool cbf_bridge_client_connect(CbfBridgeClientHandle* client,
+-                                           const char* channel_name) {
+-  if (!client || !channel_name) {
++extern "C" int cbf_bridge_prepare_channel(char* out_switch_arg,
++                                           int out_arg_len) {
++  auto& state = cbf_bridge::internal::GetPendingChannel();
++
++  state.pipe = state.invitation.AttachMessagePipe(0u);
++
++  base::CommandLine dummy(base::CommandLine::NO_PROGRAM);
++  state.channel.PrepareToPassRemoteEndpoint(&state.handle_info, &dummy);
++
++#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
++  // Ensure the Mach rendezvous server is created before the child spawns so
++  // it is accepting connections by the time the child tries to connect.
++  base::MachPortRendezvousServerMac::GetInstance();
++#endif
++
++  const std::string switch_val =
++      dummy.GetSwitchValueASCII(mojo::PlatformChannel::kHandleSwitch);
++  const std::string full_switch = std::string("--") +
++                                   mojo::PlatformChannel::kHandleSwitch + "=" +
++                                   switch_val;
++
++  if (out_switch_arg && out_arg_len > 0) {
++    base::strlcpy(out_switch_arg, full_switch.c_str(),
++                  static_cast<size_t>(out_arg_len));
++  }
++
++  state.ready = true;
++
++#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
++  // Return the remote fd so Rust can close it after spawning the child.
++  return state.handle_info.empty()
++             ? -1
++             : static_cast<int>(state.handle_info.front().first);
++#else
++  return -1;
++#endif
++}
++
++extern "C" void cbf_bridge_pass_child_pid(int64_t child_pid) {
++  auto& state = cbf_bridge::internal::GetPendingChannel();
++
++#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
++  if (child_pid > 0 && !state.handle_info.empty()) {
++    auto* server = base::MachPortRendezvousServerMac::GetInstance();
++    base::AutoLock lock(server->GetLock());
++    server->RegisterPortsForPid(static_cast<pid_t>(child_pid),
++                                state.handle_info);
++    state.handle_info.clear();
++  }
++#else
++  (void)child_pid;
++#endif
++
++  state.channel.RemoteProcessLaunchAttempted();
++}
++
++extern "C" bool cbf_bridge_client_connect_inherited(
++    CbfBridgeClientHandle* client) {
++  if (!client) {
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->Connect(channel_name);
++      ->ConnectInherited();
+ }
+ 
+ extern "C" bool cbf_bridge_client_poll_event(CbfBridgeClientHandle* client,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index 346ccece381b0..3ebd5ec9b61bf 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -20,8 +20,14 @@ typedef struct CbfBridgeClientHandle CbfBridgeClientHandle;
+ CBF_BRIDGE_EXPORT CbfBridgeClientHandle* cbf_bridge_client_create(void);
+ CBF_BRIDGE_EXPORT void cbf_bridge_client_destroy(CbfBridgeClientHandle* client);
+ CBF_BRIDGE_EXPORT void cbf_bridge_init(void);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_connect(CbfBridgeClientHandle* client,
+-                                                 const char* channel_name);
++CBF_BRIDGE_EXPORT int cbf_bridge_prepare_channel(char* out_switch_arg,
++                                                 int out_arg_len);
++CBF_BRIDGE_EXPORT void cbf_bridge_pass_child_pid(int64_t child_pid);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_connect_inherited(
++    CbfBridgeClientHandle* client);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_authenticate(
++    CbfBridgeClientHandle* client,
++    const char* token);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_poll_event(CbfBridgeClientHandle* client,
+                                                     CbfBridgeEvent* out_event);
+ CBF_BRIDGE_EXPORT void cbf_bridge_event_free(CbfBridgeEvent* event);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.cc b/chrome/browser/cbf/bridge/cbf_bridge_client.cc
+index 6a260a8c33bdc..58595d4ca3696 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.cc
+@@ -4,11 +4,10 @@
+ 
+ #include "base/functional/bind.h"
+ #include "base/location.h"
++#include "base/process/process_handle.h"
+ #include "base/synchronization/waitable_event.h"
+ #include "chrome/browser/cbf/bridge/cbf_bridge_client_impl.h"
+ #include "chrome/browser/cbf/bridge/cbf_bridge_support.h"
+-#include "components/named_mojo_ipc_server/named_mojo_ipc_server_client_util.h"
+-#include "mojo/public/cpp/platform/platform_channel_endpoint.h"
+ #include "mojo/public/cpp/system/invitation.h"
+ #include "mojo/public/cpp/system/message_pipe.h"
+ 
+@@ -20,66 +19,47 @@ CbfBridgeClient::~CbfBridgeClient() {
+   Shutdown();
+ }
+ 
+-bool CbfBridgeClient::Connect(const std::string& channel_name) {
+-  channel_name_ = channel_name;
++bool CbfBridgeClient::ConnectInherited() {
+   impl_ = std::make_unique<CbfBridgeClientImpl>();
+ 
+-  constexpr uint64_t kCbfMessagePipeId = 0u;
+   auto task_runner = GetMojoTaskRunner();
+   if (!task_runner) {
+     return false;
+   }
+ 
+-  base::WaitableEvent done(
+-      base::WaitableEvent::ResetPolicy::MANUAL,
+-      base::WaitableEvent::InitialState::NOT_SIGNALED);
++  base::WaitableEvent done(base::WaitableEvent::ResetPolicy::MANUAL,
++                            base::WaitableEvent::InitialState::NOT_SIGNALED);
+   bool success = false;
+   task_runner->PostTask(
+       FROM_HERE,
+       base::BindOnce(
+-          [](CbfBridgeClientImpl* impl, std::string channel, bool* success,
++          [](CbfBridgeClientImpl* impl, bool* success,
+              base::WaitableEvent* done) {
+-            mojo::PlatformChannelEndpoint endpoint =
+-                named_mojo_ipc_server::ConnectToServer(
+-                    mojo::NamedPlatformChannel::ServerName(channel));
+-            if (!endpoint.is_valid()) {
++            auto& state = GetPendingChannel();
++            if (!state.ready || !state.pipe.is_valid()) {
+               *success = false;
+               done->Signal();
+               return;
+             }
+ 
+-            auto invitation =
+-                mojo::IncomingInvitation::Accept(std::move(endpoint));
+-            mojo::ScopedMessagePipeHandle message_pipe =
+-                invitation.ExtractMessagePipe(kCbfMessagePipeId);
+-            if (!message_pipe.is_valid()) {
+-              *success = false;
+-              done->Signal();
+-              return;
+-            }
++            mojo::OutgoingInvitation::Send(std::move(state.invitation),
++                                           base::kNullProcessHandle,
++                                           state.channel.TakeLocalEndpoint());
++
+             impl->browser_remote.Bind(
+                 mojo::PendingRemote<cbf::mojom::CbfBrowserService>(
+-                    std::move(message_pipe),
+-                    /*version=*/0));
+-            impl->browser_observer =
+-                std::make_unique<CbfBridgeClientImpl::BrowserObserver>(impl);
+-            mojo::PendingRemote<cbf::mojom::CbfBrowserObserver> observer_remote;
+-            impl->browser_observer_receiver = std::make_unique<
+-                mojo::Receiver<cbf::mojom::CbfBrowserObserver>>(
+-                impl->browser_observer.get(),
+-                observer_remote.InitWithNewPipeAndPassReceiver());
+-            impl->browser_remote->SetObserver(std::move(observer_remote));
++                    std::move(state.pipe), /*version=*/0));
+ 
+             *success = true;
+             done->Signal();
+           },
+-          impl_.get(), channel_name, &success, &done));
++          impl_.get(), &success, &done));
+   done.Wait();
++
+   if (!success) {
+     impl_.reset();
+     return false;
+   }
+-
+   return true;
+ }
+ 
+@@ -87,9 +67,8 @@ void CbfBridgeClient::Shutdown() {
+   if (impl_) {
+     auto task_runner = GetMojoTaskRunner();
+     if (task_runner) {
+-      base::WaitableEvent done(
+-          base::WaitableEvent::ResetPolicy::MANUAL,
+-          base::WaitableEvent::InitialState::NOT_SIGNALED);
++      base::WaitableEvent done(base::WaitableEvent::ResetPolicy::MANUAL,
++                                base::WaitableEvent::InitialState::NOT_SIGNALED);
+       task_runner->PostTask(
+           FROM_HERE,
+           base::BindOnce(
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index a35faf082412e..b64f58e78b739 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -17,7 +17,8 @@ class CbfBridgeClient {
+   CbfBridgeClient& operator=(const CbfBridgeClient&) = delete;
+   ~CbfBridgeClient();
+ 
+-  bool Connect(const std::string& channel_name);
++  bool ConnectInherited();
++  bool Authenticate(const std::string& token);
+   bool PollEvent(CbfBridgeEvent* out_event);
+   bool GetProfiles(CbfProfileList* out_list);
+   bool ListExtensions(const std::string& profile_id, CbfExtensionInfoList* out_list);
+@@ -67,7 +68,6 @@ class CbfBridgeClient {
+   void Shutdown();
+ 
+  private:
+-  std::string channel_name_;
+   std::unique_ptr<CbfBridgeClientImpl> impl_;
+ };
+ 
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_support.cc b/chrome/browser/cbf/bridge/cbf_bridge_support.cc
+index 7c851dea20c43..77c44ede3e54f 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_support.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_support.cc
+@@ -51,4 +51,12 @@ scoped_refptr<base::SingleThreadTaskRunner> GetMojoTaskRunner() {
+   return GetMojoThread().task_runner();
+ }
+ 
++PendingChannel::PendingChannel() = default;
++PendingChannel::~PendingChannel() = default;
++
++PendingChannel& GetPendingChannel() {
++  static base::NoDestructor<PendingChannel> instance;
++  return *instance;
++}
++
+ }  // namespace cbf_bridge::internal
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_support.h b/chrome/browser/cbf/bridge/cbf_bridge_support.h
+index c45b162c656a2..cf8739fc905a4 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_support.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_support.h
+@@ -6,6 +6,14 @@
+ #include "base/memory/ref_counted.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/threading/thread.h"
++#include "mojo/buildflags.h"
++#include "mojo/public/cpp/platform/platform_channel.h"
++#include "mojo/public/cpp/system/invitation.h"
++#include "mojo/public/cpp/system/message_pipe.h"
++
++#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
++#include "base/apple/mach_port_rendezvous.h"
++#endif
+ 
+ namespace cbf_bridge::internal {
+ 
+@@ -16,6 +24,19 @@ base::Thread& GetMojoThread();
+ void EnsureMojoThreadStarted();
+ scoped_refptr<base::SingleThreadTaskRunner> GetMojoTaskRunner();
+ 
++struct PendingChannel {
++  PendingChannel();
++  ~PendingChannel();
++
++  mojo::PlatformChannel channel;
++  mojo::OutgoingInvitation invitation;
++  mojo::ScopedMessagePipeHandle pipe;
++  mojo::PlatformChannel::HandlePassingInfo handle_info;
++  bool ready = false;
++};
++
++PendingChannel& GetPendingChannel();
++
+ }  // namespace cbf_bridge::internal
+ 
+ #endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_SUPPORT_H_
+diff --git a/chrome/browser/cbf/cbf_service.cc b/chrome/browser/cbf/cbf_service.cc
+index b1c61a34d8c34..d50b20d38abe1 100644
+--- a/chrome/browser/cbf/cbf_service.cc
++++ b/chrome/browser/cbf/cbf_service.cc
+@@ -3,18 +3,15 @@
+ #include <string>
+ 
+ #include "base/command_line.h"
+-#include "base/functional/bind.h"
+ #include "chrome/browser/cbf/cbf_switches.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/global_features.h"
+-#include "components/named_mojo_ipc_server/connection_info.h"
+-#include "components/named_mojo_ipc_server/endpoint_options.h"
+-#include "mojo/public/cpp/platform/named_platform_channel.h"
++#include "mojo/public/cpp/platform/platform_channel.h"
++#include "mojo/public/cpp/system/invitation.h"
+ 
+ namespace cbf {
+ 
+-CbfService::CbfService(BrowserProcess* browser_process)
+-    : browser_service_(std::make_unique<CbfBrowserService>()) {
++CbfService::CbfService(BrowserProcess* browser_process) {
+   (void)browser_process;
+ }
+ 
+@@ -31,49 +28,30 @@ CbfService* CbfService::GetForProcess() {
+   return features->cbf_service();
+ }
+ 
+-void CbfService::EnsureIpcServerStarted() {
+-  if (ipc_server_started_) {
+-    return;
+-  }
++void CbfService::StartIpcServer() {
++  const base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
++
++  const std::string token =
++      cmd->HasSwitch(switches::kCbfSessionToken)
++          ? cmd->GetSwitchValueASCII(switches::kCbfSessionToken)
++          : "";
++  browser_service_ = std::make_unique<CbfBrowserService>(token);
+ 
+-  const base::CommandLine* command_line =
+-    base::CommandLine::ForCurrentProcess();
+-  if (!command_line->HasSwitch(switches::kCbfIpcChannel)) {
++  mojo::PlatformChannelEndpoint endpoint =
++      mojo::PlatformChannel::RecoverPassedEndpointFromCommandLine(*cmd);
++  if (!endpoint.is_valid()) {
+     return;
+   }
+ 
+-  const std::string channel_name =
+-    command_line->GetSwitchValueASCII(switches::kCbfIpcChannel);
+-  if (channel_name.empty()) {
++  auto invitation = mojo::IncomingInvitation::Accept(std::move(endpoint));
++  mojo::ScopedMessagePipeHandle pipe = invitation.ExtractMessagePipe(0u);
++  if (!pipe.is_valid()) {
+     return;
+   }
+ 
+-  constexpr std::uint64_t kCbfMessagePipeId = 0u;
+-  named_mojo_ipc_server::EndpointOptions options(
+-      mojo::NamedPlatformChannel::ServerName(channel_name),
+-      kCbfMessagePipeId);
+-  // Emergency hatch: BindRepeating requires a callable target and we currently
+-  // bind a raw pointer here.
+-  //
+-  // Safety rationale:
+-  // - `browser_service_` and `ipc_server_` are owned by `CbfService`.
+-  // - member destruction order is reverse declaration order in `cbf_service.h`,
+-  //   so `ipc_server_` is destroyed before `browser_service_`.
+-  // - therefore callbacks owned by `ipc_server_` cannot outlive
+-  //   `browser_service_`.
+-  //
+-  // TODO: Replace this with an explicit weak-lifetime-safe binding
+-  // style if/when NamedMojoIpcServer API allows it cleanly.
+-  ipc_server_ = std::make_unique<
+-      named_mojo_ipc_server::NamedMojoIpcServer<mojom::CbfBrowserService>>(
+-      options, base::BindRepeating(
+-                   [](CbfBrowserService* service,
+-                      const named_mojo_ipc_server::ConnectionInfo&) {
+-                     return static_cast<mojom::CbfBrowserService*>(service);
+-                   },
+-                   base::Unretained(browser_service_.get())));
+-  ipc_server_->StartServer();
+-  ipc_server_started_ = true;
++  ipc_receiver_ = std::make_unique<mojo::Receiver<mojom::CbfBrowserService>>(
++      browser_service_.get(),
++      mojo::PendingReceiver<mojom::CbfBrowserService>(std::move(pipe)));
+ }
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_service.h b/chrome/browser/cbf/cbf_service.h
+index 0a0d6cd8183e1..2ef50fe45f005 100644
+--- a/chrome/browser/cbf/cbf_service.h
++++ b/chrome/browser/cbf/cbf_service.h
+@@ -4,7 +4,7 @@
+ #include <memory>
+ 
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+-#include "components/named_mojo_ipc_server/named_mojo_ipc_server.h"
++#include "mojo/public/cpp/bindings/receiver.h"
+ 
+ class BrowserProcess;
+ 
+@@ -19,16 +19,13 @@ class CbfService {
+ 
+   static CbfService* GetForProcess();
+ 
+-  void EnsureIpcServerStarted();
++  void StartIpcServer();
+ 
+- CbfBrowserService* browser_service() { return browser_service_.get(); }
++  CbfBrowserService* browser_service() { return browser_service_.get(); }
+ 
+  private:
+   std::unique_ptr<CbfBrowserService> browser_service_;
+-  std::unique_ptr<
+-      named_mojo_ipc_server::NamedMojoIpcServer<mojom::CbfBrowserService>>
+-      ipc_server_;
+-  bool ipc_server_started_ = false;
++  std::unique_ptr<mojo::Receiver<mojom::CbfBrowserService>> ipc_receiver_;
+ };
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_switches.h b/chrome/browser/cbf/cbf_switches.h
+index 357a612ba14ab..798ec2dec0ee4 100644
+--- a/chrome/browser/cbf/cbf_switches.h
++++ b/chrome/browser/cbf/cbf_switches.h
+@@ -3,8 +3,8 @@
+ 
+ namespace cbf::switches {
+ 
+-inline constexpr char kCbfIpcChannel[] = "cbf-ipc-channel";
+ inline constexpr char kCbfDisableHostOwnedDrag[] = "cbf-disable-host-owned-drag";
++inline constexpr char kCbfSessionToken[] = "cbf-session-token";
+ 
+ }  // namespace cbf::switches
+ 
+diff --git a/chrome/browser/global_features.cc b/chrome/browser/global_features.cc
+index 8c3bd5868c4cd..5b7b7db8d03fc 100644
+--- a/chrome/browser/global_features.cc
++++ b/chrome/browser/global_features.cc
+@@ -182,7 +182,7 @@ void GlobalFeatures::PostBrowserProcessInitCore() {
+ 
+   if (base::FeatureList::IsEnabled(cbf::features::kCbf)) {
+     cbf_service_ = std::make_unique<cbf::CbfService>(g_browser_process);
+-    cbf_service_->EnsureIpcServerStarted();
++    cbf_service_->StartIpcServer();
+   }
+ 
+ #if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+-- 
+2.50.1 (Apple Git-155)
+
