@@ -1,0 +1,456 @@
+From 21933dbf324dc5e4c513e07da0b5b20f3afe7800 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Wed, 4 Mar 2026 16:24:07 +0900
+Subject: [PATCH 14/14] Add limited support for chrome settings
+
+---
+ chrome/browser/cbf/BUILD.gn                   |   1 +
+ .../browser/cbf/cbf_settings_browsertest.cc   | 257 ++++++++++++++++++
+ .../ui/webui/settings/about_handler.cc        |  10 +
+ .../ui/webui/settings/appearance_handler.cc   |   7 +-
+ .../ui/webui/settings/downloads_handler.cc    |   8 +-
+ .../ui/webui/settings/import_data_handler.cc  |   3 +
+ .../settings/password_manager_handler.cc      |   6 +-
+ .../ui/webui/settings/performance_handler.cc  |   5 +-
+ 8 files changed, 291 insertions(+), 6 deletions(-)
+ create mode 100644 chrome/browser/cbf/cbf_settings_browsertest.cc
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index 8c5fd64a5298e..f5d4d0b434bf6 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -171,6 +171,7 @@ source_set("cbf_browser_tests") {
+   defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+ 
+   sources = [
++    "cbf_settings_browsertest.cc",
+     "cbf_profile_service_browsertest.cc",
+     "profile/cbf_profile_devtools_controller_browsertest.cc",
+     "test/cbf_test_profile_observer.cc",
+diff --git a/chrome/browser/cbf/cbf_settings_browsertest.cc b/chrome/browser/cbf/cbf_settings_browsertest.cc
+new file mode 100644
+index 0000000000000..0b3f6a625f6cc
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_settings_browsertest.cc
+@@ -0,0 +1,257 @@
++#include "chrome/browser/cbf/cbf_profile_service.h"
++
++#include <array>
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/run_loop.h"
++#include "base/values.h"
++#include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/common/pref_names.h"
++#include "chrome/common/url_constants.h"
++#include "components/prefs/pref_service.h"
++#include "chrome/test/base/in_process_browser_test.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/common/url_constants.h"
++#include "content/public/test/browser_test.h"
++#include "content/public/test/browser_test_utils.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "url/gurl.h"
++
++namespace cbf {
++namespace {
++
++class CbfSettingsBrowserTest : public InProcessBrowserTest {
++ protected:
++  void SetUpOnMainThread() override {
++    InProcessBrowserTest::SetUpOnMainThread();
++    profile_service_ =
++        std::make_unique<CbfProfileService>(browser()->profile(), nullptr);
++    profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
++  }
++
++  void TearDownOnMainThread() override {
++    if (profile_service_) {
++      const auto tab_ids = profile_service_->GetAllTabIds();
++      for (TabId tab_id : tab_ids) {
++        profile_service_->NotifyWebPageClosed(tab_id);
++      }
++      profile_service_->CloseAllWebPages();
++      base::RunLoop().RunUntilIdle();
++      profile_service_.reset();
++    }
++
++    InProcessBrowserTest::TearDownOnMainThread();
++  }
++
++  TabId CreatePage(const std::string& url) {
++    TabId created_id = kInvalidTabId;
++    base::RunLoop run_loop;
++    profile_service_->CreateWebPage(
++        url, 1,
++        base::BindOnce(
++            [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
++              *out_id = tab_id;
++              run_loop->Quit();
++            },
++            &created_id, &run_loop));
++    run_loop.Run();
++    return created_id;
++  }
++
++  content::WebContents* GetWebContents(TabId tab_id) const {
++    return profile_service_->GetWebContentsForTesting(tab_id);
++  }
++
++  void WaitForLoad(TabId tab_id) {
++    content::WebContents* web_contents = GetWebContents(tab_id);
++    ASSERT_NE(web_contents, nullptr);
++    ASSERT_TRUE(content::WaitForLoadStop(web_contents));
++  }
++
++  content::WebUI* GetWebUI(TabId tab_id) const {
++    content::WebContents* web_contents = GetWebContents(tab_id);
++    return web_contents ? web_contents->GetWebUI() : nullptr;
++  }
++
++  void ExpectSettingsPageStillAlive(TabId tab_id) {
++    content::WebContents* web_contents = GetWebContents(tab_id);
++    ASSERT_NE(web_contents, nullptr);
++    EXPECT_NE(GetWebUI(tab_id), nullptr);
++
++    const GURL committed_url = web_contents->GetLastCommittedURL();
++    EXPECT_TRUE(committed_url.SchemeIs(content::kChromeUIScheme));
++    EXPECT_EQ(committed_url.host(), chrome::kChromeUISettingsHost);
++  }
++
++  void ProcessMessage(TabId tab_id, const char* message, base::ListValue args) {
++    content::WebUI* web_ui = GetWebUI(tab_id);
++    ASSERT_NE(web_ui, nullptr);
++    web_ui->ProcessWebUIMessage(GURL(), message, std::move(args));
++    base::RunLoop().RunUntilIdle();
++  }
++
++  std::unique_ptr<CbfProfileService> profile_service_;
++  cbf::test::CbfTestProfileObserver observer_;
++};
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest, SettingsRootLoadsWithoutCrash) {
++  const TabId tab_id = CreatePage("chrome://settings");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
++                       SettingsAppearanceSubPageLoadsWithoutCrash) {
++  const TabId tab_id = CreatePage("chrome://settings/appearance");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
++                       SettingsPrivacySubPageLoadsWithoutCrash) {
++  const TabId tab_id = CreatePage("chrome://settings/privacy");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
++                       SettingsPerformanceSubPageLoadsWithoutCrash) {
++  const TabId tab_id = CreatePage("chrome://settings/performance");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
++                       SelectedSettingsSubPagesLoadWithoutCrash) {
++  constexpr std::array<const char*, 6> kUrls = {
++      "chrome://settings/downloads",
++      "chrome://settings/onStartup",
++      "chrome://settings/search",
++      "chrome://settings/languages",
++      "chrome://settings/autofill",
++      "chrome://settings/system",
++  };
++
++  for (const char* url : kUrls) {
++    const TabId tab_id = CreatePage(url);
++    ASSERT_NE(tab_id, kInvalidTabId) << url;
++
++    WaitForLoad(tab_id);
++    ExpectSettingsPageStillAlive(tab_id);
++  }
++}
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
++                       SettingsAppearanceCustomizeToolbarRequestIsSafe) {
++  const TabId tab_id = CreatePage("chrome://settings/appearance");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++  ProcessMessage(tab_id, "openCustomizeChromeToolbarSection", base::ListValue());
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
++                       SettingsPerformanceOpenFeedbackRequestIsSafe) {
++  const TabId tab_id = CreatePage("chrome://settings/performance");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++
++  base::ListValue args;
++  args.Append("cbf-settings");
++  ProcessMessage(tab_id, "openPerformanceFeedbackDialog", std::move(args));
++
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
++                       SettingsPasswordManagerOpenRequestIsSafe) {
++  const TabId tab_id = CreatePage("chrome://settings");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++
++  base::ListValue passwords_args;
++  passwords_args.Append(0);
++  ProcessMessage(tab_id, "showPasswordManager", std::move(passwords_args));
++  ExpectSettingsPageStillAlive(tab_id);
++
++  base::ListValue checkup_args;
++  checkup_args.Append(1);
++  ProcessMessage(tab_id, "showPasswordManager", std::move(checkup_args));
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
++                       SettingsAboutOpenHelpAndFeedbackRequestsAreSafe) {
++  const TabId tab_id = CreatePage("chrome://settings/help");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++
++  ProcessMessage(tab_id, "openFeedbackDialog", base::ListValue());
++  ExpectSettingsPageStillAlive(tab_id);
++
++  ProcessMessage(tab_id, "openHelpPage", base::ListValue());
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
++                       SettingsDownloadsSelectDownloadLocationIsSafe) {
++  const TabId tab_id = CreatePage("chrome://settings/downloads");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++  ProcessMessage(tab_id, "selectDownloadLocation", base::ListValue());
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
++                       SettingsImportDataSelectFileIsSafe) {
++  const TabId tab_id = CreatePage("chrome://settings");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++  ProcessMessage(tab_id, "importFromBookmarksFile", base::ListValue());
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(
++    CbfSettingsBrowserTest,
++    SettingsAppearanceResetPinnedToolbarActionsRemainsNonCrashingAndAppliesPref) {
++  const TabId tab_id = CreatePage("chrome://settings/appearance");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++
++  PrefService* prefs = browser()->profile()->GetPrefs();
++  ASSERT_NE(prefs, nullptr);
++  prefs->SetBoolean(prefs::kShowHomeButton, true);
++  prefs->SetBoolean(prefs::kShowForwardButton, false);
++
++  EXPECT_TRUE(prefs->GetBoolean(prefs::kShowHomeButton));
++  EXPECT_FALSE(prefs->GetBoolean(prefs::kShowForwardButton));
++
++  ProcessMessage(tab_id, "resetPinnedToolbarActions", base::ListValue());
++
++  ExpectSettingsPageStillAlive(tab_id);
++  EXPECT_FALSE(prefs->GetBoolean(prefs::kShowHomeButton));
++  EXPECT_TRUE(prefs->GetBoolean(prefs::kShowForwardButton));
++}
++
++}  // namespace
++}  // namespace cbf
+diff --git a/chrome/browser/ui/webui/settings/about_handler.cc b/chrome/browser/ui/webui/settings/about_handler.cc
+index a37520bbe8ba9..a7f773ef580e6 100644
+--- a/chrome/browser/ui/webui/settings/about_handler.cc
++++ b/chrome/browser/ui/webui/settings/about_handler.cc
+@@ -32,6 +32,7 @@
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_finder.h"
++#include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/chrome_pages.h"
+ #include "chrome/browser/ui/webui/theme_source.h"
+ #include "chrome/browser/upgrade_detector/upgrade_detector.h"
+@@ -511,6 +512,9 @@ void AboutHandler::PromoteUpdater(const base::ListValue& args) {
+ void AboutHandler::HandleOpenFeedbackDialog(const base::ListValue& args) {
+   DCHECK(args.empty());
+   Browser* browser = chrome::FindBrowserWithTab(web_ui()->GetWebContents());
++  if (!browser || !browser->window() || !browser->window()->GetNativeWindow()) {
++    return;
++  }
+   chrome::OpenFeedbackDialog(browser,
+                              feedback::kFeedbackSourceMdSettingsAboutPage);
+ }
+@@ -518,6 +522,9 @@ void AboutHandler::HandleOpenFeedbackDialog(const base::ListValue& args) {
+ void AboutHandler::HandleOpenHelpPage(const base::ListValue& args) {
+   DCHECK(args.empty());
+   Browser* browser = chrome::FindBrowserWithTab(web_ui()->GetWebContents());
++  if (!browser || !browser->window() || !browser->window()->GetNativeWindow()) {
++    return;
++  }
+   chrome::ShowHelp(browser, chrome::HelpSource::kWebUI);
+ }
+ 
+@@ -554,6 +561,9 @@ void AboutHandler::HandleLaunchReleaseNotes(const base::ListValue& args) {
+ void AboutHandler::HandleOpenOsHelpPage(const base::ListValue& args) {
+   DCHECK(args.empty());
+   Browser* browser = chrome::FindBrowserWithTab(web_ui()->GetWebContents());
++  if (!browser || !browser->window() || !browser->window()->GetNativeWindow()) {
++    return;
++  }
+   chrome::ShowHelp(browser, chrome::HelpSource::kWebUIChromeOS);
+ }
+ 
+diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/browser/ui/webui/settings/appearance_handler.cc
+index a30d0206a45a5..8c0f712657b80 100644
+--- a/chrome/browser/ui/webui/settings/appearance_handler.cc
++++ b/chrome/browser/ui/webui/settings/appearance_handler.cc
+@@ -14,6 +14,7 @@
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_finder.h"
++#include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
+ #include "chrome/common/pref_names.h"
+ #include "content/public/browser/web_ui.h"
+@@ -70,7 +71,7 @@ void AppearanceHandler::HandleUseTheme(ui::SystemTheme system_theme,
+ 
+ void AppearanceHandler::OpenCustomizeChrome(const base::ListValue& args) {
+   auto* browser = chrome::FindLastActive();
+-  if (!browser) {
++  if (!browser || !browser->window() || !browser->window()->GetNativeWindow()) {
+     return;
+   }
+   chrome::ExecuteCommand(browser, IDC_SHOW_CUSTOMIZE_CHROME_SIDE_PANEL);
+@@ -79,7 +80,9 @@ void AppearanceHandler::OpenCustomizeChrome(const base::ListValue& args) {
+ void AppearanceHandler::OpenCustomizeChromeToolbarSection(
+     const base::ListValue& args) {
+   auto* browser = chrome::FindLastActive();
+-  CHECK(browser);
++  if (!browser || !browser->window() || !browser->window()->GetNativeWindow()) {
++    return;
++  }
+   chrome::ExecuteCommand(browser, IDC_SHOW_CUSTOMIZE_CHROME_TOOLBAR);
+ }
+ 
+diff --git a/chrome/browser/ui/webui/settings/downloads_handler.cc b/chrome/browser/ui/webui/settings/downloads_handler.cc
+index bde80cba3f55d..c643386aa114a 100644
+--- a/chrome/browser/ui/webui/settings/downloads_handler.cc
++++ b/chrome/browser/ui/webui/settings/downloads_handler.cc
+@@ -98,6 +98,11 @@ void DownloadsHandler::HandleSelectDownloadLocation(
+     return;
+   }
+ 
++  auto parent_window = web_ui()->GetWebContents()->GetTopLevelNativeWindow();
++  if (!parent_window) {
++    return;
++  }
++
+   PrefService* pref_service = profile_->GetPrefs();
+   select_folder_dialog_ = ui::SelectFileDialog::Create(
+       this,
+@@ -108,8 +113,7 @@ void DownloadsHandler::HandleSelectDownloadLocation(
+       ui::SelectFileDialog::SELECT_FOLDER,
+       l10n_util::GetStringUTF16(IDS_SETTINGS_DOWNLOAD_LOCATION),
+       pref_service->GetFilePath(prefs::kDownloadDefaultDirectory), &info, 0,
+-      base::FilePath::StringType(),
+-      web_ui()->GetWebContents()->GetTopLevelNativeWindow(), nullptr);
++      base::FilePath::StringType(), parent_window, nullptr);
+ }
+ 
+ void DownloadsHandler::FileSelected(const ui::SelectedFileInfo& file,
+diff --git a/chrome/browser/ui/webui/settings/import_data_handler.cc b/chrome/browser/ui/webui/settings/import_data_handler.cc
+index cdbe7b0119d5d..599273251556a 100644
+--- a/chrome/browser/ui/webui/settings/import_data_handler.cc
++++ b/chrome/browser/ui/webui/settings/import_data_handler.cc
+@@ -193,6 +193,9 @@ void ImportDataHandler::HandleImportFromBookmarksFile(
+   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("html"));
+ 
+   Browser* browser = chrome::FindBrowserWithTab(web_ui()->GetWebContents());
++  if (!browser || !browser->window() || !browser->window()->GetNativeWindow()) {
++    return;
++  }
+ 
+   select_file_dialog_->SelectFile(
+       ui::SelectFileDialog::SELECT_OPEN_FILE, std::u16string(),
+diff --git a/chrome/browser/ui/webui/settings/password_manager_handler.cc b/chrome/browser/ui/webui/settings/password_manager_handler.cc
+index 23847cdd4af91..2cac93baad1cd 100644
+--- a/chrome/browser/ui/webui/settings/password_manager_handler.cc
++++ b/chrome/browser/ui/webui/settings/password_manager_handler.cc
+@@ -6,6 +6,7 @@
+ 
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_finder.h"
++#include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/chrome_pages.h"
+ 
+ namespace settings {
+@@ -40,7 +41,10 @@ void PasswordManagerHandler::HandleShowPasswordManager(
+ 
+   Browser* const current_browser =
+       chrome::FindBrowserWithTab(web_ui()->GetWebContents());
+-  CHECK(current_browser);
++  if (!current_browser || !current_browser->window() ||
++      !current_browser->window()->GetNativeWindow()) {
++    return;
++  }
+ 
+   switch (PasswordManagerPage(page)) {
+     case PasswordManagerPage::kPasswords:
+diff --git a/chrome/browser/ui/webui/settings/performance_handler.cc b/chrome/browser/ui/webui/settings/performance_handler.cc
+index 6d817e72b999c..63fb8fe9575fb 100644
+--- a/chrome/browser/ui/webui/settings/performance_handler.cc
++++ b/chrome/browser/ui/webui/settings/performance_handler.cc
+@@ -11,6 +11,7 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_finder.h"
++#include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+@@ -123,7 +124,9 @@ void PerformanceHandler::HandleOpenFeedbackDialog(const base::ListValue& args) {
+   const std::string category_tag = args[0].GetString();
+ 
+   Browser* browser = chrome::FindBrowserWithTab(web_ui()->GetWebContents());
+-  DCHECK(browser);
++  if (!browser || !browser->window() || !browser->window()->GetNativeWindow()) {
++    return;
++  }
+   std::string unused;
+   chrome::ShowFeedbackPage(browser,
+                            feedback::kFeedbackSourceSettingsPerformancePage,
+-- 
+2.50.1 (Apple Git-155)
+

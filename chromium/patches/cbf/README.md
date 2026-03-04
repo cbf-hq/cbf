@@ -19,6 +19,7 @@ Patches are applied in lexical order:
 11. `0011-Preserve-embedded-rendering-for-browser-backed-tabs.patch`
 12. `0012-Replace-named-channel-bootstrap-with-inherited-endpo.patch`
 13. `0013-Add-per-session-token-handshake-for-IPC-authenticati.patch`
+14. `0014-Add-limited-support-for-chrome-settings.patch`
 
 ## Principles
 
