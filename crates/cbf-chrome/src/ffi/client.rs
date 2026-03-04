@@ -53,7 +53,7 @@ impl IpcClient {
     /// - `remote_fd` is the file descriptor of the remote channel endpoint that
     ///   must be inherited by the child process (Unix only; -1 on other platforms).
     /// - `switch_arg` is the command-line switch that Chromium needs to recover
-    ///   the endpoint (e.g. `--mojo-platform-channel-handle=7`).
+    ///   the endpoint (e.g. `--cbf-ipc-handle=...`).
     pub fn prepare_channel() -> Result<(i32, String), Error> {
         let mut buf = [0u8; 512];
         let fd = unsafe {

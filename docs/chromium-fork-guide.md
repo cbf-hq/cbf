@@ -73,7 +73,7 @@ autoninja -C out/Default unit_tests
 - CBF behavior depends on `--enable-features=Cbf`.
 - Runtime selection is chrome-only by default. `alloy` may exist as an explicit
   config value but should fail fast until implemented.
-- IPC bootstrap uses inherited Mojo endpoint (`--mojo-platform-channel-handle=<fd>`) and a
+- IPC bootstrap uses inherited Mojo endpoint (`--cbf-ipc-handle=<endpoint>`) and a
   per-session token (`--cbf-session-token=<hex>`). Both are injected by `start_chromium`; do
   not set them manually unless you are also managing the fd pair and token from the Rust side.
 - In normal library usage, prefer `start_chromium`; manual launch is for debugging only.

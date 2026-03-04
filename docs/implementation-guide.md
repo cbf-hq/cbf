@@ -111,7 +111,7 @@ Implementations should surface these as events or errors that allow upstream rec
 
 - Scope: relevant in manual launch/debug flows and when the bridge library is not linked correctly.
 - Symptom: Rust side cannot connect despite successful launch; `connect_inherited` or `authenticate` returns an error.
-- Action: verify that `--mojo-platform-channel-handle=<fd>` is present in the child command line,
+- Action: verify that `--cbf-ipc-handle=<endpoint>` is present in the child command line,
   the remote fd's `FD_CLOEXEC` flag is cleared before spawning, the parent closes its copy of the
   remote fd after spawn, and `--cbf-session-token=<token>` matches the token passed to `authenticate`.
 
@@ -131,7 +131,7 @@ Before merging bridge/boundary changes, confirm:
 For normal library usage, prefer `start_chromium` from `cbf`.
 Manual launch is intended for debugging and bridge development workflows.
 
-CBF uses inherited Mojo endpoint bootstrap. The `--mojo-platform-channel-handle=<fd>` switch
+CBF uses inherited Mojo endpoint bootstrap. The `--cbf-ipc-handle=<endpoint>` switch
 and `--cbf-session-token=<token>` are injected automatically by `start_chromium`; they cannot
 be supplied manually without also setting up the Mojo fd pair from the Rust side.
 
@@ -148,6 +148,6 @@ the bridge will not connect:
 Flag notes:
 
 - `--enable-features=Cbf`: enables CBF feature path.
-- `--mojo-platform-channel-handle=<fd>`: inherited fd from the Rust-side `prepare_channel` call (set automatically by `start_chromium`).
+- `--cbf-ipc-handle=<endpoint>`: inherited endpoint token from the Rust-side `prepare_channel` call (set automatically by `start_chromium`).
 - `--cbf-session-token=<hex>`: 32-byte random session token for initial authentication (set automatically by `start_chromium`).
 - logging flags: useful for bridge-side debugging.

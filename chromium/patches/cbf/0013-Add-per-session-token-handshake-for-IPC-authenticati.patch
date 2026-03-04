@@ -1,4 +1,4 @@
-From b52aedd59f7c3ce90f33027a703f7df345ecbe96 Mon Sep 17 00:00:00 2001
+From 9095926d7f5d79cd86c3b50da11f594a5e958d63 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 4 Mar 2026 12:31:51 +0900
 Subject: [PATCH 13/13] Add per-session token handshake for IPC authentication

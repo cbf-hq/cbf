@@ -1,4 +1,4 @@
-From c31696f462ff030678166efd80b16f2999a8c376 Mon Sep 17 00:00:00 2001
+From f3b6fe564df229f6b0e848092e1d60a36c8108e8 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 4 Mar 2026 12:31:16 +0900
 Subject: [PATCH 12/13] Replace named channel bootstrap with inherited endpoint
@@ -15,17 +15,17 @@ domain socket) to a Mojo PlatformChannel with inherited endpoint:
 - BUILD.gn: drop //components/named_mojo_ipc_server dependency.
 ---
  chrome/browser/cbf/BUILD.gn                   |  5 +-
- chrome/browser/cbf/bridge/cbf_bridge.cc       | 72 +++++++++++++++++--
+ chrome/browser/cbf/bridge/cbf_bridge.cc       | 68 +++++++++++++++++--
  chrome/browser/cbf/bridge/cbf_bridge.h        | 10 ++-
  .../browser/cbf/bridge/cbf_bridge_client.cc   | 52 ++++----------
  chrome/browser/cbf/bridge/cbf_bridge_client.h |  4 +-
  .../browser/cbf/bridge/cbf_bridge_support.cc  | 10 ++-
  .../browser/cbf/bridge/cbf_bridge_support.h   | 17 +++++
- chrome/browser/cbf/cbf_service.cc             | 62 ++++++----------
+ chrome/browser/cbf/cbf_service.cc             | 63 +++++++----------
  chrome/browser/cbf/cbf_service.h              | 11 ++-
- chrome/browser/cbf/cbf_switches.h             |  2 +-
+ chrome/browser/cbf/cbf_switches.h             |  3 +-
  chrome/browser/global_features.cc             |  2 +-
- 11 files changed, 148 insertions(+), 99 deletions(-)
+ 11 files changed, 148 insertions(+), 97 deletions(-)
 
 diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
 index a45e93af269e1..2b2761739c1d3 100644
@@ -60,16 +60,15 @@ index a45e93af269e1..2b2761739c1d3 100644
      "//mojo/public/cpp/platform",
      "//mojo/public/cpp/system",
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge.cc b/chrome/browser/cbf/bridge/cbf_bridge.cc
-index f46e8fa78298d..80ea14d9c19a6 100644
+index f46e8fa78298d..f191535261186 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge.cc
-@@ -1,7 +1,17 @@
+@@ -1,7 +1,16 @@
  #include "chrome/browser/cbf/bridge/cbf_bridge.h"
  
-+#include "base/command_line.h"
-+#include "base/strings/string_number_conversions.h"
 +#include "base/strings/string_util.h"
 +#include "build/build_config.h"
++#include "chrome/browser/cbf/cbf_switches.h"
  #include "chrome/browser/cbf/bridge/cbf_bridge_client.h"
  #include "chrome/browser/cbf/bridge/cbf_bridge_support.h"
 +#include "mojo/buildflags.h"
@@ -81,7 +80,7 @@ index f46e8fa78298d..80ea14d9c19a6 100644
  
  extern "C" CbfBridgeClientHandle* cbf_bridge_client_create(void) {
    return reinterpret_cast<CbfBridgeClientHandle*>(
-@@ -16,13 +26,67 @@ extern "C" void cbf_bridge_init(void) {
+@@ -16,13 +25,64 @@ extern "C" void cbf_bridge_init(void) {
    cbf_bridge::internal::EnsureMojoThreadStarted();
  }
  
@@ -89,11 +88,11 @@ index f46e8fa78298d..80ea14d9c19a6 100644
 -                                           const char* channel_name) {
 -  if (!client || !channel_name) {
 +extern "C" int cbf_bridge_prepare_channel(char* out_switch_arg,
-+                                           int out_arg_len) {
++                                          int out_arg_len) {
 +  auto& state = cbf_bridge::internal::GetPendingChannel();
 +
-+  base::CommandLine dummy(base::CommandLine::NO_PROGRAM);
-+  state.channel.PrepareToPassRemoteEndpoint(&state.handle_info, &dummy);
++  std::string endpoint_value;
++  state.channel.PrepareToPassRemoteEndpoint(&state.handle_info, &endpoint_value);
 +
 +#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
 +  // Ensure the Mach rendezvous server is created before the child spawns so
@@ -101,11 +100,8 @@ index f46e8fa78298d..80ea14d9c19a6 100644
 +  base::MachPortRendezvousServerMac::GetInstance();
 +#endif
 +
-+  const std::string switch_val =
-+      dummy.GetSwitchValueASCII(mojo::PlatformChannel::kHandleSwitch);
-+  const std::string full_switch = std::string("--") +
-+                                   mojo::PlatformChannel::kHandleSwitch + "=" +
-+                                   switch_val;
++  const std::string full_switch =
++      std::string("--") + cbf::switches::kCbfIpcHandle + "=" + endpoint_value;
 +
 +  if (out_switch_arg && out_arg_len > 0) {
 +    base::strlcpy(out_switch_arg, full_switch.c_str(),
@@ -366,7 +362,7 @@ index c45b162c656a2..fc24684009226 100644
  
  #endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_SUPPORT_H_
 diff --git a/chrome/browser/cbf/cbf_service.cc b/chrome/browser/cbf/cbf_service.cc
-index b1c61a34d8c34..f6332c0c90c24 100644
+index b1c61a34d8c34..6cfbe45c6b1b5 100644
 --- a/chrome/browser/cbf/cbf_service.cc
 +++ b/chrome/browser/cbf/cbf_service.cc
 @@ -3,18 +3,15 @@
@@ -391,14 +387,12 @@ index b1c61a34d8c34..f6332c0c90c24 100644
    (void)browser_process;
  }
  
-@@ -31,49 +28,30 @@ CbfService* CbfService::GetForProcess() {
+@@ -31,49 +28,35 @@ CbfService* CbfService::GetForProcess() {
    return features->cbf_service();
  }
  
 -void CbfService::EnsureIpcServerStarted() {
 -  if (ipc_server_started_) {
--    return;
--  }
 +void CbfService::StartIpcServer() {
 +  const base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
 +
@@ -407,12 +401,17 @@ index b1c61a34d8c34..f6332c0c90c24 100644
 +          ? cmd->GetSwitchValueASCII(switches::kCbfSessionToken)
 +          : "";
 +  browser_service_ = std::make_unique<CbfBrowserService>(token);
++
++  if (!cmd->HasSwitch(switches::kCbfIpcHandle)) {
+     return;
+   }
  
 -  const base::CommandLine* command_line =
 -    base::CommandLine::ForCurrentProcess();
 -  if (!command_line->HasSwitch(switches::kCbfIpcChannel)) {
 +  mojo::PlatformChannelEndpoint endpoint =
-+      mojo::PlatformChannel::RecoverPassedEndpointFromCommandLine(*cmd);
++      mojo::PlatformChannel::RecoverPassedEndpointFromString(
++          cmd->GetSwitchValueASCII(switches::kCbfIpcHandle));
 +  if (!endpoint.is_valid()) {
      return;
    }
@@ -492,15 +491,16 @@ index 0a0d6cd8183e1..2ef50fe45f005 100644
  
  }  // namespace cbf
 diff --git a/chrome/browser/cbf/cbf_switches.h b/chrome/browser/cbf/cbf_switches.h
-index 357a612ba14ab..798ec2dec0ee4 100644
+index 357a612ba14ab..8a6510196214b 100644
 --- a/chrome/browser/cbf/cbf_switches.h
 +++ b/chrome/browser/cbf/cbf_switches.h
-@@ -3,8 +3,8 @@
+@@ -3,8 +3,9 @@
  
  namespace cbf::switches {
  
 -inline constexpr char kCbfIpcChannel[] = "cbf-ipc-channel";
  inline constexpr char kCbfDisableHostOwnedDrag[] = "cbf-disable-host-owned-drag";
++inline constexpr char kCbfIpcHandle[] = "cbf-ipc-handle";
 +inline constexpr char kCbfSessionToken[] = "cbf-session-token";
  
  }  // namespace cbf::switches

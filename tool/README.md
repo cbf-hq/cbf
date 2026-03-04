@@ -91,5 +91,5 @@ uv run tool git log --oneline -n 10
 `uv run tool run` launches Chromium with CBF-specific flags:
 
 ```bash
-uv run tool run --enable-features=Cbf --cbf-ipc-channel=my-channel
+uv run tool run --enable-features=Cbf --enable-logging=stderr
 ```
