@@ -563,9 +563,17 @@ unsafe extern "C" {
     pub fn cbf_bridge_client_create() -> *mut CbfBridgeClientHandle;
     pub fn cbf_bridge_client_destroy(client: *mut CbfBridgeClientHandle);
     pub fn cbf_bridge_init();
-    pub fn cbf_bridge_client_connect(
+    pub fn cbf_bridge_prepare_channel(
+        out_switch_arg: *mut c_char,
+        out_arg_len: i32,
+    ) -> i32;
+    pub fn cbf_bridge_pass_child_pid(child_pid: i64);
+    pub fn cbf_bridge_client_connect_inherited(
         client: *mut CbfBridgeClientHandle,
-        channel_name: *const c_char,
+    ) -> bool;
+    pub fn cbf_bridge_client_authenticate(
+        client: *mut CbfBridgeClientHandle,
+        token: *const c_char,
     ) -> bool;
     pub fn cbf_bridge_client_poll_event(
         client: *mut CbfBridgeClientHandle,

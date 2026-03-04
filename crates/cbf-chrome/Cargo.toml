@@ -19,6 +19,10 @@ async-process.workspace = true
 futures-lite.workspace = true
 oneshot = { workspace = true, features = ["async", "std"] }
 tracing.workspace = true
+getrandom = { version = "0.3", features = ["std"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }

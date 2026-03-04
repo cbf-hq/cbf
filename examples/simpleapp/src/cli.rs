@@ -26,10 +26,6 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub(crate) user_data_dir: Option<PathBuf>,
 
-    /// CBF IPC channel name.
-    #[arg(long, default_value = "cbf-simpleapp")]
-    pub(crate) channel_name: String,
-
     /// Runtime selection gate.
     ///
     /// `chrome` is the default and the only currently supported runtime.
@@ -101,13 +97,12 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOption
                 .log_file
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
-            channel_name: cli.channel_name.clone(),
             unsafe_enable_startup_default_window: cli.unsafe_enable_startup_default_window,
             v: None,
             vmodule: None,
             extra_args: cli.chromium_args.clone(),
         },
-        backend: ChromiumBackendOptions::new(cli.channel_name.clone()),
+        backend: ChromiumBackendOptions::new(),
     })
 }
 

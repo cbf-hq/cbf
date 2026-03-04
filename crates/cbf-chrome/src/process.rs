@@ -1,4 +1,5 @@
 use async_process::{Child, Command};
+use cbf_chrome_sys::ffi::{cbf_bridge_client_create, cbf_bridge_client_destroy};
 use futures_lite::future::block_on;
 use std::{env, path::PathBuf, process::ExitStatus};
 
@@ -8,7 +9,10 @@ use cbf::{
     error::{ApiErrorKind, BackendErrorInfo, Error},
 };
 
-use crate::backend::{ChromiumBackend, ChromiumBackendOptions};
+use crate::{
+    backend::{ChromiumBackend, ChromiumBackendOptions},
+    ffi::IpcClient,
+};
 
 /// Resolves Chromium executable path for CBF applications.
 ///
@@ -132,9 +136,6 @@ pub struct ChromiumProcessOptions {
     /// Per-module VLOG verbosity.
     /// If provided, passed as `--vmodule=<pattern1=N,...>`.
     pub vmodule: Option<String>,
-    /// The name of the IPC channel to use.
-    /// Passed as `--cbf-ipc-channel=<name>`.
-    pub channel_name: String,
     /// Allow Chromium to create its default startup window.
     ///
     /// By default, CBF passes `--no-startup-window` to prevent Chromium's
@@ -186,15 +187,11 @@ impl ChromiumProcess {
     }
 }
 
-/// Launches the Chromium process and connects to it.
+/// Launches the Chromium process and connects to it via an inherited Mojo endpoint.
 ///
-/// This function spawns the browser process with the specified options and
-/// establishes a CBF connection.
-///
-/// # Panics
-///
-/// In debug builds, panics if `options.process.channel_name` and
-/// `options.backend.channel_name` do not match.
+/// This function prepares the IPC channel, spawns the browser process with the
+/// channel handle argument, completes the Mojo connection, and authenticates with
+/// a freshly generated per-session token before returning a ready backend session.
 pub fn start_chromium(
     options: StartChromiumOptions,
     delegate: impl BackendDelegate,
@@ -216,26 +213,64 @@ pub fn start_chromium(
         log_file,
         v,
         vmodule,
-        channel_name,
         unsafe_enable_startup_default_window,
         extra_args,
     } = process;
 
     validate_runtime_selection(runtime)?;
 
+    // Create the bridge client handle and prepare the Mojo channel pair.
+    let inner = unsafe { cbf_bridge_client_create() };
+    if inner.is_null() {
+        return Err(Error::BackendFailure(cbf::error::BackendErrorInfo {
+            kind: cbf::error::ApiErrorKind::ConnectTimeout,
+            operation: None,
+            detail: Some("cbf_bridge_client_create returned null".to_owned()),
+        }));
+    }
+
+    let (remote_fd, switch_arg) = IpcClient::prepare_channel().map_err(|_| {
+        unsafe { cbf_bridge_client_destroy(inner) };
+        Error::BackendFailure(cbf::error::BackendErrorInfo {
+            kind: cbf::error::ApiErrorKind::ConnectTimeout,
+            operation: None,
+            detail: Some("prepare_channel failed".to_owned()),
+        })
+    })?;
+
+    // Generate a per-session token.
+    let mut token_bytes = [0u8; 32];
+    getrandom::fill(&mut token_bytes).map_err(|_| {
+        Error::BackendFailure(cbf::error::BackendErrorInfo {
+            kind: cbf::error::ApiErrorKind::ConnectTimeout,
+            operation: None,
+            detail: Some("token generation failed".to_owned()),
+        })
+    })?;
+    let session_token: String = token_bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+
     let mut command = Command::new(&executable_path);
 
     command.arg("--enable-features=Cbf");
+    command.arg(&switch_arg);
+    command.arg(format!("--cbf-session-token={session_token}"));
 
-    // Set IPC channel argument
-    command.arg(format!("--cbf-ipc-channel={}", channel_name));
+    // Clear FD_CLOEXEC on the remote endpoint fd so it is inherited by the child.
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::RawFd;
+        if remote_fd >= 0 {
+            unsafe { libc::fcntl(remote_fd as RawFd, libc::F_SETFD, 0) };
+        }
+    }
 
-    // Set user data dir argument if provided
     if let Some(user_data_dir) = &user_data_dir {
         command.arg(format!("--user-data-dir={}", user_data_dir));
     }
 
-    // Set logging arguments
     if let Some(enable_logging) = enable_logging {
         command.arg(format!("--enable-logging={}", enable_logging));
     }
@@ -256,19 +291,42 @@ pub fn start_chromium(
         command.arg("--no-startup-window");
     }
 
-    // Add extra arguments
     command.args(&extra_args);
 
-    // Spawn the process
     let child = command.spawn().map_err(Error::ProcessSpawnError)?;
 
-    // Connect to the backend
-    debug_assert_eq!(
-        backend.channel_name, channel_name,
-        "process.channel_name and backend.channel_name must match"
-    );
+    // Notify the bridge of the child PID: on macOS this registers the Mach
+    // port with the rendezvous server; on other platforms it is bookkeeping.
+    IpcClient::pass_child_pid(child.id());
 
-    let backend = ChromiumBackend::new(backend);
+    // Close the parent's copy of the remote fd after spawning.
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::RawFd;
+        if remote_fd >= 0 {
+            unsafe { libc::close(remote_fd as RawFd) };
+        }
+    }
+
+    // Complete the Mojo handshake: send the OutgoingInvitation and bind the remote.
+    let client = IpcClient::connect_inherited(inner).map_err(|_| {
+        Error::BackendFailure(cbf::error::BackendErrorInfo {
+            kind: cbf::error::ApiErrorKind::ConnectTimeout,
+            operation: None,
+            detail: Some("connect_inherited failed".to_owned()),
+        })
+    })?;
+
+    // Authenticate and set up the browser observer.
+    client.authenticate(&session_token).map_err(|_| {
+        Error::BackendFailure(cbf::error::BackendErrorInfo {
+            kind: cbf::error::ApiErrorKind::ConnectTimeout,
+            operation: None,
+            detail: Some("authenticate failed".to_owned()),
+        })
+    })?;
+
+    let backend = ChromiumBackend::new(backend, client);
     let (session, events) = BrowserSession::connect(backend, delegate, None)?;
 
     Ok((session, events, ChromiumProcess { child }))

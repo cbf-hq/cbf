@@ -107,11 +107,13 @@ Implementations should surface these as events or errors that allow upstream rec
 - Symptom: shutdown or close race crashes.
 - Action: audit callbacks for raw pointer capture, then replace with ID re-resolution and weak-owner guards.
 
-### IPC channel mismatch
+### IPC connection failure
 
-- Scope: typically relevant in manual launch/debug flows, not in normal `start_chromium` usage.
-- Symptom: Rust side cannot connect despite successful launch.
-- Action: verify the channel name and handshake assumptions on both bridge and client sides.
+- Scope: relevant in manual launch/debug flows and when the bridge library is not linked correctly.
+- Symptom: Rust side cannot connect despite successful launch; `connect_inherited` or `authenticate` returns an error.
+- Action: verify that `--mojo-platform-channel-handle=<fd>` is present in the child command line,
+  the remote fd's `FD_CLOEXEC` flag is cleared before spawning, the parent closes its copy of the
+  remote fd after spawn, and `--cbf-session-token=<token>` matches the token passed to `authenticate`.
 
 ## 7. Contributor Review Checklist
 
@@ -129,12 +131,16 @@ Before merging bridge/boundary changes, confirm:
 For normal library usage, prefer `start_chromium` from `cbf`.
 Manual launch is intended for debugging and bridge development workflows.
 
-Example:
+CBF uses inherited Mojo endpoint bootstrap. The `--mojo-platform-channel-handle=<fd>` switch
+and `--cbf-session-token=<token>` are injected automatically by `start_chromium`; they cannot
+be supplied manually without also setting up the Mojo fd pair from the Rust side.
+
+For logging-only debugging without IPC, you can launch Chromium with CBF features enabled but
+the bridge will not connect:
 
 ```bash
 ./out/Default/chrome \
   --enable-features=Cbf \
-  --cbf-ipc-channel=example-channel \
   --enable-logging=stderr \
   --log-file=/tmp/chromium_debug.log
 ```
@@ -142,5 +148,6 @@ Example:
 Flag notes:
 
 - `--enable-features=Cbf`: enables CBF feature path.
-- `--cbf-ipc-channel=...`: must match the channel used by the Rust client.
+- `--mojo-platform-channel-handle=<fd>`: inherited fd from the Rust-side `prepare_channel` call (set automatically by `start_chromium`).
+- `--cbf-session-token=<hex>`: 32-byte random session token for initial authentication (set automatically by `start_chromium`).
 - logging flags: useful for bridge-side debugging.

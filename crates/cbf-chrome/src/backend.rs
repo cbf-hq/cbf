@@ -1,7 +1,4 @@
-use std::{
-    thread,
-    time::{Duration, Instant},
-};
+use std::{thread, time::Duration};
 
 use async_channel::{Receiver, Sender, TryRecvError};
 use cbf::{
@@ -19,33 +16,20 @@ use crate::{
 };
 
 /// Backend implementation that speaks the Chromium IPC protocol.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ChromiumBackend {
     options: ChromiumBackendOptions,
+    client: IpcClient,
 }
 
-/// Options for establishing an IPC connection to Chromium.
-#[derive(Debug, Clone)]
-pub struct ChromiumBackendOptions {
-    /// The name of the IPC channel to connect to.
-    pub channel_name: String,
-    /// Timeout for establishing the initial IPC connection.
-    ///
-    /// `Some(duration)` fails startup if the timeout is exceeded.
-    /// `None` waits indefinitely until a connection is established.
-    pub connect_timeout: Option<Duration>,
-    /// Retry interval between IPC connect attempts.
-    pub retry_interval: Duration,
-}
+/// Options for controlling the Chromium backend.
+#[derive(Debug, Default, Clone)]
+pub struct ChromiumBackendOptions {}
 
 impl ChromiumBackendOptions {
-    /// Create options with default connect behavior for the given channel.
-    pub fn new(channel_name: impl Into<String>) -> Self {
-        Self {
-            channel_name: channel_name.into(),
-            connect_timeout: Some(Duration::from_secs(60)),
-            retry_interval: Duration::from_millis(100),
-        }
+    /// Create default backend options.
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -77,14 +61,6 @@ impl CommandExecutionError {
     }
 }
 
-fn backend_error_connect_timeout(source: IpcError) -> BackendErrorInfo {
-    BackendErrorInfo {
-        kind: ApiErrorKind::ConnectTimeout,
-        operation: None,
-        detail: Some(format!("{source:?}")),
-    }
-}
-
 fn backend_error_event(source: IpcError) -> BackendErrorInfo {
     let kind = match source {
         IpcError::InvalidEvent => ApiErrorKind::ProtocolMismatch,
@@ -100,10 +76,7 @@ fn backend_error_event(source: IpcError) -> BackendErrorInfo {
 }
 
 fn backend_error_terminal_hint(kind: ApiErrorKind) -> bool {
-    matches!(
-        kind,
-        ApiErrorKind::ConnectTimeout | ApiErrorKind::ProtocolMismatch
-    )
+    matches!(kind, ApiErrorKind::ProtocolMismatch)
 }
 
 /// Decision returned from [`ChromeRawDelegate::on_raw_command`].
@@ -150,11 +123,11 @@ impl Backend for ChromiumBackend {
     ) -> Result<(CommandSender<Self>, EventStream<Self>), Error> {
         let (command_tx, command_rx) = async_channel::unbounded::<CommandEnvelope<Self>>();
         let (event_tx, event_rx) = async_channel::unbounded::<ChromeEvent>();
-        let options = self.options;
+        let ChromiumBackend { options: _, client } = self;
         let raw_delegate = raw_delegate.unwrap_or_else(|| Box::<NoopRawDelegate>::default());
 
         thread::spawn(move || {
-            Self::run_communication(options, command_rx, event_tx, delegate, raw_delegate)
+            Self::run_communication(client, command_rx, event_tx, delegate, raw_delegate)
         });
 
         Ok((
@@ -165,13 +138,13 @@ impl Backend for ChromiumBackend {
 }
 
 impl ChromiumBackend {
-    /// Create a backend from Chromium IPC connection options.
-    pub fn new(options: ChromiumBackendOptions) -> Self {
-        Self { options }
+    /// Create a backend from a pre-connected IPC client.
+    pub fn new(options: ChromiumBackendOptions, client: IpcClient) -> Self {
+        Self { options, client }
     }
 
     fn run_communication(
-        options: ChromiumBackendOptions,
+        client: IpcClient,
         command_rx: Receiver<CommandEnvelope<Self>>,
         event_tx: Sender<ChromeEvent>,
         delegate: impl BackendDelegate,
@@ -179,8 +152,8 @@ impl ChromiumBackend {
     ) {
         let mut dispatcher = DelegateDispatcher::new(delegate);
 
-        // Start the connection and get the IPC client.
-        let Some(mut client) = Self::start_connection(&event_tx, &mut dispatcher, &options) else {
+        // Client is already connected; emit BackendReady and start the event loop.
+        let Some(mut client) = Self::start_connection(client, &event_tx, &mut dispatcher) else {
             return;
         };
 
@@ -198,40 +171,11 @@ impl ChromiumBackend {
     }
 
     fn start_connection(
+        mut client: IpcClient,
         event_tx: &Sender<ChromeEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
-        options: &ChromiumBackendOptions,
     ) -> Option<IpcClient> {
-        let start_time = Instant::now();
-
-        let mut client = loop {
-            match IpcClient::connect(&options.channel_name) {
-                Ok(client) => break client,
-                Err(err) => {
-                    if options
-                        .connect_timeout
-                        .is_some_and(|timeout| start_time.elapsed() > timeout)
-                    {
-                        let info = backend_error_connect_timeout(err);
-                        let stop_reason = Self::handle_raw_event_with_delegate_gate(
-                            dispatcher,
-                            event_tx,
-                            ChromeEvent::BackendError {
-                                terminal_hint: true,
-                                info: info.clone(),
-                            },
-                        )
-                        .unwrap_or(BackendStopReason::Error(info));
-                        Self::stop_backend(stop_reason, dispatcher, None, event_tx);
-                        return None;
-                    }
-
-                    thread::sleep(options.retry_interval);
-                }
-            }
-        };
-
-        // Notify that the backend is ready after establishing the connection.
+        // Notify that the backend is ready. The connection is already established.
         if let Some(stop_reason) = Self::handle_raw_event_with_delegate_gate(
             dispatcher,
             event_tx,

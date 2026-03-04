@@ -1,4 +1,7 @@
-use std::{ffi::CString, ptr};
+use std::{
+    ffi::{CStr, CString},
+    ptr,
+};
 
 use cbf::data::{
     browsing_context_open::BrowsingContextOpenResponse,
@@ -29,38 +32,83 @@ pub struct IpcClient {
     inner: *mut CbfBridgeClientHandle,
 }
 
+// SAFETY: IpcClient owns the bridge client handle and its methods
+// serialize access through the Mojo thread internally. The handle
+// is not shared, only moved across the process::start_chromium →
+// backend thread boundary exactly once.
+unsafe impl Send for IpcClient {}
+
+impl std::fmt::Debug for IpcClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IpcClient")
+            .field("inner", &format!("{:p}", self.inner))
+            .finish()
+    }
+}
+
 impl IpcClient {
-    /// Connect to the IPC channel and create a new client.
-    pub fn connect(channel_name: &str) -> Result<Self, Error> {
-        let channel = CString::new(channel_name).map_err(|_| Error::InvalidInput)?;
-
-        let inner = unsafe {
+    /// Prepare the Mojo channel before spawning the Chromium process.
+    ///
+    /// Returns `(remote_fd, switch_arg)` where:
+    /// - `remote_fd` is the file descriptor of the remote channel endpoint that
+    ///   must be inherited by the child process (Unix only; -1 on other platforms).
+    /// - `switch_arg` is the command-line switch that Chromium needs to recover
+    ///   the endpoint (e.g. `--mojo-platform-channel-handle=7`).
+    pub fn prepare_channel() -> Result<(i32, String), Error> {
+        let mut buf = [0u8; 512];
+        let fd = unsafe {
             cbf_bridge_init();
-            cbf_bridge_client_create()
+            cbf_bridge_prepare_channel(buf.as_mut_ptr() as *mut std::os::raw::c_char, buf.len() as i32)
         };
+        let switch_arg = CStr::from_bytes_until_nul(&buf)
+            .map_err(|_| Error::ConnectionFailed)?
+            .to_str()
+            .map_err(|_| Error::ConnectionFailed)?
+            .to_owned();
+        Ok((fd, switch_arg))
+    }
 
-        let connected = if inner.is_null() {
-            false
-        } else {
-            unsafe { cbf_bridge_client_connect(inner, channel.as_ptr()) }
-        };
+    /// Notify the bridge of the spawned child's PID.
+    ///
+    /// Must be called after spawning the Chromium process and before
+    /// `connect_inherited`. On macOS this registers the Mach port with the
+    /// rendezvous server; on other platforms it completes channel bookkeeping.
+    pub fn pass_child_pid(pid: u32) {
+        unsafe { cbf_bridge_pass_child_pid(pid as i64) }
+    }
 
-        if !connected {
-            warn!(
-                result = "err",
-                error = "ipc_connect_failed",
-                channel = %channel_name,
-                "IPC client connect failed"
-            );
-            if !inner.is_null() {
-                unsafe { cbf_bridge_client_destroy(inner) };
-            }
-
+    /// Wrap a pre-created bridge client handle and complete the Mojo connection.
+    ///
+    /// `inner` must have been created by `cbf_bridge_client_create()` and the
+    /// channel must have been prepared with `prepare_channel()` before calling
+    /// this function (after the child process has been spawned).
+    pub fn connect_inherited(inner: *mut CbfBridgeClientHandle) -> Result<Self, Error> {
+        if inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
-
-        debug!(channel = %channel_name, "IPC client connected");
+        let connected = unsafe { cbf_bridge_client_connect_inherited(inner) };
+        if !connected {
+            warn!(result = "err", error = "ipc_connect_inherited_failed", "IPC inherited connect failed");
+            unsafe { cbf_bridge_client_destroy(inner) };
+            return Err(Error::ConnectionFailed);
+        }
+        debug!("IPC client connected via inherited endpoint");
         Ok(Self { inner })
+    }
+
+    /// Authenticate with the session token and set up the browser observer.
+    ///
+    /// Must be called once after `connect_inherited` and before any other method.
+    pub fn authenticate(&self, token: &str) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+        let token = CString::new(token).map_err(|_| Error::InvalidInput)?;
+        if unsafe { cbf_bridge_client_authenticate(self.inner, token.as_ptr()) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
     }
 
     /// Poll the next IPC event, if any, from the backend.

@@ -370,6 +370,8 @@ dependencies = [
  "cbf-chrome-sys",
  "cursor-icon",
  "futures-lite",
+ "getrandom 0.3.4",
+ "libc",
  "objc2 0.6.3",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
