@@ -93,20 +93,9 @@ CBF uses a small, explicit label taxonomy to keep triage consistent.
 - Apply exactly one `status/*` label.
 - Apply one or more `area/*` labels as needed.
 - Use `good first issue` only when scope, reproduction, and expected change are clear.
-
-### Sync labels with GitHub
-
-Use this script to create/update the standard label set:
-
-```bash
-scripts/setup-github-labels.sh
-```
-
-You can also pass a repository explicitly:
-
-```bash
-scripts/setup-github-labels.sh owner/repo
-```
+- Keep GitHub's default overlapping labels removed when they duplicate this taxonomy
+  (for example `documentation`, `enhancement`, or `question`).
+- Use GitHub Discussions for open-ended questions or support requests instead of issue labels.
 
 ## 7. Licensing and Notices
 
