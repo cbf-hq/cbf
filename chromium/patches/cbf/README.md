@@ -17,6 +17,8 @@ Patches are applied in lexical order:
 9. `0009-Update-build-deps-for-CBF-DevTools-and-extension-hoo.patch`
 10. `0010-Restore-browser-backed-CBF-tabs-after-roll.patch`
 11. `0011-Preserve-embedded-rendering-for-browser-backed-tabs.patch`
+12. `0012-Replace-named-channel-bootstrap-with-inherited-endpo.patch`
+13. `0013-Add-per-session-token-handshake-for-IPC-authenticati.patch`
 
 ## Principles
 
