@@ -612,6 +612,80 @@ fn cursor_icon_from_ffi(value: u8) -> CursorIcon {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use cbf::data::browsing_context_open::BrowsingContextOpenResult;
+    use cbf_chrome_sys::ffi::*;
+
+    use crate::data::ids::TabId;
+
+    use super::{IpcEvent, parse_event};
+
+    fn make_event(kind: u8) -> CbfBridgeEvent {
+        CbfBridgeEvent {
+            kind,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn parse_event_web_contents_created_maps_tab_id() {
+        let mut event = make_event(CBF_EVENT_WEB_PAGE_CREATED);
+        event.tab_id = 7;
+        event.request_id = 11;
+
+        let parsed = parse_event(event).expect("web page created should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::WebContentsCreated {
+                browsing_context_id,
+                request_id,
+                ..
+            } if browsing_context_id == TabId::new(7) && request_id == 11
+        ));
+    }
+
+    #[test]
+    fn parse_event_shutdown_blocked_maps_dirty_tab_ids() {
+        let dirty_ids = vec![2_u64, 3_u64];
+        let mut event = make_event(CBF_EVENT_SHUTDOWN_BLOCKED);
+        event.request_id = 9;
+        event.dirty_tab_ids = CbfTabIdList {
+            items: dirty_ids.as_ptr(),
+            len: dirty_ids.len() as u32,
+        };
+
+        let parsed = parse_event(event).expect("shutdown blocked should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::ShutdownBlocked {
+                request_id,
+                dirty_browsing_context_ids
+            } if request_id == 9
+                && dirty_browsing_context_ids == vec![TabId::new(2), TabId::new(3)]
+        ));
+    }
+
+    #[test]
+    fn parse_event_browsing_context_open_resolved_maps_target_tab_id() {
+        let mut event = make_event(CBF_EVENT_BROWSING_CONTEXT_OPEN_RESOLVED);
+        event.request_id = 55;
+        event.browsing_context_open_result_kind = CBF_BROWSING_CONTEXT_OPEN_RESULT_OPENED_NEW_CONTEXT;
+        event.browsing_context_open_has_target = true;
+        event.browsing_context_open_target_tab_id = 123;
+
+        let parsed = parse_event(event).expect("browsing context open resolved should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::BrowsingContextOpenResolved {
+                request_id,
+                result: BrowsingContextOpenResult::OpenedNewContext { browsing_context_id },
+                ..
+            } if request_id == 55 && browsing_context_id.get() == 123
+        ));
+    }
+}
+
 fn parse_surface_handle(handle: CbfSurfaceHandle) -> Result<SurfaceHandle, Error> {
     match handle.kind {
         CBF_SURFACE_HANDLE_MAC_CA_CONTEXT_ID => {

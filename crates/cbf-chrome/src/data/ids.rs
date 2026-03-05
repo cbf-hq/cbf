@@ -43,3 +43,21 @@ impl From<TabId> for BrowsingContextId {
         value.to_browsing_context_id()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use cbf::data::ids::BrowsingContextId;
+
+    use super::TabId;
+
+    #[test]
+    fn tab_id_round_trip_preserves_raw_value() {
+        let original = BrowsingContextId::new(4242);
+
+        let tab_id = TabId::from(original);
+        let round_trip = tab_id.to_browsing_context_id();
+
+        assert_eq!(round_trip, BrowsingContextId::new(4242));
+        assert_eq!(tab_id, TabId::new(4242));
+    }
+}
