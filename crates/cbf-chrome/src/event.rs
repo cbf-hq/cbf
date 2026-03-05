@@ -461,20 +461,18 @@ fn prompt_ui_resolution_to_auxiliary_window_resolution(
             permission,
             permission_key,
             result,
-        } => {
-            AuxiliaryWindowResolution::PermissionPrompt {
-                permission: prompt_ui_permission_to_permission_prompt_type(
-                    permission,
-                    permission_key.as_deref(),
-                ),
-                result: match result {
-                    PromptUiResolutionResult::Allowed => PermissionPromptResult::Allowed,
-                    PromptUiResolutionResult::Denied => PermissionPromptResult::Denied,
-                    PromptUiResolutionResult::Aborted => PermissionPromptResult::Aborted,
-                    PromptUiResolutionResult::Unknown => PermissionPromptResult::Unknown,
-                },
-            }
-        }
+        } => AuxiliaryWindowResolution::PermissionPrompt {
+            permission: prompt_ui_permission_to_permission_prompt_type(
+                permission,
+                permission_key.as_deref(),
+            ),
+            result: match result {
+                PromptUiResolutionResult::Allowed => PermissionPromptResult::Allowed,
+                PromptUiResolutionResult::Denied => PermissionPromptResult::Denied,
+                PromptUiResolutionResult::Aborted => PermissionPromptResult::Aborted,
+                PromptUiResolutionResult::Unknown => PermissionPromptResult::Unknown,
+            },
+        },
         PromptUiResolution::Unknown => AuxiliaryWindowResolution::Unknown,
     }
 }
