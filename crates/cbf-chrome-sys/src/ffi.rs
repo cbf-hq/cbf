@@ -37,22 +37,46 @@ pub const CBF_EVENT_TAB_OPEN_RESOLVED: u8 = 26;
 pub const CBF_EVENT_PROMPT_UI_REQUESTED: u8 = 27;
 pub const CBF_EVENT_PROMPT_UI_RESOLVED: u8 = 28;
 
-pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED: u8 = 0;
-pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS: u8 = 1;
-pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_USER_CANCELED: u8 = 2;
-pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ABORTED: u8 = 3;
+pub const CBF_EVENT_PROMPT_UI_OPEN_REQUESTED: u8 = CBF_EVENT_PROMPT_UI_REQUESTED;
+pub const CBF_EVENT_PROMPT_UI_OPENED: u8 = CBF_EVENT_AUXILIARY_WINDOW_OPENED;
+pub const CBF_EVENT_PROMPT_UI_CLOSED: u8 = CBF_EVENT_AUXILIARY_WINDOW_CLOSED;
+
+pub const CBF_PROMPT_UI_REQUESTED: u8 = CBF_EVENT_PROMPT_UI_REQUESTED;
+pub const CBF_PROMPT_UI_RESOLVED: u8 = CBF_EVENT_PROMPT_UI_RESOLVED;
+
+pub const CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED: u8 = 0;
+pub const CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS: u8 = 1;
+pub const CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_USER_CANCELED: u8 = 2;
+pub const CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ABORTED: u8 = 3;
+pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED: u8 =
+    CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED;
+pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS: u8 =
+    CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS;
+pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_USER_CANCELED: u8 =
+    CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_USER_CANCELED;
+pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ABORTED: u8 =
+    CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ABORTED;
 
 pub const CBF_AUXILIARY_WINDOW_KIND_UNKNOWN: u8 = 0;
 pub const CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT: u8 = 1;
 pub const CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG: u8 = 2;
 
-pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_UNKNOWN: u8 = 0;
-pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED: u8 = 1;
-pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_HOST_FORCED: u8 = 2;
-pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_SYSTEM_DISMISSED: u8 = 3;
-
 pub const CBF_PROMPT_UI_KIND_UNKNOWN: u8 = 0;
 pub const CBF_PROMPT_UI_KIND_PERMISSION_PROMPT: u8 = 1;
+pub const CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT: u8 = 2;
+pub const CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG: u8 = 3;
+
+pub const CBF_PROMPT_UI_CLOSE_REASON_UNKNOWN: u8 = 0;
+pub const CBF_PROMPT_UI_CLOSE_REASON_USER_CANCELED: u8 = 1;
+pub const CBF_PROMPT_UI_CLOSE_REASON_HOST_FORCED: u8 = 2;
+pub const CBF_PROMPT_UI_CLOSE_REASON_SYSTEM_DISMISSED: u8 = 3;
+pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_UNKNOWN: u8 = CBF_PROMPT_UI_CLOSE_REASON_UNKNOWN;
+pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED: u8 =
+    CBF_PROMPT_UI_CLOSE_REASON_USER_CANCELED;
+pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_HOST_FORCED: u8 =
+    CBF_PROMPT_UI_CLOSE_REASON_HOST_FORCED;
+pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_SYSTEM_DISMISSED: u8 =
+    CBF_PROMPT_UI_CLOSE_REASON_SYSTEM_DISMISSED;
 
 pub const CBF_PROMPT_UI_PERMISSION_TYPE_UNKNOWN: u8 = 0;
 pub const CBF_PROMPT_UI_PERMISSION_TYPE_GEOLOCATION: u8 = 1;
@@ -64,6 +88,11 @@ pub const CBF_PROMPT_UI_RESOLUTION_RESULT_UNKNOWN: u8 = 0;
 pub const CBF_PROMPT_UI_RESOLUTION_RESULT_ALLOWED: u8 = 1;
 pub const CBF_PROMPT_UI_RESOLUTION_RESULT_DENIED: u8 = 2;
 pub const CBF_PROMPT_UI_RESOLUTION_RESULT_ABORTED: u8 = 3;
+
+pub const CBF_PROMPT_UI_DIALOG_RESULT_UNKNOWN: u8 = 0;
+pub const CBF_PROMPT_UI_DIALOG_RESULT_PROCEEDED: u8 = 1;
+pub const CBF_PROMPT_UI_DIALOG_RESULT_CANCELED: u8 = 2;
+pub const CBF_PROMPT_UI_DIALOG_RESULT_ABORTED: u8 = 3;
 
 pub const CBF_TAB_OPEN_HINT_UNKNOWN: u8 = 0;
 pub const CBF_TAB_OPEN_HINT_CURRENT_CONTEXT: u8 = 1;
@@ -221,14 +250,13 @@ pub struct CbfBridgeEvent {
     pub extension_id: *mut c_char,
     pub extension_name: *mut c_char,
     pub permission_names: CbfStringList,
-    pub extension_install_prompt_result: u8,
-    pub extension_install_prompt_detail: *mut c_char,
+    pub prompt_ui_extension_install_result: u8,
+    pub prompt_ui_extension_install_detail: *mut c_char,
     pub extension_runtime_warning: *mut c_char,
-    pub auxiliary_window_id: u64,
-    pub auxiliary_window_kind: u8,
-    pub auxiliary_window_close_reason: u8,
-    pub auxiliary_window_title: *mut c_char,
-    pub auxiliary_window_modal: bool,
+    pub prompt_ui_id: u64,
+    pub prompt_ui_close_reason: u8,
+    pub prompt_ui_title: *mut c_char,
+    pub prompt_ui_modal: bool,
     pub prompt_ui_kind: u8,
     pub prompt_ui_permission: u8,
     pub prompt_ui_result: u8,
@@ -736,28 +764,22 @@ unsafe extern "C" {
         tab_id: u64,
         request_id: u64,
     ) -> bool;
-    pub fn cbf_bridge_client_open_default_auxiliary_window(
+    pub fn cbf_bridge_client_open_default_prompt_ui(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
         request_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_respond_auxiliary_window(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        request_id: u64,
-        proceed: bool,
     ) -> bool;
     pub fn cbf_bridge_client_respond_prompt_ui(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
         request_id: u64,
         prompt_ui_kind: u8,
-        allow: bool,
+        proceed: bool,
     ) -> bool;
-    pub fn cbf_bridge_client_close_auxiliary_window(
+    pub fn cbf_bridge_client_close_prompt_ui(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
-        window_id: u64,
+        prompt_ui_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_respond_tab_open(
         client: *mut CbfBridgeClientHandle,

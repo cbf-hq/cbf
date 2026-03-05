@@ -3,7 +3,7 @@ use cbf::{
     data::{
         browsing_context_open::BrowsingContextOpenResponse,
         drag::{DragDrop, DragUpdate},
-        extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
+        extension::AuxiliaryWindowResponse,
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         mouse::MouseEvent,
         window_open::WindowOpenResponse,
@@ -13,7 +13,7 @@ use cbf::{
 use crate::data::{
     ids::TabId,
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
-    prompt_ui::PromptUiResponse,
+    prompt_ui::{PromptUiId, PromptUiResponse},
 };
 
 /// Chromium-specific transport command vocabulary.
@@ -128,23 +128,18 @@ pub enum ChromeCommand {
     ListExtensions {
         profile_id: Option<String>,
     },
-    OpenDefaultAuxiliaryWindow {
+    OpenDefaultPromptUi {
         browsing_context_id: TabId,
         request_id: u64,
-    },
-    RespondAuxiliaryWindow {
-        browsing_context_id: TabId,
-        request_id: u64,
-        response: AuxiliaryWindowResponse,
     },
     RespondPromptUi {
         browsing_context_id: TabId,
         request_id: u64,
         response: PromptUiResponse,
     },
-    CloseAuxiliaryWindow {
+    ClosePromptUi {
         browsing_context_id: TabId,
-        window_id: AuxiliaryWindowId,
+        prompt_ui_id: PromptUiId,
     },
     RespondTabOpen {
         request_id: u64,
@@ -310,7 +305,7 @@ impl From<BrowserCommand> for ChromeCommand {
             BrowserCommand::OpenDefaultAuxiliaryWindow {
                 browsing_context_id,
                 request_id,
-            } => Self::OpenDefaultAuxiliaryWindow {
+            } => Self::OpenDefaultPromptUi {
                 browsing_context_id: browsing_context_id.into(),
                 request_id,
             },
@@ -324,18 +319,25 @@ impl From<BrowserCommand> for ChromeCommand {
                     request_id,
                     response: PromptUiResponse::PermissionPrompt { allow },
                 },
-                other => Self::RespondAuxiliaryWindow {
+                AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed } => {
+                    Self::RespondPromptUi {
+                        browsing_context_id: browsing_context_id.into(),
+                        request_id,
+                        response: PromptUiResponse::ExtensionInstallPrompt { proceed },
+                    }
+                }
+                AuxiliaryWindowResponse::Unknown => Self::RespondPromptUi {
                     browsing_context_id: browsing_context_id.into(),
                     request_id,
-                    response: other,
+                    response: PromptUiResponse::Unknown,
                 },
             },
             BrowserCommand::CloseAuxiliaryWindow {
                 browsing_context_id,
                 window_id,
-            } => Self::CloseAuxiliaryWindow {
+            } => Self::ClosePromptUi {
                 browsing_context_id: browsing_context_id.into(),
-                window_id,
+                prompt_ui_id: PromptUiId::new(window_id.get()),
             },
             BrowserCommand::RespondBrowsingContextOpen {
                 request_id,
@@ -363,7 +365,10 @@ mod tests {
     };
 
     use super::ChromeCommand;
-    use crate::data::{ids::TabId, prompt_ui::PromptUiResponse};
+    use crate::data::{
+        ids::TabId,
+        prompt_ui::{PromptUiId, PromptUiResponse},
+    };
 
     #[test]
     fn create_close_command_converts_browsing_context_id_into_tab_id() {
@@ -415,6 +420,42 @@ mod tests {
                 request_id,
                 response: PromptUiResponse::PermissionPrompt { allow: false },
             } if browsing_context_id == TabId::new(13) && request_id == 81
+        ));
+    }
+
+    #[test]
+    fn extension_auxiliary_response_maps_to_prompt_ui_response() {
+        let command = BrowserCommand::RespondAuxiliaryWindow {
+            browsing_context_id: BrowsingContextId::new(14),
+            request_id: 82,
+            response: AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed: true },
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::RespondPromptUi {
+                browsing_context_id,
+                request_id,
+                response: PromptUiResponse::ExtensionInstallPrompt { proceed: true },
+            } if browsing_context_id == TabId::new(14) && request_id == 82
+        ));
+    }
+
+    #[test]
+    fn close_auxiliary_window_maps_to_prompt_ui_close() {
+        let command = BrowserCommand::CloseAuxiliaryWindow {
+            browsing_context_id: BrowsingContextId::new(15),
+            window_id: cbf::data::extension::AuxiliaryWindowId::new(33),
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::ClosePromptUi {
+                browsing_context_id,
+                prompt_ui_id,
+            } if browsing_context_id == TabId::new(15) && prompt_ui_id == PromptUiId::new(33)
         ));
     }
 }

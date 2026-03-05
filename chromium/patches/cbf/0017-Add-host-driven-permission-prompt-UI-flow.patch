@@ -1,17 +1,17 @@
-From 8c502d06f16e443b6390b38527091cb5797fa115 Mon Sep 17 00:00:00 2001
+From 13d01bf609708b27ef9fbf363b71f3f0d88b30d7 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 5 Mar 2026 19:24:44 +0900
 Subject: [PATCH 17/17] Add host-driven permission prompt UI flow
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   4 +
- chrome/browser/cbf/bridge/cbf_bridge.h        |   6 +
+ chrome/browser/cbf/bridge/cbf_bridge.h        |   9 +-
  chrome/browser/cbf/bridge/cbf_bridge_client.h |   4 +
  .../cbf/bridge/cbf_bridge_client_impl.cc      |  37 ++++
  .../cbf/bridge/cbf_bridge_client_impl.h       |  10 +
  .../browser/cbf/bridge/cbf_bridge_events.cc   |  21 +++
- chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  32 ++++
- .../browser/cbf/bridge/cbf_bridge_web_page.cc |  56 ++++++
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  37 +++-
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc |  56 +++++-
  chrome/browser/cbf/cbf_permission_prompt.cc   | 159 ++++++++++++++++
  chrome/browser/cbf/cbf_permission_prompt.h    |  54 ++++++
  chrome/browser/cbf/cbf_profile_service.cc     | 177 ++++++++++++++++++
@@ -20,7 +20,7 @@ Subject: [PATCH 17/17] Add host-driven permission prompt UI flow
  .../cbf/profile/cbf_web_contents_bootstrap.cc |  10 +
  .../cbf/test/cbf_test_profile_observer.cc     |   8 +
  .../cbf/test/cbf_test_profile_observer.h      |   5 +
- 16 files changed, 668 insertions(+)
+ 16 files changed, 661 insertions(+), 15 deletions(-)
  create mode 100644 chrome/browser/cbf/cbf_permission_prompt.cc
  create mode 100644 chrome/browser/cbf/cbf_permission_prompt.h
 
@@ -54,22 +54,34 @@ index f5d4d0b434bf6..ea79daf246587 100644
      "//chrome/test:test_support",
      "//components/tabs:public",
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
-index 7c6b27d77cd44..3b4fbdfb7300c 100644
+index 7c6b27d77cd44..fa7babb34c521 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge.h
-@@ -128,6 +128,12 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_auxiliary_window(
-     uint64_t tab_id,
-     uint64_t request_id,
-     bool proceed);
-+CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_prompt_ui(
-+    CbfBridgeClientHandle* client,
-+    uint64_t tab_id,
-+    uint64_t request_id,
-+    uint8_t prompt_ui_kind,
-+    bool allow);
- CBF_BRIDGE_EXPORT bool cbf_bridge_client_close_auxiliary_window(
+@@ -119,19 +119,20 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_get_web_page_dom_html(
      CbfBridgeClientHandle* client,
      uint64_t tab_id,
+     uint64_t request_id);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_open_default_auxiliary_window(
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_open_default_prompt_ui(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+     uint64_t request_id);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_auxiliary_window(
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_prompt_ui(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+     uint64_t request_id,
++    uint8_t prompt_ui_kind,
+     bool proceed);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_close_auxiliary_window(
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_close_prompt_ui(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+-    uint64_t window_id);
++    uint64_t prompt_ui_id);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_tab_open(
+     CbfBridgeClientHandle* client,
+     uint64_t request_id,
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
 index e999bf4e3f977..2d56864feade2 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
@@ -208,7 +220,7 @@ index e6c1e0dbbe287..06f1c3a9b4252 100644
    event->permission_names.items = nullptr;
    event->permission_names.len = 0;
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
-index 1bc69e2f1a609..bf787516fc305 100644
+index 1bc69e2f1a609..9533a024158a3 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 @@ -37,6 +37,8 @@ enum CbfEventKind {
@@ -258,21 +270,33 @@ index 1bc69e2f1a609..bf787516fc305 100644
    uint8_t tab_open_hint;
    bool tab_open_user_gesture;
    bool tab_open_has_source;
-@@ -619,6 +645,12 @@ bool cbf_bridge_client_respond_auxiliary_window(
+@@ -610,18 +636,19 @@ bool cbf_bridge_client_list_extensions(
+     const char* profile_id,
+     CbfExtensionInfoList* out_list);
+ void cbf_bridge_extension_list_free(CbfExtensionInfoList* list);
+-bool cbf_bridge_client_open_default_auxiliary_window(
++bool cbf_bridge_client_open_default_prompt_ui(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+     uint64_t request_id);
+-bool cbf_bridge_client_respond_auxiliary_window(
++bool cbf_bridge_client_respond_prompt_ui(
+     CbfBridgeClientHandle* client,
      uint64_t tab_id,
      uint64_t request_id,
-     bool proceed);
-+bool cbf_bridge_client_respond_prompt_ui(
-+    CbfBridgeClientHandle* client,
-+    uint64_t tab_id,
-+    uint64_t request_id,
 +    uint8_t prompt_ui_kind,
-+    bool allow);
- bool cbf_bridge_client_close_auxiliary_window(CbfBridgeClientHandle* client,
-                                               uint64_t tab_id,
-                                               uint64_t window_id);
+     bool proceed);
+-bool cbf_bridge_client_close_auxiliary_window(CbfBridgeClientHandle* client,
+-                                              uint64_t tab_id,
+-                                              uint64_t window_id);
++bool cbf_bridge_client_close_prompt_ui(CbfBridgeClientHandle* client,
++                                       uint64_t tab_id,
++                                       uint64_t prompt_ui_id);
+ bool cbf_bridge_client_respond_tab_open(
+     CbfBridgeClientHandle* client,
+     uint64_t request_id,
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
-index f32ccbcfc310b..71e8d2b9d49f6 100644
+index f32ccbcfc310b..2d89b574aef3d 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
 @@ -488,6 +488,49 @@ bool CbfBridgeClient::RespondAuxiliaryWindow(uint64_t tab_id,
@@ -325,26 +349,49 @@ index f32ccbcfc310b..71e8d2b9d49f6 100644
  bool CbfBridgeClient::CloseAuxiliaryWindow(uint64_t tab_id,
                                             uint64_t window_id) {
    if (!impl_) {
-@@ -731,6 +774,19 @@ extern "C" bool cbf_bridge_client_respond_auxiliary_window(
-       ->RespondAuxiliaryWindow(tab_id, request_id, proceed);
+@@ -708,7 +751,7 @@ extern "C" bool cbf_bridge_client_inspect_element(
+       ->InspectElement(tab_id, x, y);
  }
  
-+extern "C" bool cbf_bridge_client_respond_prompt_ui(
-+    CbfBridgeClientHandle* client,
-+    uint64_t tab_id,
-+    uint64_t request_id,
-+    uint8_t prompt_ui_kind,
-+    bool allow) {
-+  if (!client) {
-+    return false;
-+  }
-+  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-+      ->RespondPromptUi(tab_id, request_id, prompt_ui_kind, allow);
-+}
-+
- extern "C" bool cbf_bridge_client_close_auxiliary_window(
+-extern "C" bool cbf_bridge_client_open_default_auxiliary_window(
++extern "C" bool cbf_bridge_client_open_default_prompt_ui(
      CbfBridgeClientHandle* client,
      uint64_t tab_id,
+     uint64_t request_id) {
+@@ -719,27 +762,28 @@ extern "C" bool cbf_bridge_client_open_default_auxiliary_window(
+       ->OpenDefaultAuxiliaryWindow(tab_id, request_id);
+ }
+ 
+-extern "C" bool cbf_bridge_client_respond_auxiliary_window(
++extern "C" bool cbf_bridge_client_respond_prompt_ui(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+     uint64_t request_id,
++    uint8_t prompt_ui_kind,
+     bool proceed) {
+   if (!client) {
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->RespondAuxiliaryWindow(tab_id, request_id, proceed);
++      ->RespondPromptUi(tab_id, request_id, prompt_ui_kind, proceed);
+ }
+ 
+-extern "C" bool cbf_bridge_client_close_auxiliary_window(
++extern "C" bool cbf_bridge_client_close_prompt_ui(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+-    uint64_t window_id) {
++    uint64_t prompt_ui_id) {
+   if (!client) {
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->CloseAuxiliaryWindow(tab_id, window_id);
++      ->CloseAuxiliaryWindow(tab_id, prompt_ui_id);
+ }
+ 
+ extern "C" bool cbf_bridge_client_respond_tab_open(
 diff --git a/chrome/browser/cbf/cbf_permission_prompt.cc b/chrome/browser/cbf/cbf_permission_prompt.cc
 new file mode 100644
 index 0000000000000..010790d3ad8cb

@@ -12,10 +12,7 @@ use cbf::{
             ContextMenuItemType,
         },
         drag::{DragData, DragImage, DragOperations, DragStartRequest, DragUrlInfo},
-        extension::{
-            AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
-            AuxiliaryWindowResolution, ExtensionInfo, ExtensionInstallPromptResult,
-        },
+        extension::ExtensionInfo,
         ids::BrowsingContextId,
         ime::{
             ChromeImeTextSpanStyle, ChromeImeTextSpanThickness, ChromeImeTextSpanUnderlineStyle,
@@ -36,6 +33,7 @@ use crate::data::{
     ids::TabId,
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
     prompt_ui::{
+        PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult, PromptUiId,
         PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
     },
     surface::SurfaceHandle,
@@ -172,29 +170,29 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             profile_id: c_string_to_string(event.profile_id),
             extensions: parse_extension_list(event.extensions),
         }),
-        CBF_EVENT_AUXILIARY_WINDOW_OPEN_REQUESTED => Ok(IpcEvent::AuxiliaryWindowOpenRequested {
+        CBF_EVENT_AUXILIARY_WINDOW_OPEN_REQUESTED => Ok(IpcEvent::PromptUiOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
-            kind: auxiliary_window_kind_from_ffi(
-                event.auxiliary_window_kind,
+            kind: prompt_ui_kind_from_auxiliary_window_ffi(
+                event.prompt_ui_kind,
                 event.extension_id,
                 event.extension_name,
                 event.permission_names,
             ),
         }),
-        CBF_EVENT_AUXILIARY_WINDOW_RESOLVED => Ok(IpcEvent::AuxiliaryWindowResolved {
+        CBF_EVENT_AUXILIARY_WINDOW_RESOLVED => Ok(IpcEvent::PromptUiResolved {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
-            resolution: auxiliary_window_resolution_from_ffi(
-                event.auxiliary_window_kind,
+            resolution: prompt_ui_resolution_from_auxiliary_window_ffi(
+                event.prompt_ui_kind,
                 event.extension_id,
-                event.extension_install_prompt_result,
-                event.extension_install_prompt_detail,
+                event.prompt_ui_extension_install_result,
+                event.prompt_ui_extension_install_detail,
             ),
         }),
-        CBF_EVENT_PROMPT_UI_REQUESTED => Ok(IpcEvent::PromptUiRequested {
+        CBF_EVENT_PROMPT_UI_REQUESTED => Ok(IpcEvent::PromptUiOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
@@ -202,6 +200,9 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.prompt_ui_kind,
                 event.prompt_ui_permission,
                 event.prompt_ui_permission_key,
+                event.extension_id,
+                event.extension_name,
+                event.permission_names,
             ),
         }),
         CBF_EVENT_PROMPT_UI_RESOLVED => Ok(IpcEvent::PromptUiResolved {
@@ -213,6 +214,9 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.prompt_ui_permission,
                 event.prompt_ui_permission_key,
                 event.prompt_ui_result,
+                event.extension_id,
+                event.prompt_ui_extension_install_result,
+                event.prompt_ui_extension_install_detail,
             ),
         }),
         CBF_EVENT_EXTENSION_RUNTIME_WARNING => Ok(IpcEvent::ExtensionRuntimeWarning {
@@ -220,33 +224,33 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             browsing_context_id: TabId::new(event.tab_id),
             detail: c_string_to_string(event.extension_runtime_warning),
         }),
-        CBF_EVENT_AUXILIARY_WINDOW_OPENED => Ok(IpcEvent::AuxiliaryWindowOpened {
+        CBF_EVENT_PROMPT_UI_OPENED => Ok(IpcEvent::PromptUiOpened {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
-            window_id: AuxiliaryWindowId::new(event.auxiliary_window_id),
-            kind: auxiliary_window_kind_from_ffi(
-                event.auxiliary_window_kind,
+            prompt_ui_id: PromptUiId::new(event.prompt_ui_id),
+            kind: prompt_ui_kind_from_auxiliary_window_ffi(
+                event.prompt_ui_kind,
                 event.extension_id,
                 event.extension_name,
                 event.permission_names,
             ),
             title: {
-                let value = c_string_to_string(event.auxiliary_window_title);
+                let value = c_string_to_string(event.prompt_ui_title);
                 if value.is_empty() { None } else { Some(value) }
             },
-            modal: event.auxiliary_window_modal,
+            modal: event.prompt_ui_modal,
         }),
-        CBF_EVENT_AUXILIARY_WINDOW_CLOSED => Ok(IpcEvent::AuxiliaryWindowClosed {
+        CBF_EVENT_PROMPT_UI_CLOSED => Ok(IpcEvent::PromptUiClosed {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
-            window_id: AuxiliaryWindowId::new(event.auxiliary_window_id),
-            kind: auxiliary_window_kind_from_ffi(
-                event.auxiliary_window_kind,
+            prompt_ui_id: PromptUiId::new(event.prompt_ui_id),
+            kind: prompt_ui_kind_from_auxiliary_window_ffi(
+                event.prompt_ui_kind,
                 event.extension_id,
                 event.extension_name,
                 event.permission_names,
             ),
-            reason: auxiliary_window_close_reason_from_ffi(event.auxiliary_window_close_reason),
+            reason: prompt_ui_close_reason_from_ffi(event.prompt_ui_close_reason),
         }),
         _ => Err(Error::InvalidEvent),
     }
@@ -522,57 +526,127 @@ fn beforeunload_reason_from_ffi(value: u8) -> BeforeUnloadReason {
     }
 }
 
-fn extension_install_prompt_result_from_ffi(value: u8) -> ExtensionInstallPromptResult {
+fn prompt_ui_extension_install_result_from_ffi(value: u8) -> PromptUiExtensionInstallResult {
     match value {
-        CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED => ExtensionInstallPromptResult::Accepted,
-        CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS => {
-            ExtensionInstallPromptResult::AcceptedWithWithheldPermissions
+        CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED => PromptUiExtensionInstallResult::Accepted,
+        CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS => {
+            PromptUiExtensionInstallResult::AcceptedWithWithheldPermissions
         }
-        CBF_EXTENSION_INSTALL_PROMPT_RESULT_USER_CANCELED => {
-            ExtensionInstallPromptResult::UserCanceled
+        CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_USER_CANCELED => {
+            PromptUiExtensionInstallResult::UserCanceled
         }
-        CBF_EXTENSION_INSTALL_PROMPT_RESULT_ABORTED => ExtensionInstallPromptResult::Aborted,
-        _ => ExtensionInstallPromptResult::Aborted,
+        CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ABORTED => PromptUiExtensionInstallResult::Aborted,
+        _ => PromptUiExtensionInstallResult::Aborted,
     }
 }
 
-fn auxiliary_window_kind_from_ffi(
-    value: u8,
+fn prompt_ui_kind_from_ffi(
+    kind: u8,
+    permission: u8,
+    permission_key: *mut std::ffi::c_char,
     extension_id: *mut std::ffi::c_char,
     extension_name: *mut std::ffi::c_char,
     permission_names: CbfStringList,
-) -> AuxiliaryWindowKind {
-    match value {
+) -> PromptUiKind {
+    let permission_key = {
+        let value = c_string_to_string(permission_key);
+        if value.is_empty() { None } else { Some(value) }
+    };
+    match kind {
+        CBF_PROMPT_UI_KIND_PERMISSION_PROMPT => PromptUiKind::PermissionPrompt {
+            permission: prompt_ui_permission_from_ffi(permission),
+            permission_key,
+        },
+        CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT => PromptUiKind::ExtensionInstallPrompt {
+            extension_id: c_string_to_string(extension_id),
+            extension_name: c_string_to_string(extension_name),
+            permission_names: parse_string_list(permission_names),
+        },
+        CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG => PromptUiKind::PrintPreviewDialog,
+        _ => PromptUiKind::Unknown,
+    }
+}
+
+fn prompt_ui_kind_from_auxiliary_window_ffi(
+    kind: u8,
+    extension_id: *mut std::ffi::c_char,
+    extension_name: *mut std::ffi::c_char,
+    permission_names: CbfStringList,
+) -> PromptUiKind {
+    match kind {
         CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT => {
-            AuxiliaryWindowKind::ExtensionInstallPrompt {
+            PromptUiKind::ExtensionInstallPrompt {
                 extension_id: c_string_to_string(extension_id),
                 extension_name: c_string_to_string(extension_name),
                 permission_names: parse_string_list(permission_names),
             }
         }
-        CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG => AuxiliaryWindowKind::PrintPreviewDialog,
-        _ => AuxiliaryWindowKind::Unknown,
+        CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG => PromptUiKind::PrintPreviewDialog,
+        _ => PromptUiKind::Unknown,
     }
 }
 
-fn auxiliary_window_resolution_from_ffi(
+fn prompt_ui_dialog_result_from_ffi(value: u8) -> PromptUiDialogResult {
+    match value {
+        CBF_PROMPT_UI_DIALOG_RESULT_PROCEEDED => PromptUiDialogResult::Proceeded,
+        CBF_PROMPT_UI_DIALOG_RESULT_CANCELED => PromptUiDialogResult::Canceled,
+        CBF_PROMPT_UI_DIALOG_RESULT_ABORTED => PromptUiDialogResult::Aborted,
+        _ => PromptUiDialogResult::Unknown,
+    }
+}
+
+fn prompt_ui_resolution_from_ffi(
+    kind: u8,
+    permission: u8,
+    permission_key: *mut std::ffi::c_char,
+    permission_result: u8,
+    extension_id: *mut std::ffi::c_char,
+    extension_install_result: u8,
+    detail: *mut std::ffi::c_char,
+) -> PromptUiResolution {
+    let permission_key = {
+        let value = c_string_to_string(permission_key);
+        if value.is_empty() { None } else { Some(value) }
+    };
+    match kind {
+        CBF_PROMPT_UI_KIND_PERMISSION_PROMPT => PromptUiResolution::PermissionPrompt {
+            permission: prompt_ui_permission_from_ffi(permission),
+            permission_key,
+            result: prompt_ui_resolution_result_from_ffi(permission_result),
+        },
+        CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT => PromptUiResolution::ExtensionInstallPrompt {
+            extension_id: c_string_to_string(extension_id),
+            result: prompt_ui_extension_install_result_from_ffi(extension_install_result),
+            detail: {
+                let value = c_string_to_string(detail);
+                if value.is_empty() { None } else { Some(value) }
+            },
+        },
+        CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG => PromptUiResolution::PrintPreviewDialog {
+            result: prompt_ui_dialog_result_from_ffi(permission_result),
+        },
+        _ => PromptUiResolution::Unknown,
+    }
+}
+
+fn prompt_ui_resolution_from_auxiliary_window_ffi(
     kind: u8,
     extension_id: *mut std::ffi::c_char,
-    result: u8,
+    extension_install_result: u8,
     detail: *mut std::ffi::c_char,
-) -> AuxiliaryWindowResolution {
+) -> PromptUiResolution {
     match kind {
         CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT => {
-            AuxiliaryWindowResolution::ExtensionInstallPrompt {
+            PromptUiResolution::ExtensionInstallPrompt {
                 extension_id: c_string_to_string(extension_id),
-                result: extension_install_prompt_result_from_ffi(result),
+                result: prompt_ui_extension_install_result_from_ffi(extension_install_result),
                 detail: {
                     let value = c_string_to_string(detail);
                     if value.is_empty() { None } else { Some(value) }
                 },
             }
         }
-        _ => AuxiliaryWindowResolution::Unknown,
+        _ => PromptUiResolution::Unknown,
     }
 }
 
@@ -586,24 +660,6 @@ fn prompt_ui_permission_from_ffi(value: u8) -> PromptUiPermissionType {
     }
 }
 
-fn prompt_ui_kind_from_ffi(
-    kind: u8,
-    permission: u8,
-    permission_key: *mut std::ffi::c_char,
-) -> PromptUiKind {
-    let permission_key = {
-        let value = c_string_to_string(permission_key);
-        if value.is_empty() { None } else { Some(value) }
-    };
-    match kind {
-        CBF_PROMPT_UI_KIND_PERMISSION_PROMPT => PromptUiKind::PermissionPrompt {
-            permission: prompt_ui_permission_from_ffi(permission),
-            permission_key,
-        },
-        _ => PromptUiKind::Unknown,
-    }
-}
-
 fn prompt_ui_resolution_result_from_ffi(value: u8) -> PromptUiResolutionResult {
     match value {
         CBF_PROMPT_UI_RESOLUTION_RESULT_ALLOWED => PromptUiResolutionResult::Allowed,
@@ -613,34 +669,12 @@ fn prompt_ui_resolution_result_from_ffi(value: u8) -> PromptUiResolutionResult {
     }
 }
 
-fn prompt_ui_resolution_from_ffi(
-    kind: u8,
-    permission: u8,
-    permission_key: *mut std::ffi::c_char,
-    result: u8,
-) -> PromptUiResolution {
-    let permission_key = {
-        let value = c_string_to_string(permission_key);
-        if value.is_empty() { None } else { Some(value) }
-    };
-    match kind {
-        CBF_PROMPT_UI_KIND_PERMISSION_PROMPT => PromptUiResolution::PermissionPrompt {
-            permission: prompt_ui_permission_from_ffi(permission),
-            permission_key,
-            result: prompt_ui_resolution_result_from_ffi(result),
-        },
-        _ => PromptUiResolution::Unknown,
-    }
-}
-
-fn auxiliary_window_close_reason_from_ffi(value: u8) -> AuxiliaryWindowCloseReason {
+fn prompt_ui_close_reason_from_ffi(value: u8) -> PromptUiCloseReason {
     match value {
-        CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED => AuxiliaryWindowCloseReason::UserCanceled,
-        CBF_AUXILIARY_WINDOW_CLOSE_REASON_HOST_FORCED => AuxiliaryWindowCloseReason::HostForced,
-        CBF_AUXILIARY_WINDOW_CLOSE_REASON_SYSTEM_DISMISSED => {
-            AuxiliaryWindowCloseReason::SystemDismissed
-        }
-        _ => AuxiliaryWindowCloseReason::Unknown,
+        CBF_PROMPT_UI_CLOSE_REASON_USER_CANCELED => PromptUiCloseReason::UserCanceled,
+        CBF_PROMPT_UI_CLOSE_REASON_HOST_FORCED => PromptUiCloseReason::HostForced,
+        CBF_PROMPT_UI_CLOSE_REASON_SYSTEM_DISMISSED => PromptUiCloseReason::SystemDismissed,
+        _ => PromptUiCloseReason::Unknown,
     }
 }
 
@@ -692,6 +726,7 @@ mod tests {
     use crate::data::{
         ids::TabId,
         prompt_ui::{
+            PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult, PromptUiId,
             PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
         },
         tab_open::TabOpenResult,
@@ -764,8 +799,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_event_prompt_ui_requested_maps_permission_kind() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_REQUESTED);
+    fn parse_event_prompt_ui_open_requested_maps_permission_kind() {
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_OPEN_REQUESTED);
         event.tab_id = 21;
         event.request_id = 99;
         event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PERMISSION_PROMPT;
@@ -776,7 +811,7 @@ mod tests {
         let parsed = parse_event(event).expect("prompt ui requested should parse");
         assert!(matches!(
             parsed,
-            IpcEvent::PromptUiRequested {
+            IpcEvent::PromptUiOpenRequested {
                 browsing_context_id,
                 request_id,
                 kind: PromptUiKind::PermissionPrompt {
@@ -816,6 +851,126 @@ mod tests {
             } if browsing_context_id == TabId::new(18)
                 && request_id == 77
                 && permission_key == "notifications"
+        ));
+    }
+
+    #[test]
+    fn parse_event_prompt_ui_opened_maps_extension_kind_and_metadata() {
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_OPENED);
+        event.tab_id = 12;
+        event.prompt_ui_id = 44;
+        event.prompt_ui_kind = CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT;
+        event.prompt_ui_title = CString::new("Install extension").unwrap().into_raw();
+        event.prompt_ui_modal = true;
+        event.extension_id = CString::new("ext-id").unwrap().into_raw();
+        event.extension_name = CString::new("Ext").unwrap().into_raw();
+
+        let permission_names = [
+            CString::new("tabs").unwrap(),
+            CString::new("storage").unwrap(),
+        ];
+        let permission_ptrs: Vec<*mut i8> = permission_names
+            .iter()
+            .map(|s| s.as_ptr() as *mut i8)
+            .collect();
+        event.permission_names = CbfStringList {
+            items: permission_ptrs.as_ptr() as *mut _,
+            len: permission_ptrs.len() as u32,
+        };
+
+        let parsed = parse_event(event).expect("prompt ui opened should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::PromptUiOpened {
+                browsing_context_id,
+                prompt_ui_id,
+                kind: PromptUiKind::ExtensionInstallPrompt { extension_id, extension_name, permission_names },
+                title: Some(ref title),
+                modal,
+                ..
+            } if browsing_context_id == TabId::new(12)
+                && prompt_ui_id == PromptUiId::new(44)
+                && extension_id == "ext-id"
+                && extension_name == "Ext"
+                && permission_names == vec!["tabs".to_string(), "storage".to_string()]
+                && title == "Install extension"
+                && modal
+        ));
+    }
+
+    #[test]
+    fn parse_event_prompt_ui_closed_maps_reason() {
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_CLOSED);
+        event.tab_id = 8;
+        event.prompt_ui_id = 19;
+        event.prompt_ui_kind = CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG;
+        event.prompt_ui_result = CBF_PROMPT_UI_DIALOG_RESULT_ABORTED;
+        event.prompt_ui_close_reason = CBF_PROMPT_UI_CLOSE_REASON_HOST_FORCED;
+
+        let parsed = parse_event(event).expect("prompt ui closed should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::PromptUiClosed {
+                browsing_context_id,
+                prompt_ui_id,
+                kind: PromptUiKind::PrintPreviewDialog,
+                reason: PromptUiCloseReason::HostForced,
+                ..
+            } if browsing_context_id == TabId::new(8)
+                && prompt_ui_id == PromptUiId::new(19)
+        ));
+    }
+
+    #[test]
+    fn parse_event_prompt_ui_resolved_maps_extension_install_result() {
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_RESOLVED);
+        event.tab_id = 99;
+        event.request_id = 101;
+        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT;
+        event.extension_id = CString::new("abc").unwrap().into_raw();
+        event.prompt_ui_extension_install_result =
+            CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS;
+        event.prompt_ui_extension_install_detail = CString::new("withheld").unwrap().into_raw();
+
+        let parsed = parse_event(event).expect("prompt ui resolved should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::PromptUiResolved {
+                browsing_context_id,
+                request_id,
+                resolution: PromptUiResolution::ExtensionInstallPrompt {
+                    extension_id,
+                    result: PromptUiExtensionInstallResult::AcceptedWithWithheldPermissions,
+                    detail: Some(ref detail),
+                },
+                ..
+            } if browsing_context_id == TabId::new(99)
+                && request_id == 101
+                && extension_id == "abc"
+                && detail == "withheld"
+        ));
+    }
+
+    #[test]
+    fn parse_event_prompt_ui_resolved_maps_print_preview_result() {
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_RESOLVED);
+        event.tab_id = 41;
+        event.request_id = 51;
+        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG;
+        event.prompt_ui_result = CBF_PROMPT_UI_DIALOG_RESULT_CANCELED;
+
+        let parsed = parse_event(event).expect("prompt ui resolved should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::PromptUiResolved {
+                browsing_context_id,
+                request_id,
+                resolution: PromptUiResolution::PrintPreviewDialog {
+                    result: PromptUiDialogResult::Canceled,
+                },
+                ..
+            } if browsing_context_id == TabId::new(41)
+                && request_id == 51
         ));
     }
 }

@@ -655,18 +655,11 @@ impl ChromiumBackend {
             } => client
                 .set_web_contents_focus(*browsing_context_id, *focused)
                 .map(|_| (None, Vec::new())),
-            ChromeCommand::OpenDefaultAuxiliaryWindow {
+            ChromeCommand::OpenDefaultPromptUi {
                 browsing_context_id,
                 request_id,
             } => client
-                .open_default_auxiliary_window(*browsing_context_id, *request_id)
-                .map(|_| (None, Vec::new())),
-            ChromeCommand::RespondAuxiliaryWindow {
-                browsing_context_id,
-                request_id,
-                response,
-            } => client
-                .respond_auxiliary_window(*browsing_context_id, *request_id, response)
+                .open_default_prompt_ui(*browsing_context_id, *request_id)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::RespondPromptUi {
                 browsing_context_id,
@@ -675,11 +668,11 @@ impl ChromiumBackend {
             } => client
                 .respond_prompt_ui(*browsing_context_id, *request_id, response)
                 .map(|_| (None, Vec::new())),
-            ChromeCommand::CloseAuxiliaryWindow {
+            ChromeCommand::ClosePromptUi {
                 browsing_context_id,
-                window_id,
+                prompt_ui_id,
             } => client
-                .close_auxiliary_window(*browsing_context_id, *window_id)
+                .close_prompt_ui(*browsing_context_id, *prompt_ui_id)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::RespondTabOpen {
                 request_id,

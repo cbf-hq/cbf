@@ -49,6 +49,12 @@ As of this update, the public direction in this ADR is realized by:
 
 This ADR governs architectural boundaries; exact mapping details in `cbf-chrome` may evolve while preserving browser-generic semantics in `cbf`.
 
+Vocabulary boundary note:
+
+- `cbf` public API continues to expose browser-generic `AuxiliaryWindow*` lifecycle events.
+- `cbf-chrome` / `cbf-chrome-sys` internal and FFI layers use chromium-specific `PromptUi*` vocabulary.
+- `cbf-chrome` is responsible for projecting `PromptUi*` into public `AuxiliaryWindow*` semantics at conversion boundaries.
+
 ## Consequences
 
 ### Positive

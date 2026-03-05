@@ -1,19 +1,14 @@
 use cursor_icon::CursorIcon;
 
 use cbf::data::{
-    context_menu::ContextMenu,
-    drag::DragStartRequest,
-    extension::{
-        AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
-        AuxiliaryWindowResolution, ExtensionInfo,
-    },
+    context_menu::ContextMenu, drag::DragStartRequest, extension::ExtensionInfo,
     ime::ImeBoundsUpdate,
 };
 use cbf::event::BeforeUnloadReason;
 
 use crate::data::{
     ids::TabId,
-    prompt_ui::{PromptUiKind, PromptUiResolution},
+    prompt_ui::{PromptUiCloseReason, PromptUiId, PromptUiKind, PromptUiResolution},
     surface::SurfaceHandle,
     tab_open::{TabOpenHint, TabOpenResult},
 };
@@ -182,28 +177,14 @@ pub enum IpcEvent {
         profile_id: String,
         extensions: Vec<ExtensionInfo>,
     },
-    /// Auxiliary window open was requested and host must choose flow.
-    AuxiliaryWindowOpenRequested {
-        profile_id: String,
-        browsing_context_id: TabId,
-        request_id: u64,
-        kind: AuxiliaryWindowKind,
-    },
-    /// Auxiliary request was resolved.
-    AuxiliaryWindowResolved {
-        profile_id: String,
-        browsing_context_id: TabId,
-        request_id: u64,
-        resolution: AuxiliaryWindowResolution,
-    },
-    /// Chrome-specific prompt UI open request.
-    PromptUiRequested {
+    /// Prompt UI open was requested and host must choose flow.
+    PromptUiOpenRequested {
         profile_id: String,
         browsing_context_id: TabId,
         request_id: u64,
         kind: PromptUiKind,
     },
-    /// Chrome-specific prompt UI resolution.
+    /// Prompt UI request was resolved.
     PromptUiResolved {
         profile_id: String,
         browsing_context_id: TabId,
@@ -218,21 +199,21 @@ pub enum IpcEvent {
         browsing_context_id: TabId,
         detail: String,
     },
-    /// Backend-managed auxiliary window/dialog was opened.
-    AuxiliaryWindowOpened {
+    /// Backend-managed prompt UI surface was opened.
+    PromptUiOpened {
         profile_id: String,
         browsing_context_id: TabId,
-        window_id: AuxiliaryWindowId,
-        kind: AuxiliaryWindowKind,
+        prompt_ui_id: PromptUiId,
+        kind: PromptUiKind,
         title: Option<String>,
         modal: bool,
     },
-    /// Backend-managed auxiliary window/dialog was closed.
-    AuxiliaryWindowClosed {
+    /// Backend-managed prompt UI surface was closed.
+    PromptUiClosed {
         profile_id: String,
         browsing_context_id: TabId,
-        window_id: AuxiliaryWindowId,
-        kind: AuxiliaryWindowKind,
-        reason: AuxiliaryWindowCloseReason,
+        prompt_ui_id: PromptUiId,
+        kind: PromptUiKind,
+        reason: PromptUiCloseReason,
     },
 }

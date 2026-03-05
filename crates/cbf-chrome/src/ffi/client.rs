@@ -6,7 +6,7 @@ use std::{
 use cbf::data::{
     browsing_context_open::BrowsingContextOpenResponse,
     drag::{DragDrop, DragUpdate},
-    extension::{AuxiliaryWindowId, AuxiliaryWindowResponse, ExtensionInfo},
+    extension::ExtensionInfo,
     ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
@@ -25,7 +25,7 @@ use super::{Error, IpcEvent};
 use crate::data::{
     ids::TabId,
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
-    prompt_ui::PromptUiResponse,
+    prompt_ui::{PromptUiId, PromptUiResponse},
 };
 
 /// Client wrapper for the CBF IPC bridge.
@@ -471,8 +471,8 @@ impl IpcClient {
         }
     }
 
-    /// Open Chromium default auxiliary window UI for pending request.
-    pub fn open_default_auxiliary_window(
+    /// Open Chromium default PromptUi for pending request.
+    pub fn open_default_prompt_ui(
         &mut self,
         browsing_context_id: TabId,
         request_id: u64,
@@ -483,56 +483,13 @@ impl IpcClient {
         debug!(
             %browsing_context_id,
             request_id,
-            "ffi open_default_auxiliary_window"
+            "ffi open_default_prompt_ui"
         );
         if unsafe {
-            cbf_bridge_client_open_default_auxiliary_window(
+            cbf_bridge_client_open_default_prompt_ui(
                 self.inner,
                 browsing_context_id.get(),
                 request_id,
-            )
-        } {
-            Ok(())
-        } else {
-            Err(Error::ConnectionFailed)
-        }
-    }
-
-    /// Respond to a pending auxiliary request.
-    pub fn respond_auxiliary_window(
-        &mut self,
-        browsing_context_id: TabId,
-        request_id: u64,
-        response: &AuxiliaryWindowResponse,
-    ) -> Result<(), Error> {
-        if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
-        }
-        if let AuxiliaryWindowResponse::PermissionPrompt { allow } = response {
-            return self.respond_prompt_ui(
-                browsing_context_id,
-                request_id,
-                &PromptUiResponse::PermissionPrompt { allow: *allow },
-            );
-        }
-        let proceed = match response {
-            AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed } => *proceed,
-            AuxiliaryWindowResponse::PermissionPrompt { .. } => false,
-            AuxiliaryWindowResponse::Unknown => false,
-        };
-        debug!(
-            %browsing_context_id,
-            request_id,
-            proceed,
-            ?response,
-            "ffi respond_auxiliary_window"
-        );
-        if unsafe {
-            cbf_bridge_client_respond_auxiliary_window(
-                self.inner,
-                browsing_context_id.get(),
-                request_id,
-                proceed,
             )
         } {
             Ok(())
@@ -551,9 +508,15 @@ impl IpcClient {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
-        let (prompt_ui_kind, allow) = match response {
+        let (prompt_ui_kind, proceed) = match response {
             PromptUiResponse::PermissionPrompt { allow } => {
                 (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow)
+            }
+            PromptUiResponse::ExtensionInstallPrompt { proceed } => {
+                (CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT, *proceed)
+            }
+            PromptUiResponse::PrintPreviewDialog { proceed } => {
+                (CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG, *proceed)
             }
             PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false),
         };
@@ -561,7 +524,7 @@ impl IpcClient {
             %browsing_context_id,
             request_id,
             prompt_ui_kind,
-            allow,
+            proceed,
             ?response,
             "ffi respond_prompt_ui"
         );
@@ -571,7 +534,7 @@ impl IpcClient {
                 browsing_context_id.get(),
                 request_id,
                 prompt_ui_kind,
-                allow,
+                proceed,
             )
         } {
             Ok(())
@@ -580,25 +543,25 @@ impl IpcClient {
         }
     }
 
-    /// Close a backend-managed auxiliary window/dialog.
-    pub fn close_auxiliary_window(
+    /// Close a backend-managed PromptUi surface.
+    pub fn close_prompt_ui(
         &mut self,
         browsing_context_id: TabId,
-        window_id: AuxiliaryWindowId,
+        prompt_ui_id: PromptUiId,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
         debug!(
             %browsing_context_id,
-            ?window_id,
-            "ffi close_auxiliary_window"
+            ?prompt_ui_id,
+            "ffi close_prompt_ui"
         );
         if unsafe {
-            cbf_bridge_client_close_auxiliary_window(
+            cbf_bridge_client_close_prompt_ui(
                 self.inner,
                 browsing_context_id.get(),
-                window_id.get(),
+                prompt_ui_id.get(),
             )
         } {
             Ok(())

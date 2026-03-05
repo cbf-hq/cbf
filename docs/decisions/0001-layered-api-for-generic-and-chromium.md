@@ -51,6 +51,11 @@ Design constraints:
 - `flush` is queue-drain only (`BrowserCommand` extraction), and backend implementations own transport execution/emit ordering.
 - Raw stream contracts stay raw-only (for example `ChromeEvent` does not carry a `Generic` wrapper variant).
 - `cbf` public API must not introduce chrome-specific nouns or Chromium internal concepts.
+- Prompt UI vocabulary boundary is explicit:
+  - `cbf` public surface keeps browser-generic `AuxiliaryWindow*` terms.
+  - `cbf-chrome` raw/internal event and command vocabularies use chrome-specific `PromptUi*` terms.
+  - `cbf-chrome-sys` FFI/wire contracts use `PromptUi*` terms only.
+  - Vocabulary translation is owned by `cbf-chrome` conversion boundaries (`to_generic_event` and command mapping).
 
 ## Consequences
 
