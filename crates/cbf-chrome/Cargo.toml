@@ -8,6 +8,7 @@ repository.workspace = true
 keywords.workspace = true
 license.workspace = true
 readme.workspace = true
+build = "build.rs"
 
 [dependencies]
 cbf = { path = "../cbf" }
