@@ -7,7 +7,6 @@ use tracing::debug;
 
 use cbf::{
     data::{
-        browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
         context_menu::{
             ContextMenu, ContextMenuAccelerator, ContextMenuIcon, ContextMenuItem,
             ContextMenuItemType,
@@ -37,6 +36,7 @@ use crate::data::{
     ids::TabId,
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
     surface::SurfaceHandle,
+    tab_open::{TabOpenHint, TabOpenResult},
 };
 
 pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
@@ -80,25 +80,25 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             browsing_context_id: TabId::new(event.tab_id),
             menu: parse_context_menu(event.context_menu),
         }),
-        CBF_EVENT_BROWSING_CONTEXT_OPEN_REQUESTED => Ok(IpcEvent::BrowsingContextOpenRequested {
+        CBF_EVENT_TAB_OPEN_REQUESTED => Ok(IpcEvent::TabOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
             request_id: event.request_id,
-            source_browsing_context_id: if event.browsing_context_open_has_source {
-                Some(TabId::new(event.browsing_context_open_source_tab_id))
+            source_tab_id: if event.tab_open_has_source {
+                Some(TabId::new(event.tab_open_source_tab_id))
             } else {
                 None
             },
             target_url: c_string_to_string(event.target_url),
-            open_hint: browsing_context_open_hint_from_ffi(event.browsing_context_open_hint),
-            user_gesture: event.browsing_context_open_user_gesture,
+            open_hint: tab_open_hint_from_ffi(event.tab_open_hint),
+            user_gesture: event.tab_open_user_gesture,
         }),
-        CBF_EVENT_BROWSING_CONTEXT_OPEN_RESOLVED => Ok(IpcEvent::BrowsingContextOpenResolved {
+        CBF_EVENT_TAB_OPEN_RESOLVED => Ok(IpcEvent::TabOpenResolved {
             profile_id: c_string_to_string(event.profile_id),
             request_id: event.request_id,
-            result: browsing_context_open_result_from_ffi(
-                event.browsing_context_open_result_kind,
-                event.browsing_context_open_has_target,
-                event.browsing_context_open_target_tab_id,
+            result: tab_open_result_from_ffi(
+                event.tab_open_result_kind,
+                event.tab_open_has_target,
+                event.tab_open_target_tab_id,
             ),
         }),
         CBF_EVENT_NAVIGATION_STATE_CHANGED => Ok(IpcEvent::NavigationStateChanged {
@@ -228,48 +228,40 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
     }
 }
 
-fn browsing_context_open_hint_from_ffi(value: u8) -> BrowsingContextOpenHint {
+fn tab_open_hint_from_ffi(value: u8) -> TabOpenHint {
     match value {
-        CBF_BROWSING_CONTEXT_OPEN_HINT_CURRENT_CONTEXT => BrowsingContextOpenHint::CurrentContext,
-        CBF_BROWSING_CONTEXT_OPEN_HINT_NEW_FOREGROUND_CONTEXT => {
-            BrowsingContextOpenHint::NewForegroundContext
-        }
-        CBF_BROWSING_CONTEXT_OPEN_HINT_NEW_BACKGROUND_CONTEXT => {
-            BrowsingContextOpenHint::NewBackgroundContext
-        }
-        CBF_BROWSING_CONTEXT_OPEN_HINT_NEW_WINDOW => BrowsingContextOpenHint::NewWindow,
-        CBF_BROWSING_CONTEXT_OPEN_HINT_POPUP => BrowsingContextOpenHint::Popup,
-        _ => BrowsingContextOpenHint::Unknown,
+        CBF_TAB_OPEN_HINT_CURRENT_CONTEXT => TabOpenHint::CurrentTab,
+        CBF_TAB_OPEN_HINT_NEW_FOREGROUND_CONTEXT => TabOpenHint::NewForegroundTab,
+        CBF_TAB_OPEN_HINT_NEW_BACKGROUND_CONTEXT => TabOpenHint::NewBackgroundTab,
+        CBF_TAB_OPEN_HINT_NEW_WINDOW => TabOpenHint::NewWindow,
+        CBF_TAB_OPEN_HINT_POPUP => TabOpenHint::Popup,
+        _ => TabOpenHint::Unknown,
     }
 }
 
-fn browsing_context_open_result_from_ffi(
+fn tab_open_result_from_ffi(
     value: u8,
     has_target: bool,
     target_tab_id: u64,
-) -> BrowsingContextOpenResult {
+) -> TabOpenResult {
     match value {
-        CBF_BROWSING_CONTEXT_OPEN_RESULT_OPENED_NEW_CONTEXT => {
+        CBF_TAB_OPEN_RESULT_OPENED_NEW_CONTEXT => {
             if has_target {
-                BrowsingContextOpenResult::OpenedNewContext {
-                    browsing_context_id: BrowsingContextId::new(target_tab_id),
-                }
+                TabOpenResult::OpenedNewTab { tab_id: TabId::new(target_tab_id) }
             } else {
-                BrowsingContextOpenResult::Aborted
+                TabOpenResult::Aborted
             }
         }
-        CBF_BROWSING_CONTEXT_OPEN_RESULT_OPENED_EXISTING_CONTEXT => {
+        CBF_TAB_OPEN_RESULT_OPENED_EXISTING_CONTEXT => {
             if has_target {
-                BrowsingContextOpenResult::OpenedExistingContext {
-                    browsing_context_id: BrowsingContextId::new(target_tab_id),
-                }
+                TabOpenResult::OpenedExistingTab { tab_id: TabId::new(target_tab_id) }
             } else {
-                BrowsingContextOpenResult::Aborted
+                TabOpenResult::Aborted
             }
         }
-        CBF_BROWSING_CONTEXT_OPEN_RESULT_DENIED => BrowsingContextOpenResult::Denied,
-        CBF_BROWSING_CONTEXT_OPEN_RESULT_ABORTED => BrowsingContextOpenResult::Aborted,
-        _ => BrowsingContextOpenResult::Aborted,
+        CBF_TAB_OPEN_RESULT_DENIED => TabOpenResult::Denied,
+        CBF_TAB_OPEN_RESULT_ABORTED => TabOpenResult::Aborted,
+        _ => TabOpenResult::Aborted,
     }
 }
 
@@ -614,10 +606,9 @@ fn cursor_icon_from_ffi(value: u8) -> CursorIcon {
 
 #[cfg(test)]
 mod tests {
-    use cbf::data::browsing_context_open::BrowsingContextOpenResult;
     use cbf_chrome_sys::ffi::*;
 
-    use crate::data::ids::TabId;
+    use crate::data::{ids::TabId, tab_open::TabOpenResult};
 
     use super::{IpcEvent, parse_event};
 
@@ -667,21 +658,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_event_browsing_context_open_resolved_maps_target_tab_id() {
-        let mut event = make_event(CBF_EVENT_BROWSING_CONTEXT_OPEN_RESOLVED);
+    fn parse_event_tab_open_resolved_maps_target_tab_id() {
+        let mut event = make_event(CBF_EVENT_TAB_OPEN_RESOLVED);
         event.request_id = 55;
-        event.browsing_context_open_result_kind = CBF_BROWSING_CONTEXT_OPEN_RESULT_OPENED_NEW_CONTEXT;
-        event.browsing_context_open_has_target = true;
-        event.browsing_context_open_target_tab_id = 123;
+        event.tab_open_result_kind = CBF_TAB_OPEN_RESULT_OPENED_NEW_CONTEXT;
+        event.tab_open_has_target = true;
+        event.tab_open_target_tab_id = 123;
 
-        let parsed = parse_event(event).expect("browsing context open resolved should parse");
+        let parsed = parse_event(event).expect("tab open resolved should parse");
         assert!(matches!(
             parsed,
-            IpcEvent::BrowsingContextOpenResolved {
+            IpcEvent::TabOpenResolved {
                 request_id,
-                result: BrowsingContextOpenResult::OpenedNewContext { browsing_context_id },
+                result: TabOpenResult::OpenedNewTab { tab_id },
                 ..
-            } if request_id == 55 && browsing_context_id.get() == 123
+            } if request_id == 55 && tab_id.get() == 123
         ));
     }
 }

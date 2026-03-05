@@ -32,8 +32,8 @@ pub const CBF_EVENT_AUXILIARY_WINDOW_RESOLVED: u8 = 21;
 pub const CBF_EVENT_EXTENSION_RUNTIME_WARNING: u8 = 22;
 pub const CBF_EVENT_AUXILIARY_WINDOW_OPENED: u8 = 23;
 pub const CBF_EVENT_AUXILIARY_WINDOW_CLOSED: u8 = 24;
-pub const CBF_EVENT_BROWSING_CONTEXT_OPEN_REQUESTED: u8 = 25;
-pub const CBF_EVENT_BROWSING_CONTEXT_OPEN_RESOLVED: u8 = 26;
+pub const CBF_EVENT_TAB_OPEN_REQUESTED: u8 = 25;
+pub const CBF_EVENT_TAB_OPEN_RESOLVED: u8 = 26;
 
 pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED: u8 = 0;
 pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS: u8 = 1;
@@ -49,21 +49,21 @@ pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED: u8 = 1;
 pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_HOST_FORCED: u8 = 2;
 pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_SYSTEM_DISMISSED: u8 = 3;
 
-pub const CBF_BROWSING_CONTEXT_OPEN_HINT_UNKNOWN: u8 = 0;
-pub const CBF_BROWSING_CONTEXT_OPEN_HINT_CURRENT_CONTEXT: u8 = 1;
-pub const CBF_BROWSING_CONTEXT_OPEN_HINT_NEW_FOREGROUND_CONTEXT: u8 = 2;
-pub const CBF_BROWSING_CONTEXT_OPEN_HINT_NEW_BACKGROUND_CONTEXT: u8 = 3;
-pub const CBF_BROWSING_CONTEXT_OPEN_HINT_NEW_WINDOW: u8 = 4;
-pub const CBF_BROWSING_CONTEXT_OPEN_HINT_POPUP: u8 = 5;
+pub const CBF_TAB_OPEN_HINT_UNKNOWN: u8 = 0;
+pub const CBF_TAB_OPEN_HINT_CURRENT_CONTEXT: u8 = 1;
+pub const CBF_TAB_OPEN_HINT_NEW_FOREGROUND_CONTEXT: u8 = 2;
+pub const CBF_TAB_OPEN_HINT_NEW_BACKGROUND_CONTEXT: u8 = 3;
+pub const CBF_TAB_OPEN_HINT_NEW_WINDOW: u8 = 4;
+pub const CBF_TAB_OPEN_HINT_POPUP: u8 = 5;
 
-pub const CBF_BROWSING_CONTEXT_OPEN_RESPONSE_ALLOW_NEW_CONTEXT: u8 = 0;
-pub const CBF_BROWSING_CONTEXT_OPEN_RESPONSE_ALLOW_EXISTING_CONTEXT: u8 = 1;
-pub const CBF_BROWSING_CONTEXT_OPEN_RESPONSE_DENY: u8 = 2;
+pub const CBF_TAB_OPEN_RESPONSE_ALLOW_NEW_CONTEXT: u8 = 0;
+pub const CBF_TAB_OPEN_RESPONSE_ALLOW_EXISTING_CONTEXT: u8 = 1;
+pub const CBF_TAB_OPEN_RESPONSE_DENY: u8 = 2;
 
-pub const CBF_BROWSING_CONTEXT_OPEN_RESULT_OPENED_NEW_CONTEXT: u8 = 0;
-pub const CBF_BROWSING_CONTEXT_OPEN_RESULT_OPENED_EXISTING_CONTEXT: u8 = 1;
-pub const CBF_BROWSING_CONTEXT_OPEN_RESULT_DENIED: u8 = 2;
-pub const CBF_BROWSING_CONTEXT_OPEN_RESULT_ABORTED: u8 = 3;
+pub const CBF_TAB_OPEN_RESULT_OPENED_NEW_CONTEXT: u8 = 0;
+pub const CBF_TAB_OPEN_RESULT_OPENED_EXISTING_CONTEXT: u8 = 1;
+pub const CBF_TAB_OPEN_RESULT_DENIED: u8 = 2;
+pub const CBF_TAB_OPEN_RESULT_ABORTED: u8 = 3;
 
 pub const CBF_SURFACE_HANDLE_NONE: u8 = 0;
 pub const CBF_SURFACE_HANDLE_MAC_CA_CONTEXT_ID: u8 = 1;
@@ -213,13 +213,13 @@ pub struct CbfBridgeEvent {
     pub auxiliary_window_close_reason: u8,
     pub auxiliary_window_title: *mut c_char,
     pub auxiliary_window_modal: bool,
-    pub browsing_context_open_hint: u8,
-    pub browsing_context_open_user_gesture: bool,
-    pub browsing_context_open_has_source: bool,
-    pub browsing_context_open_source_tab_id: u64,
-    pub browsing_context_open_result_kind: u8,
-    pub browsing_context_open_has_target: bool,
-    pub browsing_context_open_target_tab_id: u64,
+    pub tab_open_hint: u8,
+    pub tab_open_user_gesture: bool,
+    pub tab_open_has_source: bool,
+    pub tab_open_source_tab_id: u64,
+    pub tab_open_result_kind: u8,
+    pub tab_open_has_target: bool,
+    pub tab_open_target_tab_id: u64,
 }
 
 #[repr(C)]
@@ -742,7 +742,7 @@ unsafe extern "C" {
         tab_id: u64,
         window_id: u64,
     ) -> bool;
-    pub fn cbf_bridge_client_respond_browsing_context_open(
+    pub fn cbf_bridge_client_respond_tab_open(
         client: *mut CbfBridgeClientHandle,
         request_id: u64,
         response_kind: u8,

@@ -140,7 +140,7 @@ pub enum ChromeCommand {
         browsing_context_id: TabId,
         window_id: AuxiliaryWindowId,
     },
-    RespondBrowsingContextOpen {
+    RespondTabOpen {
         request_id: u64,
         response: BrowsingContextOpenResponse,
     },
@@ -327,7 +327,7 @@ impl From<BrowserCommand> for ChromeCommand {
             BrowserCommand::RespondBrowsingContextOpen {
                 request_id,
                 response,
-            } => Self::RespondBrowsingContextOpen {
+            } => Self::RespondTabOpen {
                 request_id,
                 response,
             },

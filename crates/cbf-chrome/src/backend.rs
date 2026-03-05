@@ -657,11 +657,11 @@ impl ChromiumBackend {
             } => client
                 .close_auxiliary_window(*browsing_context_id, *window_id)
                 .map(|_| (None, Vec::new())),
-            ChromeCommand::RespondBrowsingContextOpen {
+            ChromeCommand::RespondTabOpen {
                 request_id,
                 response,
             } => client
-                .respond_browsing_context_open(*request_id, response)
+                .respond_tab_open(*request_id, response)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::RespondWindowOpen {
                 request_id,

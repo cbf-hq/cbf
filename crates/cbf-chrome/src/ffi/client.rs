@@ -563,8 +563,8 @@ impl IpcClient {
         }
     }
 
-    /// Respond to host-mediated browsing context open request.
-    pub fn respond_browsing_context_open(
+    /// Respond to host-mediated tab-open request.
+    pub fn respond_tab_open(
         &mut self,
         request_id: u64,
         response: &BrowsingContextOpenResponse,
@@ -574,7 +574,7 @@ impl IpcClient {
         }
         let (response_kind, target_tab_id, activate) = match response {
             BrowsingContextOpenResponse::AllowNewContext { activate } => (
-                CBF_BROWSING_CONTEXT_OPEN_RESPONSE_ALLOW_NEW_CONTEXT,
+                CBF_TAB_OPEN_RESPONSE_ALLOW_NEW_CONTEXT,
                 0,
                 *activate,
             ),
@@ -582,12 +582,12 @@ impl IpcClient {
                 browsing_context_id,
                 activate,
             } => (
-                CBF_BROWSING_CONTEXT_OPEN_RESPONSE_ALLOW_EXISTING_CONTEXT,
+                CBF_TAB_OPEN_RESPONSE_ALLOW_EXISTING_CONTEXT,
                 browsing_context_id.get(),
                 *activate,
             ),
             BrowsingContextOpenResponse::Deny => {
-                (CBF_BROWSING_CONTEXT_OPEN_RESPONSE_DENY, 0, false)
+                (CBF_TAB_OPEN_RESPONSE_DENY, 0, false)
             }
         };
         debug!(
@@ -596,10 +596,10 @@ impl IpcClient {
             target_tab_id,
             activate,
             ?response,
-            "ffi respond_browsing_context_open"
+            "ffi respond_tab_open"
         );
         if unsafe {
-            cbf_bridge_client_respond_browsing_context_open(
+            cbf_bridge_client_respond_tab_open(
                 self.inner,
                 request_id,
                 response_kind,
@@ -615,20 +615,20 @@ impl IpcClient {
 
     /// Respond to host-mediated window open request.
     ///
-    /// Current bridge path reuses browsing-context-open response semantics.
+    /// Current bridge path reuses tab-open response semantics.
     pub fn respond_window_open(
         &mut self,
         request_id: u64,
         response: &WindowOpenResponse,
     ) -> Result<(), Error> {
-        let browsing_context_response = match response {
+        let tab_open_response = match response {
             WindowOpenResponse::AllowExistingWindow { .. }
             | WindowOpenResponse::AllowNewWindow { .. } => {
                 BrowsingContextOpenResponse::AllowNewContext { activate: true }
             }
             WindowOpenResponse::Deny => BrowsingContextOpenResponse::Deny,
         };
-        self.respond_browsing_context_open(request_id, &browsing_context_response)
+        self.respond_tab_open(request_id, &tab_open_response)
     }
 
     /// Send a keyboard event to the page.

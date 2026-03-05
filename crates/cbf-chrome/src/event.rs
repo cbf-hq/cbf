@@ -1,6 +1,5 @@
 use cbf::{
     data::{
-        browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
         ids::WindowId,
         profile::ProfileInfo,
         window_open::{
@@ -15,6 +14,7 @@ use cbf::{
     event::{BrowserEvent, BrowsingContextEvent, DialogType},
 };
 
+use crate::data::tab_open::{TabOpenHint, TabOpenResult};
 use crate::ffi::IpcEvent;
 
 /// Chromium-specific raw event stream payload.
@@ -100,25 +100,25 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::ContextMenuRequested { menu: menu.clone() }),
         }),
-        IpcEvent::BrowsingContextOpenRequested {
+        IpcEvent::TabOpenRequested {
             profile_id,
             request_id,
-            source_browsing_context_id,
+            source_tab_id,
             target_url,
             open_hint,
             user_gesture,
         } => match open_hint {
-            BrowsingContextOpenHint::NewWindow | BrowsingContextOpenHint::Popup => {
+            TabOpenHint::NewWindow | TabOpenHint::Popup => {
                 Some(BrowserEvent::WindowOpenRequested {
                     profile_id: profile_id.clone(),
                     request: WindowOpenRequest {
                         request_id: *request_id,
                         reason: WindowOpenReason::Navigation,
                         opener_window_id: None,
-                        opener_browsing_context_id: source_browsing_context_id
+                        opener_browsing_context_id: source_tab_id
                             .map(|id| id.to_browsing_context_id()),
                         target_url: Some(target_url.clone()),
-                        requested_kind: if matches!(open_hint, BrowsingContextOpenHint::Popup) {
+                        requested_kind: if matches!(open_hint, TabOpenHint::Popup) {
                             WindowKind::Popup
                         } else {
                             WindowKind::Normal
@@ -130,26 +130,26 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             _ => Some(BrowserEvent::BrowsingContextOpenRequested {
                 profile_id: profile_id.clone(),
                 request_id: *request_id,
-                source_browsing_context_id: source_browsing_context_id
+                source_browsing_context_id: source_tab_id
                     .map(|id| id.to_browsing_context_id()),
                 target_url: target_url.clone(),
-                open_hint: *open_hint,
+                open_hint: (*open_hint).into(),
                 user_gesture: *user_gesture,
             }),
         },
-        IpcEvent::BrowsingContextOpenResolved {
+        IpcEvent::TabOpenResolved {
             profile_id,
             request_id,
             result,
         } => match result {
-            BrowsingContextOpenResult::OpenedNewContext {
-                browsing_context_id,
+            TabOpenResult::OpenedNewTab {
+                tab_id,
             } => Some(BrowserEvent::WindowOpenResolved {
                 profile_id: profile_id.clone(),
                 request_id: *request_id,
                 result: WindowOpenResult::OpenedNewWindow {
                     window: synthetic_window_descriptor(
-                        WindowId::new(browsing_context_id.get()),
+                        WindowId::new(tab_id.get()),
                         WindowKind::Normal,
                         true,
                     ),
@@ -158,7 +158,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             _ => Some(BrowserEvent::BrowsingContextOpenResolved {
                 profile_id: profile_id.clone(),
                 request_id: *request_id,
-                result: *result,
+                result: (*result).into(),
             }),
         },
         IpcEvent::NavigationStateChanged {

@@ -1,7 +1,7 @@
 From 10a1021dd6062c9c015de1575c52b8840789311f Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 5 Mar 2026 09:39:18 +0900
-Subject: [PATCH 15/15] Stabilize history behavior in embedded CBF tabs
+Subject: [PATCH 15/16] Stabilize history behavior in embedded CBF tabs
 
 ---
  .../cbf/cbf_embedded_browser_window.cc        | 20 +++++

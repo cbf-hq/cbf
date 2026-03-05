@@ -1,0 +1,1007 @@
+From babc5cf243efc6bd1956420dcaa344547a77542f Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 5 Mar 2026 12:21:24 +0900
+Subject: [PATCH 16/16] Rename browsing-context-open bridge vocabulary to
+ tab-open
+
+---
+ chrome/browser/cbf/bridge/cbf_bridge.h        |   2 +-
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |   2 +-
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |  20 +--
+ .../cbf/bridge/cbf_bridge_client_impl.h       |  14 +-
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  34 ++---
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  52 ++++----
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc |  26 ++--
+ .../cbf/cbf_browser_service_unittest.cc       |  47 ++++++-
+ chrome/browser/cbf/cbf_profile_service.cc     |   8 +-
+ chrome/browser/cbf/cbf_profile_service.h      |   4 +-
+ .../cbf/cbf_profile_service_browsertest.cc    | 125 +++++++++++++++++-
+ .../browser/cbf/cbf_settings_browsertest.cc   |  21 +++
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  24 ++--
+ .../profile/cbf_profile_popup_controller.cc   |  48 +++----
+ .../profile/cbf_profile_popup_controller.h    |  12 +-
+ .../cbf/test/cbf_test_profile_observer.cc     |   8 +-
+ .../cbf/test/cbf_test_profile_observer.h      |   8 +-
+ .../browser/extensions/extension_tab_util.cc  |  15 +++
+ 18 files changed, 336 insertions(+), 134 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index 3ebd5ec9b61bf..7c6b27d77cd44 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -132,7 +132,7 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_close_auxiliary_window(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+     uint64_t window_id);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_browsing_context_open(
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_tab_open(
+     CbfBridgeClientHandle* client,
+     uint64_t request_id,
+     uint8_t response_kind,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index b64f58e78b739..e999bf4e3f977 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -61,7 +61,7 @@ class CbfBridgeClient {
+                               uint64_t request_id,
+                               bool proceed);
+   bool CloseAuxiliaryWindow(uint64_t tab_id, uint64_t window_id);
+-  bool RespondBrowsingContextOpen(uint64_t request_id,
++  bool RespondTabOpen(uint64_t request_id,
+                                   uint8_t response_kind,
+                                   uint64_t target_tab_id,
+                                   bool activate);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index e1aed35278bcf..987f1799ca987 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -204,42 +204,42 @@ void CbfBridgeClientImpl::Observer::OnContextMenuRequested(
+   impl_->events.push(std::move(event));
+ }
+ 
+-void CbfBridgeClientImpl::Observer::OnBrowsingContextOpenRequested(
+-    cbf::mojom::CbfBrowsingContextOpenRequestPtr request) {
++void CbfBridgeClientImpl::Observer::OnTabOpenRequested(
++    cbf::mojom::CbfTabOpenRequestPtr request) {
+   if (!request) {
+     return;
+   }
+   CbfBridgeEventData event;
+-  event.kind = kEventBrowsingContextOpenRequested;
++  event.kind = kEventTabOpenRequested;
+   event.request_id = request->request_id;
+   event.profile_id = profile_id_;
+   event.target_url = request->target_url;
+   event.user_gesture = request->user_gesture;
+-  event.browsing_context_open_hint = static_cast<uint8_t>(request->hint);
++  event.tab_open_hint = static_cast<uint8_t>(request->hint);
+   if (request->source_tab_id.has_value()) {
+     event.has_source_tab_id = true;
+     event.source_tab_id = request->source_tab_id.value();
+   }
+-  impl_->browsing_context_open_request_profiles[request->request_id] = profile_id_;
++  impl_->tab_open_request_profiles[request->request_id] = profile_id_;
+   std::lock_guard<std::mutex> lock(impl_->events_mutex);
+   impl_->events.push(std::move(event));
+ }
+ 
+-void CbfBridgeClientImpl::Observer::OnBrowsingContextOpenResolved(
+-    cbf::mojom::CbfBrowsingContextOpenResultPtr result) {
++void CbfBridgeClientImpl::Observer::OnTabOpenResolved(
++    cbf::mojom::CbfTabOpenResultPtr result) {
+   if (!result) {
+     return;
+   }
+   CbfBridgeEventData event;
+-  event.kind = kEventBrowsingContextOpenResolved;
++  event.kind = kEventTabOpenResolved;
+   event.request_id = result->request_id;
+   event.profile_id = profile_id_;
+-  event.browsing_context_open_result = static_cast<uint8_t>(result->result);
++  event.tab_open_result = static_cast<uint8_t>(result->result);
+   if (result->target_tab_id.has_value()) {
+     event.has_target_tab_id = true;
+     event.target_tab_id = result->target_tab_id.value();
+   }
+-  impl_->browsing_context_open_request_profiles.erase(result->request_id);
++  impl_->tab_open_request_profiles.erase(result->request_id);
+   std::lock_guard<std::mutex> lock(impl_->events_mutex);
+   impl_->events.push(std::move(event));
+ }
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+index 98962d0eb351a..90be6670c49d9 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+@@ -61,10 +61,10 @@ struct CbfBridgeEventData {
+   bool auxiliary_window_modal = false;
+   bool has_source_tab_id = false;
+   uint64_t source_tab_id = 0;
+-  uint8_t browsing_context_open_hint = kCbfBrowsingContextOpenHintUnknown;
++  uint8_t tab_open_hint = kCbfTabOpenHintUnknown;
+   bool has_target_tab_id = false;
+   uint64_t target_tab_id = 0;
+-  uint8_t browsing_context_open_result = kCbfBrowsingContextOpenResultAborted;
++  uint8_t tab_open_result = kCbfTabOpenResultAborted;
+ 
+   struct ImeCompositionBoundsData {
+     ImeCompositionBoundsData();
+@@ -133,10 +133,10 @@ struct CbfBridgeClientImpl {
+     void OnImeBoundsUpdated(cbf::mojom::CbfImeBoundsUpdatePtr update) override;
+     void OnContextMenuRequested(uint64_t tab_id,
+                                 cbf::mojom::CbfContextMenuPtr menu) override;
+-    void OnBrowsingContextOpenRequested(
+-        cbf::mojom::CbfBrowsingContextOpenRequestPtr request) override;
+-    void OnBrowsingContextOpenResolved(
+-        cbf::mojom::CbfBrowsingContextOpenResultPtr result) override;
++    void OnTabOpenRequested(
++        cbf::mojom::CbfTabOpenRequestPtr request) override;
++    void OnTabOpenResolved(
++        cbf::mojom::CbfTabOpenResultPtr result) override;
+     void OnBeforeUnloadDialogRequested(
+         uint64_t tab_id,
+         uint64_t request_id,
+@@ -195,7 +195,7 @@ struct CbfBridgeClientImpl {
+   std::map<std::string, ProfileConnection> profile_connections;
+   std::map<uint64_t, std::string> web_page_profiles;
+   std::map<uint64_t, std::string> context_menu_profiles;
+-  std::map<uint64_t, std::string> browsing_context_open_request_profiles;
++  std::map<uint64_t, std::string> tab_open_request_profiles;
+ };
+ 
+ }  // namespace cbf_bridge::internal
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index a3bf91651c454..e6c1e0dbbe287 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -263,13 +263,13 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+   out_event->auxiliary_window_close_reason = kCbfAuxiliaryWindowCloseReasonUnknown;
+   out_event->auxiliary_window_title = nullptr;
+   out_event->auxiliary_window_modal = false;
+-  out_event->browsing_context_open_hint = kCbfBrowsingContextOpenHintUnknown;
+-  out_event->browsing_context_open_user_gesture = false;
+-  out_event->browsing_context_open_has_source = false;
+-  out_event->browsing_context_open_source_tab_id = 0;
+-  out_event->browsing_context_open_result_kind = kCbfBrowsingContextOpenResultAborted;
+-  out_event->browsing_context_open_has_target = false;
+-  out_event->browsing_context_open_target_tab_id = 0;
++  out_event->tab_open_hint = kCbfTabOpenHintUnknown;
++  out_event->tab_open_user_gesture = false;
++  out_event->tab_open_has_source = false;
++  out_event->tab_open_source_tab_id = 0;
++  out_event->tab_open_result_kind = kCbfTabOpenResultAborted;
++  out_event->tab_open_has_target = false;
++  out_event->tab_open_target_tab_id = 0;
+ 
+   if (event.kind == kEventImeBoundsUpdated) {
+     if (event.composition_bounds.has_value()) {
+@@ -416,20 +416,20 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     out_event->auxiliary_window_close_reason =
+         event.auxiliary_window_close_reason;
+   }
+-  if (event.kind == kEventBrowsingContextOpenRequested) {
++  if (event.kind == kEventTabOpenRequested) {
+     out_event->target_url =
+         event.target_url.empty() ? nullptr : CopyCString(event.target_url);
+-    out_event->browsing_context_open_hint = event.browsing_context_open_hint;
+-    out_event->browsing_context_open_user_gesture = event.user_gesture;
+-    out_event->browsing_context_open_has_source = event.has_source_tab_id;
+-    out_event->browsing_context_open_source_tab_id =
++    out_event->tab_open_hint = event.tab_open_hint;
++    out_event->tab_open_user_gesture = event.user_gesture;
++    out_event->tab_open_has_source = event.has_source_tab_id;
++    out_event->tab_open_source_tab_id =
+         event.source_tab_id;
+   }
+-  if (event.kind == kEventBrowsingContextOpenResolved) {
+-    out_event->browsing_context_open_result_kind =
+-        event.browsing_context_open_result;
+-    out_event->browsing_context_open_has_target = event.has_target_tab_id;
+-    out_event->browsing_context_open_target_tab_id =
++  if (event.kind == kEventTabOpenResolved) {
++    out_event->tab_open_result_kind =
++        event.tab_open_result;
++    out_event->tab_open_has_target = event.has_target_tab_id;
++    out_event->tab_open_target_tab_id =
+         event.target_tab_id;
+   }
+   impl_->events.pop();
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index f34147b3f2e7d..1bc69e2f1a609 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -35,8 +35,8 @@ enum CbfEventKind {
+   kEventExtensionRuntimeWarning = 22,
+   kEventAuxiliaryWindowOpened = 23,
+   kEventAuxiliaryWindowClosed = 24,
+-  kEventBrowsingContextOpenRequested = 25,
+-  kEventBrowsingContextOpenResolved = 26,
++  kEventTabOpenRequested = 25,
++  kEventTabOpenResolved = 26,
+ };
+ 
+ enum CbfExtensionInstallPromptResult {
+@@ -59,26 +59,26 @@ enum CbfAuxiliaryWindowCloseReason {
+   kCbfAuxiliaryWindowCloseReasonSystemDismissed = 3,
+ };
+ 
+-enum CbfBrowsingContextOpenHint {
+-  kCbfBrowsingContextOpenHintUnknown = 0,
+-  kCbfBrowsingContextOpenHintCurrentContext = 1,
+-  kCbfBrowsingContextOpenHintNewForegroundContext = 2,
+-  kCbfBrowsingContextOpenHintNewBackgroundContext = 3,
+-  kCbfBrowsingContextOpenHintNewWindow = 4,
+-  kCbfBrowsingContextOpenHintPopup = 5,
++enum CbfTabOpenHint {
++  kCbfTabOpenHintUnknown = 0,
++  kCbfTabOpenHintCurrentContext = 1,
++  kCbfTabOpenHintNewForegroundContext = 2,
++  kCbfTabOpenHintNewBackgroundContext = 3,
++  kCbfTabOpenHintNewWindow = 4,
++  kCbfTabOpenHintPopup = 5,
+ };
+ 
+-enum CbfBrowsingContextOpenResponseKind {
+-  kCbfBrowsingContextOpenResponseAllowNewContext = 0,
+-  kCbfBrowsingContextOpenResponseAllowExistingContext = 1,
+-  kCbfBrowsingContextOpenResponseDeny = 2,
++enum CbfTabOpenResponseKind {
++  kCbfTabOpenResponseAllowNewContext = 0,
++  kCbfTabOpenResponseAllowExistingContext = 1,
++  kCbfTabOpenResponseDeny = 2,
+ };
+ 
+-enum CbfBrowsingContextOpenResult {
+-  kCbfBrowsingContextOpenResultOpenedNewContext = 0,
+-  kCbfBrowsingContextOpenResultOpenedExistingContext = 1,
+-  kCbfBrowsingContextOpenResultDenied = 2,
+-  kCbfBrowsingContextOpenResultAborted = 3,
++enum CbfTabOpenResult {
++  kCbfTabOpenResultOpenedNewContext = 0,
++  kCbfTabOpenResultOpenedExistingContext = 1,
++  kCbfTabOpenResultDenied = 2,
++  kCbfTabOpenResultAborted = 3,
+ };
+ 
+ enum CbfSurfaceHandleKind {
+@@ -502,13 +502,13 @@ typedef struct CbfBridgeEvent {
+   uint8_t auxiliary_window_close_reason;
+   char* auxiliary_window_title;
+   bool auxiliary_window_modal;
+-  uint8_t browsing_context_open_hint;
+-  bool browsing_context_open_user_gesture;
+-  bool browsing_context_open_has_source;
+-  uint64_t browsing_context_open_source_tab_id;
+-  uint8_t browsing_context_open_result_kind;
+-  bool browsing_context_open_has_target;
+-  uint64_t browsing_context_open_target_tab_id;
++  uint8_t tab_open_hint;
++  bool tab_open_user_gesture;
++  bool tab_open_has_source;
++  uint64_t tab_open_source_tab_id;
++  uint8_t tab_open_result_kind;
++  bool tab_open_has_target;
++  uint64_t tab_open_target_tab_id;
+ } CbfBridgeEvent;
+ 
+ typedef struct CbfImeTextSpan {
+@@ -622,7 +622,7 @@ bool cbf_bridge_client_respond_auxiliary_window(
+ bool cbf_bridge_client_close_auxiliary_window(CbfBridgeClientHandle* client,
+                                               uint64_t tab_id,
+                                               uint64_t window_id);
+-bool cbf_bridge_client_respond_browsing_context_open(
++bool cbf_bridge_client_respond_tab_open(
+     CbfBridgeClientHandle* client,
+     uint64_t request_id,
+     uint8_t response_kind,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index 560cfec599319..f32ccbcfc310b 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -517,7 +517,7 @@ bool CbfBridgeClient::CloseAuxiliaryWindow(uint64_t tab_id,
+   return true;
+ }
+ 
+-bool CbfBridgeClient::RespondBrowsingContextOpen(uint64_t request_id,
++bool CbfBridgeClient::RespondTabOpen(uint64_t request_id,
+                                                  uint8_t response_kind,
+                                                  uint64_t target_tab_id,
+                                                  bool activate) {
+@@ -535,36 +535,36 @@ bool CbfBridgeClient::RespondBrowsingContextOpen(uint64_t request_id,
+           [](CbfBridgeClientImpl* impl, uint64_t request_id,
+              uint8_t response_kind, uint64_t target_tab_id, bool activate) {
+             auto profile_it =
+-                impl->browsing_context_open_request_profiles.find(request_id);
+-            if (profile_it == impl->browsing_context_open_request_profiles.end()) {
++                impl->tab_open_request_profiles.find(request_id);
++            if (profile_it == impl->tab_open_request_profiles.end()) {
+               return;
+             }
+             auto remote_it = impl->profile_connections.find(profile_it->second);
+             if (remote_it == impl->profile_connections.end()) {
+               return;
+             }
+-            auto response = cbf::mojom::CbfBrowsingContextOpenResponse::New();
++            auto response = cbf::mojom::CbfTabOpenResponse::New();
+             response->request_id = request_id;
+             response->activate = activate;
+             switch (response_kind) {
+-              case kCbfBrowsingContextOpenResponseAllowNewContext:
++              case kCbfTabOpenResponseAllowNewContext:
+                 response->action =
+-                    cbf::mojom::CbfBrowsingContextOpenResponseAction::kAllowNewContext;
++                    cbf::mojom::CbfTabOpenResponseAction::kAllowNewContext;
+                 break;
+-              case kCbfBrowsingContextOpenResponseAllowExistingContext:
++              case kCbfTabOpenResponseAllowExistingContext:
+                 response->action =
+-                    cbf::mojom::CbfBrowsingContextOpenResponseAction::kAllowExistingContext;
++                    cbf::mojom::CbfTabOpenResponseAction::kAllowExistingContext;
+                 response->target_tab_id = target_tab_id;
+                 break;
+-              case kCbfBrowsingContextOpenResponseDeny:
++              case kCbfTabOpenResponseDeny:
+               default:
+                 response->action =
+-                    cbf::mojom::CbfBrowsingContextOpenResponseAction::kDeny;
++                    cbf::mojom::CbfTabOpenResponseAction::kDeny;
+                 response->target_tab_id.reset();
+                 response->activate = false;
+                 break;
+             }
+-            remote_it->second.remote->RespondBrowsingContextOpen(std::move(response));
++            remote_it->second.remote->RespondTabOpen(std::move(response));
+           },
+           impl, request_id, response_kind, target_tab_id, activate));
+   return true;
+@@ -742,7 +742,7 @@ extern "C" bool cbf_bridge_client_close_auxiliary_window(
+       ->CloseAuxiliaryWindow(tab_id, window_id);
+ }
+ 
+-extern "C" bool cbf_bridge_client_respond_browsing_context_open(
++extern "C" bool cbf_bridge_client_respond_tab_open(
+     CbfBridgeClientHandle* client,
+     uint64_t request_id,
+     uint8_t response_kind,
+@@ -752,6 +752,6 @@ extern "C" bool cbf_bridge_client_respond_browsing_context_open(
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->RespondBrowsingContextOpen(request_id, response_kind, target_tab_id,
++      ->RespondTabOpen(request_id, response_kind, target_tab_id,
+                                    activate);
+ }
+diff --git a/chrome/browser/cbf/cbf_browser_service_unittest.cc b/chrome/browser/cbf/cbf_browser_service_unittest.cc
+index 9cabdc6790f9d..72508c0c8276e 100644
+--- a/chrome/browser/cbf/cbf_browser_service_unittest.cc
++++ b/chrome/browser/cbf/cbf_browser_service_unittest.cc
+@@ -1,12 +1,18 @@
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+ 
+ #include "base/functional/bind.h"
++#include "base/test/task_environment.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+ namespace cbf {
+ namespace {
+ 
+-TEST(CbfBrowserServiceTest, RejectsMismatchedTokenAndRemainsUnauthenticated) {
++class CbfBrowserServiceTest : public testing::Test {
++ protected:
++  base::test::TaskEnvironment task_environment_;
++};
++
++TEST_F(CbfBrowserServiceTest, RejectsMismatchedTokenAndRemainsUnauthenticated) {
+   CbfBrowserService service("expected-token");
+ 
+   bool callback_called = false;
+@@ -27,7 +33,7 @@ TEST(CbfBrowserServiceTest, RejectsMismatchedTokenAndRemainsUnauthenticated) {
+   EXPECT_FALSE(service.IsShutdownRequested());
+ }
+ 
+-TEST(CbfBrowserServiceTest, AcceptsMatchingToken) {
++TEST_F(CbfBrowserServiceTest, AcceptsMatchingToken) {
+   CbfBrowserService service("expected-token");
+ 
+   bool callback_called = false;
+@@ -45,5 +51,42 @@ TEST(CbfBrowserServiceTest, AcceptsMatchingToken) {
+   EXPECT_TRUE(authenticated);
+ }
+ 
++TEST_F(CbfBrowserServiceTest,
++       ShutdownWithoutManagedTabsTransitionsToProceedingAndNotRequested) {
++  CbfBrowserService service("expected-token");
++
++  service.RequestShutdown(/*request_id=*/1u);
++
++  EXPECT_FALSE(service.IsShutdownRequested());
++}
++
++TEST_F(CbfBrowserServiceTest,
++       LateBeforeUnloadSignalsAfterProceedingAreIgnoredSafely) {
++  CbfBrowserService service("expected-token");
++
++  service.NotifyBeforeUnloadDialogRequested(/*tab_id=*/42u);
++  service.NotifyBeforeUnloadFired(/*tab_id=*/42u, /*proceed=*/false);
++  service.NotifyBeforeUnloadFired(/*tab_id=*/42u, /*proceed=*/true);
++
++  EXPECT_FALSE(service.IsShutdownRequested());
++}
++
++TEST_F(CbfBrowserServiceTest, MismatchedConfirmShutdownIsSafeNoOp) {
++  CbfBrowserService service("expected-token");
++
++  service.ConfirmShutdown(/*request_id=*/999u, /*proceed=*/true);
++
++  EXPECT_FALSE(service.IsShutdownRequested());
++}
++
++TEST_F(CbfBrowserServiceTest, RepeatedRequestShutdownAfterProceedingIsSafe) {
++  CbfBrowserService service("expected-token");
++
++  service.RequestShutdown(/*request_id=*/1u);
++  service.RequestShutdown(/*request_id=*/2u);
++
++  EXPECT_FALSE(service.IsShutdownRequested());
++}
++
+ }  // namespace
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index dea6666f12bdd..85d0bbb155d0d 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -546,9 +546,9 @@ void CbfProfileService::CloseAuxiliaryWindow(uint64_t tab_id,
+                                 mojom::CbfAuxiliaryWindowCloseReason::kHostForced);
+ }
+ 
+-void CbfProfileService::RespondBrowsingContextOpen(
+-    mojom::CbfBrowsingContextOpenResponsePtr response) {
+-  popup_controller_->RespondBrowsingContextOpen(std::move(response));
++void CbfProfileService::RespondTabOpen(
++    mojom::CbfTabOpenResponsePtr response) {
++  popup_controller_->RespondTabOpen(std::move(response));
+ }
+ 
+ void CbfProfileService::SetShutdownDialogAutoConfirm(bool enabled) {
+@@ -633,7 +633,7 @@ void CbfProfileService::NotifyNewWebPageRequested(
+     const GURL& target_url,
+     WindowOpenDisposition disposition,
+     bool user_gesture) {
+-  popup_controller_->RequestBrowsingContextOpen(source, target_url, disposition,
++  popup_controller_->RequestTabOpen(source, target_url, disposition,
+                                                 user_gesture);
+ }
+ 
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 35547fe746926..6e9d4937bd271 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -120,8 +120,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+       mojom::CbfAuxiliaryWindowResponsePtr response) override;
+   void CloseAuxiliaryWindow(uint64_t tab_id,
+                             uint64_t window_id) override;
+-  void RespondBrowsingContextOpen(
+-      mojom::CbfBrowsingContextOpenResponsePtr response) override;
++  void RespondTabOpen(
++      mojom::CbfTabOpenResponsePtr response) override;
+   bool RequestAuxiliaryInstallPromptForWebstore(
+       content::WebContents* web_contents,
+       const extensions::Extension* extension,
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 5c964c01b33f2..c5b12f66e9301 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -1,5 +1,6 @@
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ 
++#include <memory>
+ #include <string>
+ #include <utility>
+ 
+@@ -7,18 +8,25 @@
+ #include "build/buildflag.h"
+ #include "base/functional/bind.h"
+ #include "base/run_loop.h"
++#include "base/task/cancelable_task_tracker.h"
+ #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
+ #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
++#include "chrome/browser/history/history_service_factory.h"
+ #include "chrome/browser/ui/browser.h"
+-#include "chrome/common/url_constants.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/webui/webui_embedding_context.h"
++#include "chrome/common/url_constants.h"
+ #include "chrome/test/base/in_process_browser_test.h"
++#include "components/history/core/browser/history_service.h"
++#include "components/history/core/browser/history_types.h"
+ #include "components/tabs/public/tab_interface.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/test/browser_test.h"
+ #include "content/public/test/browser_test_utils.h"
++#include "net/http/http_status_code.h"
++#include "net/test/embedded_test_server/http_request.h"
++#include "net/test/embedded_test_server/http_response.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+ namespace cbf {
+@@ -273,6 +281,121 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   )"));
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       HistoryRootLoadsWithoutCrash) {
++  const TabId tab_id = CreatePage("chrome://history");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  EXPECT_EQ(true, content::EvalJs(web_contents, R"(
++    (() => !!document.querySelector('history-app'))();
++  )"));
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       HistoryGroupedPathLoadsWithoutCrash) {
++  const TabId tab_id = CreatePage("chrome://history/grouped");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  EXPECT_EQ(true, content::EvalJs(web_contents, R"(
++    (() => {
++      const app = document.querySelector('history-app');
++      return !!app && window.location.pathname.endsWith('/grouped');
++    })();
++  )"));
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       HistorySwitchBetweenRootAndGroupedDoesNotCrash) {
++  const TabId tab_id = CreatePage("chrome://history");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  EXPECT_EQ(true, content::EvalJs(web_contents, R"(
++    (async () => {
++      const waitFrame = () =>
++          new Promise(resolve => requestAnimationFrame(() => resolve()));
++      const appExists = () => !!document.querySelector('history-app');
++
++      window.history.pushState({}, '', '/grouped');
++      window.dispatchEvent(new PopStateEvent('popstate'));
++      await waitFrame();
++      if (!appExists() || !window.location.pathname.endsWith('/grouped')) {
++        return false;
++      }
++
++      window.history.pushState({}, '', '/');
++      window.dispatchEvent(new PopStateEvent('popstate'));
++      await waitFrame();
++      return appExists() && window.location.pathname === '/';
++    })();
++  )"));
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       HistoryContainsVisitedUrlFromCbfManagedTab) {
++  embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
++      [](const net::test_server::HttpRequest& request)
++          -> std::unique_ptr<net::test_server::HttpResponse> {
++        if (request.relative_url != "/cbf-history-regression") {
++          return nullptr;
++        }
++        auto response =
++            std::make_unique<net::test_server::BasicHttpResponse>();
++        response->set_code(net::HTTP_OK);
++        response->set_content_type("text/html");
++        response->set_content(
++            "<!doctype html><title>cbf-history-regression-marker</title>"
++            "<body>cbf-history-regression-marker</body>");
++        return response;
++      }));
++  ASSERT_TRUE(embedded_test_server()->Start());
++
++  const GURL visited_url = embedded_test_server()->GetURL(
++      "/cbf-history-regression");
++  const TabId visited_tab_id = CreatePage(visited_url.spec());
++  ASSERT_NE(visited_tab_id, kInvalidTabId);
++  WaitForLoad(visited_tab_id);
++
++  const TabId history_tab_id = CreatePage("chrome://history");
++  ASSERT_NE(history_tab_id, kInvalidTabId);
++  WaitForLoad(history_tab_id);
++
++  history::HistoryService* history_service = HistoryServiceFactory::GetForProfile(
++      browser()->profile(), ServiceAccessType::EXPLICIT_ACCESS);
++  ASSERT_NE(history_service, nullptr);
++
++  history::QueryURLResult query_result;
++  base::RunLoop run_loop;
++  base::CancelableTaskTracker tracker;
++  history_service->QueryURL(
++      visited_url,
++      base::BindOnce(
++          [](history::QueryURLResult* out_result, base::RunLoop* run_loop,
++             history::QueryURLResult result) {
++            *out_result = std::move(result);
++            run_loop->Quit();
++          },
++          &query_result, &run_loop),
++      &tracker);
++  run_loop.Run();
++
++  EXPECT_TRUE(query_result.success);
++}
++
+ #if BUILDFLAG(IS_MAC)
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        InstallsSurfaceObserverForCreatedPage) {
+diff --git a/chrome/browser/cbf/cbf_settings_browsertest.cc b/chrome/browser/cbf/cbf_settings_browsertest.cc
+index 0b3f6a625f6cc..3a98498ffde26 100644
+--- a/chrome/browser/cbf/cbf_settings_browsertest.cc
++++ b/chrome/browser/cbf/cbf_settings_browsertest.cc
+@@ -230,6 +230,27 @@ IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+   ExpectSettingsPageStillAlive(tab_id);
+ }
+ 
++IN_PROC_BROWSER_TEST_F(
++    CbfSettingsBrowserTest,
++    SettingsMultipleUnsupportedActionsInSequenceRemainNonCrashing) {
++  const TabId tab_id = CreatePage("chrome://settings");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++
++  ProcessMessage(tab_id, "openHelpPage", base::ListValue());
++  ExpectSettingsPageStillAlive(tab_id);
++
++  ProcessMessage(tab_id, "openFeedbackDialog", base::ListValue());
++  ExpectSettingsPageStillAlive(tab_id);
++
++  ProcessMessage(tab_id, "selectDownloadLocation", base::ListValue());
++  ExpectSettingsPageStillAlive(tab_id);
++
++  ProcessMessage(tab_id, "importFromBookmarksFile", base::ListValue());
++  ExpectSettingsPageStillAlive(tab_id);
++}
++
+ IN_PROC_BROWSER_TEST_F(
+     CbfSettingsBrowserTest,
+     SettingsAppearanceResetPinnedToolbarActionsRemainsNonCrashingAndAppliesPref) {
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index b705bdd2d2803..a9344f268b801 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -55,7 +55,7 @@ enum CbfAuxiliaryWindowCloseReason {
+   kSystemDismissed,
+ };
+ 
+-enum CbfBrowsingContextOpenHint {
++enum CbfTabOpenHint {
+   kUnknown,
+   kCurrentContext,
+   kNewForegroundContext,
+@@ -64,37 +64,37 @@ enum CbfBrowsingContextOpenHint {
+   kPopup,
+ };
+ 
+-enum CbfBrowsingContextOpenResponseAction {
++enum CbfTabOpenResponseAction {
+   kAllowNewContext,
+   kAllowExistingContext,
+   kDeny,
+ };
+ 
+-enum CbfBrowsingContextOpenResultKind {
++enum CbfTabOpenResultKind {
+   kOpenedNewContext,
+   kOpenedExistingContext,
+   kDenied,
+   kAborted,
+ };
+ 
+-struct CbfBrowsingContextOpenRequest {
++struct CbfTabOpenRequest {
+   uint64 request_id;
+   uint64? source_tab_id;
+   string target_url;
+-  CbfBrowsingContextOpenHint hint;
++  CbfTabOpenHint hint;
+   bool user_gesture;
+ };
+ 
+-struct CbfBrowsingContextOpenResponse {
++struct CbfTabOpenResponse {
+   uint64 request_id;
+-  CbfBrowsingContextOpenResponseAction action;
++  CbfTabOpenResponseAction action;
+   uint64? target_tab_id;
+   bool activate;
+ };
+ 
+-struct CbfBrowsingContextOpenResult {
++struct CbfTabOpenResult {
+   uint64 request_id;
+-  CbfBrowsingContextOpenResultKind result;
++  CbfTabOpenResultKind result;
+   uint64? target_tab_id;
+ };
+ 
+@@ -462,8 +462,8 @@ interface CbfProfileObserver {
+   OnWebPageResizeAcknowledged(uint64 tab_id);
+   OnImeBoundsUpdated(CbfImeBoundsUpdate update);
+   OnContextMenuRequested(uint64 tab_id, CbfContextMenu menu);
+-  OnBrowsingContextOpenRequested(CbfBrowsingContextOpenRequest request);
+-  OnBrowsingContextOpenResolved(CbfBrowsingContextOpenResult result);
++  OnTabOpenRequested(CbfTabOpenRequest request);
++  OnTabOpenResolved(CbfTabOpenResult result);
+   OnTitleUpdated(uint64 tab_id, string title);
+   OnFaviconUrlUpdated(uint64 tab_id, string url);
+   OnBeforeUnloadDialogRequested(uint64 tab_id,
+@@ -528,7 +528,7 @@ interface CbfProfileService {
+                          uint64 request_id,
+                          CbfAuxiliaryWindowResponse response);
+   CloseAuxiliaryWindow(uint64 tab_id, uint64 window_id);
+-  RespondBrowsingContextOpen(CbfBrowsingContextOpenResponse response);
++  RespondTabOpen(CbfTabOpenResponse response);
+ };
+ 
+ interface CbfBrowserService {
+diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
+index 1e08ac4bbd637..e73737016c6e5 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
+@@ -16,7 +16,7 @@ CbfProfilePopupController::CbfProfilePopupController(CbfProfileServiceContext* c
+ 
+ CbfProfilePopupController::~CbfProfilePopupController() = default;
+ 
+-void CbfProfilePopupController::RequestBrowsingContextOpen(
++void CbfProfilePopupController::RequestTabOpen(
+     content::WebContents* source,
+     const GURL& target_url,
+     WindowOpenDisposition disposition,
+@@ -44,7 +44,7 @@ void CbfProfilePopupController::RequestBrowsingContextOpen(
+   request.user_gesture = user_gesture;
+   pending_open_requests_[request_id] = request;
+ 
+-  auto event = mojom::CbfBrowsingContextOpenRequest::New();
++  auto event = mojom::CbfTabOpenRequest::New();
+   event->request_id = request_id;
+   if (source_tab_id.has_value()) {
+     event->source_tab_id = source_tab_id.value();
+@@ -52,11 +52,11 @@ void CbfProfilePopupController::RequestBrowsingContextOpen(
+   event->target_url = target_url.spec();
+   event->hint = request.hint;
+   event->user_gesture = user_gesture;
+-  observer->OnBrowsingContextOpenRequested(std::move(event));
++  observer->OnTabOpenRequested(std::move(event));
+ }
+ 
+-void CbfProfilePopupController::RespondBrowsingContextOpen(
+-    mojom::CbfBrowsingContextOpenResponsePtr response) {
++void CbfProfilePopupController::RespondTabOpen(
++    mojom::CbfTabOpenResponsePtr response) {
+   if (!response) {
+     return;
+   }
+@@ -68,7 +68,7 @@ void CbfProfilePopupController::RespondBrowsingContextOpen(
+   const PendingOpenRequest request = it->second;
+ 
+   switch (response->action) {
+-    case mojom::CbfBrowsingContextOpenResponseAction::kAllowNewContext: {
++    case mojom::CbfTabOpenResponseAction::kAllowNewContext: {
+       const TabId tab_id =
+           context_->page_controller().CreateWebPage(request.target_url.spec());
+       if (tab_id != kInvalidTabId) {
+@@ -82,26 +82,26 @@ void CbfProfilePopupController::RespondBrowsingContextOpen(
+           context_->navigation_controller().SetWebPageFocus(tab_id, true);
+         }
+         ResolveOpenRequest(response->request_id,
+-                           mojom::CbfBrowsingContextOpenResultKind::kOpenedNewContext,
++                           mojom::CbfTabOpenResultKind::kOpenedNewContext,
+                            tab_id);
+       } else {
+         ResolveOpenRequest(response->request_id,
+-                           mojom::CbfBrowsingContextOpenResultKind::kAborted,
++                           mojom::CbfTabOpenResultKind::kAborted,
+                            std::nullopt);
+       }
+       return;
+     }
+-    case mojom::CbfBrowsingContextOpenResponseAction::kAllowExistingContext: {
++    case mojom::CbfTabOpenResponseAction::kAllowExistingContext: {
+       if (!response->target_tab_id.has_value()) {
+         ResolveOpenRequest(response->request_id,
+-                           mojom::CbfBrowsingContextOpenResultKind::kAborted,
++                           mojom::CbfTabOpenResultKind::kAborted,
+                            std::nullopt);
+         return;
+       }
+       const TabId target_id = response->target_tab_id.value();
+       if (!context_->tab_manager().GetWebContents(target_id)) {
+         ResolveOpenRequest(response->request_id,
+-                           mojom::CbfBrowsingContextOpenResultKind::kAborted,
++                           mojom::CbfTabOpenResultKind::kAborted,
+                            std::nullopt);
+         return;
+       }
+@@ -111,49 +111,49 @@ void CbfProfilePopupController::RespondBrowsingContextOpen(
+       }
+       ResolveOpenRequest(
+           response->request_id,
+-          mojom::CbfBrowsingContextOpenResultKind::kOpenedExistingContext,
++          mojom::CbfTabOpenResultKind::kOpenedExistingContext,
+           target_id);
+       return;
+     }
+-    case mojom::CbfBrowsingContextOpenResponseAction::kDeny:
++    case mojom::CbfTabOpenResponseAction::kDeny:
+       ResolveOpenRequest(response->request_id,
+-                         mojom::CbfBrowsingContextOpenResultKind::kDenied,
++                         mojom::CbfTabOpenResultKind::kDenied,
+                          std::nullopt);
+       return;
+   }
+ }
+ 
+-mojom::CbfBrowsingContextOpenHint CbfProfilePopupController::ToOpenHint(
++mojom::CbfTabOpenHint CbfProfilePopupController::ToOpenHint(
+     WindowOpenDisposition disposition) const {
+   switch (disposition) {
+     case WindowOpenDisposition::CURRENT_TAB:
+-      return mojom::CbfBrowsingContextOpenHint::kCurrentContext;
++      return mojom::CbfTabOpenHint::kCurrentContext;
+     case WindowOpenDisposition::NEW_FOREGROUND_TAB:
+-      return mojom::CbfBrowsingContextOpenHint::kNewForegroundContext;
++      return mojom::CbfTabOpenHint::kNewForegroundContext;
+     case WindowOpenDisposition::NEW_BACKGROUND_TAB:
+-      return mojom::CbfBrowsingContextOpenHint::kNewBackgroundContext;
++      return mojom::CbfTabOpenHint::kNewBackgroundContext;
+     case WindowOpenDisposition::NEW_WINDOW:
+-      return mojom::CbfBrowsingContextOpenHint::kNewWindow;
++      return mojom::CbfTabOpenHint::kNewWindow;
+     case WindowOpenDisposition::NEW_POPUP:
+-      return mojom::CbfBrowsingContextOpenHint::kPopup;
++      return mojom::CbfTabOpenHint::kPopup;
+     default:
+-      return mojom::CbfBrowsingContextOpenHint::kUnknown;
++      return mojom::CbfTabOpenHint::kUnknown;
+   }
+ }
+ 
+ void CbfProfilePopupController::ResolveOpenRequest(
+     uint64_t request_id,
+-    mojom::CbfBrowsingContextOpenResultKind result,
++    mojom::CbfTabOpenResultKind result,
+     std::optional<uint64_t> target_tab_id) {
+   auto& observer = context_->observer_remote();
+   if (observer.is_bound()) {
+-    auto event = mojom::CbfBrowsingContextOpenResult::New();
++    auto event = mojom::CbfTabOpenResult::New();
+     event->request_id = request_id;
+     event->result = result;
+     if (target_tab_id.has_value()) {
+       event->target_tab_id = target_tab_id.value();
+     }
+-    observer->OnBrowsingContextOpenResolved(std::move(event));
++    observer->OnTabOpenResolved(std::move(event));
+   }
+   pending_open_requests_.erase(request_id);
+ }
+diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller.h b/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
+index 9a5ec351b7f00..9e4e8311934dd 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
+@@ -25,11 +25,11 @@ class CbfProfilePopupController {
+   CbfProfilePopupController& operator=(const CbfProfilePopupController&) = delete;
+   ~CbfProfilePopupController();
+ 
+-  void RequestBrowsingContextOpen(content::WebContents* source,
++  void RequestTabOpen(content::WebContents* source,
+                                   const GURL& target_url,
+                                   WindowOpenDisposition disposition,
+                                   bool user_gesture);
+-  void RespondBrowsingContextOpen(mojom::CbfBrowsingContextOpenResponsePtr response);
++  void RespondTabOpen(mojom::CbfTabOpenResponsePtr response);
+   void MarkCloseWebPageBeforeUnloadReason(content::WebContents* web_contents);
+   void ClearBeforeUnloadReason(content::WebContents* web_contents);
+   bool ConsumeCloseWebPageBeforeUnloadReason(content::WebContents* web_contents);
+@@ -42,15 +42,15 @@ class CbfProfilePopupController {
+     uint64_t request_id = 0;
+     std::optional<uint64_t> source_tab_id;
+     GURL target_url;
+-    mojom::CbfBrowsingContextOpenHint hint =
+-        mojom::CbfBrowsingContextOpenHint::kUnknown;
++    mojom::CbfTabOpenHint hint =
++        mojom::CbfTabOpenHint::kUnknown;
+     bool user_gesture = false;
+   };
+ 
+-  mojom::CbfBrowsingContextOpenHint ToOpenHint(
++  mojom::CbfTabOpenHint ToOpenHint(
+       WindowOpenDisposition disposition) const;
+   void ResolveOpenRequest(uint64_t request_id,
+-                          mojom::CbfBrowsingContextOpenResultKind result,
++                          mojom::CbfTabOpenResultKind result,
+                           std::optional<uint64_t> target_tab_id);
+ 
+   base::flat_map<raw_ptr<content::WebContents>, mojom::CbfBeforeUnloadReason>
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index a6152a3f7d19d..2c29530eba7df 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -58,11 +58,11 @@ void CbfTestProfileObserver::OnContextMenuRequested(
+     uint64_t tab_id,
+     cbf::mojom::CbfContextMenuPtr menu) {}
+ 
+-void CbfTestProfileObserver::OnBrowsingContextOpenRequested(
+-    cbf::mojom::CbfBrowsingContextOpenRequestPtr request) {}
++void CbfTestProfileObserver::OnTabOpenRequested(
++    cbf::mojom::CbfTabOpenRequestPtr request) {}
+ 
+-void CbfTestProfileObserver::OnBrowsingContextOpenResolved(
+-    cbf::mojom::CbfBrowsingContextOpenResultPtr result) {}
++void CbfTestProfileObserver::OnTabOpenResolved(
++    cbf::mojom::CbfTabOpenResultPtr result) {}
+ 
+ void CbfTestProfileObserver::OnTitleUpdated(uint64_t tab_id,
+                                             const std::string& title) {}
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index 9b80caecc006f..538e24b413274 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -47,10 +47,10 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void OnContextMenuRequested(
+       uint64_t tab_id,
+       cbf::mojom::CbfContextMenuPtr menu) override;
+-  void OnBrowsingContextOpenRequested(
+-      cbf::mojom::CbfBrowsingContextOpenRequestPtr request) override;
+-  void OnBrowsingContextOpenResolved(
+-      cbf::mojom::CbfBrowsingContextOpenResultPtr result) override;
++  void OnTabOpenRequested(
++      cbf::mojom::CbfTabOpenRequestPtr request) override;
++  void OnTabOpenResolved(
++      cbf::mojom::CbfTabOpenResultPtr result) override;
+   void OnTitleUpdated(uint64_t tab_id, const std::string& title) override;
+   void OnFaviconUrlUpdated(uint64_t tab_id,
+                            const std::string& url) override;
+diff --git a/chrome/browser/extensions/extension_tab_util.cc b/chrome/browser/extensions/extension_tab_util.cc
+index c251f40666f75..d2cc95d402383 100644
+--- a/chrome/browser/extensions/extension_tab_util.cc
++++ b/chrome/browser/extensions/extension_tab_util.cc
+@@ -1265,6 +1265,21 @@ bool ExtensionTabUtil::OpenOptionsPageFromWebContents(
+ // TODO(crbug.com/441209530): Unify the path on android after browser
+ // abstraction is introduced.
+ #if BUILDFLAG(ENABLE_EXTENSIONS)
++  if (auto* cbf_service = cbf::CbfService::GetForProcess()) {
++    if (auto* browser_service = cbf_service->browser_service()) {
++      Profile* profile =
++          Profile::FromBrowserContext(web_contents->GetBrowserContext());
++      if (auto* profile_service =
++              browser_service->GetProfileServiceForProfile(profile)) {
++        profile_service->NotifyNewWebPageRequested(
++            web_contents, *url,
++            open_in_tab ? WindowOpenDisposition::NEW_FOREGROUND_TAB
++                        : WindowOpenDisposition::CURRENT_TAB,
++            /*user_gesture=*/true);
++        return true;
++      }
++    }
++  }
+   return WindowControllerFromBrowser(chrome::FindBrowserWithTab(web_contents))
+       ->OpenOptionsPage(extension, *url, open_in_tab);
+ #else
+-- 
+2.50.1 (Apple Git-155)
+

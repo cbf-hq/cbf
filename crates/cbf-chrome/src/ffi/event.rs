@@ -1,7 +1,6 @@
 use cursor_icon::CursorIcon;
 
 use cbf::data::{
-    browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
     context_menu::ContextMenu,
     drag::DragStartRequest,
     extension::{
@@ -12,7 +11,7 @@ use cbf::data::{
 };
 use cbf::event::BeforeUnloadReason;
 
-use crate::data::{ids::TabId, surface::SurfaceHandle};
+use crate::data::{ids::TabId, surface::SurfaceHandle, tab_open::{TabOpenHint, TabOpenResult}};
 
 /// Low-level IPC events emitted by the Chromium bridge.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,24 +59,24 @@ pub enum IpcEvent {
         browsing_context_id: TabId,
         menu: ContextMenu,
     },
-    /// Host-mediated open request for browsing context.
+    /// Host-mediated open request for tab.
     ///
     /// Maps to `BrowserEvent::BrowsingContextOpenRequested`.
-    BrowsingContextOpenRequested {
+    TabOpenRequested {
         profile_id: String,
         request_id: u64,
-        source_browsing_context_id: Option<TabId>,
+        source_tab_id: Option<TabId>,
         target_url: String,
-        open_hint: BrowsingContextOpenHint,
+        open_hint: TabOpenHint,
         user_gesture: bool,
     },
     /// Result for host-mediated open request.
     ///
     /// Maps to `BrowserEvent::BrowsingContextOpenResolved`.
-    BrowsingContextOpenResolved {
+    TabOpenResolved {
         profile_id: String,
         request_id: u64,
-        result: BrowsingContextOpenResult,
+        result: TabOpenResult,
     },
     /// Navigation state changed for a page.
     ///

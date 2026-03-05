@@ -1,7 +1,7 @@
 From 81fb3ba914acfd200d6633a0f3cd3f98fe4d0203 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 24 Feb 2026 14:41:14 +0900
-Subject: [PATCH 05/15] Wire extension runtime and install prompt flow
+Subject: [PATCH 05/16] Wire extension runtime and install prompt flow
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   6 +
