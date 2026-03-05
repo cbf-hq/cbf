@@ -6,6 +6,7 @@ fn main() {
     };
 
     println!("cargo:rustc-link-search=native={cbf_bridge_lib_dir}");
+    println!("cargo:rustc-link-lib=dylib=cbf_bridge");
 
     if cfg!(target_os = "macos") || cfg!(target_os = "linux") {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{cbf_bridge_lib_dir}");
