@@ -487,6 +487,20 @@ impl<B: Backend> BrowserHandle<B> {
         })
     }
 
+    /// Respond to a permission prompt via the browser-generic auxiliary window API.
+    pub fn respond_permission_prompt(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        allow: bool,
+    ) -> Result<(), Error> {
+        self.respond_auxiliary_window(
+            browsing_context_id,
+            request_id,
+            AuxiliaryWindowResponse::PermissionPrompt { allow },
+        )
+    }
+
     /// Close a backend-managed auxiliary window/dialog.
     pub fn close_auxiliary_window(
         &self,
@@ -568,11 +582,7 @@ impl<B: Backend> BrowserHandle<B> {
         request_id: u64,
         allow: bool,
     ) -> Result<(), Error> {
-        self.send(BrowserCommand::ConfirmPermission {
-            browsing_context_id,
-            request_id,
-            allow,
-        })
+        self.respond_permission_prompt(browsing_context_id, request_id, allow)
     }
 
     /// Force shutdown without waiting for confirmations.

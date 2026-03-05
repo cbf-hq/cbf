@@ -34,6 +34,8 @@ pub const CBF_EVENT_AUXILIARY_WINDOW_OPENED: u8 = 23;
 pub const CBF_EVENT_AUXILIARY_WINDOW_CLOSED: u8 = 24;
 pub const CBF_EVENT_TAB_OPEN_REQUESTED: u8 = 25;
 pub const CBF_EVENT_TAB_OPEN_RESOLVED: u8 = 26;
+pub const CBF_EVENT_PROMPT_UI_REQUESTED: u8 = 27;
+pub const CBF_EVENT_PROMPT_UI_RESOLVED: u8 = 28;
 
 pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED: u8 = 0;
 pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS: u8 = 1;
@@ -48,6 +50,20 @@ pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_UNKNOWN: u8 = 0;
 pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED: u8 = 1;
 pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_HOST_FORCED: u8 = 2;
 pub const CBF_AUXILIARY_WINDOW_CLOSE_REASON_SYSTEM_DISMISSED: u8 = 3;
+
+pub const CBF_PROMPT_UI_KIND_UNKNOWN: u8 = 0;
+pub const CBF_PROMPT_UI_KIND_PERMISSION_PROMPT: u8 = 1;
+
+pub const CBF_PROMPT_UI_PERMISSION_TYPE_UNKNOWN: u8 = 0;
+pub const CBF_PROMPT_UI_PERMISSION_TYPE_GEOLOCATION: u8 = 1;
+pub const CBF_PROMPT_UI_PERMISSION_TYPE_NOTIFICATIONS: u8 = 2;
+pub const CBF_PROMPT_UI_PERMISSION_TYPE_AUDIO_CAPTURE: u8 = 3;
+pub const CBF_PROMPT_UI_PERMISSION_TYPE_VIDEO_CAPTURE: u8 = 4;
+
+pub const CBF_PROMPT_UI_RESOLUTION_RESULT_UNKNOWN: u8 = 0;
+pub const CBF_PROMPT_UI_RESOLUTION_RESULT_ALLOWED: u8 = 1;
+pub const CBF_PROMPT_UI_RESOLUTION_RESULT_DENIED: u8 = 2;
+pub const CBF_PROMPT_UI_RESOLUTION_RESULT_ABORTED: u8 = 3;
 
 pub const CBF_TAB_OPEN_HINT_UNKNOWN: u8 = 0;
 pub const CBF_TAB_OPEN_HINT_CURRENT_CONTEXT: u8 = 1;
@@ -213,6 +229,10 @@ pub struct CbfBridgeEvent {
     pub auxiliary_window_close_reason: u8,
     pub auxiliary_window_title: *mut c_char,
     pub auxiliary_window_modal: bool,
+    pub prompt_ui_kind: u8,
+    pub prompt_ui_permission: u8,
+    pub prompt_ui_result: u8,
+    pub prompt_ui_permission_key: *mut c_char,
     pub tab_open_hint: u8,
     pub tab_open_user_gesture: bool,
     pub tab_open_has_source: bool,
@@ -563,14 +583,9 @@ unsafe extern "C" {
     pub fn cbf_bridge_client_create() -> *mut CbfBridgeClientHandle;
     pub fn cbf_bridge_client_destroy(client: *mut CbfBridgeClientHandle);
     pub fn cbf_bridge_init();
-    pub fn cbf_bridge_prepare_channel(
-        out_switch_arg: *mut c_char,
-        out_arg_len: i32,
-    ) -> i32;
+    pub fn cbf_bridge_prepare_channel(out_switch_arg: *mut c_char, out_arg_len: i32) -> i32;
     pub fn cbf_bridge_pass_child_pid(child_pid: i64);
-    pub fn cbf_bridge_client_connect_inherited(
-        client: *mut CbfBridgeClientHandle,
-    ) -> bool;
+    pub fn cbf_bridge_client_connect_inherited(client: *mut CbfBridgeClientHandle) -> bool;
     pub fn cbf_bridge_client_authenticate(
         client: *mut CbfBridgeClientHandle,
         token: *const c_char,
@@ -698,19 +713,14 @@ unsafe extern "C" {
         url: *const c_char,
     ) -> bool;
     pub fn cbf_bridge_client_go_back(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
-    pub fn cbf_bridge_client_go_forward(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-    ) -> bool;
+    pub fn cbf_bridge_client_go_forward(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
     pub fn cbf_bridge_client_reload(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
         ignore_cache: bool,
     ) -> bool;
-    pub fn cbf_bridge_client_print_preview(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-    ) -> bool;
+    pub fn cbf_bridge_client_print_preview(client: *mut CbfBridgeClientHandle, tab_id: u64)
+    -> bool;
     pub fn cbf_bridge_client_open_dev_tools(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
@@ -736,6 +746,13 @@ unsafe extern "C" {
         tab_id: u64,
         request_id: u64,
         proceed: bool,
+    ) -> bool;
+    pub fn cbf_bridge_client_respond_prompt_ui(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        request_id: u64,
+        prompt_ui_kind: u8,
+        allow: bool,
     ) -> bool;
     pub fn cbf_bridge_client_close_auxiliary_window(
         client: *mut CbfBridgeClientHandle,

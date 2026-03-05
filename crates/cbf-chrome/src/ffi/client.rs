@@ -25,6 +25,7 @@ use super::{Error, IpcEvent};
 use crate::data::{
     ids::TabId,
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+    prompt_ui::PromptUiResponse,
 };
 
 /// Client wrapper for the CBF IPC bridge.
@@ -58,7 +59,10 @@ impl IpcClient {
         let mut buf = [0u8; 512];
         let fd = unsafe {
             cbf_bridge_init();
-            cbf_bridge_prepare_channel(buf.as_mut_ptr() as *mut std::os::raw::c_char, buf.len() as i32)
+            cbf_bridge_prepare_channel(
+                buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                buf.len() as i32,
+            )
         };
         let switch_arg = CStr::from_bytes_until_nul(&buf)
             .map_err(|_| Error::ConnectionFailed)?
@@ -94,7 +98,11 @@ impl IpcClient {
         }
         let connected = unsafe { cbf_bridge_client_connect_inherited(inner) };
         if !connected {
-            warn!(result = "err", error = "ipc_connect_inherited_failed", "IPC inherited connect failed");
+            warn!(
+                result = "err",
+                error = "ipc_connect_inherited_failed",
+                "IPC inherited connect failed"
+            );
             unsafe { cbf_bridge_client_destroy(inner) };
             return Err(Error::ConnectionFailed);
         }
@@ -255,10 +263,7 @@ impl IpcClient {
     }
 
     /// Request closing the specified web page.
-    pub fn request_close_web_contents(
-        &mut self,
-        browsing_context_id: TabId,
-    ) -> Result<(), Error> {
+    pub fn request_close_web_contents(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -342,11 +347,7 @@ impl IpcClient {
     }
 
     /// Navigate the page to the provided URL.
-    pub fn navigate(
-        &mut self,
-        browsing_context_id: TabId,
-        url: &str,
-    ) -> Result<(), Error> {
+    pub fn navigate(&mut self, browsing_context_id: TabId, url: &str) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -389,11 +390,7 @@ impl IpcClient {
     }
 
     /// Reload the page, optionally ignoring caches.
-    pub fn reload(
-        &mut self,
-        browsing_context_id: TabId,
-        ignore_cache: bool,
-    ) -> Result<(), Error> {
+    pub fn reload(&mut self, browsing_context_id: TabId, ignore_cache: bool) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -511,8 +508,16 @@ impl IpcClient {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
+        if let AuxiliaryWindowResponse::PermissionPrompt { allow } = response {
+            return self.respond_prompt_ui(
+                browsing_context_id,
+                request_id,
+                &PromptUiResponse::PermissionPrompt { allow: *allow },
+            );
+        }
         let proceed = match response {
             AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed } => *proceed,
+            AuxiliaryWindowResponse::PermissionPrompt { .. } => false,
             AuxiliaryWindowResponse::Unknown => false,
         };
         debug!(
@@ -528,6 +533,45 @@ impl IpcClient {
                 browsing_context_id.get(),
                 request_id,
                 proceed,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Respond to a pending chrome-specific PromptUi request.
+    pub fn respond_prompt_ui(
+        &mut self,
+        browsing_context_id: TabId,
+        request_id: u64,
+        response: &PromptUiResponse,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+        let (prompt_ui_kind, allow) = match response {
+            PromptUiResponse::PermissionPrompt { allow } => {
+                (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow)
+            }
+            PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false),
+        };
+        debug!(
+            %browsing_context_id,
+            request_id,
+            prompt_ui_kind,
+            allow,
+            ?response,
+            "ffi respond_prompt_ui"
+        );
+        if unsafe {
+            cbf_bridge_client_respond_prompt_ui(
+                self.inner,
+                browsing_context_id.get(),
+                request_id,
+                prompt_ui_kind,
+                allow,
             )
         } {
             Ok(())
@@ -573,11 +617,9 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
         let (response_kind, target_tab_id, activate) = match response {
-            BrowsingContextOpenResponse::AllowNewContext { activate } => (
-                CBF_TAB_OPEN_RESPONSE_ALLOW_NEW_CONTEXT,
-                0,
-                *activate,
-            ),
+            BrowsingContextOpenResponse::AllowNewContext { activate } => {
+                (CBF_TAB_OPEN_RESPONSE_ALLOW_NEW_CONTEXT, 0, *activate)
+            }
             BrowsingContextOpenResponse::AllowExistingContext {
                 browsing_context_id,
                 activate,
@@ -586,9 +628,7 @@ impl IpcClient {
                 browsing_context_id.get(),
                 *activate,
             ),
-            BrowsingContextOpenResponse::Deny => {
-                (CBF_TAB_OPEN_RESPONSE_DENY, 0, false)
-            }
+            BrowsingContextOpenResponse::Deny => (CBF_TAB_OPEN_RESPONSE_DENY, 0, false),
         };
         debug!(
             request_id,

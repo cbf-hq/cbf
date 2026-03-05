@@ -22,6 +22,7 @@ use cbf::{
 };
 use cbf_chrome::{backend::ChromiumBackend, data::surface::SurfaceHandle};
 use cursor_icon::CursorIcon;
+use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use tracing::{error, info, warn};
 use winit::event::WindowEvent;
 
@@ -699,6 +700,20 @@ impl CoreState {
             BrowsingContextEvent::AuxiliaryWindowOpenRequested { request_id, kind } => {
                 info!("auxiliary open requested: request_id={request_id}, kind={kind:?}");
 
+                if let AuxiliaryWindowKind::PermissionPrompt { permission } = &kind {
+                    let allow = show_permission_prompt_dialog(permission);
+                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
+                        browsing_context_id,
+                        request_id,
+                        AuxiliaryWindowResponse::PermissionPrompt { allow },
+                    ) {
+                        warn!(
+                            "failed to respond permission prompt request_id={request_id}: {err}"
+                        );
+                    }
+                    return Vec::new();
+                }
+
                 // Extension install prompts
                 if matches!(kind, AuxiliaryWindowKind::ExtensionInstallPrompt { .. })
                     && self
@@ -720,6 +735,36 @@ impl CoreState {
 
                 Vec::new()
             }
+            BrowsingContextEvent::AuxiliaryWindowResolved {
+                request_id,
+                resolution,
+            } => {
+                info!(
+                    "auxiliary resolved: request_id={request_id}, resolution={resolution:?}"
+                );
+                Vec::new()
+            }
+            BrowsingContextEvent::AuxiliaryWindowOpened {
+                window_id,
+                kind,
+                title,
+                modal,
+            } => {
+                info!(
+                    "auxiliary opened: window_id={window_id:?}, kind={kind:?}, title={title:?}, modal={modal}"
+                );
+                Vec::new()
+            }
+            BrowsingContextEvent::AuxiliaryWindowClosed {
+                window_id,
+                kind,
+                reason,
+            } => {
+                info!(
+                    "auxiliary closed: window_id={window_id:?}, kind={kind:?}, reason={reason:?}"
+                );
+                Vec::new()
+            }
             BrowsingContextEvent::SelectionChanged { .. }
             | BrowsingContextEvent::ScrollPositionChanged { .. }
             | BrowsingContextEvent::NavigationStateChanged { .. }
@@ -729,10 +774,45 @@ impl CoreState {
             | BrowsingContextEvent::RenderProcessGone { .. }
             | BrowsingContextEvent::AudioStateChanged { .. }
             | BrowsingContextEvent::DomHtmlRead { .. }
-            | BrowsingContextEvent::AuxiliaryWindowResolved { .. }
             | BrowsingContextEvent::ExtensionRuntimeWarning { .. }
-            | BrowsingContextEvent::AuxiliaryWindowOpened { .. }
-            | BrowsingContextEvent::AuxiliaryWindowClosed { .. } => Vec::new(),
+            => Vec::new(),
+        }
+    }
+}
+
+fn show_permission_prompt_dialog(permission: &cbf::data::extension::PermissionPromptType) -> bool {
+    let message = format!(
+        "{}\n\nAllow this request?",
+        permission_prompt_description(permission)
+    );
+
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Info)
+        .set_title("Permission Request")
+        .set_description(&message)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+
+    matches!(result, MessageDialogResult::Yes)
+}
+
+fn permission_prompt_description(
+    permission: &cbf::data::extension::PermissionPromptType,
+) -> String {
+    use cbf::data::extension::PermissionPromptType;
+
+    match permission {
+        PermissionPromptType::Geolocation => {
+            "This site wants to access your location.".to_string()
+        }
+        PermissionPromptType::Notifications => {
+            "This site wants to show notifications.".to_string()
+        }
+        PermissionPromptType::AudioCapture => "This site wants to use your microphone.".to_string(),
+        PermissionPromptType::VideoCapture => "This site wants to use your camera.".to_string(),
+        PermissionPromptType::Other(name) => format!("This site requests permission: {name}."),
+        PermissionPromptType::Unknown => {
+            "This site requests a permission that could not be identified.".to_string()
         }
     }
 }

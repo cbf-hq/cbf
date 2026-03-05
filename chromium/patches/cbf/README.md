@@ -21,6 +21,8 @@ Patches are applied in lexical order:
 13. `0013-Add-per-session-token-handshake-for-IPC-authenticati.patch`
 14. `0014-Add-limited-support-for-chrome-settings.patch`
 15. `0015-Stabilize-history-behavior-in-embedded-CBF-tabs.patch`
+16. `0016-Rename-browsing-context-open-bridge-vocabulary-to-ta.patch`
+17. `0017-Add-host-driven-permission-prompt-UI-flow.patch`
 
 ## Principles
 

@@ -11,6 +11,7 @@ use cbf::{
 
 use crate::{
     command::ChromeCommand,
+    data::prompt_ui::PromptUiResponse,
     event::{ChromeEvent, to_generic_event},
     ffi::{Error as IpcError, IpcClient, IpcEvent},
 };
@@ -123,7 +124,10 @@ impl Backend for ChromiumBackend {
     ) -> Result<(CommandSender<Self>, EventStream<Self>), Error> {
         let (command_tx, command_rx) = async_channel::unbounded::<CommandEnvelope<Self>>();
         let (event_tx, event_rx) = async_channel::unbounded::<ChromeEvent>();
-        let ChromiumBackend { _options: _, client } = self;
+        let ChromiumBackend {
+            _options: _,
+            client,
+        } = self;
         let raw_delegate = raw_delegate.unwrap_or_else(|| Box::<NoopRawDelegate>::default());
 
         thread::spawn(move || {
@@ -140,7 +144,10 @@ impl Backend for ChromiumBackend {
 impl ChromiumBackend {
     /// Create a backend from a pre-connected IPC client.
     pub fn new(options: ChromiumBackendOptions, client: IpcClient) -> Self {
-        Self { _options: options, client }
+        Self {
+            _options: options,
+            client,
+        }
     }
 
     fn run_communication(
@@ -493,7 +500,17 @@ impl ChromiumBackend {
             } => client
                 .confirm_beforeunload(*browsing_context_id, *request_id, *proceed)
                 .map(|_| (None, Vec::new())),
-            ChromeCommand::ConfirmPermission { .. } => Ok((None, Vec::new())),
+            ChromeCommand::ConfirmPermission {
+                browsing_context_id,
+                request_id,
+                allow,
+            } => client
+                .respond_prompt_ui(
+                    *browsing_context_id,
+                    *request_id,
+                    &PromptUiResponse::PermissionPrompt { allow: *allow },
+                )
+                .map(|_| (None, Vec::new())),
             ChromeCommand::CreateWebContents {
                 request_id,
                 initial_url,
@@ -651,6 +668,13 @@ impl ChromiumBackend {
             } => client
                 .respond_auxiliary_window(*browsing_context_id, *request_id, response)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::RespondPromptUi {
+                browsing_context_id,
+                request_id,
+                response,
+            } => client
+                .respond_prompt_ui(*browsing_context_id, *request_id, response)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::CloseAuxiliaryWindow {
                 browsing_context_id,
                 window_id,
@@ -677,12 +701,7 @@ impl ChromiumBackend {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        mem::MaybeUninit,
-        sync::mpsc,
-        thread,
-        time::Duration,
-    };
+    use std::{mem::MaybeUninit, sync::mpsc, thread, time::Duration};
 
     use cbf::{
         browser::{Backend, EventStream, RawOpaqueEventExt},

@@ -35,6 +35,9 @@ use super::{Error, IpcEvent, utils::c_string_to_string};
 use crate::data::{
     ids::TabId,
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+    prompt_ui::{
+        PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
+    },
     surface::SurfaceHandle,
     tab_open::{TabOpenHint, TabOpenResult},
 };
@@ -191,6 +194,27 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.extension_install_prompt_detail,
             ),
         }),
+        CBF_EVENT_PROMPT_UI_REQUESTED => Ok(IpcEvent::PromptUiRequested {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            request_id: event.request_id,
+            kind: prompt_ui_kind_from_ffi(
+                event.prompt_ui_kind,
+                event.prompt_ui_permission,
+                event.prompt_ui_permission_key,
+            ),
+        }),
+        CBF_EVENT_PROMPT_UI_RESOLVED => Ok(IpcEvent::PromptUiResolved {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            request_id: event.request_id,
+            resolution: prompt_ui_resolution_from_ffi(
+                event.prompt_ui_kind,
+                event.prompt_ui_permission,
+                event.prompt_ui_permission_key,
+                event.prompt_ui_result,
+            ),
+        }),
         CBF_EVENT_EXTENSION_RUNTIME_WARNING => Ok(IpcEvent::ExtensionRuntimeWarning {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
@@ -239,22 +263,22 @@ fn tab_open_hint_from_ffi(value: u8) -> TabOpenHint {
     }
 }
 
-fn tab_open_result_from_ffi(
-    value: u8,
-    has_target: bool,
-    target_tab_id: u64,
-) -> TabOpenResult {
+fn tab_open_result_from_ffi(value: u8, has_target: bool, target_tab_id: u64) -> TabOpenResult {
     match value {
         CBF_TAB_OPEN_RESULT_OPENED_NEW_CONTEXT => {
             if has_target {
-                TabOpenResult::OpenedNewTab { tab_id: TabId::new(target_tab_id) }
+                TabOpenResult::OpenedNewTab {
+                    tab_id: TabId::new(target_tab_id),
+                }
             } else {
                 TabOpenResult::Aborted
             }
         }
         CBF_TAB_OPEN_RESULT_OPENED_EXISTING_CONTEXT => {
             if has_target {
-                TabOpenResult::OpenedExistingTab { tab_id: TabId::new(target_tab_id) }
+                TabOpenResult::OpenedExistingTab {
+                    tab_id: TabId::new(target_tab_id),
+                }
             } else {
                 TabOpenResult::Aborted
             }
@@ -526,9 +550,7 @@ fn auxiliary_window_kind_from_ffi(
                 permission_names: parse_string_list(permission_names),
             }
         }
-        CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG => {
-            AuxiliaryWindowKind::PrintPreviewDialog
-        }
+        CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG => AuxiliaryWindowKind::PrintPreviewDialog,
         _ => AuxiliaryWindowKind::Unknown,
     }
 }
@@ -551,6 +573,63 @@ fn auxiliary_window_resolution_from_ffi(
             }
         }
         _ => AuxiliaryWindowResolution::Unknown,
+    }
+}
+
+fn prompt_ui_permission_from_ffi(value: u8) -> PromptUiPermissionType {
+    match value {
+        CBF_PROMPT_UI_PERMISSION_TYPE_GEOLOCATION => PromptUiPermissionType::Geolocation,
+        CBF_PROMPT_UI_PERMISSION_TYPE_NOTIFICATIONS => PromptUiPermissionType::Notifications,
+        CBF_PROMPT_UI_PERMISSION_TYPE_AUDIO_CAPTURE => PromptUiPermissionType::AudioCapture,
+        CBF_PROMPT_UI_PERMISSION_TYPE_VIDEO_CAPTURE => PromptUiPermissionType::VideoCapture,
+        _ => PromptUiPermissionType::Unknown,
+    }
+}
+
+fn prompt_ui_kind_from_ffi(
+    kind: u8,
+    permission: u8,
+    permission_key: *mut std::ffi::c_char,
+) -> PromptUiKind {
+    let permission_key = {
+        let value = c_string_to_string(permission_key);
+        if value.is_empty() { None } else { Some(value) }
+    };
+    match kind {
+        CBF_PROMPT_UI_KIND_PERMISSION_PROMPT => PromptUiKind::PermissionPrompt {
+            permission: prompt_ui_permission_from_ffi(permission),
+            permission_key,
+        },
+        _ => PromptUiKind::Unknown,
+    }
+}
+
+fn prompt_ui_resolution_result_from_ffi(value: u8) -> PromptUiResolutionResult {
+    match value {
+        CBF_PROMPT_UI_RESOLUTION_RESULT_ALLOWED => PromptUiResolutionResult::Allowed,
+        CBF_PROMPT_UI_RESOLUTION_RESULT_DENIED => PromptUiResolutionResult::Denied,
+        CBF_PROMPT_UI_RESOLUTION_RESULT_ABORTED => PromptUiResolutionResult::Aborted,
+        _ => PromptUiResolutionResult::Unknown,
+    }
+}
+
+fn prompt_ui_resolution_from_ffi(
+    kind: u8,
+    permission: u8,
+    permission_key: *mut std::ffi::c_char,
+    result: u8,
+) -> PromptUiResolution {
+    let permission_key = {
+        let value = c_string_to_string(permission_key);
+        if value.is_empty() { None } else { Some(value) }
+    };
+    match kind {
+        CBF_PROMPT_UI_KIND_PERMISSION_PROMPT => PromptUiResolution::PermissionPrompt {
+            permission: prompt_ui_permission_from_ffi(permission),
+            permission_key,
+            result: prompt_ui_resolution_result_from_ffi(result),
+        },
+        _ => PromptUiResolution::Unknown,
     }
 }
 
@@ -606,9 +685,17 @@ fn cursor_icon_from_ffi(value: u8) -> CursorIcon {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::CString;
+
     use cbf_chrome_sys::ffi::*;
 
-    use crate::data::{ids::TabId, tab_open::TabOpenResult};
+    use crate::data::{
+        ids::TabId,
+        prompt_ui::{
+            PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
+        },
+        tab_open::TabOpenResult,
+    };
 
     use super::{IpcEvent, parse_event};
 
@@ -673,6 +760,62 @@ mod tests {
                 result: TabOpenResult::OpenedNewTab { tab_id },
                 ..
             } if request_id == 55 && tab_id.get() == 123
+        ));
+    }
+
+    #[test]
+    fn parse_event_prompt_ui_requested_maps_permission_kind() {
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_REQUESTED);
+        event.tab_id = 21;
+        event.request_id = 99;
+        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PERMISSION_PROMPT;
+        event.prompt_ui_permission = CBF_PROMPT_UI_PERMISSION_TYPE_GEOLOCATION;
+        let permission_key = CString::new("geolocation").unwrap();
+        event.prompt_ui_permission_key = permission_key.as_ptr() as *mut _;
+
+        let parsed = parse_event(event).expect("prompt ui requested should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::PromptUiRequested {
+                browsing_context_id,
+                request_id,
+                kind: PromptUiKind::PermissionPrompt {
+                    permission: PromptUiPermissionType::Geolocation,
+                    permission_key: Some(ref permission_key),
+                },
+                ..
+            } if browsing_context_id == TabId::new(21)
+                && request_id == 99
+                && permission_key == "geolocation"
+        ));
+    }
+
+    #[test]
+    fn parse_event_prompt_ui_resolved_maps_result() {
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_RESOLVED);
+        event.tab_id = 18;
+        event.request_id = 77;
+        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PERMISSION_PROMPT;
+        event.prompt_ui_permission = CBF_PROMPT_UI_PERMISSION_TYPE_NOTIFICATIONS;
+        event.prompt_ui_result = CBF_PROMPT_UI_RESOLUTION_RESULT_DENIED;
+        let permission_key = CString::new("notifications").unwrap();
+        event.prompt_ui_permission_key = permission_key.as_ptr() as *mut _;
+
+        let parsed = parse_event(event).expect("prompt ui resolved should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::PromptUiResolved {
+                browsing_context_id,
+                request_id,
+                resolution: PromptUiResolution::PermissionPrompt {
+                    permission: PromptUiPermissionType::Notifications,
+                    permission_key: Some(ref permission_key),
+                    result: PromptUiResolutionResult::Denied
+                },
+                ..
+            } if browsing_context_id == TabId::new(18)
+                && request_id == 77
+                && permission_key == "notifications"
         ));
     }
 }

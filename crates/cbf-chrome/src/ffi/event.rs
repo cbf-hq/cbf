@@ -11,7 +11,12 @@ use cbf::data::{
 };
 use cbf::event::BeforeUnloadReason;
 
-use crate::data::{ids::TabId, surface::SurfaceHandle, tab_open::{TabOpenHint, TabOpenResult}};
+use crate::data::{
+    ids::TabId,
+    prompt_ui::{PromptUiKind, PromptUiResolution},
+    surface::SurfaceHandle,
+    tab_open::{TabOpenHint, TabOpenResult},
+};
 
 /// Low-level IPC events emitted by the Chromium bridge.
 #[derive(Debug, Clone, PartialEq)]
@@ -190,6 +195,20 @@ pub enum IpcEvent {
         browsing_context_id: TabId,
         request_id: u64,
         resolution: AuxiliaryWindowResolution,
+    },
+    /// Chrome-specific prompt UI open request.
+    PromptUiRequested {
+        profile_id: String,
+        browsing_context_id: TabId,
+        request_id: u64,
+        kind: PromptUiKind,
+    },
+    /// Chrome-specific prompt UI resolution.
+    PromptUiResolved {
+        profile_id: String,
+        browsing_context_id: TabId,
+        request_id: u64,
+        resolution: PromptUiResolution,
     },
     /// Non-fatal extension runtime warning.
     ///

@@ -1,0 +1,1043 @@
+From 8c502d06f16e443b6390b38527091cb5797fa115 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 5 Mar 2026 19:24:44 +0900
+Subject: [PATCH 17/17] Add host-driven permission prompt UI flow
+
+---
+ chrome/browser/cbf/BUILD.gn                   |   4 +
+ chrome/browser/cbf/bridge/cbf_bridge.h        |   6 +
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |   4 +
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |  37 ++++
+ .../cbf/bridge/cbf_bridge_client_impl.h       |  10 +
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  21 +++
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  32 ++++
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc |  56 ++++++
+ chrome/browser/cbf/cbf_permission_prompt.cc   | 159 ++++++++++++++++
+ chrome/browser/cbf/cbf_permission_prompt.h    |  54 ++++++
+ chrome/browser/cbf/cbf_profile_service.cc     | 177 ++++++++++++++++++
+ chrome/browser/cbf/cbf_profile_service.h      |  42 +++++
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  43 +++++
+ .../cbf/profile/cbf_web_contents_bootstrap.cc |  10 +
+ .../cbf/test/cbf_test_profile_observer.cc     |   8 +
+ .../cbf/test/cbf_test_profile_observer.h      |   5 +
+ 16 files changed, 668 insertions(+)
+ create mode 100644 chrome/browser/cbf/cbf_permission_prompt.cc
+ create mode 100644 chrome/browser/cbf/cbf_permission_prompt.h
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index f5d4d0b434bf6..ea79daf246587 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -19,6 +19,8 @@ source_set("cbf") {
+     "cbf_browser_service.h",
+     "cbf_java_script_dialog_manager.cc",
+     "cbf_java_script_dialog_manager.h",
++    "cbf_permission_prompt.cc",
++    "cbf_permission_prompt.h",
+     "cbf_profile_service.cc",
+     "cbf_profile_service.h",
+     "cbf_switches.h",
+@@ -82,6 +84,7 @@ source_set("cbf") {
+     "//chrome/browser/ui/tab_contents:tab_contents",
+     "//content/public/browser",
+     "//extensions/browser",
++    "//components/permissions",
+     "//mojo/public/cpp/bindings",
+     "//mojo/public/cpp/platform",
+     "//mojo/public/cpp/system",
+@@ -184,6 +187,7 @@ source_set("cbf_browser_tests") {
+     "//base",
+     "//base/test:test_support",
+     "//chrome/browser",
++    "//chrome/browser/history:history",
+     "//chrome/browser/ui/webui:webui_util",
+     "//chrome/test:test_support",
+     "//components/tabs:public",
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index 7c6b27d77cd44..3b4fbdfb7300c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -128,6 +128,12 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_auxiliary_window(
+     uint64_t tab_id,
+     uint64_t request_id,
+     bool proceed);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_prompt_ui(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id,
++    uint64_t request_id,
++    uint8_t prompt_ui_kind,
++    bool allow);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_close_auxiliary_window(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index e999bf4e3f977..2d56864feade2 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -60,6 +60,10 @@ class CbfBridgeClient {
+   bool RespondAuxiliaryWindow(uint64_t tab_id,
+                               uint64_t request_id,
+                               bool proceed);
++  bool RespondPromptUi(uint64_t tab_id,
++                       uint64_t request_id,
++                       uint8_t prompt_ui_kind,
++                       bool allow);
+   bool CloseAuxiliaryWindow(uint64_t tab_id, uint64_t window_id);
+   bool RespondTabOpen(uint64_t request_id,
+                                   uint8_t response_kind,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index 987f1799ca987..064eddf9cda3c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -383,6 +383,43 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowResolved(
+   impl_->events.push(std::move(event));
+ }
+ 
++void CbfBridgeClientImpl::Observer::OnPromptUiRequested(
++    uint64_t tab_id,
++    cbf::mojom::CbfPromptUiRequestPtr request) {
++  if (!request) {
++    return;
++  }
++  CbfBridgeEventData event;
++  event.kind = kEventPromptUiRequested;
++  event.profile_id = profile_id_;
++  event.tab_id = tab_id;
++  event.request_id = request->request_id;
++  event.prompt_ui_kind = static_cast<uint8_t>(request->kind);
++  event.prompt_ui_permission = static_cast<uint8_t>(request->permission);
++  event.prompt_ui_permission_key = request->permission_key;
++  std::lock_guard<std::mutex> lock(impl_->events_mutex);
++  impl_->events.push(std::move(event));
++}
++
++void CbfBridgeClientImpl::Observer::OnPromptUiResolved(
++    uint64_t tab_id,
++    cbf::mojom::CbfPromptUiResolutionPtr resolution) {
++  if (!resolution) {
++    return;
++  }
++  CbfBridgeEventData event;
++  event.kind = kEventPromptUiResolved;
++  event.profile_id = profile_id_;
++  event.tab_id = tab_id;
++  event.request_id = resolution->request_id;
++  event.prompt_ui_kind = static_cast<uint8_t>(resolution->kind);
++  event.prompt_ui_permission = static_cast<uint8_t>(resolution->permission);
++  event.prompt_ui_result = static_cast<uint8_t>(resolution->result);
++  event.prompt_ui_permission_key = resolution->permission_key;
++  std::lock_guard<std::mutex> lock(impl_->events_mutex);
++  impl_->events.push(std::move(event));
++}
++
+ void CbfBridgeClientImpl::Observer::OnExtensionRuntimeWarning(
+     uint64_t tab_id,
+     const std::string& detail) {
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+index 90be6670c49d9..53fdead9773ff 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+@@ -59,6 +59,10 @@ struct CbfBridgeEventData {
+   uint8_t auxiliary_window_close_reason = kCbfAuxiliaryWindowCloseReasonUnknown;
+   std::string auxiliary_window_title;
+   bool auxiliary_window_modal = false;
++  uint8_t prompt_ui_kind = kCbfPromptUiKindUnknown;
++  uint8_t prompt_ui_permission = kCbfPromptUiPermissionTypeUnknown;
++  uint8_t prompt_ui_result = kCbfPromptUiResolutionResultUnknown;
++  std::string prompt_ui_permission_key;
+   bool has_source_tab_id = false;
+   uint64_t source_tab_id = 0;
+   uint8_t tab_open_hint = kCbfTabOpenHintUnknown;
+@@ -160,6 +164,12 @@ struct CbfBridgeClientImpl {
+     void OnAuxiliaryWindowResolved(
+         uint64_t tab_id,
+         cbf::mojom::CbfAuxiliaryWindowResolutionPtr resolution) override;
++    void OnPromptUiRequested(
++        uint64_t tab_id,
++        cbf::mojom::CbfPromptUiRequestPtr request) override;
++    void OnPromptUiResolved(
++        uint64_t tab_id,
++        cbf::mojom::CbfPromptUiResolutionPtr resolution) override;
+     void OnExtensionRuntimeWarning(uint64_t tab_id,
+                                    const std::string& detail) override;
+     void OnAuxiliaryWindowOpened(uint64_t tab_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index e6c1e0dbbe287..06f1c3a9b4252 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -263,6 +263,10 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+   out_event->auxiliary_window_close_reason = kCbfAuxiliaryWindowCloseReasonUnknown;
+   out_event->auxiliary_window_title = nullptr;
+   out_event->auxiliary_window_modal = false;
++  out_event->prompt_ui_kind = kCbfPromptUiKindUnknown;
++  out_event->prompt_ui_permission = kCbfPromptUiPermissionTypeUnknown;
++  out_event->prompt_ui_result = kCbfPromptUiResolutionResultUnknown;
++  out_event->prompt_ui_permission_key = nullptr;
+   out_event->tab_open_hint = kCbfTabOpenHintUnknown;
+   out_event->tab_open_user_gesture = false;
+   out_event->tab_open_has_source = false;
+@@ -416,6 +420,21 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     out_event->auxiliary_window_close_reason =
+         event.auxiliary_window_close_reason;
+   }
++  if (event.kind == kEventPromptUiRequested) {
++    out_event->prompt_ui_kind = event.prompt_ui_kind;
++    out_event->prompt_ui_permission = event.prompt_ui_permission;
++    out_event->prompt_ui_permission_key = event.prompt_ui_permission_key.empty()
++                                             ? nullptr
++                                             : CopyCString(event.prompt_ui_permission_key);
++  }
++  if (event.kind == kEventPromptUiResolved) {
++    out_event->prompt_ui_kind = event.prompt_ui_kind;
++    out_event->prompt_ui_permission = event.prompt_ui_permission;
++    out_event->prompt_ui_result = event.prompt_ui_result;
++    out_event->prompt_ui_permission_key = event.prompt_ui_permission_key.empty()
++                                             ? nullptr
++                                             : CopyCString(event.prompt_ui_permission_key);
++  }
+   if (event.kind == kEventTabOpenRequested) {
+     out_event->target_url =
+         event.target_url.empty() ? nullptr : CopyCString(event.target_url);
+@@ -543,6 +562,8 @@ extern "C" void cbf_bridge_event_free(CbfBridgeEvent* event) {
+   event->extension_runtime_warning = nullptr;
+   delete[] event->auxiliary_window_title;
+   event->auxiliary_window_title = nullptr;
++  delete[] event->prompt_ui_permission_key;
++  event->prompt_ui_permission_key = nullptr;
+   FreeStringList(event->permission_names);
+   event->permission_names.items = nullptr;
+   event->permission_names.len = 0;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index 1bc69e2f1a609..bf787516fc305 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -37,6 +37,8 @@ enum CbfEventKind {
+   kEventAuxiliaryWindowClosed = 24,
+   kEventTabOpenRequested = 25,
+   kEventTabOpenResolved = 26,
++  kEventPromptUiRequested = 27,
++  kEventPromptUiResolved = 28,
+ };
+ 
+ enum CbfExtensionInstallPromptResult {
+@@ -59,6 +61,26 @@ enum CbfAuxiliaryWindowCloseReason {
+   kCbfAuxiliaryWindowCloseReasonSystemDismissed = 3,
+ };
+ 
++enum CbfPromptUiKind {
++  kCbfPromptUiKindUnknown = 0,
++  kCbfPromptUiKindPermissionPrompt = 1,
++};
++
++enum CbfPromptUiPermissionType {
++  kCbfPromptUiPermissionTypeUnknown = 0,
++  kCbfPromptUiPermissionTypeGeolocation = 1,
++  kCbfPromptUiPermissionTypeNotifications = 2,
++  kCbfPromptUiPermissionTypeAudioCapture = 3,
++  kCbfPromptUiPermissionTypeVideoCapture = 4,
++};
++
++enum CbfPromptUiResolutionResult {
++  kCbfPromptUiResolutionResultUnknown = 0,
++  kCbfPromptUiResolutionResultAllowed = 1,
++  kCbfPromptUiResolutionResultDenied = 2,
++  kCbfPromptUiResolutionResultAborted = 3,
++};
++
+ enum CbfTabOpenHint {
+   kCbfTabOpenHintUnknown = 0,
+   kCbfTabOpenHintCurrentContext = 1,
+@@ -502,6 +524,10 @@ typedef struct CbfBridgeEvent {
+   uint8_t auxiliary_window_close_reason;
+   char* auxiliary_window_title;
+   bool auxiliary_window_modal;
++  uint8_t prompt_ui_kind;
++  uint8_t prompt_ui_permission;
++  uint8_t prompt_ui_result;
++  char* prompt_ui_permission_key;
+   uint8_t tab_open_hint;
+   bool tab_open_user_gesture;
+   bool tab_open_has_source;
+@@ -619,6 +645,12 @@ bool cbf_bridge_client_respond_auxiliary_window(
+     uint64_t tab_id,
+     uint64_t request_id,
+     bool proceed);
++bool cbf_bridge_client_respond_prompt_ui(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id,
++    uint64_t request_id,
++    uint8_t prompt_ui_kind,
++    bool allow);
+ bool cbf_bridge_client_close_auxiliary_window(CbfBridgeClientHandle* client,
+                                               uint64_t tab_id,
+                                               uint64_t window_id);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index f32ccbcfc310b..71e8d2b9d49f6 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -488,6 +488,49 @@ bool CbfBridgeClient::RespondAuxiliaryWindow(uint64_t tab_id,
+   return true;
+ }
+ 
++bool CbfBridgeClient::RespondPromptUi(uint64_t tab_id,
++                                      uint64_t request_id,
++                                      uint8_t prompt_ui_kind,
++                                      bool allow) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id, uint64_t request_id,
++             uint8_t prompt_ui_kind, bool allow) {
++            auto it = impl->web_page_profiles.find(tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            auto response = cbf::mojom::CbfPromptUiResponse::New();
++            switch (prompt_ui_kind) {
++              case kCbfPromptUiKindPermissionPrompt:
++                response->kind = cbf::mojom::CbfPromptUiKind::kPermissionPrompt;
++                break;
++              case kCbfPromptUiKindUnknown:
++              default:
++                response->kind = cbf::mojom::CbfPromptUiKind::kUnknown;
++                break;
++            }
++            response->allow = allow;
++            remote_it->second.remote->RespondPromptUi(
++                tab_id, request_id, std::move(response));
++          },
++          impl, tab_id, request_id, prompt_ui_kind, allow));
++  return true;
++}
++
+ bool CbfBridgeClient::CloseAuxiliaryWindow(uint64_t tab_id,
+                                            uint64_t window_id) {
+   if (!impl_) {
+@@ -731,6 +774,19 @@ extern "C" bool cbf_bridge_client_respond_auxiliary_window(
+       ->RespondAuxiliaryWindow(tab_id, request_id, proceed);
+ }
+ 
++extern "C" bool cbf_bridge_client_respond_prompt_ui(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id,
++    uint64_t request_id,
++    uint8_t prompt_ui_kind,
++    bool allow) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->RespondPromptUi(tab_id, request_id, prompt_ui_kind, allow);
++}
++
+ extern "C" bool cbf_bridge_client_close_auxiliary_window(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+diff --git a/chrome/browser/cbf/cbf_permission_prompt.cc b/chrome/browser/cbf/cbf_permission_prompt.cc
+new file mode 100644
+index 0000000000000..010790d3ad8cb
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_permission_prompt.cc
+@@ -0,0 +1,159 @@
++#include "chrome/browser/cbf/cbf_permission_prompt.h"
++
++#include <variant>
++
++#include "build/build_config.h"
++#include "build/buildflag.h"
++#include "chrome/browser/cbf/cbf_browser_service.h"
++#include "chrome/browser/cbf/cbf_profile_service.h"
++#include "chrome/browser/cbf/cbf_service.h"
++#include "chrome/browser/profiles/profile.h"
++#include "components/permissions/permission_request.h"
++#include "components/permissions/request_type.h"
++#include "components/permissions/resolvers/permission_prompt_options.h"
++#include "content/public/browser/web_contents.h"
++
++namespace cbf {
++namespace {
++
++CbfProfileService* ResolveProfileService(content::WebContents* web_contents) {
++  if (!web_contents) {
++    return nullptr;
++  }
++
++  CbfService* cbf_service = CbfService::GetForProcess();
++  if (!cbf_service || !cbf_service->browser_service()) {
++    return nullptr;
++  }
++
++  auto* profile =
++      Profile::FromBrowserContext(web_contents->GetBrowserContext());
++  if (!profile) {
++    return nullptr;
++  }
++
++  return cbf_service->browser_service()->GetProfileServiceForProfile(profile);
++}
++
++}  // namespace
++
++CbfPermissionPrompt::CbfPermissionPrompt(content::WebContents* web_contents,
++                                         Delegate* delegate)
++    : web_contents_(web_contents), delegate_(delegate) {
++  if (!web_contents_ || !delegate_) {
++    return;
++  }
++
++  CbfProfileService* profile_service = ResolveProfileService(web_contents_);
++  if (profile_service &&
++      profile_service->RequestPermissionPromptForWebContents(
++          web_contents_, ResolvePermissionType(delegate_),
++          ResolvePermissionKey(delegate_),
++          delegate_->GetWeakPtr())) {
++    return;
++  }
++
++  PromptOptions prompt_options = std::monostate();
++  delegate_->Deny(prompt_options);
++}
++
++CbfPermissionPrompt::~CbfPermissionPrompt() = default;
++
++// static
++std::unique_ptr<permissions::PermissionPrompt> CbfPermissionPrompt::Create(
++    content::WebContents* web_contents,
++    permissions::PermissionPrompt::Delegate* delegate) {
++  return std::make_unique<CbfPermissionPrompt>(web_contents, delegate);
++}
++
++bool CbfPermissionPrompt::UpdateAnchor() {
++  return true;
++}
++
++permissions::PermissionPrompt::TabSwitchingBehavior
++CbfPermissionPrompt::GetTabSwitchingBehavior() {
++  return TabSwitchingBehavior::kKeepPromptAlive;
++}
++
++permissions::PermissionPromptDisposition
++CbfPermissionPrompt::GetPromptDisposition() const {
++  return permissions::PermissionPromptDisposition::CUSTOM_MODAL_DIALOG;
++}
++
++bool CbfPermissionPrompt::IsAskPrompt() const {
++  return true;
++}
++
++std::optional<gfx::Rect> CbfPermissionPrompt::GetViewBoundsInScreen() const {
++  return std::nullopt;
++}
++
++bool CbfPermissionPrompt::ShouldFinalizeRequestAfterDecided() const {
++  return true;
++}
++
++std::vector<permissions::ElementAnchoredBubbleVariant>
++CbfPermissionPrompt::GetPromptVariants() const {
++  return {};
++}
++
++std::optional<permissions::feature_params::PermissionElementPromptPosition>
++CbfPermissionPrompt::GetPromptPosition() const {
++  return std::nullopt;
++}
++
++// static
++mojom::CbfPromptUiPermissionType CbfPermissionPrompt::ResolvePermissionType(
++    Delegate* delegate) {
++  if (!delegate) {
++    return mojom::CbfPromptUiPermissionType::kUnknown;
++  }
++
++  const auto& requests = delegate->Requests();
++  for (const auto& request : requests) {
++    if (!request) {
++      continue;
++    }
++    switch (request->request_type()) {
++      case permissions::RequestType::kGeolocation:
++        return mojom::CbfPromptUiPermissionType::kGeolocation;
++      case permissions::RequestType::kNotifications:
++        return mojom::CbfPromptUiPermissionType::kNotifications;
++      case permissions::RequestType::kMicStream:
++        return mojom::CbfPromptUiPermissionType::kAudioCapture;
++      case permissions::RequestType::kCameraStream:
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
++      case permissions::RequestType::kCameraPanTiltZoom:
++#endif
++        return mojom::CbfPromptUiPermissionType::kVideoCapture;
++      default:
++        break;
++    }
++  }
++
++  return mojom::CbfPromptUiPermissionType::kUnknown;
++}
++
++// static
++std::string CbfPermissionPrompt::ResolvePermissionKey(Delegate* delegate) {
++  if (!delegate) {
++    return std::string();
++  }
++
++  const auto& requests = delegate->Requests();
++  for (const auto& request : requests) {
++    if (!request) {
++      continue;
++    }
++    const char* key =
++        permissions::PermissionKeyForRequestType(request->request_type());
++    if (!key || key[0] == '\0') {
++      continue;
++    }
++    return key;
++  }
++
++  return std::string();
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_permission_prompt.h b/chrome/browser/cbf/cbf_permission_prompt.h
+new file mode 100644
+index 0000000000000..c320678c01815
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_permission_prompt.h
+@@ -0,0 +1,54 @@
++#ifndef CHROME_BROWSER_CBF_CBF_PERMISSION_PROMPT_H_
++#define CHROME_BROWSER_CBF_CBF_PERMISSION_PROMPT_H_
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "components/permissions/permission_prompt.h"
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++namespace cbf {
++
++class CbfPermissionPrompt final : public permissions::PermissionPrompt {
++ public:
++  CbfPermissionPrompt(content::WebContents* web_contents,
++                      Delegate* delegate);
++  CbfPermissionPrompt(const CbfPermissionPrompt&) = delete;
++  CbfPermissionPrompt& operator=(const CbfPermissionPrompt&) = delete;
++  ~CbfPermissionPrompt() override;
++
++  static std::unique_ptr<permissions::PermissionPrompt> Create(
++      content::WebContents* web_contents,
++      permissions::PermissionPrompt::Delegate* delegate);
++
++  // permissions::PermissionPrompt:
++  bool UpdateAnchor() override;
++  TabSwitchingBehavior GetTabSwitchingBehavior() override;
++  permissions::PermissionPromptDisposition GetPromptDisposition() const override;
++  bool IsAskPrompt() const override;
++  std::optional<gfx::Rect> GetViewBoundsInScreen() const override;
++  bool ShouldFinalizeRequestAfterDecided() const override;
++  std::vector<permissions::ElementAnchoredBubbleVariant> GetPromptVariants()
++      const override;
++  std::optional<permissions::feature_params::PermissionElementPromptPosition>
++  GetPromptPosition() const override;
++
++ private:
++  static mojom::CbfPromptUiPermissionType ResolvePermissionType(
++      Delegate* delegate);
++  static std::string ResolvePermissionKey(Delegate* delegate);
++
++  const raw_ptr<content::WebContents> web_contents_;
++  const raw_ptr<Delegate> delegate_;
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_CBF_PERMISSION_PROMPT_H_
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 85d0bbb155d0d..891a235c30db9 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -3,6 +3,7 @@
+ #include <optional>
+ #include <utility>
+ #include <vector>
++#include <variant>
+ 
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
+@@ -35,6 +36,7 @@
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/isolated_world_ids.h"
++#include "components/permissions/resolvers/permission_prompt_options.h"
+ #include "mojo/public/cpp/bindings/clone_traits.h"
+ #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+ #include "ui/views/widget/widget.h"
+@@ -114,6 +116,14 @@ CbfProfileService::PendingExtensionInstallPrompt&
+ CbfProfileService::PendingExtensionInstallPrompt::operator=(
+     PendingExtensionInstallPrompt&&) = default;
+ 
++CbfProfileService::PendingPermissionPrompt::PendingPermissionPrompt() = default;
++CbfProfileService::PendingPermissionPrompt::~PendingPermissionPrompt() = default;
++CbfProfileService::PendingPermissionPrompt::PendingPermissionPrompt(
++    PendingPermissionPrompt&&) = default;
++CbfProfileService::PendingPermissionPrompt&
++CbfProfileService::PendingPermissionPrompt::operator=(PendingPermissionPrompt&&) =
++    default;
++
+ CbfProfileService::CbfProfileService(::Profile* profile,
+                                      CbfBrowserService* browser_service)
+     : profile_(profile),
+@@ -186,6 +196,8 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+ 
+ CbfProfileService::~CbfProfileService() {
+   profile_observation_.Reset();
++  ResolvePendingPermissionPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult::kAborted);
+   const std::vector<TabId> tab_ids = GetAllTabIds();
+   for (const TabId tab_id : tab_ids) {
+     if (tab_id == kInvalidTabId) {
+@@ -487,6 +499,35 @@ bool CbfProfileService::RequestAuxiliaryInstallPromptForWebstore(
+   return true;
+ }
+ 
++bool CbfProfileService::RequestPermissionPromptForWebContents(
++    content::WebContents* web_contents,
++    mojom::CbfPromptUiPermissionType permission,
++    const std::string& permission_key,
++    base::WeakPtr<permissions::PermissionPrompt::Delegate> delegate) {
++  if (!web_contents || !delegate || !observer_) {
++    return false;
++  }
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
++    return false;
++  }
++  ResolvePendingPermissionPromptsForTab(
++      tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
++
++  const uint64_t request_id = next_prompt_ui_request_id_++;
++  auto pending = PendingPermissionPrompt();
++  pending.tab_id = tab_id;
++  pending.permission = permission;
++  pending.permission_key = permission_key;
++  pending.delegate = std::move(delegate);
++  pending_permission_prompts_[request_id] = std::move(pending);
++
++  NotifyPromptUiRequested(tab_id, request_id,
++                          mojom::CbfPromptUiKind::kPermissionPrompt,
++                          permission, permission_key);
++  return true;
++}
++
+ void CbfProfileService::OpenDefaultAuxiliaryWindow(uint64_t tab_id,
+                                                    uint64_t request_id) {
+   auto it = pending_extension_prompts_.find(request_id);
+@@ -513,6 +554,46 @@ void CbfProfileService::RespondAuxiliaryWindow(
+   RespondAuxiliaryWindowImpl(request_id, std::move(response));
+ }
+ 
++void CbfProfileService::RespondPromptUi(uint64_t tab_id,
++                                        uint64_t request_id,
++                                        mojom::CbfPromptUiResponsePtr response) {
++  if (!response) {
++    return;
++  }
++  if (response->kind != mojom::CbfPromptUiKind::kPermissionPrompt) {
++    return;
++  }
++
++  auto it = pending_permission_prompts_.find(request_id);
++  if (it == pending_permission_prompts_.end()) {
++    return;
++  }
++  if (it->second.tab_id != tab_id) {
++    DCHECK(false);
++    return;
++  }
++
++  PendingPermissionPrompt pending = std::move(it->second);
++  pending_permission_prompts_.erase(it);
++
++  mojom::CbfPromptUiResolutionResult result =
++      mojom::CbfPromptUiResolutionResult::kAborted;
++  if (pending.delegate) {
++    PromptOptions prompt_options = std::monostate();
++    if (response->allow) {
++      pending.delegate->Accept(prompt_options);
++      result = mojom::CbfPromptUiResolutionResult::kAllowed;
++    } else {
++      pending.delegate->Deny(prompt_options);
++      result = mojom::CbfPromptUiResolutionResult::kDenied;
++    }
++  }
++
++  NotifyPromptUiResolved(tab_id, request_id,
++                         mojom::CbfPromptUiKind::kPermissionPrompt,
++                         pending.permission, pending.permission_key, result);
++}
++
+ void CbfProfileService::CloseAuxiliaryWindow(uint64_t tab_id,
+                                              uint64_t window_id) {
+   auto print_it = print_preview_window_to_dialog_.find(window_id);
+@@ -639,6 +720,8 @@ void CbfProfileService::NotifyNewWebPageRequested(
+ 
+ void CbfProfileService::NotifyWebPageClosed(TabId tab_id) {
+   if (tab_id != kInvalidTabId) {
++    ResolvePendingPermissionPromptsForTab(
++        tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
+     context_menu_controller_->OnWebPageClosed(tab_id);
+     input_controller_->OnWebPageClosed(tab_id);
+     ime_controller_->OnWebPageClosed(tab_id);
+@@ -976,6 +1059,98 @@ void CbfProfileService::NotifyAuxiliaryWindowClosed(
+   observer_->OnAuxiliaryWindowClosed(tab_id, window_id, kind, reason);
+ }
+ 
++void CbfProfileService::NotifyPromptUiRequested(
++    uint64_t tab_id,
++    uint64_t request_id,
++    mojom::CbfPromptUiKind kind,
++    mojom::CbfPromptUiPermissionType permission,
++    const std::string& permission_key) {
++  if (!observer_) {
++    return;
++  }
++  auto request = mojom::CbfPromptUiRequest::New();
++  request->request_id = request_id;
++  request->kind = kind;
++  request->permission = permission;
++  request->permission_key = permission_key;
++  observer_->OnPromptUiRequested(tab_id, std::move(request));
++}
++
++void CbfProfileService::NotifyPromptUiResolved(
++    uint64_t tab_id,
++    uint64_t request_id,
++    mojom::CbfPromptUiKind kind,
++    mojom::CbfPromptUiPermissionType permission,
++    const std::string& permission_key,
++    mojom::CbfPromptUiResolutionResult result) {
++  if (!observer_) {
++    return;
++  }
++  auto resolution = mojom::CbfPromptUiResolution::New();
++  resolution->request_id = request_id;
++  resolution->kind = kind;
++  resolution->permission = permission;
++  resolution->permission_key = permission_key;
++  resolution->result = result;
++  observer_->OnPromptUiResolved(tab_id, std::move(resolution));
++}
++
++void CbfProfileService::ResolvePendingPermissionPromptsForTab(
++    TabId tab_id,
++    mojom::CbfPromptUiResolutionResult result) {
++  if (tab_id == kInvalidTabId) {
++    return;
++  }
++
++  for (auto it = pending_permission_prompts_.begin();
++       it != pending_permission_prompts_.end();) {
++    if (it->second.tab_id != tab_id) {
++      ++it;
++      continue;
++    }
++    const uint64_t request_id = it->first;
++    const mojom::CbfPromptUiPermissionType permission = it->second.permission;
++    const std::string permission_key = it->second.permission_key;
++    const auto delegate = it->second.delegate;
++    it = pending_permission_prompts_.erase(it);
++    if (delegate) {
++      PromptOptions prompt_options = std::monostate();
++      if (result == mojom::CbfPromptUiResolutionResult::kAllowed) {
++        delegate->Accept(prompt_options);
++      } else {
++        delegate->Deny(prompt_options);
++      }
++    }
++    NotifyPromptUiResolved(tab_id, request_id,
++                           mojom::CbfPromptUiKind::kPermissionPrompt,
++                           permission, permission_key, result);
++  }
++}
++
++void CbfProfileService::ResolvePendingPermissionPromptsForShutdown(
++    mojom::CbfPromptUiResolutionResult result) {
++  for (auto it = pending_permission_prompts_.begin();
++       it != pending_permission_prompts_.end();) {
++    const uint64_t request_id = it->first;
++    const TabId tab_id = it->second.tab_id;
++    const mojom::CbfPromptUiPermissionType permission = it->second.permission;
++    const std::string permission_key = it->second.permission_key;
++    const auto delegate = it->second.delegate;
++    it = pending_permission_prompts_.erase(it);
++    if (delegate) {
++      PromptOptions prompt_options = std::monostate();
++      if (result == mojom::CbfPromptUiResolutionResult::kAllowed) {
++        delegate->Accept(prompt_options);
++      } else {
++        delegate->Deny(prompt_options);
++      }
++    }
++    NotifyPromptUiResolved(tab_id, request_id,
++                           mojom::CbfPromptUiKind::kPermissionPrompt,
++                           permission, permission_key, result);
++  }
++}
++
+ void CbfProfileService::TryAttachPrintPreviewDialog(TabId tab_id,
+                                                     int attempts_remaining) {
+   if (attempts_remaining < 0) {
+@@ -1080,6 +1255,8 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
+   }
+ 
+   profile_observation_.Reset();
++  ResolvePendingPermissionPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult::kAborted);
+   CloseAllWebPages();
+ }
+ 
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 6e9d4937bd271..164a2a38e659f 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -21,6 +21,7 @@
+ #include "chrome/browser/profiles/profile_observer.h"
+ #include "chrome/browser/tab_contents/web_contents_collection.h"
+ #include "chrome/browser/extensions/extension_install_prompt.h"
++#include "components/permissions/permission_prompt.h"
+ #include "content/public/browser/context_menu_params.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/common/drop_data.h"
+@@ -118,6 +119,9 @@ class CbfProfileService : public mojom::CbfProfileService,
+       uint64_t tab_id,
+       uint64_t request_id,
+       mojom::CbfAuxiliaryWindowResponsePtr response) override;
++  void RespondPromptUi(uint64_t tab_id,
++                       uint64_t request_id,
++                       mojom::CbfPromptUiResponsePtr response) override;
+   void CloseAuxiliaryWindow(uint64_t tab_id,
+                             uint64_t window_id) override;
+   void RespondTabOpen(
+@@ -127,6 +131,11 @@ class CbfProfileService : public mojom::CbfProfileService,
+       const extensions::Extension* extension,
+       const SkBitmap* icon,
+       ExtensionInstallPrompt::DoneCallback done_callback);
++  bool RequestPermissionPromptForWebContents(
++      content::WebContents* web_contents,
++      mojom::CbfPromptUiPermissionType permission,
++      const std::string& permission_key,
++      base::WeakPtr<permissions::PermissionPrompt::Delegate> delegate);
+ 
+   bool IsShutdownRequested() const;
+   void SetShutdownDialogAutoConfirm(bool enabled);
+@@ -199,6 +208,21 @@ class CbfProfileService : public mojom::CbfProfileService,
+     ExtensionInstallPrompt::DoneCallback done_callback;
+   };
+ 
++  struct PendingPermissionPrompt {
++    PendingPermissionPrompt();
++    ~PendingPermissionPrompt();
++    PendingPermissionPrompt(PendingPermissionPrompt&&);
++    PendingPermissionPrompt& operator=(PendingPermissionPrompt&&);
++    PendingPermissionPrompt(const PendingPermissionPrompt&) = delete;
++    PendingPermissionPrompt& operator=(const PendingPermissionPrompt&) = delete;
++
++    TabId tab_id = kInvalidTabId;
++    mojom::CbfPromptUiPermissionType permission =
++        mojom::CbfPromptUiPermissionType::kUnknown;
++    std::string permission_key;
++    base::WeakPtr<permissions::PermissionPrompt::Delegate> delegate;
++  };
++
+   void ResolveExtensionInstallPrompt(
+       uint64_t request_id,
+       mojom::CbfExtensionInstallPromptResult result,
+@@ -233,6 +257,22 @@ class CbfProfileService : public mojom::CbfProfileService,
+                                    uint64_t window_id,
+                                    mojom::CbfAuxiliaryWindowKind kind,
+                                    mojom::CbfAuxiliaryWindowCloseReason reason);
++  void NotifyPromptUiRequested(uint64_t tab_id,
++                               uint64_t request_id,
++                               mojom::CbfPromptUiKind kind,
++                               mojom::CbfPromptUiPermissionType permission,
++                               const std::string& permission_key);
++  void NotifyPromptUiResolved(uint64_t tab_id,
++                              uint64_t request_id,
++                              mojom::CbfPromptUiKind kind,
++                              mojom::CbfPromptUiPermissionType permission,
++                              const std::string& permission_key,
++                              mojom::CbfPromptUiResolutionResult result);
++  void ResolvePendingPermissionPromptsForTab(
++      TabId tab_id,
++      mojom::CbfPromptUiResolutionResult result);
++  void ResolvePendingPermissionPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult result);
+   void TryAttachPrintPreviewDialog(TabId tab_id, int attempts_remaining);
+   void RegisterPrintPreviewDialog(TabId tab_id,
+                                   content::WebContents* preview_dialog);
+@@ -265,8 +305,10 @@ class CbfProfileService : public mojom::CbfProfileService,
+   std::unique_ptr<CbfProfileDragController> drag_controller_;
+   std::unique_ptr<CbfProfileDevToolsController> devtools_controller_;
+   uint64_t next_auxiliary_request_id_ = 1;
++  uint64_t next_prompt_ui_request_id_ = 1;
+   uint64_t next_auxiliary_window_id_ = 1;
+   std::map<uint64_t, PendingExtensionInstallPrompt> pending_extension_prompts_;
++  std::map<uint64_t, PendingPermissionPrompt> pending_permission_prompts_;
+   std::map<uint64_t, uint64_t> auxiliary_window_to_prompt_request_;
+   std::map<raw_ptr<views::Widget>, uint64_t> auxiliary_widget_to_window_id_;
+   std::map<uint64_t, raw_ptr<content::WebContents>>
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index a9344f268b801..7289fc26e3d0e 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -55,6 +55,46 @@ enum CbfAuxiliaryWindowCloseReason {
+   kSystemDismissed,
+ };
+ 
++enum CbfPromptUiKind {
++  kUnknown,
++  kPermissionPrompt,
++};
++
++enum CbfPromptUiPermissionType {
++  kUnknown,
++  kGeolocation,
++  kNotifications,
++  kAudioCapture,
++  kVideoCapture,
++};
++
++enum CbfPromptUiResolutionResult {
++  kUnknown,
++  kAllowed,
++  kDenied,
++  kAborted,
++};
++
++struct CbfPromptUiRequest {
++  uint64 request_id;
++  CbfPromptUiKind kind;
++  CbfPromptUiPermissionType permission;
++  string permission_key;
++};
++
++struct CbfPromptUiResponse {
++  CbfPromptUiKind kind;
++  bool allow;
++};
++
++struct CbfPromptUiResolution {
++  uint64 request_id;
++  CbfPromptUiKind kind;
++  CbfPromptUiPermissionType permission;
++  string permission_key;
++  CbfPromptUiResolutionResult result;
++};
++
+ enum CbfTabOpenHint {
+   kUnknown,
+   kCurrentContext,
+@@ -482,6 +522,8 @@ interface CbfProfileObserver {
+                                  CbfAuxiliaryWindowRequest request);
+   OnAuxiliaryWindowResolved(uint64 tab_id,
+                             CbfAuxiliaryWindowResolution resolution);
++  OnPromptUiRequested(uint64 tab_id, CbfPromptUiRequest request);
++  OnPromptUiResolved(uint64 tab_id, CbfPromptUiResolution resolution);
+   OnExtensionRuntimeWarning(uint64 tab_id, string detail);
+   OnAuxiliaryWindowOpened(uint64 tab_id,
+                           uint64 window_id,
+@@ -527,6 +569,7 @@ interface CbfProfileService {
+   RespondAuxiliaryWindow(uint64 tab_id,
+                          uint64 request_id,
+                          CbfAuxiliaryWindowResponse response);
++  RespondPromptUi(uint64 tab_id, uint64 request_id, CbfPromptUiResponse response);
+   CloseAuxiliaryWindow(uint64 tab_id, uint64 window_id);
+   RespondTabOpen(CbfTabOpenResponse response);
+ };
+diff --git a/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
+index 6e52a5623258d..052e898cc21dc 100644
+--- a/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
++++ b/chrome/browser/cbf/profile/cbf_web_contents_bootstrap.cc
+@@ -1,9 +1,12 @@
+ #include "chrome/browser/cbf/profile/cbf_web_contents_bootstrap.h"
+ 
+ #include "base/observer_list.h"
++#include "base/functional/bind.h"
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
++#include "chrome/browser/cbf/cbf_permission_prompt.h"
+ #include "chrome/browser/printing/printing_init.h"
++#include "components/permissions/permission_request_manager.h"
+ #include "components/web_modal/web_contents_modal_dialog_host.h"
+ #include "components/web_modal/web_contents_modal_dialog_manager.h"
+ #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
+@@ -156,6 +159,13 @@ void BootstrapCbfWebContents(content::WebContents* web_contents,
+ 
+   CbfWebContentsBootstrapMarker::CreateForWebContents(web_contents);
+   CbfWebModalDialogHandler::CreateForWebContents(web_contents);
++  permissions::PermissionRequestManager::CreateForWebContents(web_contents);
++  if (auto* permission_manager =
++          permissions::PermissionRequestManager::FromWebContents(
++              web_contents)) {
++    permission_manager->set_view_factory_for_testing(
++        base::BindRepeating(&CbfPermissionPrompt::Create));
++  }
+ 
+   if (mode == CbfWebContentsBootstrapMode::kStandalone) {
+     AttachExtensionRuntimeHelpers(web_contents, profile);
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index 2c29530eba7df..3166b37fa498d 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -104,6 +104,14 @@ void CbfTestProfileObserver::OnAuxiliaryWindowResolved(
+     uint64_t tab_id,
+     cbf::mojom::CbfAuxiliaryWindowResolutionPtr resolution) {}
+ 
++void CbfTestProfileObserver::OnPromptUiRequested(
++    uint64_t tab_id,
++    cbf::mojom::CbfPromptUiRequestPtr request) {}
++
++void CbfTestProfileObserver::OnPromptUiResolved(
++    uint64_t tab_id,
++    cbf::mojom::CbfPromptUiResolutionPtr resolution) {}
++
+ void CbfTestProfileObserver::OnExtensionRuntimeWarning(
+     uint64_t tab_id,
+     const std::string& detail) {}
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index 538e24b413274..cf3045a29f44c 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -78,6 +78,11 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void OnAuxiliaryWindowResolved(
+       uint64_t tab_id,
+       cbf::mojom::CbfAuxiliaryWindowResolutionPtr resolution) override;
++  void OnPromptUiRequested(uint64_t tab_id,
++                           cbf::mojom::CbfPromptUiRequestPtr request) override;
++  void OnPromptUiResolved(
++      uint64_t tab_id,
++      cbf::mojom::CbfPromptUiResolutionPtr resolution) override;
+   void OnExtensionRuntimeWarning(uint64_t tab_id,
+                                  const std::string& detail) override;
+   void OnAuxiliaryWindowOpened(uint64_t tab_id,
+-- 
+2.50.1 (Apple Git-155)
+

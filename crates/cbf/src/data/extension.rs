@@ -17,6 +17,26 @@ pub enum ExtensionInstallPromptResult {
     Aborted,
 }
 
+/// Browser-generic permission categories used by permission prompt UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PermissionPromptType {
+    Geolocation,
+    Notifications,
+    AudioCapture,
+    VideoCapture,
+    Other(String),
+    Unknown,
+}
+
+/// Browser-generic result for permission prompt resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionPromptResult {
+    Allowed,
+    Denied,
+    Aborted,
+    Unknown,
+}
+
 /// Stable id for a backend-managed auxiliary dialog/window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AuxiliaryWindowId(u64);
@@ -39,6 +59,9 @@ pub enum AuxiliaryWindowKind {
         extension_name: String,
         permission_names: Vec<String>,
     },
+    PermissionPrompt {
+        permission: PermissionPromptType,
+    },
     PrintPreviewDialog,
     Unknown,
 }
@@ -47,6 +70,7 @@ pub enum AuxiliaryWindowKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuxiliaryWindowResponse {
     ExtensionInstallPrompt { proceed: bool },
+    PermissionPrompt { allow: bool },
     Unknown,
 }
 
@@ -57,6 +81,10 @@ pub enum AuxiliaryWindowResolution {
         extension_id: String,
         result: ExtensionInstallPromptResult,
         detail: Option<String>,
+    },
+    PermissionPrompt {
+        permission: PermissionPromptType,
+        result: PermissionPromptResult,
     },
     Unknown,
 }

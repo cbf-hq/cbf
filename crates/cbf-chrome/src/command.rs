@@ -13,6 +13,7 @@ use cbf::{
 use crate::data::{
     ids::TabId,
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+    prompt_ui::PromptUiResponse,
 };
 
 /// Chromium-specific transport command vocabulary.
@@ -136,6 +137,11 @@ pub enum ChromeCommand {
         request_id: u64,
         response: AuxiliaryWindowResponse,
     },
+    RespondPromptUi {
+        browsing_context_id: TabId,
+        request_id: u64,
+        response: PromptUiResponse,
+    },
     CloseAuxiliaryWindow {
         browsing_context_id: TabId,
         window_id: AuxiliaryWindowId,
@@ -175,10 +181,10 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id,
                 request_id,
                 allow,
-            } => Self::ConfirmPermission {
+            } => Self::RespondPromptUi {
                 browsing_context_id: browsing_context_id.into(),
                 request_id,
-                allow,
+                response: PromptUiResponse::PermissionPrompt { allow },
             },
             BrowserCommand::CreateBrowsingContext {
                 request_id,
@@ -312,10 +318,17 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id,
                 request_id,
                 response,
-            } => Self::RespondAuxiliaryWindow {
-                browsing_context_id: browsing_context_id.into(),
-                request_id,
-                response,
+            } => match response {
+                AuxiliaryWindowResponse::PermissionPrompt { allow } => Self::RespondPromptUi {
+                    browsing_context_id: browsing_context_id.into(),
+                    request_id,
+                    response: PromptUiResponse::PermissionPrompt { allow },
+                },
+                other => Self::RespondAuxiliaryWindow {
+                    browsing_context_id: browsing_context_id.into(),
+                    request_id,
+                    response: other,
+                },
             },
             BrowserCommand::CloseAuxiliaryWindow {
                 browsing_context_id,
@@ -344,10 +357,13 @@ impl From<BrowserCommand> for ChromeCommand {
 
 #[cfg(test)]
 mod tests {
-    use cbf::{command::BrowserCommand, data::ids::BrowsingContextId};
+    use cbf::{
+        command::BrowserCommand,
+        data::{extension::AuxiliaryWindowResponse, ids::BrowsingContextId},
+    };
 
     use super::ChromeCommand;
-    use crate::data::ids::TabId;
+    use crate::data::{ids::TabId, prompt_ui::PromptUiResponse};
 
     #[test]
     fn create_close_command_converts_browsing_context_id_into_tab_id() {
@@ -361,6 +377,44 @@ mod tests {
             ChromeCommand::RequestCloseWebContents {
                 browsing_context_id
             } if browsing_context_id == TabId::new(42)
+        ));
+    }
+
+    #[test]
+    fn confirm_permission_maps_to_prompt_ui_response() {
+        let command = BrowserCommand::ConfirmPermission {
+            browsing_context_id: BrowsingContextId::new(9),
+            request_id: 77,
+            allow: true,
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::RespondPromptUi {
+                browsing_context_id,
+                request_id,
+                response: PromptUiResponse::PermissionPrompt { allow: true },
+            } if browsing_context_id == TabId::new(9) && request_id == 77
+        ));
+    }
+
+    #[test]
+    fn permission_auxiliary_response_maps_to_prompt_ui_response() {
+        let command = BrowserCommand::RespondAuxiliaryWindow {
+            browsing_context_id: BrowsingContextId::new(13),
+            request_id: 81,
+            response: AuxiliaryWindowResponse::PermissionPrompt { allow: false },
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::RespondPromptUi {
+                browsing_context_id,
+                request_id,
+                response: PromptUiResponse::PermissionPrompt { allow: false },
+            } if browsing_context_id == TabId::new(13) && request_id == 81
         ));
     }
 }

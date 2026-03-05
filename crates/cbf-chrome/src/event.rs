@@ -1,5 +1,9 @@
 use cbf::{
     data::{
+        extension::{
+            AuxiliaryWindowKind, AuxiliaryWindowResolution, PermissionPromptResult,
+            PermissionPromptType,
+        },
         ids::WindowId,
         profile::ProfileInfo,
         window_open::{
@@ -14,7 +18,12 @@ use cbf::{
     event::{BrowserEvent, BrowsingContextEvent, DialogType},
 };
 
-use crate::data::tab_open::{TabOpenHint, TabOpenResult};
+use crate::data::{
+    prompt_ui::{
+        PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
+    },
+    tab_open::{TabOpenHint, TabOpenResult},
+};
 use crate::ffi::IpcEvent;
 
 /// Chromium-specific raw event stream payload.
@@ -130,14 +139,15 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             _ => Some(BrowserEvent::BrowsingContextOpenRequested {
                 profile_id: profile_id.clone(),
                 request_id: *request_id,
-                source_browsing_context_id: source_tab_id
-                    .map(|id| id.to_browsing_context_id()),
+                source_browsing_context_id: source_tab_id.map(|id| id.to_browsing_context_id()),
                 target_url: target_url.clone(),
-                open_hint: open_hint.to_browsing_context_open_hint().unwrap_or_else(|| {
-                    unreachable!(
-                        "window-oriented tab-open hints are mapped to WindowOpenRequested"
-                    )
-                }),
+                open_hint: open_hint
+                    .to_browsing_context_open_hint()
+                    .unwrap_or_else(|| {
+                        unreachable!(
+                            "window-oriented tab-open hints are mapped to WindowOpenRequested"
+                        )
+                    }),
                 user_gesture: *user_gesture,
             }),
         },
@@ -146,9 +156,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             request_id,
             result,
         } => match result {
-            TabOpenResult::OpenedNewTab {
-                tab_id,
-            } => Some(BrowserEvent::WindowOpenResolved {
+            TabOpenResult::OpenedNewTab { tab_id } => Some(BrowserEvent::WindowOpenResolved {
                 profile_id: profile_id.clone(),
                 request_id: *request_id,
                 result: WindowOpenResult::OpenedNewWindow {
@@ -320,6 +328,32 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 resolution: resolution.clone(),
             }),
         }),
+        IpcEvent::PromptUiRequested {
+            profile_id,
+            browsing_context_id,
+            request_id,
+            kind,
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(BrowsingContextEvent::AuxiliaryWindowOpenRequested {
+                request_id: *request_id,
+                kind: prompt_ui_kind_to_auxiliary_window_kind(kind),
+            }),
+        }),
+        IpcEvent::PromptUiResolved {
+            profile_id,
+            browsing_context_id,
+            request_id,
+            resolution,
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(BrowsingContextEvent::AuxiliaryWindowResolved {
+                request_id: *request_id,
+                resolution: prompt_ui_resolution_to_auxiliary_window_resolution(resolution),
+            }),
+        }),
         IpcEvent::ExtensionRuntimeWarning {
             profile_id,
             browsing_context_id,
@@ -387,15 +421,82 @@ fn synthetic_window_descriptor(
     }
 }
 
+fn prompt_ui_permission_to_permission_prompt_type(
+    permission: &PromptUiPermissionType,
+    permission_key: Option<&str>,
+) -> PermissionPromptType {
+    match permission {
+        PromptUiPermissionType::Geolocation => PermissionPromptType::Geolocation,
+        PromptUiPermissionType::Notifications => PermissionPromptType::Notifications,
+        PromptUiPermissionType::AudioCapture => PermissionPromptType::AudioCapture,
+        PromptUiPermissionType::VideoCapture => PermissionPromptType::VideoCapture,
+        PromptUiPermissionType::Unknown => permission_key
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| PermissionPromptType::Other(value.to_string()))
+            .unwrap_or(PermissionPromptType::Unknown),
+    }
+}
+
+fn prompt_ui_kind_to_auxiliary_window_kind(kind: &PromptUiKind) -> AuxiliaryWindowKind {
+    match kind {
+        PromptUiKind::PermissionPrompt {
+            permission,
+            permission_key,
+        } => AuxiliaryWindowKind::PermissionPrompt {
+            permission: prompt_ui_permission_to_permission_prompt_type(
+                permission,
+                permission_key.as_deref(),
+            ),
+        },
+        PromptUiKind::Unknown => AuxiliaryWindowKind::Unknown,
+    }
+}
+
+fn prompt_ui_resolution_to_auxiliary_window_resolution(
+    resolution: &PromptUiResolution,
+) -> AuxiliaryWindowResolution {
+    match resolution {
+        PromptUiResolution::PermissionPrompt {
+            permission,
+            permission_key,
+            result,
+        } => {
+            AuxiliaryWindowResolution::PermissionPrompt {
+                permission: prompt_ui_permission_to_permission_prompt_type(
+                    permission,
+                    permission_key.as_deref(),
+                ),
+                result: match result {
+                    PromptUiResolutionResult::Allowed => PermissionPromptResult::Allowed,
+                    PromptUiResolutionResult::Denied => PermissionPromptResult::Denied,
+                    PromptUiResolutionResult::Aborted => PermissionPromptResult::Aborted,
+                    PromptUiResolutionResult::Unknown => PermissionPromptResult::Unknown,
+                },
+            }
+        }
+        PromptUiResolution::Unknown => AuxiliaryWindowResolution::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use cbf::{
-        data::ids::BrowsingContextId,
+        data::{
+            extension::{
+                AuxiliaryWindowKind, AuxiliaryWindowResolution, PermissionPromptResult,
+                PermissionPromptType,
+            },
+            ids::BrowsingContextId,
+        },
         event::{BrowserEvent, BrowsingContextEvent},
     };
 
     use super::map_ipc_event_to_generic;
-    use crate::{data::ids::TabId, ffi::IpcEvent};
+    use crate::{
+        data::{ids::TabId, prompt_ui::PromptUiKind},
+        ffi::IpcEvent,
+    };
 
     #[test]
     fn web_contents_created_maps_tab_id_into_browsing_context_id() {
@@ -432,6 +533,104 @@ mod tests {
                 dirty_browsing_context_ids
             } if dirty_browsing_context_ids
                 == vec![BrowsingContextId::new(2), BrowsingContextId::new(3)]
+        ));
+    }
+
+    #[test]
+    fn prompt_ui_requested_maps_into_permission_auxiliary_window() {
+        let event = IpcEvent::PromptUiRequested {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(44),
+            request_id: 12,
+            kind: PromptUiKind::PermissionPrompt {
+                permission: crate::data::prompt_ui::PromptUiPermissionType::Geolocation,
+                permission_key: None,
+            },
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::BrowsingContext {
+                browsing_context_id,
+                event,
+                ..
+            } if browsing_context_id == BrowsingContextId::new(44)
+                && matches!(
+                    *event,
+                    BrowsingContextEvent::AuxiliaryWindowOpenRequested {
+                        request_id: 12,
+                        kind: AuxiliaryWindowKind::PermissionPrompt {
+                            permission: PermissionPromptType::Geolocation
+                        }
+                    }
+                )
+        ));
+    }
+
+    #[test]
+    fn prompt_ui_resolved_maps_into_permission_auxiliary_resolution() {
+        let event = IpcEvent::PromptUiResolved {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(44),
+            request_id: 12,
+            resolution: crate::data::prompt_ui::PromptUiResolution::PermissionPrompt {
+                permission: crate::data::prompt_ui::PromptUiPermissionType::Geolocation,
+                permission_key: None,
+                result: crate::data::prompt_ui::PromptUiResolutionResult::Denied,
+            },
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::BrowsingContext {
+                browsing_context_id,
+                event,
+                ..
+            } if browsing_context_id == BrowsingContextId::new(44)
+                && matches!(
+                    *event,
+                    BrowsingContextEvent::AuxiliaryWindowResolved {
+                        request_id: 12,
+                        resolution: AuxiliaryWindowResolution::PermissionPrompt {
+                            permission: PermissionPromptType::Geolocation,
+                            result: PermissionPromptResult::Denied
+                        }
+                    }
+                )
+        ));
+    }
+
+    #[test]
+    fn prompt_ui_requested_maps_unknown_with_key_to_other_permission_prompt() {
+        let event = IpcEvent::PromptUiRequested {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(44),
+            request_id: 12,
+            kind: PromptUiKind::PermissionPrompt {
+                permission: crate::data::prompt_ui::PromptUiPermissionType::Unknown,
+                permission_key: Some("window_management".to_string()),
+            },
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::BrowsingContext {
+                browsing_context_id,
+                event,
+                ..
+            } if browsing_context_id == BrowsingContextId::new(44)
+                && matches!(
+                    *event,
+                    BrowsingContextEvent::AuxiliaryWindowOpenRequested {
+                        request_id: 12,
+                        kind: AuxiliaryWindowKind::PermissionPrompt {
+                            permission: PermissionPromptType::Other(ref key)
+                        }
+                    } if key == "window_management"
+                )
         ));
     }
 }
