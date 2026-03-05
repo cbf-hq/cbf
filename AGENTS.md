@@ -35,7 +35,9 @@ This repository does not own:
 
 Dependency direction:
 
-`Application -> cbf -> cbf-chrome -> cbf-chrome-sys -> Chromium process`
+- `Application -> cbf + cbf-chrome`
+- `cbf-chrome -> cbf + cbf-chrome-sys`
+- `cbf-chrome-sys -> cbf_bridge <--- IPC ---> Chromium process`
 
 Hard rules:
 
