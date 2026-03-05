@@ -674,3 +674,61 @@ impl ChromiumBackend {
         result.map_err(|source| CommandExecutionError::from_ipc_call(operation, source))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        mem::MaybeUninit,
+        sync::mpsc,
+        thread,
+        time::Duration,
+    };
+
+    use cbf::{
+        browser::{Backend, EventStream, RawOpaqueEventExt},
+        delegate::NoopDelegate,
+        event::BackendStopReason,
+    };
+
+    use super::{ChromeEvent, ChromiumBackend, ChromiumBackendOptions, IpcClient};
+
+    fn null_ipc_client() -> IpcClient {
+        // SAFETY: `IpcClient` is a raw pointer wrapper. A null pointer is a valid
+        // inert state for this test path because `poll_event`/`drop` both handle null.
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+
+    fn recv_raw_event_with_timeout(
+        events: &EventStream<ChromiumBackend>,
+        timeout: Duration,
+    ) -> ChromeEvent {
+        let events = events.clone();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let event = events.recv_blocking().map(|opaque| opaque.as_raw().clone());
+            let _ = tx.send(event);
+        });
+
+        rx.recv_timeout(timeout)
+            .expect("timed out waiting for backend event")
+            .expect("event stream closed unexpectedly")
+    }
+
+    #[test]
+    fn dropping_all_command_senders_emits_disconnected_stop_event() {
+        let backend = ChromiumBackend::new(ChromiumBackendOptions::new(), null_ipc_client());
+        let (command_tx, events) = backend.connect(NoopDelegate, None).unwrap();
+        drop(command_tx);
+
+        let ready = recv_raw_event_with_timeout(&events, Duration::from_secs(1));
+        assert!(matches!(ready, ChromeEvent::BackendReady));
+
+        let stopped = recv_raw_event_with_timeout(&events, Duration::from_secs(1));
+        assert!(matches!(
+            stopped,
+            ChromeEvent::BackendStopped {
+                reason: BackendStopReason::Disconnected
+            }
+        ));
+    }
+}
