@@ -13,15 +13,15 @@ pub enum TabOpenHint {
     Popup,
 }
 
-impl From<TabOpenHint> for BrowsingContextOpenHint {
-    fn from(value: TabOpenHint) -> Self {
-        match value {
-            TabOpenHint::Unknown => Self::Unknown,
-            TabOpenHint::CurrentTab => Self::CurrentContext,
-            TabOpenHint::NewForegroundTab => Self::NewForegroundContext,
-            TabOpenHint::NewBackgroundTab => Self::NewBackgroundContext,
-            TabOpenHint::NewWindow => Self::NewWindow,
-            TabOpenHint::Popup => Self::Popup,
+impl TabOpenHint {
+    /// Convert into generic-layer hint only for non-window-open cases.
+    pub const fn to_browsing_context_open_hint(self) -> Option<BrowsingContextOpenHint> {
+        match self {
+            TabOpenHint::Unknown => Some(BrowsingContextOpenHint::Unknown),
+            TabOpenHint::CurrentTab => Some(BrowsingContextOpenHint::CurrentContext),
+            TabOpenHint::NewForegroundTab => Some(BrowsingContextOpenHint::NewForegroundContext),
+            TabOpenHint::NewBackgroundTab => Some(BrowsingContextOpenHint::NewBackgroundContext),
+            TabOpenHint::NewWindow | TabOpenHint::Popup => None,
         }
     }
 }
@@ -33,8 +33,6 @@ impl From<BrowsingContextOpenHint> for TabOpenHint {
             BrowsingContextOpenHint::CurrentContext => Self::CurrentTab,
             BrowsingContextOpenHint::NewForegroundContext => Self::NewForegroundTab,
             BrowsingContextOpenHint::NewBackgroundContext => Self::NewBackgroundTab,
-            BrowsingContextOpenHint::NewWindow => Self::NewWindow,
-            BrowsingContextOpenHint::Popup => Self::Popup,
         }
     }
 }
@@ -97,9 +95,10 @@ mod tests {
             TabOpenHint::CurrentTab
         );
         assert_eq!(
-            BrowsingContextOpenHint::from(TabOpenHint::NewBackgroundTab),
-            BrowsingContextOpenHint::NewBackgroundContext
+            TabOpenHint::NewBackgroundTab.to_browsing_context_open_hint(),
+            Some(BrowsingContextOpenHint::NewBackgroundContext)
         );
+        assert_eq!(TabOpenHint::Popup.to_browsing_context_open_hint(), None);
     }
 
     #[test]

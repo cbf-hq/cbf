@@ -399,9 +399,6 @@ impl CoreState {
                     "browsing context open requested: request_id={request_id}, source={source_browsing_context_id:?}, target_url={target_url}, hint={open_hint:?}, user_gesture={user_gesture}"
                 );
                 let response = match open_hint {
-                    BrowsingContextOpenHint::NewWindow | BrowsingContextOpenHint::Popup => {
-                        BrowsingContextOpenResponse::AllowNewContext { activate: true }
-                    }
                     BrowsingContextOpenHint::Unknown
                     | BrowsingContextOpenHint::CurrentContext
                     | BrowsingContextOpenHint::NewForegroundContext

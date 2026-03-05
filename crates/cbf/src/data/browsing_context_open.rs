@@ -7,8 +7,6 @@ pub enum BrowsingContextOpenHint {
     CurrentContext,
     NewForegroundContext,
     NewBackgroundContext,
-    NewWindow,
-    Popup,
 }
 
 /// Host decision for an open request.

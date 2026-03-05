@@ -133,7 +133,11 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 source_browsing_context_id: source_tab_id
                     .map(|id| id.to_browsing_context_id()),
                 target_url: target_url.clone(),
-                open_hint: (*open_hint).into(),
+                open_hint: open_hint.to_browsing_context_open_hint().unwrap_or_else(|| {
+                    unreachable!(
+                        "window-oriented tab-open hints are mapped to WindowOpenRequested"
+                    )
+                }),
                 user_gesture: *user_gesture,
             }),
         },
