@@ -1,0 +1,526 @@
+From 10a1021dd6062c9c015de1575c52b8840789311f Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 5 Mar 2026 09:39:18 +0900
+Subject: [PATCH 15/15] Stabilize history behavior in embedded CBF tabs
+
+---
+ .../cbf/cbf_embedded_browser_window.cc        | 20 +++++
+ .../browser/cbf/cbf_embedded_browser_window.h |  4 +
+ chrome/browser/cbf/cbf_profile_service.cc     | 11 +++
+ .../cbf/cbf_profile_service_browsertest.cc    | 85 +++++++++++++++++++
+ ...profile_devtools_controller_browsertest.cc | 14 +++
+ chrome/browser/resources/history/app.html.ts  |  2 +-
+ chrome/browser/resources/history/app.ts       | 27 ++++--
+ .../resources/history/side_bar.html.ts        | 38 +++++----
+ chrome/browser/resources/history/side_bar.ts  |  6 ++
+ .../webui/history/browsing_history_handler.cc | 13 +++
+ chrome/browser/ui/webui/history/history_ui.cc | 24 ++++--
+ 11 files changed, 209 insertions(+), 35 deletions(-)
+
+diff --git a/chrome/browser/cbf/cbf_embedded_browser_window.cc b/chrome/browser/cbf/cbf_embedded_browser_window.cc
+index da2dd78c8556d..76d8f2d5c92ac 100644
+--- a/chrome/browser/cbf/cbf_embedded_browser_window.cc
++++ b/chrome/browser/cbf/cbf_embedded_browser_window.cc
+@@ -19,6 +19,7 @@
+ #include "chrome/browser/ui/browser_list_observer.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
++#include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "chrome/browser/ui/dialogs/browser_dialogs.h"
+ #include "chrome/browser/ui/find_bar/find_bar.h"
+ #include "chrome/browser/ui/location_bar/location_bar.h"
+@@ -476,8 +477,27 @@ Browser* CreateCbfEmbeddedBrowser(Profile* profile, bool for_devtools) {
+   Browser::CreateParams params =
+       for_devtools ? Browser::CreateParams::CreateForDevTools(profile)
+                    : Browser::CreateParams(profile, /*user_gesture=*/false);
++  params.omit_from_session_restore = true;
++  params.should_trigger_session_restore = false;
++  params.trusted_source = true;
+   params.window = new CbfEmbeddedBrowserWindow();
+   return Browser::Create(params);
+ }
+ 
++bool IsCbfEmbeddedBrowser(content::WebContents* web_contents) {
++  if (!web_contents) {
++    return false;
++  }
++
++  BrowserWindowInterface* browser_window_interface =
++      webui::GetBrowserWindowInterface(web_contents);
++  if (!browser_window_interface) {
++    return false;
++  }
++
++  Browser* browser = browser_window_interface->GetBrowserForMigrationOnly();
++  return browser && browser->omit_from_session_restore() &&
++         browser->window() && browser->window()->AsBrowserView() == nullptr;
++}
++
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_embedded_browser_window.h b/chrome/browser/cbf/cbf_embedded_browser_window.h
+index 2560c157d1bfa..91e48712a1e6f 100644
+--- a/chrome/browser/cbf/cbf_embedded_browser_window.h
++++ b/chrome/browser/cbf/cbf_embedded_browser_window.h
+@@ -3,12 +3,16 @@
+ 
+ class Browser;
+ class Profile;
++namespace content {
++class WebContents;
++}
+ 
+ namespace cbf {
+ 
+ // Creates a browser-backed shell for embedded CBF tabs without creating a
+ // visible Chromium browser window.
+ Browser* CreateCbfEmbeddedBrowser(Profile* profile, bool for_devtools);
++bool IsCbfEmbeddedBrowser(content::WebContents* web_contents);
+ 
+ }  // namespace cbf
+ 
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index b391256a7b814..dea6666f12bdd 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -186,6 +186,17 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+ 
+ CbfProfileService::~CbfProfileService() {
+   profile_observation_.Reset();
++  const std::vector<TabId> tab_ids = GetAllTabIds();
++  for (const TabId tab_id : tab_ids) {
++    if (tab_id == kInvalidTabId) {
++      continue;
++    }
++    context_menu_controller_->OnWebPageClosed(tab_id);
++    input_controller_->OnWebPageClosed(tab_id);
++    ime_controller_->OnWebPageClosed(tab_id);
++    drag_controller_->OnWebPageClosed(tab_id);
++    devtools_controller_->OnWebPageClosed(tab_id);
++  }
+   CloseAllWebPages();
+ }
+ 
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index c9160f426b337..5c964c01b33f2 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -10,12 +10,15 @@
+ #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
+ #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
+ #include "chrome/browser/ui/browser.h"
++#include "chrome/common/url_constants.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "chrome/test/base/in_process_browser_test.h"
+ #include "components/tabs/public/tab_interface.h"
++#include "content/public/browser/web_contents.h"
+ #include "content/public/test/browser_test.h"
++#include "content/public/test/browser_test_utils.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+ namespace cbf {
+@@ -30,6 +33,20 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
+   }
+ 
++  void TearDownOnMainThread() override {
++    if (profile_service_) {
++      const auto tab_ids = profile_service_->GetAllTabIds();
++      for (TabId tab_id : tab_ids) {
++        profile_service_->NotifyWebPageClosed(tab_id);
++      }
++      profile_service_->CloseAllWebPages();
++      base::RunLoop().RunUntilIdle();
++      profile_service_.reset();
++    }
++
++    InProcessBrowserTest::TearDownOnMainThread();
++  }
++
+   TabId CreatePage(const std::string& url = "about:blank") {
+     TabId created_id = kInvalidTabId;
+     base::RunLoop run_loop;
+@@ -71,6 +88,13 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     return host_browser->window() ? host_browser : nullptr;
+   }
+ 
++  void WaitForLoad(TabId tab_id) {
++    content::WebContents* web_contents =
++        profile_service_->GetWebContentsForTesting(tab_id);
++    ASSERT_NE(web_contents, nullptr);
++    ASSERT_TRUE(content::WaitForLoadStop(web_contents));
++  }
++
+   std::unique_ptr<CbfProfileService> profile_service_;
+   cbf::test::CbfTestProfileObserver observer_;
+ };
+@@ -138,6 +162,8 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, UsesEmbeddedBrowserWindow)
+   EXPECT_EQ(host_browser->window()->AsBrowserView(), nullptr);
+   EXPECT_EQ(host_browser->window()->GetNativeWindow(), gfx::NativeWindow());
+   EXPECT_FALSE(host_browser->window()->IsVisibleOnScreen());
++  EXPECT_TRUE(host_browser->omit_from_session_restore());
++  EXPECT_FALSE(host_browser->should_trigger_session_restore());
+ }
+ 
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+@@ -188,6 +214,65 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   EXPECT_FALSE(host_browser->window()->IsLocationBarVisible());
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       HistoryPageHidesSyncedTabsUiInCbfTabs) {
++  const TabId tab_id = CreatePage("chrome://history");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  EXPECT_EQ(true, content::EvalJs(web_contents, R"(
++    (async () => {
++      await customElements.whenDefined('history-app');
++      await customElements.whenDefined('history-side-bar');
++      await new Promise(resolve => requestAnimationFrame(resolve));
++
++      const app = document.querySelector('history-app');
++      if (!app) {
++        return false;
++      }
++
++      const sideBar = app?.shadowRoot?.querySelector('#contentSideBar');
++      if (!sideBar) {
++        return false;
++      }
++
++      return !sideBar?.shadowRoot?.querySelector('#syncedTabs');
++    })();
++  )"));
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       HistoryPageHidesClearBrowsingDataActionInCbfTabs) {
++  const TabId tab_id = CreatePage("chrome://history");
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  EXPECT_EQ(true, content::EvalJs(web_contents, R"(
++    (async () => {
++      await customElements.whenDefined('history-app');
++      await customElements.whenDefined('history-side-bar');
++      await new Promise(resolve => requestAnimationFrame(resolve));
++
++      const app = document.querySelector('history-app');
++      const sideBar = app?.shadowRoot?.querySelector('#contentSideBar');
++      if (!sideBar) {
++        return false;
++      }
++      return !sideBar.shadowRoot?.querySelector('#clear-browsing-data');
++    })();
++  )"));
++}
++
+ #if BUILDFLAG(IS_MAC)
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        InstallsSurfaceObserverForCreatedPage) {
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+index 952d00a42fbbe..08228fdc0f828 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+@@ -24,6 +24,20 @@ class CbfProfileDevToolsControllerBrowserTest : public InProcessBrowserTest {
+     profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
+   }
+ 
++  void TearDownOnMainThread() override {
++    if (profile_service_) {
++      const auto tab_ids = profile_service_->GetAllTabIds();
++      for (TabId tab_id : tab_ids) {
++        profile_service_->NotifyWebPageClosed(tab_id);
++      }
++      profile_service_->CloseAllWebPages();
++      base::RunLoop().RunUntilIdle();
++      profile_service_.reset();
++    }
++
++    InProcessBrowserTest::TearDownOnMainThread();
++  }
++
+   TabId CreatePage() {
+     TabId created_id = kInvalidTabId;
+     base::RunLoop run_loop;
+diff --git a/chrome/browser/resources/history/app.html.ts b/chrome/browser/resources/history/app.html.ts
+index 07a9e6b644133..0379ae1acf23c 100644
+--- a/chrome/browser/resources/history/app.html.ts
++++ b/chrome/browser/resources/history/app.html.ts
+@@ -136,7 +136,7 @@ export function getHtml(this: HistoryAppElement) {
+             </cr-page-selector>
+           </div>
+         </div>
+-        ${this.syncedTabsSelected_() ? html`
++        ${this.showSyncedTabs_ && this.syncedTabsSelected_() ? html`
+           <div id="syncedDevicesScroll" class="cr-scrollable" path="syncedTabs">
+             <div class="cr-scrollable-top-shadow"></div>
+             <history-synced-device-manager id="synced-devices"
+diff --git a/chrome/browser/resources/history/app.ts b/chrome/browser/resources/history/app.ts
+index 0d1a352334568..db232a903602c 100644
+--- a/chrome/browser/resources/history/app.ts
++++ b/chrome/browser/resources/history/app.ts
+@@ -154,6 +154,7 @@ export class HistoryAppElement extends HistoryAppElementBase {
+       historyClustersEnabled_: {type: Boolean},
+       historyClustersVisible_: {type: Boolean},
+       lastSelectedTab_: {type: Number},
++      showSyncedTabs_: {type: Boolean},
+       showHistoryClusters_: {
+         type: Boolean,
+         reflect: true,
+@@ -205,6 +206,8 @@ export class HistoryAppElement extends HistoryAppElementBase {
+   };
+   protected accessor lastSelectedTab_: number =
+       loadTimeData.getInteger('lastSelectedTab');
++  protected accessor showSyncedTabs_: boolean =
++      loadTimeData.getBoolean('showSyncedTabs');
+   protected accessor contentPage_: string = Page.HISTORY;
+   protected accessor tabsContentPage_: string = Page.HISTORY;
+   protected accessor pendingDelete_: boolean = false;
+@@ -274,13 +277,15 @@ export class HistoryAppElement extends HistoryAppElementBase {
+         'history-identity-state-changed',
+         (identityState: HistoryIdentityState) =>
+             this.onIdentityStateChanged_(identityState));
+-    this.addWebUiListener(
+-        'foreign-sessions-changed',
+-        (sessionList: ForeignSession[]) =>
+-            this.setForeignSessions_(sessionList));
+     this.shadowRoot.querySelector('history-query-manager')!.initialize();
+-    this.browserService_.getForeignSessions().then(
+-        sessionList => this.setForeignSessions_(sessionList));
++    if (this.showSyncedTabs_) {
++      this.addWebUiListener(
++          'foreign-sessions-changed',
++          (sessionList: ForeignSession[]) =>
++              this.setForeignSessions_(sessionList));
++      this.browserService_.getForeignSessions().then(
++          sessionList => this.setForeignSessions_(sessionList));
++    }
+     this.browserService_.getInitialIdentityState().then(
+         (identityState: HistoryIdentityState) =>
+             this.onIdentityStateChanged_(identityState));
+@@ -618,7 +623,7 @@ export class HistoryAppElement extends HistoryAppElementBase {
+   }
+ 
+   protected syncedTabsSelected_(): boolean {
+-    return this.selectedPage_ === Page.SYNCED_TABS;
++    return this.showSyncedTabs_ && this.selectedPage_ === Page.SYNCED_TABS;
+   }
+ 
+   /**
+@@ -633,7 +638,8 @@ export class HistoryAppElement extends HistoryAppElementBase {
+   private updateContentPage_() {
+     switch (this.selectedPage_) {
+       case Page.SYNCED_TABS:
+-        this.contentPage_ = Page.SYNCED_TABS;
++        this.contentPage_ = this.showSyncedTabs_ ? Page.SYNCED_TABS :
++                                                   Page.HISTORY;
+         break;
+       default:
+         this.contentPage_ = Page.HISTORY;
+@@ -649,6 +655,11 @@ export class HistoryAppElement extends HistoryAppElementBase {
+   }
+ 
+   private selectedPageChanged_(oldPage: string) {
++    if (!this.showSyncedTabs_ && this.selectedPage_ === Page.SYNCED_TABS) {
++      this.selectedPage_ = Page.HISTORY;
++      return;
++    }
++
+     this.updateContentPage_();
+     this.updateTabsContentPage_();
+     this.unselectAll();
+diff --git a/chrome/browser/resources/history/side_bar.html.ts b/chrome/browser/resources/history/side_bar.html.ts
+index 40aebfd948c5b..7e5010f5bb96f 100644
+--- a/chrome/browser/resources/history/side_bar.html.ts
++++ b/chrome/browser/resources/history/side_bar.html.ts
+@@ -22,24 +22,26 @@ export function getHtml(this: HistorySideBarElement) {
+     $i18n{historyMenuItem}
+     <cr-ripple></cr-ripple>
+   </a>
+-  <a id="syncedTabs" role="menuitem" href="/syncedTabs"
+-      class="page-item cr-nav-menu-item"
+-      path="syncedTabs" @click="${this.onItemClick_}">
+-    <cr-icon icon="cr:phonelink"></cr-icon>
+-    $i18n{openTabsMenuItem}
+-    <cr-ripple></cr-ripple>
+-  </a>
+-  <a role="menuitem" id="clear-browsing-data"
+-      class="cr-nav-menu-item"
+-      href="chrome://settings/clearBrowserData"
+-      @click="${this.onClearBrowsingDataClick_}"
+-      ?disabled="${this.guestSession_}"
+-      title="$i18n{clearBrowsingDataLinkTooltip}">
+-    <cr-icon icon="cr:delete"></cr-icon>
+-    $i18n{clearBrowsingData}
+-    <div class="cr-icon icon-external"></div>
+-    <cr-ripple></cr-ripple>
+-  </a>
++  ${this.showSyncedTabs_ ? html`
++    <a id="syncedTabs" role="menuitem" href="/syncedTabs"
++        class="page-item cr-nav-menu-item"
++        path="syncedTabs" @click="${this.onItemClick_}">
++      <cr-icon icon="cr:phonelink"></cr-icon>
++      $i18n{openTabsMenuItem}
++      <cr-ripple></cr-ripple>
++    </a>` : ''}
++  ${this.showClearBrowsingData_ ? html`
++    <a role="menuitem" id="clear-browsing-data"
++        class="cr-nav-menu-item"
++        href="chrome://settings/clearBrowserData"
++        @click="${this.onClearBrowsingDataClick_}"
++        ?disabled="${this.guestSession_}"
++        title="$i18n{clearBrowsingDataLinkTooltip}">
++      <cr-icon icon="cr:delete"></cr-icon>
++      $i18n{clearBrowsingData}
++      <div class="cr-icon icon-external"></div>
++      <cr-ripple></cr-ripple>
++    </a>` : ''}
+ </cr-menu-selector>
+ <div id="spacer"></div>
+ <div id="footer" ?hidden="${!this.showFooter_}">
+diff --git a/chrome/browser/resources/history/side_bar.ts b/chrome/browser/resources/history/side_bar.ts
+index 9c213d6b8a30b..ca06b0c125ada 100644
+--- a/chrome/browser/resources/history/side_bar.ts
++++ b/chrome/browser/resources/history/side_bar.ts
+@@ -98,6 +98,8 @@ export class HistorySideBarElement extends CrLitElement {
+       showGAAOnly_: {type: Boolean},
+       showGMAAndGAA_: {type: Boolean},
+ 
++      showClearBrowsingData_: {type: Boolean},
++      showSyncedTabs_: {type: Boolean},
+       showHistoryClusters_: {type: Boolean},
+     };
+   }
+@@ -117,6 +119,10 @@ export class HistorySideBarElement extends CrLitElement {
+   protected accessor showGMAOnly_: boolean = false;
+   protected accessor showGAAOnly_: boolean = false;
+   protected accessor showGMAAndGAA_: boolean = false;
++  protected accessor showClearBrowsingData_: boolean =
++      loadTimeData.getBoolean('showClearBrowsingData');
++  protected accessor showSyncedTabs_: boolean =
++      loadTimeData.getBoolean('showSyncedTabs');
+   private accessor showHistoryClusters_: boolean = false;
+ 
+   override connectedCallback() {
+diff --git a/chrome/browser/ui/webui/history/browsing_history_handler.cc b/chrome/browser/ui/webui/history/browsing_history_handler.cc
+index 1ebfc1d09ab2b..f850b97d25143 100644
+--- a/chrome/browser/ui/webui/history/browsing_history_handler.cc
++++ b/chrome/browser/ui/webui/history/browsing_history_handler.cc
+@@ -22,6 +22,7 @@
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/time/default_clock.h"
+ #include "base/time/time.h"
++#include "chrome/browser/cbf/cbf_embedded_browser_window.h"
+ #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+ #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+ #include "chrome/browser/favicon/large_icon_service_factory.h"
+@@ -46,6 +47,7 @@
+ #include "chrome/browser/ui/webui/top_chrome/top_chrome_web_ui_controller.h"
+ #include "chrome/common/buildflags.h"
+ #include "chrome/common/chrome_features.h"
++#include "chrome/common/webui_url_constants.h"
+ #include "chrome/common/pref_names.h"
+ #include "components/bookmarks/browser/bookmark_model.h"
+ #include "components/bookmarks/browser/bookmark_utils.h"
+@@ -73,7 +75,10 @@
+ #include "components/sync_device_info/device_info_sync_service.h"
+ #include "components/sync_device_info/device_info_tracker.h"
+ #include "content/public/browser/url_data_source.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/web_ui.h"
++#include "content/public/common/referrer.h"
++#include "ui/base/page_transition_types.h"
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/l10n/time_format.h"
+ #include "ui/webui/resources/cr_components/history/history.mojom.h"
+@@ -538,6 +543,14 @@ void BrowsingHistoryHandler::RemoveVisits(
+ }
+ 
+ void BrowsingHistoryHandler::OpenClearBrowsingDataDialog() {
++  if (cbf::IsCbfEmbeddedBrowser(web_contents_)) {
++    web_contents_->GetController().LoadURL(
++        chrome::GetSettingsUrl(chrome::kClearBrowserDataSubPage),
++        content::Referrer(), ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
++        std::string());
++    return;
++  }
++
+   // TODO(beng): This is an improper direct dependency on Browser. Route this
+   // through some sort of delegate.
+   Browser* browser = chrome::FindBrowserWithTab(web_contents_);
+diff --git a/chrome/browser/ui/webui/history/history_ui.cc b/chrome/browser/ui/webui/history/history_ui.cc
+index 07b76d6de0211..4a29c5828c383 100644
+--- a/chrome/browser/ui/webui/history/history_ui.cc
++++ b/chrome/browser/ui/webui/history/history_ui.cc
+@@ -17,6 +17,7 @@
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/values.h"
+ #include "build/build_config.h"
++#include "chrome/browser/cbf/cbf_embedded_browser_window.h"
+ #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/feature_engagement/tracker_factory.h"
+@@ -76,10 +77,13 @@
+ 
+ namespace {
+ 
+-content::WebUIDataSource* CreateAndAddHistoryUIHTMLSource(Profile* profile) {
++content::WebUIDataSource* CreateAndAddHistoryUIHTMLSource(Profile* profile,
++                                                          bool show_synced_tabs) {
+   content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
+       profile, chrome::kChromeUIHistoryHost);
+ 
++  source->AddBoolean("showSyncedTabs", show_synced_tabs);
++  source->AddBoolean("showClearBrowsingData", show_synced_tabs);
+   source->AddBoolean(
+       "replaceSyncPromosWithSignInPromos",
+       base::FeatureList::IsEnabled(syncer::kReplaceSyncPromosWithSignInPromos));
+@@ -250,8 +254,10 @@ HistoryUIConfig::CreateWebUIController(content::WebUI* web_ui,
+ HistoryUI::HistoryUI(content::WebUI* web_ui)
+     : ui::MojoWebUIController(web_ui, /*enable_chrome_send=*/true) {
+   Profile* profile = Profile::FromWebUI(web_ui);
++  const bool show_synced_tabs =
++      !cbf::IsCbfEmbeddedBrowser(web_ui->GetWebContents());
+   content::WebUIDataSource* data_source =
+-      CreateAndAddHistoryUIHTMLSource(profile);
++      CreateAndAddHistoryUIHTMLSource(profile, show_synced_tabs);
+   ManagedUIHandler::Initialize(web_ui, data_source);
+ 
+   pref_change_registrar_.Init(profile->GetPrefs());
+@@ -262,12 +268,14 @@ HistoryUI::HistoryUI(content::WebUI* web_ui)
+   web_ui->AddMessageHandler(std::make_unique<webui::NavigationHandler>());
+   web_ui->AddMessageHandler(std::make_unique<MetricsHandler>());
+ 
+-  auto foreign_session_handler =
+-      std::make_unique<browser_sync::ForeignSessionHandler>();
+-  browser_sync::ForeignSessionHandler* foreign_session_handler_ptr =
+-      foreign_session_handler.get();
+-  web_ui->AddMessageHandler(std::move(foreign_session_handler));
+-  foreign_session_handler_ptr->InitializeForeignSessions();
++  if (show_synced_tabs) {
++    auto foreign_session_handler =
++        std::make_unique<browser_sync::ForeignSessionHandler>();
++    browser_sync::ForeignSessionHandler* foreign_session_handler_ptr =
++        foreign_session_handler.get();
++    web_ui->AddMessageHandler(std::move(foreign_session_handler));
++    foreign_session_handler_ptr->InitializeForeignSessions();
++  }
+   web_ui->AddMessageHandler(
+       std::make_unique<HistoryLoginHandler>(base::BindRepeating(
+           &HistoryUI::UpdateDataSource, base::Unretained(this))));
+-- 
+2.50.1 (Apple Git-155)
+
