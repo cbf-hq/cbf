@@ -6,12 +6,11 @@ Thanks for contributing.
 
 Read these first:
 
-- `docs/setup-guide.md`
-- `docs/user-setup-guide.md`
-- `docs/developer-setup-guide.md`
-- `docs/chromium-fork-guide.md`
-- `docs/implementation-guide.md`
-- `docs/licensing.md`
+- `README.md`
+- `docs/getting-started/concepts.md`
+- `docs/getting-started/user-setup.md`
+- `docs/developer-guide/contributor-setup.md`
+- `docs/developer-guide/licensing.md`
 
 ## 2. Scope of Contributions
 
@@ -25,7 +24,13 @@ Main areas:
 
 ## 3. Required Technical Rules
 
-When changing bridge/fork/boundary behavior, follow `docs/implementation-guide.md`:
+When changing bridge/fork/boundary behavior, follow these:
+
+- `docs/developer-guide/chromium-fork-workflow.md`
+- `docs/developer-guide/chromium-integration-rules.md`
+- `docs/developer-guide/chromium-implementation-guide.md`
+
+Key rules:
 
 - No raw pointer ownership across async boundaries.
 - Prefer `WebPageId` re-resolution and weak ownership guards.
@@ -34,7 +39,7 @@ When changing bridge/fork/boundary behavior, follow `docs/implementation-guide.m
 
 ## 4. Commit Message Convention
 
-Use Conventional Commits:
+Use the project commit format:
 
 `<type>(<scope>): <subject>`
 
@@ -78,23 +83,23 @@ Additional scopes for non-runtime changes:
 
 CBF uses a small, explicit label taxonomy to keep triage consistent.
 
-### Label groups
+### Label groups (GitHub labels verified via MCP on 2026-03-06)
 
-- `type/*`: what kind of work this is (`type/bug`, `type/feature`, `type/docs`, ...)
-- `area/*`: which layer is affected (`area/cbf`, `area/chrome`, `area/chrome-sys`, `area/bridge`, ...)
-- `priority/*`: urgency (`priority/p0` to `priority/p3`)
-- `status/*`: current workflow state (`status/needs-triage`, `status/in-progress`, ...)
-- OSS onboarding labels: `good first issue`, `help wanted`
+- `type/*`: `type/bug`, `type/feature`, `type/docs`, `type/enhancement`, `type/refactor`, `type/test`
+- `area/*`: `area/cbf`, `area/chrome`, `area/chrome-sys`, `area/bridge`, `area/chromium`, `area/build`, `area/ci`, `area/cli`
+- `priority/*`: `priority/p0`, `priority/p1`, `priority/p2`, `priority/p3`
+- `status/*`: `status/needs-triage`, `status/in-progress`, `status/needs-info`
+- onboarding: `good first issue`, `help wanted`
 
 ### Usage rules
 
 - Apply exactly one `type/*` label.
 - Apply exactly one `priority/*` label.
-- Apply exactly one `status/*` label.
+- Apply at most one `status/*` label at a time.
 - Apply one or more `area/*` labels as needed.
 - Use `good first issue` only when scope, reproduction, and expected change are clear.
 - Keep GitHub's default overlapping labels removed when they duplicate this taxonomy
-  (for example `documentation`, `enhancement`, or `question`).
+  (for example `documentation` or `question`).
 - Use GitHub Discussions for open-ended questions or support requests instead of issue labels.
 
 ## 7. Licensing and Notices
