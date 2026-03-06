@@ -1,7 +1,7 @@
 [book]
 authors = ["CBF contributors"]
 language = "en"
-src = "docs/book/src"
+src = "docs/"
 title = "CBF Book"
 
 [build]

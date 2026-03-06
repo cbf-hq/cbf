@@ -1,5 +1,7 @@
 # CBF Licensing Guide
 
+**WARNING**: This document is a work in progress and may be updated as the project evolves. It is intended to provide practical guidance on licensing policy for the CBF project, but should not be considered legal advice. For specific legal questions, consult a qualified attorney.
+
 ## 1. Scope
 
 This document defines practical licensing policy for the standalone CBF repository.
