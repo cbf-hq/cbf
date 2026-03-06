@@ -1,3 +1,5 @@
+//! Chromium-facing tab-open hint and result types, mapping between Chromium tab semantics and generic browsing context open semantics.
+
 use super::{
     browsing_context_open::{ChromeBrowsingContextOpenHint, ChromeBrowsingContextOpenResult},
     ids::TabId,

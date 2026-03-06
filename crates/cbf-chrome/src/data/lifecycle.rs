@@ -1,3 +1,5 @@
+//! Chrome-specific lifecycle types, including backend stop/error info and before-unload trigger reasons.
+
 use cbf::{data::dialog::BeforeUnloadReason, error::BackendErrorInfo, event::BackendStopReason};
 
 pub type ChromeBackendErrorInfo = BackendErrorInfo;

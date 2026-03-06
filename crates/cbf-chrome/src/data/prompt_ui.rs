@@ -1,3 +1,5 @@
+//! Chrome-specific prompt UI types for permission prompts, extension install dialogs, and print preview.
+
 /// Chrome-specific permission categories exposed through PromptUi.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptUiPermissionType {

@@ -1,3 +1,5 @@
+//! Chrome-specific types for browsing context open hints and responses, with conversions to/from `cbf` equivalents.
+
 use cbf::data::browsing_context_open::{
     BrowsingContextOpenHint, BrowsingContextOpenResponse, BrowsingContextOpenResult,
 };

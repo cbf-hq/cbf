@@ -1,3 +1,5 @@
+//! Chrome-specific keyboard and mouse-wheel input event types, with conversions to/from `cbf` equivalents.
+
 use cbf::data::{
     key::{KeyEvent, KeyEventType},
     mouse::{MouseWheelEvent, ScrollGranularity},

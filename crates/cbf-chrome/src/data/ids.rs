@@ -1,3 +1,5 @@
+//! Chrome-facing stable identifiers; primarily `TabId` as the Chromium-layer counterpart of `BrowsingContextId`.
+
 use cbf::data::ids::BrowsingContextId;
 
 /// Chrome-facing stable identifier for a tab managed by Chromium runtime.

@@ -1,3 +1,5 @@
+//! Chrome-specific drag-and-drop operation flags and data, with conversions to/from `cbf` equivalents.
+
 use std::collections::BTreeMap;
 
 use super::ids::TabId;

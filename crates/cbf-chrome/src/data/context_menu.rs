@@ -1,3 +1,5 @@
+//! Chrome-specific context menu item structures, including types, icons, accelerators, and submenus.
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChromeContextMenuItemType {
     Command,

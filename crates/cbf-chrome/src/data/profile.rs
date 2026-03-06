@@ -1,3 +1,5 @@
+//! Chrome-specific profile information, with conversions to/from `cbf::data::profile::ProfileInfo`.
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChromeProfileInfo {
     pub profile_id: String,

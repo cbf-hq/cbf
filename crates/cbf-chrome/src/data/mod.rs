@@ -1,3 +1,5 @@
+//! Chrome-specific data types for IPC events and commands, with conversions to/from generic `cbf` data types.
+
 pub mod browsing_context_open;
 pub mod context_menu;
 pub mod drag;
@@ -15,11 +17,5 @@ pub mod window_open;
 
 // Chrome-specific API policy:
 // Keep raw/internal chrome vocabulary (`ChromeCommand` / `IpcEvent` / `ChromeEvent`)
-// independent from direct `cbf::...` imports by routing generic-model references
-// through `cbf-chrome::data::*` type aliases.
-//
-// Aliases are intentionally split by domain file (not a single `generic.rs`) so
-// future Chromium-specific model additions can be localized without introducing
-// broad import-path churn across unrelated domains.
-//
+// independent from direct `cbf::...` imports.
 // This policy was established by issue #59.

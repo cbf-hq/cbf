@@ -1,3 +1,5 @@
+//! Chrome-specific IME (Input Method Editor) text span types and composition state, with conversions to/from `cbf` equivalents.
+
 use super::ids::TabId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

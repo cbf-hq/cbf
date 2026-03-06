@@ -1,3 +1,5 @@
+//! Chrome-specific extension info and auxiliary window response types.
+
 use cbf::data::extension::{AuxiliaryWindowResponse, ExtensionInfo};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,3 +1,5 @@
+//! Chrome-specific mouse event types and button identifiers, with conversions to/from `cbf` equivalents.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChromeMouseEventType {
     Down,
