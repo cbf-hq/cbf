@@ -50,7 +50,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 handle,
             })
         }
-        CBF_EVENT_WEB_PAGE_CREATED => Ok(IpcEvent::WebContentsCreated {
+        CBF_EVENT_TAB_CREATED => Ok(IpcEvent::TabCreated {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
@@ -142,15 +142,15 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 reason,
             })
         }
-        CBF_EVENT_WEB_PAGE_CLOSED => Ok(IpcEvent::WebContentsClosed {
+        CBF_EVENT_TAB_CLOSED => Ok(IpcEvent::TabClosed {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
         }),
-        CBF_EVENT_WEB_PAGE_RESIZE_ACKNOWLEDGED => Ok(IpcEvent::WebContentsResizeAcknowledged {
+        CBF_EVENT_TAB_RESIZE_ACKNOWLEDGED => Ok(IpcEvent::TabResizeAcknowledged {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
         }),
-        CBF_EVENT_WEB_PAGE_DOM_HTML_READ => Ok(IpcEvent::WebContentsDomHtmlRead {
+        CBF_EVENT_TAB_DOM_HTML_READ => Ok(IpcEvent::TabDomHtmlRead {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
@@ -519,7 +519,7 @@ fn rect_from_ffi(rect: CbfRect) -> ChromeImeRect {
 
 fn beforeunload_reason_from_ffi(value: u8) -> ChromeBeforeUnloadReason {
     match value {
-        CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE => ChromeBeforeUnloadReason::CloseBrowsingContext,
+        CBF_BEFOREUNLOAD_REASON_CLOSE_TAB => ChromeBeforeUnloadReason::CloseBrowsingContext,
         CBF_BEFOREUNLOAD_REASON_NAVIGATE => ChromeBeforeUnloadReason::Navigate,
         CBF_BEFOREUNLOAD_REASON_RELOAD => ChromeBeforeUnloadReason::Reload,
         CBF_BEFOREUNLOAD_REASON_WINDOW_CLOSE => ChromeBeforeUnloadReason::WindowClose,
@@ -1107,15 +1107,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_event_web_contents_created_maps_tab_id() {
-        let mut event = make_event(CBF_EVENT_WEB_PAGE_CREATED);
+    fn parse_event_tab_created_maps_tab_id() {
+        let mut event = make_event(CBF_EVENT_TAB_CREATED);
         event.tab_id = 7;
         event.request_id = 11;
 
-        let parsed = parse_event(event).expect("web page created should parse");
+        let parsed = parse_event(event).expect("tab created should parse");
         assert!(matches!(
             parsed,
-            IpcEvent::WebContentsCreated {
+            IpcEvent::TabCreated {
                 browsing_context_id,
                 request_id,
                 ..

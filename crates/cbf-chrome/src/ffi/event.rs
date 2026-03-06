@@ -25,10 +25,10 @@ pub enum IpcEvent {
         browsing_context_id: TabId,
         handle: SurfaceHandle,
     },
-    /// A new web page was created by the backend.
+    /// A new tab was created by the backend.
     ///
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::Created`.
-    WebContentsCreated {
+    TabCreated {
         profile_id: String,
         browsing_context_id: TabId,
         request_id: u64,
@@ -122,10 +122,10 @@ pub enum IpcEvent {
         request_id: u64,
         reason: ChromeBeforeUnloadReason,
     },
-    /// A web page closed event was observed.
+    /// A tab closed event was observed.
     ///
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::Closed`.
-    WebContentsClosed {
+    TabClosed {
         profile_id: String,
         browsing_context_id: TabId,
     },
@@ -133,14 +133,14 @@ pub enum IpcEvent {
     ///
     /// **Note**: This event does not map to `BrowserEvent` because it is an internal
     /// acknowledgement with no semantic value for browser-generic consumers.
-    WebContentsResizeAcknowledged {
+    TabResizeAcknowledged {
         profile_id: String,
         browsing_context_id: TabId,
     },
     /// The DOM HTML was read for a page.
     ///
     /// Maps to `BrowserEvent::BrowsingContext` with `BrowsingContextEvent::DomHtmlRead`.
-    WebContentsDomHtmlRead {
+    TabDomHtmlRead {
         profile_id: String,
         browsing_context_id: TabId,
         request_id: u64,

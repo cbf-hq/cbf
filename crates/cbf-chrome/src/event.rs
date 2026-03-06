@@ -76,7 +76,7 @@ pub fn to_generic_event(event: &ChromeEvent) -> Option<BrowserEvent> {
 pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
     match event {
         IpcEvent::SurfaceHandleUpdated { .. } => None,
-        IpcEvent::WebContentsCreated {
+        IpcEvent::TabCreated {
             profile_id,
             browsing_context_id,
             request_id,
@@ -239,7 +239,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 beforeunload_reason: Some((*reason).into()),
             }),
         }),
-        IpcEvent::WebContentsClosed {
+        IpcEvent::TabClosed {
             profile_id,
             browsing_context_id,
         } => Some(BrowserEvent::BrowsingContext {
@@ -247,8 +247,8 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::Closed),
         }),
-        IpcEvent::WebContentsResizeAcknowledged { .. } => None,
-        IpcEvent::WebContentsDomHtmlRead {
+        IpcEvent::TabResizeAcknowledged { .. } => None,
+        IpcEvent::TabDomHtmlRead {
             profile_id,
             browsing_context_id,
             request_id,
@@ -525,8 +525,8 @@ mod tests {
     };
 
     #[test]
-    fn web_contents_created_maps_tab_id_into_browsing_context_id() {
-        let event = IpcEvent::WebContentsCreated {
+    fn tab_created_maps_tab_id_into_browsing_context_id() {
+        let event = IpcEvent::TabCreated {
             profile_id: "default".to_string(),
             browsing_context_id: TabId::new(7),
             request_id: 1,

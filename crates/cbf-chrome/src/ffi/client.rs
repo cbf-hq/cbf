@@ -231,8 +231,8 @@ impl IpcClient {
         Ok(result)
     }
 
-    /// Create a web page (tab) via the IPC bridge.
-    pub fn create_web_contents(
+    /// Create a tab via the IPC bridge.
+    pub fn create_tab(
         &mut self,
         request_id: u64,
         initial_url: &str,
@@ -246,12 +246,7 @@ impl IpcClient {
         let profile = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
 
         if unsafe {
-            cbf_bridge_client_create_web_page(
-                self.inner,
-                request_id,
-                url.as_ptr(),
-                profile.as_ptr(),
-            )
+            cbf_bridge_client_create_tab(self.inner, request_id, url.as_ptr(), profile.as_ptr())
         } {
             Ok(())
         } else {
@@ -259,23 +254,21 @@ impl IpcClient {
         }
     }
 
-    /// Request closing the specified web page.
-    pub fn request_close_web_contents(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
+    /// Request closing the specified tab.
+    pub fn request_close_tab(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        if unsafe {
-            cbf_bridge_client_request_close_web_page(self.inner, browsing_context_id.get())
-        } {
+        if unsafe { cbf_bridge_client_request_close_tab(self.inner, browsing_context_id.get()) } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
         }
     }
 
-    /// Update the surface size of the specified web page.
-    pub fn set_web_contents_size(
+    /// Update the surface size of the specified tab.
+    pub fn set_tab_size(
         &mut self,
         browsing_context_id: TabId,
         width: u32,
@@ -286,12 +279,7 @@ impl IpcClient {
         }
 
         if unsafe {
-            cbf_bridge_client_set_web_page_size(
-                self.inner,
-                browsing_context_id.get(),
-                width,
-                height,
-            )
+            cbf_bridge_client_set_tab_size(self.inner, browsing_context_id.get(), width, height)
         } {
             Ok(())
         } else {
@@ -299,8 +287,8 @@ impl IpcClient {
         }
     }
 
-    /// Update whether the specified web page should receive text input focus.
-    pub fn set_web_contents_focus(
+    /// Update whether the specified tab should receive text input focus.
+    pub fn set_tab_focus(
         &mut self,
         browsing_context_id: TabId,
         focused: bool,
@@ -310,7 +298,7 @@ impl IpcClient {
         }
 
         if unsafe {
-            cbf_bridge_client_set_web_page_focus(self.inner, browsing_context_id.get(), focused)
+            cbf_bridge_client_set_tab_focus(self.inner, browsing_context_id.get(), focused)
         } {
             Ok(())
         } else {
@@ -446,7 +434,7 @@ impl IpcClient {
     }
 
     /// Request the DOM HTML for the specified page.
-    pub fn get_web_contents_dom_html(
+    pub fn get_tab_dom_html(
         &mut self,
         browsing_context_id: TabId,
         request_id: u64,
@@ -456,11 +444,7 @@ impl IpcClient {
         }
 
         if unsafe {
-            cbf_bridge_client_get_web_page_dom_html(
-                self.inner,
-                browsing_context_id.get(),
-                request_id,
-            )
+            cbf_bridge_client_get_tab_dom_html(self.inner, browsing_context_id.get(), request_id)
         } {
             Ok(())
         } else {

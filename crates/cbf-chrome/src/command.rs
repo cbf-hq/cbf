@@ -33,16 +33,16 @@ pub enum ChromeCommand {
         request_id: u64,
         allow: bool,
     },
-    CreateWebContents {
+    CreateTab {
         request_id: u64,
         initial_url: Option<String>,
         profile_id: Option<String>,
     },
     ListProfiles,
-    RequestCloseWebContents {
+    RequestCloseTab {
         browsing_context_id: TabId,
     },
-    SetWebContentsSize {
+    SetTabSize {
         browsing_context_id: TabId,
         width: u32,
         height: u32,
@@ -72,11 +72,11 @@ pub enum ChromeCommand {
         x: i32,
         y: i32,
     },
-    GetWebContentsDomHtml {
+    GetTabDomHtml {
         browsing_context_id: TabId,
         request_id: u64,
     },
-    SetWebContentsFocus {
+    SetTabFocus {
         browsing_context_id: TabId,
         focused: bool,
     },
@@ -181,7 +181,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 request_id,
                 initial_url,
                 profile_id,
-            } => Self::CreateWebContents {
+            } => Self::CreateTab {
                 request_id,
                 initial_url,
                 profile_id,
@@ -189,14 +189,14 @@ impl From<BrowserCommand> for ChromeCommand {
             BrowserCommand::ListProfiles => Self::ListProfiles,
             BrowserCommand::RequestCloseBrowsingContext {
                 browsing_context_id,
-            } => Self::RequestCloseWebContents {
+            } => Self::RequestCloseTab {
                 browsing_context_id: browsing_context_id.into(),
             },
             BrowserCommand::ResizeBrowsingContext {
                 browsing_context_id,
                 width,
                 height,
-            } => Self::SetWebContentsSize {
+            } => Self::SetTabSize {
                 browsing_context_id: browsing_context_id.into(),
                 width,
                 height,
@@ -233,14 +233,14 @@ impl From<BrowserCommand> for ChromeCommand {
             BrowserCommand::GetBrowsingContextDomHtml {
                 browsing_context_id,
                 request_id,
-            } => Self::GetWebContentsDomHtml {
+            } => Self::GetTabDomHtml {
                 browsing_context_id: browsing_context_id.into(),
                 request_id,
             },
             BrowserCommand::SetBrowsingContextFocus {
                 browsing_context_id,
                 focused,
-            } => Self::SetWebContentsFocus {
+            } => Self::SetTabFocus {
                 browsing_context_id: browsing_context_id.into(),
                 focused,
             },
@@ -381,7 +381,7 @@ mod tests {
         let raw: ChromeCommand = command.into();
         assert!(matches!(
             raw,
-            ChromeCommand::RequestCloseWebContents {
+            ChromeCommand::RequestCloseTab {
                 browsing_context_id
             } if browsing_context_id == TabId::new(42)
         ));

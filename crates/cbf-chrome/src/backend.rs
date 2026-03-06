@@ -511,7 +511,7 @@ impl ChromiumBackend {
                     &PromptUiResponse::PermissionPrompt { allow: *allow },
                 )
                 .map(|_| (None, Vec::new())),
-            ChromeCommand::CreateWebContents {
+            ChromeCommand::CreateTab {
                 request_id,
                 initial_url,
                 profile_id,
@@ -522,15 +522,15 @@ impl ChromiumBackend {
                 let profile = profile_id.clone().unwrap_or_default();
 
                 client
-                    .create_web_contents(*request_id, &url, &profile)
+                    .create_tab(*request_id, &url, &profile)
                     .map(|_| (None, Vec::new()))
             }
-            ChromeCommand::SetWebContentsSize {
+            ChromeCommand::SetTabSize {
                 browsing_context_id,
                 width,
                 height,
             } => client
-                .set_web_contents_size(*browsing_context_id, *width, *height)
+                .set_tab_size(*browsing_context_id, *width, *height)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::ListProfiles => client
                 .list_profiles()
@@ -599,10 +599,10 @@ impl ChromiumBackend {
             ChromeCommand::DismissContextMenu { menu_id } => client
                 .dismiss_context_menu(*menu_id)
                 .map(|_| (None, Vec::new())),
-            ChromeCommand::RequestCloseWebContents {
+            ChromeCommand::RequestCloseTab {
                 browsing_context_id,
             } => client
-                .request_close_web_contents(*browsing_context_id)
+                .request_close_tab(*browsing_context_id)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::Navigate {
                 browsing_context_id,
@@ -643,17 +643,17 @@ impl ChromiumBackend {
             } => client
                 .inspect_element(*browsing_context_id, *x, *y)
                 .map(|_| (None, Vec::new())),
-            ChromeCommand::GetWebContentsDomHtml {
+            ChromeCommand::GetTabDomHtml {
                 browsing_context_id,
                 request_id,
             } => client
-                .get_web_contents_dom_html(*browsing_context_id, *request_id)
+                .get_tab_dom_html(*browsing_context_id, *request_id)
                 .map(|_| (None, Vec::new())),
-            ChromeCommand::SetWebContentsFocus {
+            ChromeCommand::SetTabFocus {
                 browsing_context_id,
                 focused,
             } => client
-                .set_web_contents_focus(*browsing_context_id, *focused)
+                .set_tab_focus(*browsing_context_id, *focused)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::OpenDefaultPromptUi {
                 browsing_context_id,

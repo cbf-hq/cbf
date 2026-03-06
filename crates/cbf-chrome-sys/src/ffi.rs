@@ -40,6 +40,11 @@ pub const CBF_EVENT_PROMPT_UI_RESOLVED: u8 = 28;
 pub const CBF_EVENT_PROMPT_UI_OPEN_REQUESTED: u8 = CBF_EVENT_PROMPT_UI_REQUESTED;
 pub const CBF_EVENT_PROMPT_UI_OPENED: u8 = CBF_EVENT_AUXILIARY_WINDOW_OPENED;
 pub const CBF_EVENT_PROMPT_UI_CLOSED: u8 = CBF_EVENT_AUXILIARY_WINDOW_CLOSED;
+pub const CBF_EVENT_TAB_CREATED: u8 = CBF_EVENT_WEB_PAGE_CREATED;
+pub const CBF_EVENT_NEW_TAB_REQUESTED: u8 = CBF_EVENT_NEW_WEB_PAGE_REQUESTED;
+pub const CBF_EVENT_TAB_CLOSED: u8 = CBF_EVENT_WEB_PAGE_CLOSED;
+pub const CBF_EVENT_TAB_RESIZE_ACKNOWLEDGED: u8 = CBF_EVENT_WEB_PAGE_RESIZE_ACKNOWLEDGED;
+pub const CBF_EVENT_TAB_DOM_HTML_READ: u8 = CBF_EVENT_WEB_PAGE_DOM_HTML_READ;
 
 pub const CBF_PROMPT_UI_REQUESTED: u8 = CBF_EVENT_PROMPT_UI_REQUESTED;
 pub const CBF_PROMPT_UI_RESOLVED: u8 = CBF_EVENT_PROMPT_UI_RESOLVED;
@@ -168,6 +173,7 @@ pub const CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE: u8 = 1;
 pub const CBF_BEFOREUNLOAD_REASON_NAVIGATE: u8 = 2;
 pub const CBF_BEFOREUNLOAD_REASON_RELOAD: u8 = 3;
 pub const CBF_BEFOREUNLOAD_REASON_WINDOW_CLOSE: u8 = 4;
+pub const CBF_BEFOREUNLOAD_REASON_CLOSE_TAB: u8 = CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE;
 
 pub const CBF_CURSOR_DEFAULT: u8 = 0;
 pub const CBF_CURSOR_CROSSHAIR: u8 = 1;
@@ -640,7 +646,17 @@ unsafe extern "C" {
         initial_url: *const c_char,
         profile_id: *const c_char,
     ) -> bool;
+    pub fn cbf_bridge_client_create_tab(
+        client: *mut CbfBridgeClientHandle,
+        request_id: u64,
+        initial_url: *const c_char,
+        profile_id: *const c_char,
+    ) -> bool;
     pub fn cbf_bridge_client_request_close_web_page(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_request_close_tab(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
     ) -> bool;
@@ -650,7 +666,18 @@ unsafe extern "C" {
         width: u32,
         height: u32,
     ) -> bool;
+    pub fn cbf_bridge_client_set_tab_size(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        width: u32,
+        height: u32,
+    ) -> bool;
     pub fn cbf_bridge_client_set_web_page_focus(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        focused: bool,
+    ) -> bool;
+    pub fn cbf_bridge_client_set_tab_focus(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
         focused: bool,
@@ -760,6 +787,11 @@ unsafe extern "C" {
         y: i32,
     ) -> bool;
     pub fn cbf_bridge_client_get_web_page_dom_html(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        request_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_get_tab_dom_html(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
         request_id: u64,
