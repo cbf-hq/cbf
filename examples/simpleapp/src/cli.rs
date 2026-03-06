@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use cbf_chrome::{
     backend::ChromiumBackendOptions,
     process::{
-        resolve_chromium_executable, ChromiumProcessOptions, RuntimeSelection, StartChromiumOptions,
+        ChromiumProcessOptions, RuntimeSelection, StartChromiumOptions, resolve_chromium_executable,
     },
 };
 use clap::Parser;

@@ -707,9 +707,7 @@ impl CoreState {
                         request_id,
                         AuxiliaryWindowResponse::PermissionPrompt { allow },
                     ) {
-                        warn!(
-                            "failed to respond permission prompt request_id={request_id}: {err}"
-                        );
+                        warn!("failed to respond permission prompt request_id={request_id}: {err}");
                     }
                     return Vec::new();
                 }
@@ -739,9 +737,7 @@ impl CoreState {
                 request_id,
                 resolution,
             } => {
-                info!(
-                    "auxiliary resolved: request_id={request_id}, resolution={resolution:?}"
-                );
+                info!("auxiliary resolved: request_id={request_id}, resolution={resolution:?}");
                 Vec::new()
             }
             BrowsingContextEvent::AuxiliaryWindowOpened {
@@ -774,8 +770,7 @@ impl CoreState {
             | BrowsingContextEvent::RenderProcessGone { .. }
             | BrowsingContextEvent::AudioStateChanged { .. }
             | BrowsingContextEvent::DomHtmlRead { .. }
-            | BrowsingContextEvent::ExtensionRuntimeWarning { .. }
-            => Vec::new(),
+            | BrowsingContextEvent::ExtensionRuntimeWarning { .. } => Vec::new(),
         }
     }
 }
@@ -802,12 +797,8 @@ fn permission_prompt_description(
     use cbf::data::extension::PermissionPromptType;
 
     match permission {
-        PermissionPromptType::Geolocation => {
-            "This site wants to access your location.".to_string()
-        }
-        PermissionPromptType::Notifications => {
-            "This site wants to show notifications.".to_string()
-        }
+        PermissionPromptType::Geolocation => "This site wants to access your location.".to_string(),
+        PermissionPromptType::Notifications => "This site wants to show notifications.".to_string(),
         PermissionPromptType::AudioCapture => "This site wants to use your microphone.".to_string(),
         PermissionPromptType::VideoCapture => "This site wants to use your camera.".to_string(),
         PermissionPromptType::Other(name) => format!("This site requests permission: {name}."),
