@@ -7,7 +7,7 @@ Framework development only; not product-specific. Currently private; breaking ch
 
 **Language:** conversations follow first-used language; code comments, docs, and commits in English.
 
-**Scope:** owns `cbf` (browser-generic API), `cbf-chrome` (Chrome backend), `cbf-chrome-sys` (FFI),
+**Scope:** owns `cbf` (browser-generic API), `cbf-chrome` (Chrome backend, chrome-specific API), `cbf-chrome-sys` (FFI),
 Chromium bridge/patches, async IPC/lifecycle reliability. Does not own product domain logic or app UI/UX.
 
 ## Architecture (Must Keep)
@@ -31,6 +31,25 @@ Hard rules:
 - `BrowserCommand` for upstream requests; `BrowserEvent` for backend facts.
 - Prefer additive changes; avoid unnecessary `pub` surface growth.
 - Keep failure/lifecycle explicit; keep `cbf` vocabulary browser-generic.
+
+## Vocabulary and Layer Boundaries
+
+- Choose vocabulary per layer, not per implementation convenience.
+- Public `cbf` types and events must use browser-generic terms such as `BrowsingContext`, `WindowOpen`, `Profile`, `Mouse`, and `Ime`.
+- `cbf-chrome` may expose Chrome-specific behavior, but must not leak Chromium process internals or Mojo-generated naming into `cbf`. Example: `Tab`, `ChromeKeyEvent`
+- `cbf-chrome-sys` owns FFI-facing names and ABI compatibility shims; compatibility aliases belong here rather than in public `cbf`.
+- Chromium-side code under `chromium/src/chrome/browser/cbf/` may use Chromium-native concepts such as `Tab`, `WebContents`, `Profile`, and other browser-process terminology.
+- Mojo, bridge, and Chromium implementation naming should follow the Chromium-side concept model unless the boundary intentionally translates into a browser-generic API.
+
+Responsibility split:
+- `cbf`: browser-generic API, stable Rust-side domain vocabulary, commands/events, and logical IDs.
+- `cbf-chrome`: Chrome backend behavior and conversions between generic `cbf` concepts and Chrome-specific semantics.
+- `cbf-chrome-sys`: ABI, bindgen/FFI surface, raw bridge interop, and temporary compatibility aliases needed for migration.
+- `chromium/src`: browser-process implementation details, Mojo interfaces, `Tab`/`WebContents` ownership, and Chromium-specific lifecycle handling.
+
+Rename discipline:
+- Do not mechanically propagate Chromium vocabulary into public `cbf` just because Chromium-side code was renamed.
+- Treat `BrowsingContextId <-> TabId` and similar mappings as boundary translations, not as a reason to collapse distinct concepts into one layer's naming.
 
 ## IPC and Async Safety (Bridge / Chromium-facing changes)
 
@@ -122,4 +141,3 @@ additional: `docs`, `ci`, `build`, `release`.
 3. Update docs when behavior, API, or build flow changes.
 4. Run focused checks for touched areas.
 5. Report known risks, regressions, and follow-up tasks explicitly.
-
