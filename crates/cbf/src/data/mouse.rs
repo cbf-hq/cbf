@@ -1,3 +1,5 @@
+//! Data models for mouse events, buttons, and pointer device types.
+
 /// Mouse event kind delivered to the backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseEventType {

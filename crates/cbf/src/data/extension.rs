@@ -1,3 +1,5 @@
+//! Data models for browser extension metadata and install prompt results.
+
 /// Extension metadata exposed by backends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionInfo {

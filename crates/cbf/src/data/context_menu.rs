@@ -1,3 +1,5 @@
+//! Data models for context menu items, icons, and keyboard accelerators.
+
 /// Context menu item kind coming from the backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextMenuItemType {

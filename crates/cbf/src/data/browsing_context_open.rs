@@ -1,3 +1,5 @@
+//! Data models for browsing context open requests, host responses, and open results.
+
 use super::ids::BrowsingContextId;
 
 /// Advisory hint describing how opener requested a new browsing context.

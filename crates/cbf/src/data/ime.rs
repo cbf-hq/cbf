@@ -1,3 +1,5 @@
+//! Data models for IME (Input Method Editor) composition and text span styling.
+
 use super::ids::BrowsingContextId;
 
 /// Classification of IME text spans.

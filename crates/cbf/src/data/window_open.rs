@@ -1,3 +1,5 @@
+//! Data models for window open requests, window kind, state, and bounds.
+
 use super::ids::{BrowsingContextId, WindowId};
 
 /// Host-level window type requested by backend.

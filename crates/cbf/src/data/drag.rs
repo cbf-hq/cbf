@@ -1,3 +1,5 @@
+//! Data models for drag-and-drop operations and transfer data.
+
 use crate::data::ids::BrowsingContextId;
 use std::collections::BTreeMap;
 

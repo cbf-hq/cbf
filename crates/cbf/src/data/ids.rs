@@ -1,3 +1,5 @@
+//! Stable logical identifiers used across the browser API boundary.
+
 /// A stable identifier for a web page (tab) managed by the browser backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BrowsingContextId(pub u64);

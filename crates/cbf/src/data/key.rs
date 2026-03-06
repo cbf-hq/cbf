@@ -1,3 +1,5 @@
+//! Data models for keyboard events and input payloads.
+
 /// Keyboard event type as understood by the backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyEventType {
