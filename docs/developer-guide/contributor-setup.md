@@ -61,7 +61,7 @@ autoninja -C out/Default cbf_bridge
 
 This builds the main Chromium target and the CBF bridge library, which is required for `cbf-chrome-sys` to link successfully.
 
-> Warning:
+> [!WARNING]
 > Chromium builds can take several hours or longer, and CPU usage may stay high during the entire build, which can keep sustained load on your machine.
 > Because builds are long-running, you can mitigate sleep-related build interruption by using tools such as `caffeinate` of macOS.
 
