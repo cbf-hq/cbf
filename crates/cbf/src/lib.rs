@@ -14,6 +14,3 @@ pub mod delegate;
 pub mod error;
 pub mod event;
 pub mod middleware;
-
-#[cfg(feature = "dummy-backend")]
-pub mod dummy_backend;

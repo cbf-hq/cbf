@@ -9,10 +9,6 @@ keywords.workspace = true
 license.workspace = true
 readme.workspace = true
 
-[features]
-default = []
-dummy-backend = []
-
 [dependencies]
 thiserror.workspace = true
 cursor-icon = { workspace = true }
