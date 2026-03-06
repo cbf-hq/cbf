@@ -1,16 +1,11 @@
-use cbf::{
-    command::BrowserCommand,
-    data::{
-        browsing_context_open::BrowsingContextOpenResponse,
-        drag::{DragDrop, DragUpdate},
-        extension::AuxiliaryWindowResponse,
-        ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
-        mouse::MouseEvent,
-        window_open::WindowOpenResponse,
-    },
-};
+use cbf::command::BrowserCommand;
 
 use crate::data::{
+    generic::{
+        ChromeAuxiliaryWindowResponse, ChromeBrowsingContextOpenResponse,
+        ChromeConfirmCompositionBehavior, ChromeDragDrop, ChromeDragUpdate, ChromeImeCommitText,
+        ChromeImeComposition, ChromeMouseEvent, ChromeWindowOpenResponse,
+    },
     ids::TabId,
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
     prompt_ui::{PromptUiId, PromptUiResponse},
@@ -91,31 +86,31 @@ pub enum ChromeCommand {
     },
     SendMouseEvent {
         browsing_context_id: TabId,
-        event: MouseEvent,
+        event: ChromeMouseEvent,
     },
     SendMouseWheelEvent {
         browsing_context_id: TabId,
         event: ChromeMouseWheelEvent,
     },
     SendDragUpdate {
-        update: DragUpdate,
+        update: ChromeDragUpdate,
     },
     SendDragDrop {
-        drop: DragDrop,
+        drop: ChromeDragDrop,
     },
     SendDragCancel {
         session_id: u64,
         browsing_context_id: TabId,
     },
     SetImeComposition {
-        composition: ImeComposition,
+        composition: ChromeImeComposition,
     },
     CommitImeText {
-        commit: ImeCommitText,
+        commit: ChromeImeCommitText,
     },
     FinishComposingText {
         browsing_context_id: TabId,
-        behavior: ConfirmCompositionBehavior,
+        behavior: ChromeConfirmCompositionBehavior,
     },
     ExecuteContextMenuCommand {
         menu_id: u64,
@@ -143,11 +138,11 @@ pub enum ChromeCommand {
     },
     RespondTabOpen {
         request_id: u64,
-        response: BrowsingContextOpenResponse,
+        response: ChromeBrowsingContextOpenResponse,
     },
     RespondWindowOpen {
         request_id: u64,
-        response: WindowOpenResponse,
+        response: ChromeWindowOpenResponse,
     },
 }
 
@@ -314,19 +309,21 @@ impl From<BrowserCommand> for ChromeCommand {
                 request_id,
                 response,
             } => match response {
-                AuxiliaryWindowResponse::PermissionPrompt { allow } => Self::RespondPromptUi {
-                    browsing_context_id: browsing_context_id.into(),
-                    request_id,
-                    response: PromptUiResponse::PermissionPrompt { allow },
-                },
-                AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed } => {
+                ChromeAuxiliaryWindowResponse::PermissionPrompt { allow } => {
+                    Self::RespondPromptUi {
+                        browsing_context_id: browsing_context_id.into(),
+                        request_id,
+                        response: PromptUiResponse::PermissionPrompt { allow },
+                    }
+                }
+                ChromeAuxiliaryWindowResponse::ExtensionInstallPrompt { proceed } => {
                     Self::RespondPromptUi {
                         browsing_context_id: browsing_context_id.into(),
                         request_id,
                         response: PromptUiResponse::ExtensionInstallPrompt { proceed },
                     }
                 }
-                AuxiliaryWindowResponse::Unknown => Self::RespondPromptUi {
+                ChromeAuxiliaryWindowResponse::Unknown => Self::RespondPromptUi {
                     browsing_context_id: browsing_context_id.into(),
                     request_id,
                     response: PromptUiResponse::Unknown,

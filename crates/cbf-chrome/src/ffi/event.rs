@@ -1,12 +1,10 @@
 use cursor_icon::CursorIcon;
 
-use cbf::data::{
-    context_menu::ContextMenu, drag::DragStartRequest, extension::ExtensionInfo,
-    ime::ImeBoundsUpdate,
-};
-use cbf::event::BeforeUnloadReason;
-
 use crate::data::{
+    generic::{
+        ChromeBeforeUnloadReason, ChromeContextMenu, ChromeDragStartRequest, ChromeExtensionInfo,
+        ChromeImeBoundsUpdate,
+    },
     ids::TabId,
     prompt_ui::{PromptUiCloseReason, PromptUiId, PromptUiKind, PromptUiResolution},
     surface::SurfaceHandle,
@@ -49,7 +47,7 @@ pub enum IpcEvent {
     ImeBoundsUpdated {
         profile_id: String,
         browsing_context_id: TabId,
-        update: ImeBoundsUpdate,
+        update: ChromeImeBoundsUpdate,
     },
     /// The backend requested a context menu.
     ///
@@ -57,7 +55,7 @@ pub enum IpcEvent {
     ContextMenuRequested {
         profile_id: String,
         browsing_context_id: TabId,
-        menu: ContextMenu,
+        menu: ChromeContextMenu,
     },
     /// Host-mediated open request for tab.
     ///
@@ -121,7 +119,7 @@ pub enum IpcEvent {
         profile_id: String,
         browsing_context_id: TabId,
         request_id: u64,
-        reason: BeforeUnloadReason,
+        reason: ChromeBeforeUnloadReason,
     },
     /// A web page closed event was observed.
     ///
@@ -153,7 +151,7 @@ pub enum IpcEvent {
     DragStartRequested {
         profile_id: String,
         browsing_context_id: TabId,
-        request: DragStartRequest,
+        request: ChromeDragStartRequest,
     },
     /// Shutdown is blocked by dirty pages.
     ///
@@ -175,7 +173,7 @@ pub enum IpcEvent {
     /// Maps to `BrowserEvent::ExtensionsListed`.
     ExtensionsListed {
         profile_id: String,
-        extensions: Vec<ExtensionInfo>,
+        extensions: Vec<ChromeExtensionInfo>,
     },
     /// Prompt UI open was requested and host must choose flow.
     PromptUiOpenRequested {

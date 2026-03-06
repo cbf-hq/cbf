@@ -1,25 +1,22 @@
-use cbf::{
-    data::{
-        extension::{
-            AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
-            AuxiliaryWindowResolution, ExtensionInstallPromptResult, PermissionPromptResult,
-            PermissionPromptType,
-        },
-        ids::WindowId,
-        profile::ProfileInfo,
-        window_open::{
-            WindowBounds, WindowDescriptor, WindowKind, WindowOpenReason, WindowOpenRequest,
-            WindowOpenResult, WindowState,
-        },
+use cbf::data::{
+    extension::{
+        AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
+        AuxiliaryWindowResolution, ExtensionInstallPromptResult, PermissionPromptResult,
+        PermissionPromptType,
     },
-    event::{BackendStopReason, BeforeUnloadReason},
+    ids::WindowId,
+    window_open::{
+        WindowBounds, WindowDescriptor, WindowKind, WindowOpenReason, WindowOpenRequest,
+        WindowOpenResult, WindowState,
+    },
 };
-use cbf::{
-    error::BackendErrorInfo,
-    event::{BrowserEvent, BrowsingContextEvent, DialogType},
-};
+use cbf::event::{BrowserEvent, BrowsingContextEvent, DialogType};
 
 use crate::data::{
+    generic::{
+        ChromeBackendErrorInfo, ChromeBackendStopReason, ChromeBeforeUnloadReason,
+        ChromeProfileInfo,
+    },
     prompt_ui::{
         PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult, PromptUiId,
         PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
@@ -36,14 +33,14 @@ pub enum ChromeEvent {
     /// Backend connected and ready.
     BackendReady,
     /// Backend stopped with a reason.
-    BackendStopped { reason: BackendStopReason },
+    BackendStopped { reason: ChromeBackendStopReason },
     /// Backend error surfaced from command/event processing.
     BackendError {
-        info: BackendErrorInfo,
+        info: ChromeBackendErrorInfo,
         terminal_hint: bool,
     },
     /// Profile list obtained through backend-side request/response path.
-    ProfilesListed { profiles: Vec<ProfileInfo> },
+    ProfilesListed { profiles: Vec<ChromeProfileInfo> },
 }
 
 /// Maps Chromium raw events into browser-generic events when possible.
@@ -237,13 +234,13 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 default_prompt_text: None,
                 r#type: DialogType::BeforeUnload,
                 beforeunload_reason: Some(match reason {
-                    BeforeUnloadReason::Unknown => BeforeUnloadReason::Unknown,
-                    BeforeUnloadReason::CloseBrowsingContext => {
-                        BeforeUnloadReason::CloseBrowsingContext
+                    ChromeBeforeUnloadReason::Unknown => ChromeBeforeUnloadReason::Unknown,
+                    ChromeBeforeUnloadReason::CloseBrowsingContext => {
+                        ChromeBeforeUnloadReason::CloseBrowsingContext
                     }
-                    BeforeUnloadReason::Navigate => BeforeUnloadReason::Navigate,
-                    BeforeUnloadReason::Reload => BeforeUnloadReason::Reload,
-                    BeforeUnloadReason::WindowClose => BeforeUnloadReason::WindowClose,
+                    ChromeBeforeUnloadReason::Navigate => ChromeBeforeUnloadReason::Navigate,
+                    ChromeBeforeUnloadReason::Reload => ChromeBeforeUnloadReason::Reload,
+                    ChromeBeforeUnloadReason::WindowClose => ChromeBeforeUnloadReason::WindowClose,
                 }),
             }),
         }),
