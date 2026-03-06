@@ -10,18 +10,18 @@ pub enum ImeTextSpanType {
     GrammarSuggestion,
 }
 
-/// Chromium-specific thickness of IME underline decorations.
+/// Backend-specific thickness of IME underline decorations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ChromeImeTextSpanThickness {
+pub enum ImeTextSpanThickness {
     #[default]
     None,
     Thin,
     Thick,
 }
 
-/// Chromium-specific style of IME underline decorations.
+/// Backend-specific style of IME underline decorations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ChromeImeTextSpanUnderlineStyle {
+pub enum ImeTextSpanUnderlineStyle {
     #[default]
     None,
     Solid,
@@ -43,16 +43,16 @@ pub struct ImeTextSpan {
     pub r#type: ImeTextSpanType,
     pub start_offset: u32,
     pub end_offset: u32,
-    /// Optional Chromium-specific style details.
-    pub chrome_style: Option<ChromeImeTextSpanStyle>,
+    /// Optional backend-specific style details.
+    pub style: Option<ImeTextSpanStyle>,
 }
 
-/// Chromium-specific visual/style details for IME text spans.
+/// Backend-specific visual/style details for IME text spans.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ChromeImeTextSpanStyle {
+pub struct ImeTextSpanStyle {
     pub underline_color: u32,
-    pub thickness: ChromeImeTextSpanThickness,
-    pub underline_style: ChromeImeTextSpanUnderlineStyle,
+    pub thickness: ImeTextSpanThickness,
+    pub underline_style: ImeTextSpanUnderlineStyle,
     pub text_color: u32,
     pub background_color: u32,
     pub suggestion_highlight_color: u32,
@@ -68,23 +68,23 @@ impl ImeTextSpan {
             r#type,
             start_offset,
             end_offset,
-            chrome_style: None,
+            style: None,
         }
     }
 
-    /// Create a span with Chromium-specific style details.
-    pub fn with_chrome_style(mut self, chrome_style: ChromeImeTextSpanStyle) -> Self {
-        self.chrome_style = Some(chrome_style);
+    /// Create a span with backend-specific style details.
+    pub fn with_style(mut self, style: ImeTextSpanStyle) -> Self {
+        self.style = Some(style);
         self
     }
 
-    /// Create a span with explicit no-decoration style on Chromium.
+    /// Create a span with explicit no-decoration backend style.
     pub fn no_decoration(r#type: ImeTextSpanType, start_offset: u32, end_offset: u32) -> Self {
         Self {
             r#type,
             start_offset,
             end_offset,
-            chrome_style: Some(ChromeImeTextSpanStyle::default()),
+            style: Some(ImeTextSpanStyle::default()),
         }
     }
 }

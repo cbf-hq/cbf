@@ -41,7 +41,7 @@ pub enum ChromeImeTextSpanThickness {
     Thick,
 }
 
-impl From<ChromeImeTextSpanThickness> for cbf::data::ime::ChromeImeTextSpanThickness {
+impl From<ChromeImeTextSpanThickness> for cbf::data::ime::ImeTextSpanThickness {
     fn from(value: ChromeImeTextSpanThickness) -> Self {
         match value {
             ChromeImeTextSpanThickness::None => Self::None,
@@ -51,12 +51,12 @@ impl From<ChromeImeTextSpanThickness> for cbf::data::ime::ChromeImeTextSpanThick
     }
 }
 
-impl From<cbf::data::ime::ChromeImeTextSpanThickness> for ChromeImeTextSpanThickness {
-    fn from(value: cbf::data::ime::ChromeImeTextSpanThickness) -> Self {
+impl From<cbf::data::ime::ImeTextSpanThickness> for ChromeImeTextSpanThickness {
+    fn from(value: cbf::data::ime::ImeTextSpanThickness) -> Self {
         match value {
-            cbf::data::ime::ChromeImeTextSpanThickness::None => Self::None,
-            cbf::data::ime::ChromeImeTextSpanThickness::Thin => Self::Thin,
-            cbf::data::ime::ChromeImeTextSpanThickness::Thick => Self::Thick,
+            cbf::data::ime::ImeTextSpanThickness::None => Self::None,
+            cbf::data::ime::ImeTextSpanThickness::Thin => Self::Thin,
+            cbf::data::ime::ImeTextSpanThickness::Thick => Self::Thick,
         }
     }
 }
@@ -71,7 +71,7 @@ pub enum ChromeImeTextSpanUnderlineStyle {
     Squiggle,
 }
 
-impl From<ChromeImeTextSpanUnderlineStyle> for cbf::data::ime::ChromeImeTextSpanUnderlineStyle {
+impl From<ChromeImeTextSpanUnderlineStyle> for cbf::data::ime::ImeTextSpanUnderlineStyle {
     fn from(value: ChromeImeTextSpanUnderlineStyle) -> Self {
         match value {
             ChromeImeTextSpanUnderlineStyle::None => Self::None,
@@ -83,14 +83,14 @@ impl From<ChromeImeTextSpanUnderlineStyle> for cbf::data::ime::ChromeImeTextSpan
     }
 }
 
-impl From<cbf::data::ime::ChromeImeTextSpanUnderlineStyle> for ChromeImeTextSpanUnderlineStyle {
-    fn from(value: cbf::data::ime::ChromeImeTextSpanUnderlineStyle) -> Self {
+impl From<cbf::data::ime::ImeTextSpanUnderlineStyle> for ChromeImeTextSpanUnderlineStyle {
+    fn from(value: cbf::data::ime::ImeTextSpanUnderlineStyle) -> Self {
         match value {
-            cbf::data::ime::ChromeImeTextSpanUnderlineStyle::None => Self::None,
-            cbf::data::ime::ChromeImeTextSpanUnderlineStyle::Solid => Self::Solid,
-            cbf::data::ime::ChromeImeTextSpanUnderlineStyle::Dot => Self::Dot,
-            cbf::data::ime::ChromeImeTextSpanUnderlineStyle::Dash => Self::Dash,
-            cbf::data::ime::ChromeImeTextSpanUnderlineStyle::Squiggle => Self::Squiggle,
+            cbf::data::ime::ImeTextSpanUnderlineStyle::None => Self::None,
+            cbf::data::ime::ImeTextSpanUnderlineStyle::Solid => Self::Solid,
+            cbf::data::ime::ImeTextSpanUnderlineStyle::Dot => Self::Dot,
+            cbf::data::ime::ImeTextSpanUnderlineStyle::Dash => Self::Dash,
+            cbf::data::ime::ImeTextSpanUnderlineStyle::Squiggle => Self::Squiggle,
         }
     }
 }
@@ -132,7 +132,7 @@ pub struct ChromeImeTextSpanStyle {
     pub should_hide_suggestion_menu: bool,
 }
 
-impl From<ChromeImeTextSpanStyle> for cbf::data::ime::ChromeImeTextSpanStyle {
+impl From<ChromeImeTextSpanStyle> for cbf::data::ime::ImeTextSpanStyle {
     fn from(value: ChromeImeTextSpanStyle) -> Self {
         Self {
             underline_color: value.underline_color,
@@ -148,8 +148,8 @@ impl From<ChromeImeTextSpanStyle> for cbf::data::ime::ChromeImeTextSpanStyle {
     }
 }
 
-impl From<cbf::data::ime::ChromeImeTextSpanStyle> for ChromeImeTextSpanStyle {
-    fn from(value: cbf::data::ime::ChromeImeTextSpanStyle) -> Self {
+impl From<cbf::data::ime::ImeTextSpanStyle> for ChromeImeTextSpanStyle {
+    fn from(value: cbf::data::ime::ImeTextSpanStyle) -> Self {
         Self {
             underline_color: value.underline_color,
             thickness: value.thickness.into(),
@@ -207,7 +207,7 @@ impl From<ChromeImeTextSpan> for cbf::data::ime::ImeTextSpan {
             r#type: value.r#type.into(),
             start_offset: value.start_offset,
             end_offset: value.end_offset,
-            chrome_style: value.chrome_style.map(Into::into),
+            style: value.chrome_style.map(Into::into),
         }
     }
 }
@@ -218,7 +218,7 @@ impl From<cbf::data::ime::ImeTextSpan> for ChromeImeTextSpan {
             r#type: value.r#type.into(),
             start_offset: value.start_offset,
             end_offset: value.end_offset,
-            chrome_style: value.chrome_style.map(Into::into),
+            chrome_style: value.style.map(Into::into),
         }
     }
 }
