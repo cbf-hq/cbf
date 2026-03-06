@@ -5,33 +5,32 @@ use cbf_chrome_sys::ffi::*;
 use cursor_icon::CursorIcon;
 use tracing::debug;
 
-use cbf::{
-    data::{
-        context_menu::{
-            ContextMenu, ContextMenuAccelerator, ContextMenuIcon, ContextMenuItem,
-            ContextMenuItemType,
-        },
-        drag::{DragData, DragImage, DragOperations, DragStartRequest, DragUrlInfo},
-        extension::ExtensionInfo,
-        ids::BrowsingContextId,
-        ime::{
-            ChromeImeTextSpanStyle, ChromeImeTextSpanThickness, ChromeImeTextSpanUnderlineStyle,
-            ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, ImeTextSpan,
-            ImeTextSpanType, TextSelectionBounds,
-        },
-        key::{KeyEvent, KeyEventType},
-        mouse::{
-            MouseButton, MouseEvent, MouseEventType, MouseWheelEvent, PointerType,
-            ScrollGranularity,
-        },
-    },
-    event::BeforeUnloadReason,
+use cbf::data::{
+    drag::DragData,
+    key::KeyEvent,
+    mouse::{MouseEvent, MouseWheelEvent, PointerType},
 };
 
 use super::{Error, IpcEvent, utils::c_string_to_string};
 use crate::data::{
+    context_menu::{
+        ChromeContextMenu, ChromeContextMenuAccelerator, ChromeContextMenuIcon,
+        ChromeContextMenuItem, ChromeContextMenuItemType,
+    },
+    drag::{
+        ChromeDragData, ChromeDragImage, ChromeDragOperations, ChromeDragStartRequest,
+        ChromeDragUrlInfo,
+    },
+    extension::ChromeExtensionInfo,
     ids::TabId,
-    input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+    ime::{
+        ChromeImeBoundsUpdate, ChromeImeCompositionBounds, ChromeImeRect, ChromeImeTextRange,
+        ChromeImeTextSpan, ChromeImeTextSpanStyle, ChromeImeTextSpanThickness,
+        ChromeImeTextSpanType, ChromeImeTextSpanUnderlineStyle, ChromeTextSelectionBounds,
+    },
+    input::{ChromeKeyEvent, ChromeKeyEventType, ChromeMouseWheelEvent, ChromeScrollGranularity},
+    lifecycle::ChromeBeforeUnloadReason,
+    mouse::{ChromeMouseButton, ChromeMouseEvent, ChromeMouseEventType, ChromePointerType},
     prompt_ui::{
         PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult, PromptUiId,
         PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
@@ -161,7 +160,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             let profile_id = c_string_to_string(event.profile_id);
             let request = parse_drag_start_request(event.drag_start_request);
             Ok(IpcEvent::DragStartRequested {
-                browsing_context_id: request.browsing_context_id.into(),
+                browsing_context_id: request.browsing_context_id,
                 profile_id,
                 request,
             })
@@ -293,13 +292,13 @@ fn tab_open_result_from_ffi(value: u8, has_target: bool, target_tab_id: u64) -> 
     }
 }
 
-fn parse_drag_start_request(request: CbfDragStartRequest) -> DragStartRequest {
-    DragStartRequest {
+fn parse_drag_start_request(request: CbfDragStartRequest) -> ChromeDragStartRequest {
+    ChromeDragStartRequest {
         session_id: request.session_id,
-        browsing_context_id: BrowsingContextId::new(request.tab_id),
-        allowed_operations: DragOperations::from_bits(request.allowed_operations),
+        browsing_context_id: TabId::new(request.tab_id),
+        allowed_operations: ChromeDragOperations::from_bits(request.allowed_operations),
         source_origin: c_string_to_string(request.source_origin),
-        data: DragData {
+        data: ChromeDragData {
             text: c_string_to_string(request.data.text),
             html: c_string_to_string(request.data.html),
             html_base_url: c_string_to_string(request.data.html_base_url),
@@ -312,14 +311,14 @@ fn parse_drag_start_request(request: CbfDragStartRequest) -> DragStartRequest {
     }
 }
 
-fn parse_drag_url_infos(list: CbfDragUrlInfoList) -> Vec<DragUrlInfo> {
+fn parse_drag_url_infos(list: CbfDragUrlInfoList) -> Vec<ChromeDragUrlInfo> {
     if list.len == 0 || list.items.is_null() {
         return Vec::new();
     }
     let infos = unsafe { std::slice::from_raw_parts(list.items, list.len as usize) };
     infos
         .iter()
-        .map(|info| DragUrlInfo {
+        .map(|info| ChromeDragUrlInfo {
             url: c_string_to_string(info.url),
             title: c_string_to_string(info.title),
         })
@@ -337,14 +336,14 @@ fn parse_string_list(list: CbfStringList) -> Vec<String> {
         .collect()
 }
 
-fn parse_extension_list(list: CbfExtensionInfoList) -> Vec<ExtensionInfo> {
+fn parse_extension_list(list: CbfExtensionInfoList) -> Vec<ChromeExtensionInfo> {
     if list.len == 0 || list.items.is_null() {
         return Vec::new();
     }
     let values = unsafe { std::slice::from_raw_parts(list.items, list.len as usize) };
     values
         .iter()
-        .map(|value| ExtensionInfo {
+        .map(|value| ChromeExtensionInfo {
             id: c_string_to_string(value.id),
             name: c_string_to_string(value.name),
             version: c_string_to_string(value.version),
@@ -365,12 +364,12 @@ fn parse_string_pair_list(list: CbfStringPairList) -> std::collections::BTreeMap
         .collect()
 }
 
-fn parse_drag_image(image: CbfDragImage) -> Option<DragImage> {
+fn parse_drag_image(image: CbfDragImage) -> Option<ChromeDragImage> {
     if image.png_bytes.is_null() || image.png_len == 0 {
         return None;
     }
     let bytes = unsafe { std::slice::from_raw_parts(image.png_bytes, image.png_len as usize) };
-    Some(DragImage {
+    Some(ChromeDragImage {
         png_bytes: bytes.to_vec(),
         pixel_width: image.pixel_width,
         pixel_height: image.pixel_height,
@@ -380,7 +379,7 @@ fn parse_drag_image(image: CbfDragImage) -> Option<DragImage> {
     })
 }
 
-fn parse_ime_bounds(update: CbfImeBoundsUpdate) -> ImeBoundsUpdate {
+fn parse_ime_bounds(update: CbfImeBoundsUpdate) -> ChromeImeBoundsUpdate {
     let composition = if update.has_composition {
         let list = update.composition.character_bounds;
         let rects = if list.len == 0 || list.items.is_null() {
@@ -391,7 +390,7 @@ fn parse_ime_bounds(update: CbfImeBoundsUpdate) -> ImeBoundsUpdate {
                 .map(|rect| rect_from_ffi(*rect))
                 .collect()
         };
-        Some(ImeCompositionBounds {
+        Some(ChromeImeCompositionBounds {
             range_start: update.composition.range_start,
             range_end: update.composition.range_end,
             character_bounds: rects,
@@ -401,7 +400,7 @@ fn parse_ime_bounds(update: CbfImeBoundsUpdate) -> ImeBoundsUpdate {
     };
 
     let selection = if update.has_selection {
-        Some(TextSelectionBounds {
+        Some(ChromeTextSelectionBounds {
             range_start: update.selection.range_start,
             range_end: update.selection.range_end,
             caret_rect: rect_from_ffi(update.selection.caret_rect),
@@ -411,7 +410,7 @@ fn parse_ime_bounds(update: CbfImeBoundsUpdate) -> ImeBoundsUpdate {
         None
     };
 
-    ImeBoundsUpdate {
+    ChromeImeBoundsUpdate {
         composition,
         selection,
     }
@@ -426,8 +425,8 @@ fn parse_browsing_context_ids(list: CbfTabIdList) -> Vec<TabId> {
     ids.iter().copied().map(TabId::new).collect()
 }
 
-fn parse_context_menu(menu: CbfContextMenu) -> ContextMenu {
-    let menu = ContextMenu {
+fn parse_context_menu(menu: CbfContextMenu) -> ChromeContextMenu {
+    let menu = ChromeContextMenu {
         menu_id: menu.menu_id,
         x: menu.x,
         y: menu.y,
@@ -438,7 +437,7 @@ fn parse_context_menu(menu: CbfContextMenu) -> ContextMenu {
     crate::data::context_menu::filter_supported(menu)
 }
 
-fn parse_context_menu_items(list: CbfContextMenuItemList) -> Vec<ContextMenuItem> {
+fn parse_context_menu_items(list: CbfContextMenuItemList) -> Vec<ChromeContextMenuItem> {
     if list.len == 0 || list.items.is_null() {
         return Vec::new();
     }
@@ -447,8 +446,8 @@ fn parse_context_menu_items(list: CbfContextMenuItemList) -> Vec<ContextMenuItem
     items.iter().map(parse_context_menu_item).collect()
 }
 
-fn parse_context_menu_item(item: &CbfContextMenuItem) -> ContextMenuItem {
-    ContextMenuItem {
+fn parse_context_menu_item(item: &CbfContextMenuItem) -> ChromeContextMenuItem {
+    ChromeContextMenuItem {
         r#type: context_menu_item_type_from_ffi(item.type_),
         command_id: item.command_id,
         label: c_string_to_string(item.label),
@@ -469,46 +468,48 @@ fn parse_context_menu_item(item: &CbfContextMenuItem) -> ContextMenuItem {
     }
 }
 
-fn parse_context_menu_icon(icon: CbfContextMenuIcon) -> Option<ContextMenuIcon> {
+fn parse_context_menu_icon(icon: CbfContextMenuIcon) -> Option<ChromeContextMenuIcon> {
     if icon.len == 0 || icon.png_bytes.is_null() {
         return None;
     }
     let bytes = unsafe { std::slice::from_raw_parts(icon.png_bytes, icon.len as usize) };
-    Some(ContextMenuIcon {
+    Some(ChromeContextMenuIcon {
         png_bytes: bytes.to_vec(),
         width: icon.width,
         height: icon.height,
     })
 }
 
-fn parse_context_menu_accelerator(item: &CbfContextMenuItem) -> Option<ContextMenuAccelerator> {
+fn parse_context_menu_accelerator(
+    item: &CbfContextMenuItem,
+) -> Option<ChromeContextMenuAccelerator> {
     if !item.has_accelerator {
         return None;
     }
 
-    Some(ContextMenuAccelerator {
+    Some(ChromeContextMenuAccelerator {
         key_equivalent: c_string_to_string(item.accelerator_key_equivalent),
         modifier_mask: item.accelerator_modifier_mask,
     })
 }
 
-fn context_menu_item_type_from_ffi(value: u8) -> ContextMenuItemType {
+fn context_menu_item_type_from_ffi(value: u8) -> ChromeContextMenuItemType {
     match value {
-        CBF_MENU_ITEM_COMMAND => ContextMenuItemType::Command,
-        CBF_MENU_ITEM_CHECK => ContextMenuItemType::Check,
-        CBF_MENU_ITEM_RADIO => ContextMenuItemType::Radio,
-        CBF_MENU_ITEM_SEPARATOR => ContextMenuItemType::Separator,
-        CBF_MENU_ITEM_BUTTON_ITEM => ContextMenuItemType::ButtonItem,
-        CBF_MENU_ITEM_SUBMENU => ContextMenuItemType::Submenu,
-        CBF_MENU_ITEM_ACTIONABLE_SUBMENU => ContextMenuItemType::ActionableSubmenu,
-        CBF_MENU_ITEM_HIGHLIGHTED => ContextMenuItemType::Highlighted,
-        CBF_MENU_ITEM_TITLE => ContextMenuItemType::Title,
-        _ => ContextMenuItemType::Command,
+        CBF_MENU_ITEM_COMMAND => ChromeContextMenuItemType::Command,
+        CBF_MENU_ITEM_CHECK => ChromeContextMenuItemType::Check,
+        CBF_MENU_ITEM_RADIO => ChromeContextMenuItemType::Radio,
+        CBF_MENU_ITEM_SEPARATOR => ChromeContextMenuItemType::Separator,
+        CBF_MENU_ITEM_BUTTON_ITEM => ChromeContextMenuItemType::ButtonItem,
+        CBF_MENU_ITEM_SUBMENU => ChromeContextMenuItemType::Submenu,
+        CBF_MENU_ITEM_ACTIONABLE_SUBMENU => ChromeContextMenuItemType::ActionableSubmenu,
+        CBF_MENU_ITEM_HIGHLIGHTED => ChromeContextMenuItemType::Highlighted,
+        CBF_MENU_ITEM_TITLE => ChromeContextMenuItemType::Title,
+        _ => ChromeContextMenuItemType::Command,
     }
 }
 
-fn rect_from_ffi(rect: CbfRect) -> ImeRect {
-    ImeRect {
+fn rect_from_ffi(rect: CbfRect) -> ChromeImeRect {
+    ChromeImeRect {
         x: rect.x,
         y: rect.y,
         width: rect.width,
@@ -516,13 +517,13 @@ fn rect_from_ffi(rect: CbfRect) -> ImeRect {
     }
 }
 
-fn beforeunload_reason_from_ffi(value: u8) -> BeforeUnloadReason {
+fn beforeunload_reason_from_ffi(value: u8) -> ChromeBeforeUnloadReason {
     match value {
-        CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE => BeforeUnloadReason::CloseBrowsingContext,
-        CBF_BEFOREUNLOAD_REASON_NAVIGATE => BeforeUnloadReason::Navigate,
-        CBF_BEFOREUNLOAD_REASON_RELOAD => BeforeUnloadReason::Reload,
-        CBF_BEFOREUNLOAD_REASON_WINDOW_CLOSE => BeforeUnloadReason::WindowClose,
-        _ => BeforeUnloadReason::Unknown,
+        CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE => ChromeBeforeUnloadReason::CloseBrowsingContext,
+        CBF_BEFOREUNLOAD_REASON_NAVIGATE => ChromeBeforeUnloadReason::Navigate,
+        CBF_BEFOREUNLOAD_REASON_RELOAD => ChromeBeforeUnloadReason::Reload,
+        CBF_BEFOREUNLOAD_REASON_WINDOW_CLOSE => ChromeBeforeUnloadReason::WindowClose,
+        _ => ChromeBeforeUnloadReason::Unknown,
     }
 }
 
@@ -729,106 +730,108 @@ fn parse_surface_handle(handle: CbfSurfaceHandle) -> Result<SurfaceHandle, Error
     }
 }
 
-pub(super) fn key_event_type_to_ffi(value: KeyEventType) -> u8 {
+pub(super) fn key_event_type_to_ffi(value: ChromeKeyEventType) -> u8 {
     match value {
-        KeyEventType::RawKeyDown => CBF_KEY_EVENT_RAW_KEY_DOWN,
-        KeyEventType::KeyDown => CBF_KEY_EVENT_KEY_DOWN,
-        KeyEventType::KeyUp => CBF_KEY_EVENT_KEY_UP,
-        KeyEventType::Char => CBF_KEY_EVENT_CHAR,
+        ChromeKeyEventType::RawKeyDown => CBF_KEY_EVENT_RAW_KEY_DOWN,
+        ChromeKeyEventType::KeyDown => CBF_KEY_EVENT_KEY_DOWN,
+        ChromeKeyEventType::KeyUp => CBF_KEY_EVENT_KEY_UP,
+        ChromeKeyEventType::Char => CBF_KEY_EVENT_CHAR,
     }
 }
 
-pub(super) fn mouse_event_type_to_ffi(value: MouseEventType) -> u8 {
+pub(super) fn mouse_event_type_to_ffi(value: ChromeMouseEventType) -> u8 {
     match value {
-        MouseEventType::Down => CBF_MOUSE_EVENT_DOWN,
-        MouseEventType::Up => CBF_MOUSE_EVENT_UP,
-        MouseEventType::Move => CBF_MOUSE_EVENT_MOVE,
-        MouseEventType::Enter => CBF_MOUSE_EVENT_ENTER,
-        MouseEventType::Leave => CBF_MOUSE_EVENT_LEAVE,
+        ChromeMouseEventType::Down => CBF_MOUSE_EVENT_DOWN,
+        ChromeMouseEventType::Up => CBF_MOUSE_EVENT_UP,
+        ChromeMouseEventType::Move => CBF_MOUSE_EVENT_MOVE,
+        ChromeMouseEventType::Enter => CBF_MOUSE_EVENT_ENTER,
+        ChromeMouseEventType::Leave => CBF_MOUSE_EVENT_LEAVE,
     }
 }
 
-fn mouse_event_type_from_ffi(value: u8) -> MouseEventType {
+fn mouse_event_type_from_ffi(value: u8) -> ChromeMouseEventType {
     match value {
-        CBF_MOUSE_EVENT_DOWN => MouseEventType::Down,
-        CBF_MOUSE_EVENT_UP => MouseEventType::Up,
-        CBF_MOUSE_EVENT_MOVE => MouseEventType::Move,
-        CBF_MOUSE_EVENT_ENTER => MouseEventType::Enter,
-        CBF_MOUSE_EVENT_LEAVE => MouseEventType::Leave,
-        _ => MouseEventType::Move,
+        CBF_MOUSE_EVENT_DOWN => ChromeMouseEventType::Down,
+        CBF_MOUSE_EVENT_UP => ChromeMouseEventType::Up,
+        CBF_MOUSE_EVENT_MOVE => ChromeMouseEventType::Move,
+        CBF_MOUSE_EVENT_ENTER => ChromeMouseEventType::Enter,
+        CBF_MOUSE_EVENT_LEAVE => ChromeMouseEventType::Leave,
+        _ => ChromeMouseEventType::Move,
     }
 }
 
-pub(super) fn mouse_button_to_ffi(value: MouseButton) -> u8 {
+pub(super) fn mouse_button_to_ffi(value: ChromeMouseButton) -> u8 {
     match value {
-        MouseButton::None => CBF_MOUSE_BUTTON_NONE,
-        MouseButton::Left => CBF_MOUSE_BUTTON_LEFT,
-        MouseButton::Middle => CBF_MOUSE_BUTTON_MIDDLE,
-        MouseButton::Right => CBF_MOUSE_BUTTON_RIGHT,
-        MouseButton::Back => CBF_MOUSE_BUTTON_BACK,
-        MouseButton::Forward => CBF_MOUSE_BUTTON_FORWARD,
+        ChromeMouseButton::None => CBF_MOUSE_BUTTON_NONE,
+        ChromeMouseButton::Left => CBF_MOUSE_BUTTON_LEFT,
+        ChromeMouseButton::Middle => CBF_MOUSE_BUTTON_MIDDLE,
+        ChromeMouseButton::Right => CBF_MOUSE_BUTTON_RIGHT,
+        ChromeMouseButton::Back => CBF_MOUSE_BUTTON_BACK,
+        ChromeMouseButton::Forward => CBF_MOUSE_BUTTON_FORWARD,
     }
 }
 
-fn mouse_button_from_ffi(value: u8) -> MouseButton {
+fn mouse_button_from_ffi(value: u8) -> ChromeMouseButton {
     match value {
-        CBF_MOUSE_BUTTON_LEFT => MouseButton::Left,
-        CBF_MOUSE_BUTTON_MIDDLE => MouseButton::Middle,
-        CBF_MOUSE_BUTTON_RIGHT => MouseButton::Right,
-        CBF_MOUSE_BUTTON_BACK => MouseButton::Back,
-        CBF_MOUSE_BUTTON_FORWARD => MouseButton::Forward,
-        _ => MouseButton::None,
+        CBF_MOUSE_BUTTON_LEFT => ChromeMouseButton::Left,
+        CBF_MOUSE_BUTTON_MIDDLE => ChromeMouseButton::Middle,
+        CBF_MOUSE_BUTTON_RIGHT => ChromeMouseButton::Right,
+        CBF_MOUSE_BUTTON_BACK => ChromeMouseButton::Back,
+        CBF_MOUSE_BUTTON_FORWARD => ChromeMouseButton::Forward,
+        _ => ChromeMouseButton::None,
     }
 }
 
-pub(super) fn pointer_type_to_ffi(value: PointerType) -> u8 {
+pub(super) fn pointer_type_to_ffi(value: ChromePointerType) -> u8 {
     match value {
-        PointerType::Unknown => CBF_POINTER_TYPE_UNKNOWN,
-        PointerType::Mouse => CBF_POINTER_TYPE_MOUSE,
-        PointerType::Pen => CBF_POINTER_TYPE_PEN,
-        PointerType::Touch => CBF_POINTER_TYPE_TOUCH,
-        PointerType::Eraser => CBF_POINTER_TYPE_ERASER,
+        ChromePointerType::Unknown => CBF_POINTER_TYPE_UNKNOWN,
+        ChromePointerType::Mouse => CBF_POINTER_TYPE_MOUSE,
+        ChromePointerType::Pen => CBF_POINTER_TYPE_PEN,
+        ChromePointerType::Touch => CBF_POINTER_TYPE_TOUCH,
+        ChromePointerType::Eraser => CBF_POINTER_TYPE_ERASER,
     }
 }
 
-fn pointer_type_from_ffi(value: u8) -> PointerType {
+fn pointer_type_from_ffi(value: u8) -> ChromePointerType {
     match value {
-        CBF_POINTER_TYPE_MOUSE => PointerType::Mouse,
-        CBF_POINTER_TYPE_PEN => PointerType::Pen,
-        CBF_POINTER_TYPE_TOUCH => PointerType::Touch,
-        CBF_POINTER_TYPE_ERASER => PointerType::Eraser,
-        _ => PointerType::Unknown,
+        CBF_POINTER_TYPE_MOUSE => ChromePointerType::Mouse,
+        CBF_POINTER_TYPE_PEN => ChromePointerType::Pen,
+        CBF_POINTER_TYPE_TOUCH => ChromePointerType::Touch,
+        CBF_POINTER_TYPE_ERASER => ChromePointerType::Eraser,
+        _ => ChromePointerType::Unknown,
     }
 }
 
-pub(super) fn scroll_granularity_to_ffi(value: ScrollGranularity) -> u8 {
+pub(super) fn scroll_granularity_to_ffi(value: ChromeScrollGranularity) -> u8 {
     match value {
-        ScrollGranularity::PrecisePixel => CBF_SCROLL_BY_PRECISE_PIXEL,
-        ScrollGranularity::Pixel => CBF_SCROLL_BY_PIXEL,
-        ScrollGranularity::Line => CBF_SCROLL_BY_LINE,
-        ScrollGranularity::Page => CBF_SCROLL_BY_PAGE,
-        ScrollGranularity::Document => CBF_SCROLL_BY_DOCUMENT,
+        ChromeScrollGranularity::PrecisePixel => CBF_SCROLL_BY_PRECISE_PIXEL,
+        ChromeScrollGranularity::Pixel => CBF_SCROLL_BY_PIXEL,
+        ChromeScrollGranularity::Line => CBF_SCROLL_BY_LINE,
+        ChromeScrollGranularity::Page => CBF_SCROLL_BY_PAGE,
+        ChromeScrollGranularity::Document => CBF_SCROLL_BY_DOCUMENT,
     }
 }
 
-fn scroll_granularity_from_ffi(value: u8) -> ScrollGranularity {
+fn scroll_granularity_from_ffi(value: u8) -> ChromeScrollGranularity {
     match value {
-        CBF_SCROLL_BY_PRECISE_PIXEL => ScrollGranularity::PrecisePixel,
-        CBF_SCROLL_BY_PIXEL => ScrollGranularity::Pixel,
-        CBF_SCROLL_BY_LINE => ScrollGranularity::Line,
-        CBF_SCROLL_BY_PAGE => ScrollGranularity::Page,
-        CBF_SCROLL_BY_DOCUMENT => ScrollGranularity::Document,
-        _ => ScrollGranularity::Pixel,
+        CBF_SCROLL_BY_PRECISE_PIXEL => ChromeScrollGranularity::PrecisePixel,
+        CBF_SCROLL_BY_PIXEL => ChromeScrollGranularity::Pixel,
+        CBF_SCROLL_BY_LINE => ChromeScrollGranularity::Line,
+        CBF_SCROLL_BY_PAGE => ChromeScrollGranularity::Page,
+        CBF_SCROLL_BY_DOCUMENT => ChromeScrollGranularity::Document,
+        _ => ChromeScrollGranularity::Pixel,
     }
 }
 
-fn ime_text_span_type_to_ffi(value: ImeTextSpanType) -> u8 {
+fn ime_text_span_type_to_ffi(value: ChromeImeTextSpanType) -> u8 {
     match value {
-        ImeTextSpanType::Composition => CBF_IME_TEXT_SPAN_TYPE_COMPOSITION,
-        ImeTextSpanType::Suggestion => CBF_IME_TEXT_SPAN_TYPE_SUGGESTION,
-        ImeTextSpanType::MisspellingSuggestion => CBF_IME_TEXT_SPAN_TYPE_MISSPELLING_SUGGESTION,
-        ImeTextSpanType::Autocorrect => CBF_IME_TEXT_SPAN_TYPE_AUTOCORRECT,
-        ImeTextSpanType::GrammarSuggestion => CBF_IME_TEXT_SPAN_TYPE_GRAMMAR_SUGGESTION,
+        ChromeImeTextSpanType::Composition => CBF_IME_TEXT_SPAN_TYPE_COMPOSITION,
+        ChromeImeTextSpanType::Suggestion => CBF_IME_TEXT_SPAN_TYPE_SUGGESTION,
+        ChromeImeTextSpanType::MisspellingSuggestion => {
+            CBF_IME_TEXT_SPAN_TYPE_MISSPELLING_SUGGESTION
+        }
+        ChromeImeTextSpanType::Autocorrect => CBF_IME_TEXT_SPAN_TYPE_AUTOCORRECT,
+        ChromeImeTextSpanType::GrammarSuggestion => CBF_IME_TEXT_SPAN_TYPE_GRAMMAR_SUGGESTION,
     }
 }
 
@@ -850,11 +853,11 @@ fn ime_text_span_underline_style_to_ffi(value: ChromeImeTextSpanUnderlineStyle) 
     }
 }
 
-fn chrome_ime_text_span_style_from_span(span: &ImeTextSpan) -> ChromeImeTextSpanStyle {
+fn chrome_ime_text_span_style_from_span(span: &ChromeImeTextSpan) -> ChromeImeTextSpanStyle {
     span.chrome_style.clone().unwrap_or_default()
 }
 
-pub(super) fn ime_range_to_ffi(value: &Option<ImeTextRange>) -> (i32, i32) {
+pub(super) fn ime_range_to_ffi(value: &Option<ChromeImeTextRange>) -> (i32, i32) {
     match value {
         Some(range) => (range.start, range.end),
         // Sentinel for "no replacement range"; C++ side treats (-1, -1) as null.
@@ -862,7 +865,7 @@ pub(super) fn ime_range_to_ffi(value: &Option<ImeTextRange>) -> (i32, i32) {
     }
 }
 
-pub(super) fn to_ffi_ime_text_spans(spans: &[ImeTextSpan]) -> Vec<CbfImeTextSpan> {
+pub(super) fn to_ffi_ime_text_spans(spans: &[ChromeImeTextSpan]) -> Vec<CbfImeTextSpan> {
     spans
         .iter()
         .map(|span| {
@@ -908,11 +911,11 @@ pub fn convert_nsevent_to_chrome_key_event(
 
     let event = ChromeKeyEvent {
         type_: match ffi_event.type_ {
-            CBF_KEY_EVENT_RAW_KEY_DOWN => KeyEventType::RawKeyDown,
-            CBF_KEY_EVENT_KEY_DOWN => KeyEventType::KeyDown,
-            CBF_KEY_EVENT_KEY_UP => KeyEventType::KeyUp,
-            CBF_KEY_EVENT_CHAR => KeyEventType::Char,
-            _ => KeyEventType::RawKeyDown,
+            CBF_KEY_EVENT_RAW_KEY_DOWN => ChromeKeyEventType::RawKeyDown,
+            CBF_KEY_EVENT_KEY_DOWN => ChromeKeyEventType::KeyDown,
+            CBF_KEY_EVENT_KEY_UP => ChromeKeyEventType::KeyUp,
+            CBF_KEY_EVENT_CHAR => ChromeKeyEventType::Char,
+            _ => ChromeKeyEventType::RawKeyDown,
         },
         modifiers: ffi_event.modifiers,
         windows_key_code: ffi_event.windows_key_code,
@@ -961,7 +964,10 @@ pub fn convert_nspasteboard_to_drag_data(nspasteboard: NonNull<c_void>) -> DragD
         text: c_string_to_string(ffi_data.text),
         html: c_string_to_string(ffi_data.html),
         html_base_url: c_string_to_string(ffi_data.html_base_url),
-        url_infos: parse_drag_url_infos(ffi_data.url_infos),
+        url_infos: parse_drag_url_infos(ffi_data.url_infos)
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         filenames: parse_string_list(ffi_data.filenames),
         file_mime_types: parse_string_list(ffi_data.file_mime_types),
         custom_data: parse_string_pair_list(ffi_data.custom_data),
@@ -982,6 +988,24 @@ pub fn convert_nsevent_to_mouse_event(
     pointer_type: PointerType,
     unaccelerated_movement: bool,
 ) -> MouseEvent {
+    convert_nsevent_to_chrome_mouse_event(
+        browsing_context_id,
+        nsevent,
+        nsview,
+        pointer_type.into(),
+        unaccelerated_movement,
+    )
+    .into()
+}
+
+#[cfg(target_os = "macos")]
+pub fn convert_nsevent_to_chrome_mouse_event(
+    browsing_context_id: u64,
+    nsevent: NonNull<c_void>,
+    nsview: NonNull<c_void>,
+    pointer_type: ChromePointerType,
+    unaccelerated_movement: bool,
+) -> ChromeMouseEvent {
     let mut ffi_event = CbfMouseEvent::default();
     unsafe {
         cbf_bridge_convert_nsevent_to_mouse_event(
@@ -994,7 +1018,7 @@ pub fn convert_nsevent_to_mouse_event(
         );
     }
 
-    MouseEvent {
+    ChromeMouseEvent {
         type_: mouse_event_type_from_ffi(ffi_event.type_),
         modifiers: ffi_event.modifiers,
         button: mouse_button_from_ffi(ffi_event.button),

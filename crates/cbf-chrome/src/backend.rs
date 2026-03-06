@@ -551,7 +551,7 @@ impl ChromiumBackend {
                 event,
                 commands,
             } => client
-                .send_key_event(*browsing_context_id, &event.clone().into(), commands)
+                .send_key_event_raw(*browsing_context_id, event, commands)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::SendMouseEvent {
                 browsing_context_id,
@@ -563,7 +563,7 @@ impl ChromiumBackend {
                 browsing_context_id,
                 event,
             } => client
-                .send_mouse_wheel_event(*browsing_context_id, &event.clone().into())
+                .send_mouse_wheel_event_raw(*browsing_context_id, event)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::SendDragUpdate { update } => {
                 client.send_drag_update(update).map(|_| (None, Vec::new()))

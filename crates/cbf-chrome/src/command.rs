@@ -258,7 +258,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 event,
             } => Self::SendMouseEvent {
                 browsing_context_id: browsing_context_id.into(),
-                event,
+                event: event.into(),
             },
             BrowserCommand::SendMouseWheelEvent {
                 browsing_context_id,
@@ -267,8 +267,10 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id: browsing_context_id.into(),
                 event: event.into(),
             },
-            BrowserCommand::SendDragUpdate { update } => Self::SendDragUpdate { update },
-            BrowserCommand::SendDragDrop { drop } => Self::SendDragDrop { drop },
+            BrowserCommand::SendDragUpdate { update } => Self::SendDragUpdate {
+                update: update.into(),
+            },
+            BrowserCommand::SendDragDrop { drop } => Self::SendDragDrop { drop: drop.into() },
             BrowserCommand::SendDragCancel {
                 session_id,
                 browsing_context_id,
@@ -276,16 +278,18 @@ impl From<BrowserCommand> for ChromeCommand {
                 session_id,
                 browsing_context_id: browsing_context_id.into(),
             },
-            BrowserCommand::SetComposition { composition } => {
-                Self::SetImeComposition { composition }
-            }
-            BrowserCommand::CommitText { commit } => Self::CommitImeText { commit },
+            BrowserCommand::SetComposition { composition } => Self::SetImeComposition {
+                composition: composition.into(),
+            },
+            BrowserCommand::CommitText { commit } => Self::CommitImeText {
+                commit: commit.into(),
+            },
             BrowserCommand::FinishComposingText {
                 browsing_context_id,
                 behavior,
             } => Self::FinishComposingText {
                 browsing_context_id: browsing_context_id.into(),
-                behavior,
+                behavior: behavior.into(),
             },
             BrowserCommand::ExecuteContextMenuCommand {
                 menu_id,
@@ -309,7 +313,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id,
                 request_id,
                 response,
-            } => match response {
+            } => match ChromeAuxiliaryWindowResponse::from(response) {
                 ChromeAuxiliaryWindowResponse::PermissionPrompt { allow } => {
                     Self::RespondPromptUi {
                         browsing_context_id: browsing_context_id.into(),
@@ -342,7 +346,7 @@ impl From<BrowserCommand> for ChromeCommand {
                 response,
             } => Self::RespondTabOpen {
                 request_id,
-                response,
+                response: response.into(),
             },
             BrowserCommand::RespondWindowOpen {
                 request_id,

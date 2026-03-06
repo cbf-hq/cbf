@@ -1,6 +1,129 @@
-use cbf::data::context_menu::{ContextMenu, ContextMenuItem, ContextMenuItemType};
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChromeContextMenuItemType {
+    Command,
+    Check,
+    Radio,
+    Separator,
+    ButtonItem,
+    Submenu,
+    ActionableSubmenu,
+    Highlighted,
+    Title,
+}
 
-pub type ChromeContextMenu = ContextMenu;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChromeContextMenuIcon {
+    pub png_bytes: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChromeContextMenuAccelerator {
+    pub key_equivalent: String,
+    pub modifier_mask: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChromeContextMenuItem {
+    pub r#type: ChromeContextMenuItemType,
+    pub command_id: i32,
+    pub label: String,
+    pub secondary_label: String,
+    pub minor_text: String,
+    pub accessible_name: String,
+    pub enabled: bool,
+    pub visible: bool,
+    pub checked: bool,
+    pub group_id: i32,
+    pub is_new_feature: bool,
+    pub is_alerted: bool,
+    pub may_have_mnemonics: bool,
+    pub accelerator: Option<ChromeContextMenuAccelerator>,
+    pub icon: Option<ChromeContextMenuIcon>,
+    pub minor_icon: Option<ChromeContextMenuIcon>,
+    pub submenu: Vec<ChromeContextMenuItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChromeContextMenu {
+    pub menu_id: u64,
+    pub x: i32,
+    pub y: i32,
+    pub source_type: u32,
+    pub items: Vec<ChromeContextMenuItem>,
+}
+
+impl From<ChromeContextMenuItemType> for cbf::data::context_menu::ContextMenuItemType {
+    fn from(value: ChromeContextMenuItemType) -> Self {
+        match value {
+            ChromeContextMenuItemType::Command => Self::Command,
+            ChromeContextMenuItemType::Check => Self::Check,
+            ChromeContextMenuItemType::Radio => Self::Radio,
+            ChromeContextMenuItemType::Separator => Self::Separator,
+            ChromeContextMenuItemType::ButtonItem => Self::ButtonItem,
+            ChromeContextMenuItemType::Submenu => Self::Submenu,
+            ChromeContextMenuItemType::ActionableSubmenu => Self::ActionableSubmenu,
+            ChromeContextMenuItemType::Highlighted => Self::Highlighted,
+            ChromeContextMenuItemType::Title => Self::Title,
+        }
+    }
+}
+
+impl From<ChromeContextMenuIcon> for cbf::data::context_menu::ContextMenuIcon {
+    fn from(value: ChromeContextMenuIcon) -> Self {
+        Self {
+            png_bytes: value.png_bytes,
+            width: value.width,
+            height: value.height,
+        }
+    }
+}
+
+impl From<ChromeContextMenuAccelerator> for cbf::data::context_menu::ContextMenuAccelerator {
+    fn from(value: ChromeContextMenuAccelerator) -> Self {
+        Self {
+            key_equivalent: value.key_equivalent,
+            modifier_mask: value.modifier_mask,
+        }
+    }
+}
+
+impl From<ChromeContextMenuItem> for cbf::data::context_menu::ContextMenuItem {
+    fn from(value: ChromeContextMenuItem) -> Self {
+        Self {
+            r#type: value.r#type.into(),
+            command_id: value.command_id,
+            label: value.label,
+            secondary_label: value.secondary_label,
+            minor_text: value.minor_text,
+            accessible_name: value.accessible_name,
+            enabled: value.enabled,
+            visible: value.visible,
+            checked: value.checked,
+            group_id: value.group_id,
+            is_new_feature: value.is_new_feature,
+            is_alerted: value.is_alerted,
+            may_have_mnemonics: value.may_have_mnemonics,
+            accelerator: value.accelerator.map(Into::into),
+            icon: value.icon.map(Into::into),
+            minor_icon: value.minor_icon.map(Into::into),
+            submenu: value.submenu.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<ChromeContextMenu> for cbf::data::context_menu::ContextMenu {
+    fn from(value: ChromeContextMenu) -> Self {
+        Self {
+            menu_id: value.menu_id,
+            x: value.x,
+            y: value.y,
+            source_type: value.source_type,
+            items: value.items.into_iter().map(Into::into).collect(),
+        }
+    }
+}
 
 /// Command id for navigating back.
 pub const CMD_BACK: i32 = 33000;
@@ -66,9 +189,9 @@ const CONTEXT_MENU_ALLOWLIST: &[i32] = &[
     CMD_CONTENT_INSPECT_ELEMENT,
 ];
 
-pub fn filter_supported(menu: ContextMenu) -> ContextMenu {
+pub fn filter_supported(menu: ChromeContextMenu) -> ChromeContextMenu {
     let items = filter_items(menu.items);
-    ContextMenu { items, ..menu }
+    ChromeContextMenu { items, ..menu }
 }
 
 /// Check whether a command id represents "open link in new tab".
@@ -81,13 +204,13 @@ pub fn is_open_link_new_window(command_id: i32) -> bool {
     command_id == CMD_CONTENT_OPEN_LINK_NEW_WINDOW
 }
 
-fn filter_items(items: Vec<ContextMenuItem>) -> Vec<ContextMenuItem> {
+fn filter_items(items: Vec<ChromeContextMenuItem>) -> Vec<ChromeContextMenuItem> {
     let mut filtered = Vec::new();
 
     for mut item in items {
         match item.r#type {
-            ContextMenuItemType::Separator => filtered.push(item),
-            ContextMenuItemType::Submenu | ContextMenuItemType::ActionableSubmenu => {
+            ChromeContextMenuItemType::Separator => filtered.push(item),
+            ChromeContextMenuItemType::Submenu | ChromeContextMenuItemType::ActionableSubmenu => {
                 let submenu = filter_items(item.submenu);
                 if submenu.is_empty() {
                     continue;
@@ -106,12 +229,12 @@ fn filter_items(items: Vec<ContextMenuItem>) -> Vec<ContextMenuItem> {
     trim_menu_separators(filtered)
 }
 
-fn trim_menu_separators(items: Vec<ContextMenuItem>) -> Vec<ContextMenuItem> {
+fn trim_menu_separators(items: Vec<ChromeContextMenuItem>) -> Vec<ChromeContextMenuItem> {
     let mut trimmed = Vec::new();
     let mut last_was_separator = true;
 
     for item in items {
-        if item.r#type == ContextMenuItemType::Separator {
+        if item.r#type == ChromeContextMenuItemType::Separator {
             if last_was_separator {
                 continue;
             }
@@ -123,7 +246,7 @@ fn trim_menu_separators(items: Vec<ContextMenuItem>) -> Vec<ContextMenuItem> {
         }
     }
 
-    if matches!(trimmed.last(), Some(item) if item.r#type == ContextMenuItemType::Separator) {
+    if matches!(trimmed.last(), Some(item) if item.r#type == ChromeContextMenuItemType::Separator) {
         trimmed.pop();
     }
 

@@ -10,10 +10,12 @@ use cbf::data::{
         WindowOpenResult, WindowState,
     },
 };
-use cbf::event::{BrowserEvent, BrowsingContextEvent, DialogType};
+use cbf::event::{BrowserEvent, BrowsingContextEvent};
 
 use crate::data::{
-    lifecycle::{ChromeBackendErrorInfo, ChromeBackendStopReason, ChromeBeforeUnloadReason},
+    browsing_context_open::ChromeBrowsingContextOpenResult,
+    extension::ChromeExtensionInfo,
+    lifecycle::{ChromeBackendErrorInfo, ChromeBackendStopReason},
     profile::ChromeProfileInfo,
     prompt_ui::{
         PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult, PromptUiId,
@@ -61,7 +63,7 @@ pub fn to_generic_event(event: &ChromeEvent) -> Option<BrowserEvent> {
             terminal_hint: *terminal_hint,
         }),
         ChromeEvent::ProfilesListed { profiles } => Some(BrowserEvent::ProfilesListed {
-            profiles: profiles.clone(),
+            profiles: profiles.iter().cloned().map(Into::into).collect(),
         }),
     }
 }
@@ -94,7 +96,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             profile_id: profile_id.clone(),
             browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::ImeBoundsUpdated {
-                update: update.clone(),
+                update: update.clone().into(),
             }),
         }),
         IpcEvent::ContextMenuRequested {
@@ -104,7 +106,9 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
         } => Some(BrowserEvent::BrowsingContext {
             profile_id: profile_id.clone(),
             browsing_context_id: browsing_context_id.to_browsing_context_id(),
-            event: Box::new(BrowsingContextEvent::ContextMenuRequested { menu: menu.clone() }),
+            event: Box::new(BrowsingContextEvent::ContextMenuRequested {
+                menu: menu.clone().into(),
+            }),
         }),
         IpcEvent::TabOpenRequested {
             profile_id,
@@ -140,6 +144,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 target_url: target_url.clone(),
                 open_hint: open_hint
                     .to_browsing_context_open_hint()
+                    .map(Into::into)
                     .unwrap_or_else(|| {
                         unreachable!(
                             "window-oriented tab-open hints are mapped to WindowOpenRequested"
@@ -167,7 +172,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             _ => Some(BrowserEvent::BrowsingContextOpenResolved {
                 profile_id: profile_id.clone(),
                 request_id: *request_id,
-                result: (*result).into(),
+                result: ChromeBrowsingContextOpenResult::from(*result).into(),
             }),
         },
         IpcEvent::NavigationStateChanged {
@@ -230,16 +235,8 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 request_id: *request_id,
                 message: String::new(),
                 default_prompt_text: None,
-                r#type: DialogType::BeforeUnload,
-                beforeunload_reason: Some(match reason {
-                    ChromeBeforeUnloadReason::Unknown => ChromeBeforeUnloadReason::Unknown,
-                    ChromeBeforeUnloadReason::CloseBrowsingContext => {
-                        ChromeBeforeUnloadReason::CloseBrowsingContext
-                    }
-                    ChromeBeforeUnloadReason::Navigate => ChromeBeforeUnloadReason::Navigate,
-                    ChromeBeforeUnloadReason::Reload => ChromeBeforeUnloadReason::Reload,
-                    ChromeBeforeUnloadReason::WindowClose => ChromeBeforeUnloadReason::WindowClose,
-                }),
+                r#type: cbf::data::dialog::DialogType::BeforeUnload,
+                beforeunload_reason: Some((*reason).into()),
             }),
         }),
         IpcEvent::WebContentsClosed {
@@ -272,7 +269,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             profile_id: profile_id.clone(),
             browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::DragStartRequested {
-                request: request.clone(),
+                request: request.clone().into(),
             }),
         }),
         IpcEvent::ShutdownBlocked {
@@ -297,7 +294,11 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             extensions,
         } => Some(BrowserEvent::ExtensionsListed {
             profile_id: profile_id.clone(),
-            extensions: extensions.clone(),
+            extensions: extensions
+                .iter()
+                .cloned()
+                .map(ChromeExtensionInfo::into)
+                .collect(),
         }),
         IpcEvent::PromptUiOpenRequested {
             profile_id,

@@ -1,6 +1,7 @@
-use cbf::data::browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult};
-
-use super::ids::TabId;
+use super::{
+    browsing_context_open::{ChromeBrowsingContextOpenHint, ChromeBrowsingContextOpenResult},
+    ids::TabId,
+};
 
 /// Chromium-facing hint describing how opener requested a tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,24 +16,28 @@ pub enum TabOpenHint {
 
 impl TabOpenHint {
     /// Convert into generic-layer hint only for non-window-open cases.
-    pub const fn to_browsing_context_open_hint(self) -> Option<BrowsingContextOpenHint> {
+    pub const fn to_browsing_context_open_hint(self) -> Option<ChromeBrowsingContextOpenHint> {
         match self {
-            TabOpenHint::Unknown => Some(BrowsingContextOpenHint::Unknown),
-            TabOpenHint::CurrentTab => Some(BrowsingContextOpenHint::CurrentContext),
-            TabOpenHint::NewForegroundTab => Some(BrowsingContextOpenHint::NewForegroundContext),
-            TabOpenHint::NewBackgroundTab => Some(BrowsingContextOpenHint::NewBackgroundContext),
+            TabOpenHint::Unknown => Some(ChromeBrowsingContextOpenHint::Unknown),
+            TabOpenHint::CurrentTab => Some(ChromeBrowsingContextOpenHint::CurrentContext),
+            TabOpenHint::NewForegroundTab => {
+                Some(ChromeBrowsingContextOpenHint::NewForegroundContext)
+            }
+            TabOpenHint::NewBackgroundTab => {
+                Some(ChromeBrowsingContextOpenHint::NewBackgroundContext)
+            }
             TabOpenHint::NewWindow | TabOpenHint::Popup => None,
         }
     }
 }
 
-impl From<BrowsingContextOpenHint> for TabOpenHint {
-    fn from(value: BrowsingContextOpenHint) -> Self {
+impl From<ChromeBrowsingContextOpenHint> for TabOpenHint {
+    fn from(value: ChromeBrowsingContextOpenHint) -> Self {
         match value {
-            BrowsingContextOpenHint::Unknown => Self::Unknown,
-            BrowsingContextOpenHint::CurrentContext => Self::CurrentTab,
-            BrowsingContextOpenHint::NewForegroundContext => Self::NewForegroundTab,
-            BrowsingContextOpenHint::NewBackgroundContext => Self::NewBackgroundTab,
+            ChromeBrowsingContextOpenHint::Unknown => Self::Unknown,
+            ChromeBrowsingContextOpenHint::CurrentContext => Self::CurrentTab,
+            ChromeBrowsingContextOpenHint::NewForegroundContext => Self::NewForegroundTab,
+            ChromeBrowsingContextOpenHint::NewBackgroundContext => Self::NewBackgroundTab,
         }
     }
 }
@@ -46,57 +51,50 @@ pub enum TabOpenResult {
     Aborted,
 }
 
-impl From<TabOpenResult> for BrowsingContextOpenResult {
+impl From<TabOpenResult> for ChromeBrowsingContextOpenResult {
     fn from(value: TabOpenResult) -> Self {
         match value {
-            TabOpenResult::OpenedNewTab { tab_id } => Self::OpenedNewContext {
-                browsing_context_id: tab_id.into(),
-            },
-            TabOpenResult::OpenedExistingTab { tab_id } => Self::OpenedExistingContext {
-                browsing_context_id: tab_id.into(),
-            },
+            TabOpenResult::OpenedNewTab { tab_id } => Self::OpenedNewContext { tab_id },
+            TabOpenResult::OpenedExistingTab { tab_id } => Self::OpenedExistingContext { tab_id },
             TabOpenResult::Denied => Self::Denied,
             TabOpenResult::Aborted => Self::Aborted,
         }
     }
 }
 
-impl From<BrowsingContextOpenResult> for TabOpenResult {
-    fn from(value: BrowsingContextOpenResult) -> Self {
+impl From<ChromeBrowsingContextOpenResult> for TabOpenResult {
+    fn from(value: ChromeBrowsingContextOpenResult) -> Self {
         match value {
-            BrowsingContextOpenResult::OpenedNewContext {
-                browsing_context_id,
-            } => Self::OpenedNewTab {
-                tab_id: browsing_context_id.into(),
-            },
-            BrowsingContextOpenResult::OpenedExistingContext {
-                browsing_context_id,
-            } => Self::OpenedExistingTab {
-                tab_id: browsing_context_id.into(),
-            },
-            BrowsingContextOpenResult::Denied => Self::Denied,
-            BrowsingContextOpenResult::Aborted => Self::Aborted,
+            ChromeBrowsingContextOpenResult::OpenedNewContext { tab_id } => {
+                Self::OpenedNewTab { tab_id }
+            }
+            ChromeBrowsingContextOpenResult::OpenedExistingContext { tab_id } => {
+                Self::OpenedExistingTab { tab_id }
+            }
+            ChromeBrowsingContextOpenResult::Denied => Self::Denied,
+            ChromeBrowsingContextOpenResult::Aborted => Self::Aborted,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use cbf::data::browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult};
-
-    use crate::data::ids::TabId;
+    use crate::data::{
+        browsing_context_open::{ChromeBrowsingContextOpenHint, ChromeBrowsingContextOpenResult},
+        ids::TabId,
+    };
 
     use super::{TabOpenHint, TabOpenResult};
 
     #[test]
     fn tab_open_hint_round_trip() {
         assert_eq!(
-            TabOpenHint::from(BrowsingContextOpenHint::CurrentContext),
+            TabOpenHint::from(ChromeBrowsingContextOpenHint::CurrentContext),
             TabOpenHint::CurrentTab
         );
         assert_eq!(
             TabOpenHint::NewBackgroundTab.to_browsing_context_open_hint(),
-            Some(BrowsingContextOpenHint::NewBackgroundContext)
+            Some(ChromeBrowsingContextOpenHint::NewBackgroundContext)
         );
         assert_eq!(TabOpenHint::Popup.to_browsing_context_open_hint(), None);
     }
@@ -106,8 +104,8 @@ mod tests {
         let raw = TabOpenResult::OpenedExistingTab {
             tab_id: TabId::new(42),
         };
-        let generic = BrowsingContextOpenResult::from(raw);
-        let round_trip = TabOpenResult::from(generic);
+        let chrome_result = ChromeBrowsingContextOpenResult::from(raw);
+        let round_trip = TabOpenResult::from(chrome_result);
 
         assert_eq!(round_trip, raw);
     }

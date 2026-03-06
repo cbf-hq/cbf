@@ -3,16 +3,7 @@ use std::{
     ptr,
 };
 
-use cbf::data::{
-    browsing_context_open::BrowsingContextOpenResponse,
-    drag::{DragDrop, DragUpdate},
-    extension::ExtensionInfo,
-    ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
-    key::KeyEvent,
-    mouse::{MouseEvent, MouseWheelEvent},
-    profile::ProfileInfo,
-    window_open::WindowOpenResponse,
-};
+use cbf::data::window_open::WindowOpenResponse;
 use cbf_chrome_sys::ffi::*;
 use tracing::{debug, warn};
 
@@ -23,8 +14,14 @@ use super::map::{
 use super::utils::{c_string_to_string, to_optional_cstring};
 use super::{Error, IpcEvent};
 use crate::data::{
+    browsing_context_open::ChromeBrowsingContextOpenResponse,
+    drag::{ChromeDragDrop, ChromeDragUpdate},
+    extension::ChromeExtensionInfo,
     ids::TabId,
+    ime::{ChromeConfirmCompositionBehavior, ChromeImeCommitText, ChromeImeComposition},
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+    mouse::ChromeMouseEvent,
+    profile::ChromeProfileInfo,
     prompt_ui::{PromptUiId, PromptUiResponse},
 };
 
@@ -152,7 +149,7 @@ impl IpcClient {
     }
 
     /// Retrieve the list of browser profiles from the backend.
-    pub fn list_profiles(&mut self) -> Result<Vec<ProfileInfo>, Error> {
+    pub fn list_profiles(&mut self) -> Result<Vec<ChromeProfileInfo>, Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -170,7 +167,7 @@ impl IpcClient {
         let mut result = Vec::with_capacity(profiles.len());
 
         for profile in profiles {
-            result.push(ProfileInfo {
+            result.push(ChromeProfileInfo {
                 profile_id: c_string_to_string(profile.profile_id),
                 profile_path: c_string_to_string(profile.profile_path),
                 display_name: c_string_to_string(profile.display_name),
@@ -186,7 +183,7 @@ impl IpcClient {
     pub fn list_extensions(
         &mut self,
         profile_id: &Option<String>,
-    ) -> Result<Vec<ExtensionInfo>, Error> {
+    ) -> Result<Vec<ChromeExtensionInfo>, Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -221,7 +218,7 @@ impl IpcClient {
                         .map(|entry| c_string_to_string(*entry))
                         .collect()
                 };
-            result.push(ExtensionInfo {
+            result.push(ChromeExtensionInfo {
                 id: c_string_to_string(value.id),
                 name: c_string_to_string(value.name),
                 version: c_string_to_string(value.version),
@@ -574,24 +571,21 @@ impl IpcClient {
     pub fn respond_tab_open(
         &mut self,
         request_id: u64,
-        response: &BrowsingContextOpenResponse,
+        response: &ChromeBrowsingContextOpenResponse,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
         let (response_kind, target_tab_id, activate) = match response {
-            BrowsingContextOpenResponse::AllowNewContext { activate } => {
+            ChromeBrowsingContextOpenResponse::AllowNewContext { activate } => {
                 (CBF_TAB_OPEN_RESPONSE_ALLOW_NEW_CONTEXT, 0, *activate)
             }
-            BrowsingContextOpenResponse::AllowExistingContext {
-                browsing_context_id,
-                activate,
-            } => (
+            ChromeBrowsingContextOpenResponse::AllowExistingContext { tab_id, activate } => (
                 CBF_TAB_OPEN_RESPONSE_ALLOW_EXISTING_CONTEXT,
-                browsing_context_id.get(),
+                tab_id.get(),
                 *activate,
             ),
-            BrowsingContextOpenResponse::Deny => (CBF_TAB_OPEN_RESPONSE_DENY, 0, false),
+            ChromeBrowsingContextOpenResponse::Deny => (CBF_TAB_OPEN_RESPONSE_DENY, 0, false),
         };
         debug!(
             request_id,
@@ -627,22 +621,11 @@ impl IpcClient {
         let tab_open_response = match response {
             WindowOpenResponse::AllowExistingWindow { .. }
             | WindowOpenResponse::AllowNewWindow { .. } => {
-                BrowsingContextOpenResponse::AllowNewContext { activate: true }
+                ChromeBrowsingContextOpenResponse::AllowNewContext { activate: true }
             }
-            WindowOpenResponse::Deny => BrowsingContextOpenResponse::Deny,
+            WindowOpenResponse::Deny => ChromeBrowsingContextOpenResponse::Deny,
         };
         self.respond_tab_open(request_id, &tab_open_response)
-    }
-
-    /// Send a keyboard event to the page.
-    pub fn send_key_event(
-        &mut self,
-        browsing_context_id: TabId,
-        event: &KeyEvent,
-        commands: &[String],
-    ) -> Result<(), Error> {
-        let chrome_event = ChromeKeyEvent::from(event.clone());
-        self.send_key_event_raw(browsing_context_id, &chrome_event, commands)
     }
 
     /// Send a Chromium-shaped keyboard event to the page.
@@ -704,7 +687,7 @@ impl IpcClient {
     pub fn send_mouse_event(
         &mut self,
         browsing_context_id: TabId,
-        event: &MouseEvent,
+        event: &ChromeMouseEvent,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
@@ -731,16 +714,6 @@ impl IpcClient {
         } else {
             Err(Error::ConnectionFailed)
         }
-    }
-
-    /// Send a mouse wheel event to the page.
-    pub fn send_mouse_wheel_event(
-        &mut self,
-        browsing_context_id: TabId,
-        event: &MouseWheelEvent,
-    ) -> Result<(), Error> {
-        let chrome_event = ChromeMouseWheelEvent::from(event.clone());
-        self.send_mouse_wheel_event_raw(browsing_context_id, &chrome_event)
     }
 
     /// Send a Chromium-shaped mouse wheel event to the page.
@@ -780,7 +753,7 @@ impl IpcClient {
     }
 
     /// Send a drag update event for host-owned drag session.
-    pub fn send_drag_update(&mut self, update: &DragUpdate) -> Result<(), Error> {
+    pub fn send_drag_update(&mut self, update: &ChromeDragUpdate) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -804,7 +777,7 @@ impl IpcClient {
     }
 
     /// Send a drag drop event for host-owned drag session.
-    pub fn send_drag_drop(&mut self, drop: &DragDrop) -> Result<(), Error> {
+    pub fn send_drag_drop(&mut self, drop: &ChromeDragDrop) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -846,7 +819,7 @@ impl IpcClient {
     }
 
     /// Update the IME composition state.
-    pub fn set_composition(&mut self, composition: &ImeComposition) -> Result<(), Error> {
+    pub fn set_composition(&mut self, composition: &ChromeImeComposition) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -881,7 +854,7 @@ impl IpcClient {
     }
 
     /// Commit IME text input to the page.
-    pub fn commit_text(&mut self, commit: &ImeCommitText) -> Result<(), Error> {
+    pub fn commit_text(&mut self, commit: &ChromeImeCommitText) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
@@ -918,15 +891,17 @@ impl IpcClient {
     pub fn finish_composing_text(
         &mut self,
         browsing_context_id: TabId,
-        behavior: ConfirmCompositionBehavior,
+        behavior: ChromeConfirmCompositionBehavior,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
         let behavior = match behavior {
-            ConfirmCompositionBehavior::DoNotKeepSelection => CBF_IME_CONFIRM_DO_NOT_KEEP_SELECTION,
-            ConfirmCompositionBehavior::KeepSelection => CBF_IME_CONFIRM_KEEP_SELECTION,
+            ChromeConfirmCompositionBehavior::DoNotKeepSelection => {
+                CBF_IME_CONFIRM_DO_NOT_KEEP_SELECTION
+            }
+            ChromeConfirmCompositionBehavior::KeepSelection => CBF_IME_CONFIRM_KEEP_SELECTION,
         };
 
         if unsafe {

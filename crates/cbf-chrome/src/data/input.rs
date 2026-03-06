@@ -3,12 +3,75 @@ use cbf::data::{
     mouse::{MouseWheelEvent, ScrollGranularity},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChromeKeyEventType {
+    RawKeyDown,
+    KeyDown,
+    KeyUp,
+    Char,
+}
+
+impl From<KeyEventType> for ChromeKeyEventType {
+    fn from(value: KeyEventType) -> Self {
+        match value {
+            KeyEventType::RawKeyDown => Self::RawKeyDown,
+            KeyEventType::KeyDown => Self::KeyDown,
+            KeyEventType::KeyUp => Self::KeyUp,
+            KeyEventType::Char => Self::Char,
+        }
+    }
+}
+
+impl From<ChromeKeyEventType> for KeyEventType {
+    fn from(value: ChromeKeyEventType) -> Self {
+        match value {
+            ChromeKeyEventType::RawKeyDown => Self::RawKeyDown,
+            ChromeKeyEventType::KeyDown => Self::KeyDown,
+            ChromeKeyEventType::KeyUp => Self::KeyUp,
+            ChromeKeyEventType::Char => Self::Char,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChromeScrollGranularity {
+    PrecisePixel,
+    Pixel,
+    Line,
+    Page,
+    Document,
+}
+
+impl From<ScrollGranularity> for ChromeScrollGranularity {
+    fn from(value: ScrollGranularity) -> Self {
+        match value {
+            ScrollGranularity::PrecisePixel => Self::PrecisePixel,
+            ScrollGranularity::Pixel => Self::Pixel,
+            ScrollGranularity::Line => Self::Line,
+            ScrollGranularity::Page => Self::Page,
+            ScrollGranularity::Document => Self::Document,
+        }
+    }
+}
+
+impl From<ChromeScrollGranularity> for ScrollGranularity {
+    fn from(value: ChromeScrollGranularity) -> Self {
+        match value {
+            ChromeScrollGranularity::PrecisePixel => Self::PrecisePixel,
+            ChromeScrollGranularity::Pixel => Self::Pixel,
+            ChromeScrollGranularity::Line => Self::Line,
+            ChromeScrollGranularity::Page => Self::Page,
+            ChromeScrollGranularity::Document => Self::Document,
+        }
+    }
+}
+
 /// Chromium-specific keyboard input payload.
 ///
 /// Field names intentionally match Chromium/bridge vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChromeKeyEvent {
-    pub type_: KeyEventType,
+    pub type_: ChromeKeyEventType,
     pub modifiers: u32,
     pub windows_key_code: i32,
     pub native_key_code: i32,
@@ -25,7 +88,7 @@ pub struct ChromeKeyEvent {
 impl From<KeyEvent> for ChromeKeyEvent {
     fn from(value: KeyEvent) -> Self {
         Self {
-            type_: value.type_,
+            type_: value.type_.into(),
             modifiers: value.modifiers,
             windows_key_code: value.key_code,
             native_key_code: value.platform_key_code,
@@ -44,7 +107,7 @@ impl From<KeyEvent> for ChromeKeyEvent {
 impl From<ChromeKeyEvent> for KeyEvent {
     fn from(value: ChromeKeyEvent) -> Self {
         Self {
-            type_: value.type_,
+            type_: value.type_.into(),
             modifiers: value.modifiers,
             key_code: value.windows_key_code,
             platform_key_code: value.native_key_code,
@@ -79,7 +142,7 @@ pub struct ChromeMouseWheelEvent {
     pub wheel_ticks_y: f32,
     pub phase: u32,
     pub momentum_phase: u32,
-    pub delta_units: ScrollGranularity,
+    pub delta_units: ChromeScrollGranularity,
 }
 
 impl From<MouseWheelEvent> for ChromeMouseWheelEvent {
@@ -99,7 +162,7 @@ impl From<MouseWheelEvent> for ChromeMouseWheelEvent {
             wheel_ticks_y: value.wheel_ticks_y,
             phase: 0,
             momentum_phase: 0,
-            delta_units: value.delta_units,
+            delta_units: value.delta_units.into(),
         }
     }
 }
@@ -119,7 +182,7 @@ impl From<ChromeMouseWheelEvent> for MouseWheelEvent {
             delta_y: value.delta_y,
             wheel_ticks_x: value.wheel_ticks_x,
             wheel_ticks_y: value.wheel_ticks_y,
-            delta_units: value.delta_units,
+            delta_units: value.delta_units.into(),
         }
     }
 }
