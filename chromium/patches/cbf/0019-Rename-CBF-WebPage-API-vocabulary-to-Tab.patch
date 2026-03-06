@@ -1,0 +1,1354 @@
+From e5eedd4695c461d791319bbbe6f11da1df727dd0 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Fri, 6 Mar 2026 11:43:12 +0900
+Subject: [PATCH 19/19] Rename CBF WebPage API vocabulary to Tab
+
+---
+ chrome/browser/cbf/bridge/cbf_bridge_client.h | 10 +--
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |  8 +-
+ .../cbf/bridge/cbf_bridge_client_impl.h       |  8 +-
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc | 30 ++++----
+ chrome/browser/cbf/cbf_browser_service.cc     |  6 +-
+ chrome/browser/cbf/cbf_browser_service.h      |  2 +-
+ chrome/browser/cbf/cbf_profile_service.cc     | 74 +++++++++----------
+ chrome/browser/cbf/cbf_profile_service.h      | 18 ++---
+ .../cbf/cbf_profile_service_browsertest.cc    | 12 +--
+ .../browser/cbf/cbf_settings_browsertest.cc   |  6 +-
+ chrome/browser/cbf/cbf_tab_manager.cc         | 16 ++--
+ chrome/browser/cbf/cbf_tab_manager.h          | 12 +--
+ .../browser/cbf/cbf_web_contents_delegate.cc  |  4 +-
+ chrome/browser/cbf/mojom/cbf_browser.mojom    | 20 ++---
+ .../cbf_profile_context_menu_controller.cc    |  2 +-
+ .../cbf_profile_context_menu_controller.h     |  2 +-
+ .../cbf_profile_devtools_controller.cc        | 12 +--
+ .../profile/cbf_profile_devtools_controller.h |  2 +-
+ ...profile_devtools_controller_browsertest.cc |  8 +-
+ ...bf_profile_devtools_controller_unittest.cc |  4 +-
+ .../profile/cbf_profile_drag_controller.cc    |  2 +-
+ .../cbf/profile/cbf_profile_drag_controller.h |  2 +-
+ .../cbf_profile_drag_controller_unittest.cc   |  4 +-
+ .../cbf/profile/cbf_profile_ime_controller.cc |  2 +-
+ .../cbf/profile/cbf_profile_ime_controller.h  |  2 +-
+ .../profile/cbf_profile_input_controller.cc   |  2 +-
+ .../profile/cbf_profile_input_controller.h    |  2 +-
+ .../cbf_profile_input_controller_unittest.cc  |  4 +-
+ .../cbf_profile_navigation_controller.cc      |  2 +-
+ .../cbf_profile_navigation_controller.h       |  2 +-
+ .../profile/cbf_profile_page_controller.cc    | 20 ++---
+ .../cbf/profile/cbf_profile_page_controller.h | 10 +--
+ .../profile/cbf_profile_popup_controller.cc   | 16 ++--
+ .../profile/cbf_profile_popup_controller.h    |  4 +-
+ .../cbf_profile_popup_controller_unittest.cc  |  4 +-
+ .../cbf/test/cbf_test_profile_observer.cc     |  8 +-
+ .../cbf/test/cbf_test_profile_observer.h      |  8 +-
+ 37 files changed, 175 insertions(+), 175 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index 2d56864feade2..fb96a0cd06d00 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -22,11 +22,11 @@ class CbfBridgeClient {
+   bool PollEvent(CbfBridgeEvent* out_event);
+   bool GetProfiles(CbfProfileList* out_list);
+   bool ListExtensions(const std::string& profile_id, CbfExtensionInfoList* out_list);
+-  bool CreateWebPage(uint64_t request_id,
++  bool CreateTab(uint64_t request_id,
+                      const std::string& initial_url,
+                      const std::string& profile_id);
+-  bool SetWebPageSize(uint64_t tab_id, uint32_t width, uint32_t height);
+-  bool SetWebPageFocus(uint64_t tab_id, bool focused);
++  bool SetTabSize(uint64_t tab_id, uint32_t width, uint32_t height);
++  bool SetTabFocus(uint64_t tab_id, bool focused);
+   bool SendKeyEvent(const CbfKeyEvent* event, const CbfCommandList* commands);
+   bool SendMouseEvent(const CbfMouseEvent* event);
+   bool SendMouseWheelEvent(const CbfMouseWheelEvent* event);
+@@ -44,7 +44,7 @@ class CbfBridgeClient {
+   bool ConfirmShutdown(uint64_t request_id, bool proceed);
+   bool ForceShutdown();
+ 
+-  bool RequestCloseWebPage(uint64_t tab_id);
++  bool RequestCloseTab(uint64_t tab_id);
+   bool ConfirmBeforeUnload(uint64_t tab_id,
+                            uint64_t request_id,
+                            bool proceed);
+@@ -55,7 +55,7 @@ class CbfBridgeClient {
+   bool PrintPreview(uint64_t tab_id);
+   bool OpenDevTools(uint64_t tab_id);
+   bool InspectElement(uint64_t tab_id, int32_t x, int32_t y);
+-  bool GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id);
++  bool GetTabDomHtml(uint64_t tab_id, uint64_t request_id);
+   bool OpenDefaultAuxiliaryWindow(uint64_t tab_id, uint64_t request_id);
+   bool RespondAuxiliaryWindow(uint64_t tab_id,
+                               uint64_t request_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index 5f3253e448d8b..be53536a7c1d5 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -92,7 +92,7 @@ void CbfBridgeClientImpl::Observer::OnSurfaceHandleUpdated(
+   impl_->events.push(std::move(event));
+ }
+ 
+-void CbfBridgeClientImpl::Observer::OnWebPageCreated(uint64_t tab_id,
++void CbfBridgeClientImpl::Observer::OnTabCreated(uint64_t tab_id,
+                                                     uint64_t request_id) {
+   impl_->web_page_profiles.emplace(tab_id, profile_id_);
+   CbfBridgeEventData event;
+@@ -117,7 +117,7 @@ void CbfBridgeClientImpl::Observer::OnDevToolsOpened(
+   impl_->events.push(std::move(event));
+ }
+ 
+-void CbfBridgeClientImpl::Observer::OnWebPageClosed(uint64_t tab_id) {
++void CbfBridgeClientImpl::Observer::OnTabClosed(uint64_t tab_id) {
+   impl_->web_page_profiles.erase(tab_id);
+   CbfBridgeEventData event;
+   event.kind = kEventTabClosed;
+@@ -127,7 +127,7 @@ void CbfBridgeClientImpl::Observer::OnWebPageClosed(uint64_t tab_id) {
+   impl_->events.push(std::move(event));
+ }
+ 
+-void CbfBridgeClientImpl::Observer::OnWebPageResizeAcknowledged(uint64_t tab_id) {
++void CbfBridgeClientImpl::Observer::OnTabResizeAcknowledged(uint64_t tab_id) {
+   CbfBridgeEventData event;
+   event.kind = kEventTabResizeAcknowledged;
+   event.tab_id = tab_id;
+@@ -307,7 +307,7 @@ void CbfBridgeClientImpl::Observer::OnNavigationStateChanged(uint64_t tab_id, co
+   impl_->events.push(std::move(event));
+ }
+ 
+-void CbfBridgeClientImpl::Observer::OnWebPageDomHtmlRead(uint64_t tab_id,
++void CbfBridgeClientImpl::Observer::OnTabDomHtmlRead(uint64_t tab_id,
+                                                         uint64_t request_id,
+                                                         const std::string& html) {
+   CbfBridgeEventData event;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+index 53fdead9773ff..8ce5c71db617c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+@@ -129,11 +129,11 @@ struct CbfBridgeClientImpl {
+ 
+     void OnSurfaceHandleUpdated(uint64_t tab_id,
+                                 uint32_t ca_context_id) override;
+-    void OnWebPageCreated(uint64_t tab_id, uint64_t request_id) override;
++    void OnTabCreated(uint64_t tab_id, uint64_t request_id) override;
+     void OnDevToolsOpened(uint64_t tab_id,
+                           uint64_t devtools_tab_id) override;
+-    void OnWebPageClosed(uint64_t tab_id) override;
+-    void OnWebPageResizeAcknowledged(uint64_t tab_id) override;
++    void OnTabClosed(uint64_t tab_id) override;
++    void OnTabResizeAcknowledged(uint64_t tab_id) override;
+     void OnImeBoundsUpdated(cbf::mojom::CbfImeBoundsUpdatePtr update) override;
+     void OnContextMenuRequested(uint64_t tab_id,
+                                 cbf::mojom::CbfContextMenuPtr menu) override;
+@@ -151,7 +151,7 @@ struct CbfBridgeClientImpl {
+     void OnFaviconUrlUpdated(uint64_t tab_id,
+                              const std::string& url) override;
+     void OnNavigationStateChanged(uint64_t tab_id, const std::string& url, bool can_go_back, bool can_go_forward, bool is_loading) override;
+-    void OnWebPageDomHtmlRead(uint64_t tab_id,
++    void OnTabDomHtmlRead(uint64_t tab_id,
+                               uint64_t request_id,
+                               const std::string& html) override;
+     void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index 2242e5d543e28..9183dfdeccc63 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -9,7 +9,7 @@
+ 
+ namespace cbf_bridge::internal {
+ 
+-bool CbfBridgeClient::CreateWebPage(const uint64_t request_id,
++bool CbfBridgeClient::CreateTab(const uint64_t request_id,
+                                     const std::string& initial_url,
+                                     const std::string& profile_id) {
+   if (!impl_) {
+@@ -50,7 +50,7 @@ bool CbfBridgeClient::CreateWebPage(const uint64_t request_id,
+                   observer_remote.InitWithNewPipeAndPassReceiver());
+               connection.remote->SetObserver(std::move(observer_remote));
+             }
+-            connection.remote->CreateWebPage(
++            connection.remote->CreateTab(
+                 std::move(url),
+                 request_id,
+                 base::BindOnce(
+@@ -65,7 +65,7 @@ bool CbfBridgeClient::CreateWebPage(const uint64_t request_id,
+   return true;
+ }
+ 
+-bool CbfBridgeClient::SetWebPageSize(const uint64_t tab_id,
++bool CbfBridgeClient::SetTabSize(const uint64_t tab_id,
+                                     const uint32_t width,
+                                     const uint32_t height) {
+   if (!impl_) {
+@@ -95,14 +95,14 @@ bool CbfBridgeClient::SetWebPageSize(const uint64_t tab_id,
+             if (remote_it == impl->profile_connections.end()) {
+               return;
+             }
+-            remote_it->second.remote->SetWebPageSize(tab_id, width,
++            remote_it->second.remote->SetTabSize(tab_id, width,
+                                                      height, base::DoNothing());
+           },
+           impl, tab_id, width, height));
+   return true;
+ }
+ 
+-bool CbfBridgeClient::SetWebPageFocus(const uint64_t tab_id,
++bool CbfBridgeClient::SetTabFocus(const uint64_t tab_id,
+                                       const bool focused) {
+   if (!impl_) {
+     return false;
+@@ -131,13 +131,13 @@ bool CbfBridgeClient::SetWebPageFocus(const uint64_t tab_id,
+             if (remote_it == impl->profile_connections.end()) {
+               return;
+             }
+-            remote_it->second.remote->SetWebPageFocus(tab_id, focused);
++            remote_it->second.remote->SetTabFocus(tab_id, focused);
+           },
+           impl, tab_id, focused));
+   return true;
+ }
+ 
+-bool CbfBridgeClient::RequestCloseWebPage(const uint64_t tab_id) {
++bool CbfBridgeClient::RequestCloseTab(const uint64_t tab_id) {
+   if (!impl_) {
+     return false;
+   }
+@@ -164,7 +164,7 @@ bool CbfBridgeClient::RequestCloseWebPage(const uint64_t tab_id) {
+             if (remote_it == impl->profile_connections.end()) {
+               return;
+             }
+-            remote_it->second.remote->RequestCloseWebPage(tab_id);
++            remote_it->second.remote->RequestCloseTab(tab_id);
+           },
+           impl, tab_id));
+   return true;
+@@ -398,7 +398,7 @@ bool CbfBridgeClient::InspectElement(uint64_t tab_id, int32_t x, int32_t y) {
+   return true;
+ }
+ 
+-bool CbfBridgeClient::GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id) {
++bool CbfBridgeClient::GetTabDomHtml(uint64_t tab_id, uint64_t request_id) {
+   if (!impl_) {
+     return false;
+   }
+@@ -419,7 +419,7 @@ bool CbfBridgeClient::GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id) {
+             if (remote_it == impl->profile_connections.end()) {
+               return;
+             }
+-            remote_it->second.remote->GetWebPageDomHtml(tab_id, request_id);
++            remote_it->second.remote->GetTabDomHtml(tab_id, request_id);
+           },
+           impl, tab_id, request_id));
+   return true;
+@@ -623,7 +623,7 @@ extern "C" bool cbf_bridge_client_create_web_page(CbfBridgeClientHandle* client,
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->CreateWebPage(request_id, initial_url, profile_id);
++      ->CreateTab(request_id, initial_url, profile_id);
+ }
+ 
+ extern "C" bool cbf_bridge_client_create_tab(CbfBridgeClientHandle* client,
+@@ -641,7 +641,7 @@ extern "C" bool cbf_bridge_client_request_close_web_page(
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->RequestCloseWebPage(tab_id);
++      ->RequestCloseTab(tab_id);
+ }
+ 
+ extern "C" bool cbf_bridge_client_request_close_tab(
+@@ -659,7 +659,7 @@ extern "C" bool cbf_bridge_client_set_web_page_size(
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->SetWebPageSize(tab_id, width, height);
++      ->SetTabSize(tab_id, width, height);
+ }
+ 
+ extern "C" bool cbf_bridge_client_set_tab_size(
+@@ -678,7 +678,7 @@ extern "C" bool cbf_bridge_client_set_web_page_focus(
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->SetWebPageFocus(tab_id, focused);
++      ->SetTabFocus(tab_id, focused);
+ }
+ 
+ extern "C" bool cbf_bridge_client_set_tab_focus(
+@@ -755,7 +755,7 @@ extern "C" bool cbf_bridge_client_get_web_page_dom_html(
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->GetWebPageDomHtml(tab_id, request_id);
++      ->GetTabDomHtml(tab_id, request_id);
+ }
+ 
+ extern "C" bool cbf_bridge_client_get_tab_dom_html(
+diff --git a/chrome/browser/cbf/cbf_browser_service.cc b/chrome/browser/cbf/cbf_browser_service.cc
+index a28dd6369090e..2c1b1248beec1 100644
+--- a/chrome/browser/cbf/cbf_browser_service.cc
++++ b/chrome/browser/cbf/cbf_browser_service.cc
+@@ -146,7 +146,7 @@ void CbfBrowserService::ForceShutdown() {
+   chrome::ExitIgnoreUnloadHandlers();
+ }
+ 
+-void CbfBrowserService::NotifyWebPageClosed() {
++void CbfBrowserService::NotifyTabClosed() {
+   if (!shutdown_in_progress_) {
+     return;
+   }
+@@ -171,7 +171,7 @@ void CbfBrowserService::StartShutdown(uint64_t request_id) {
+   }
+ 
+   for (const auto& entry : profile_services_) {
+-    entry.second->CloseAllWebPages();
++    entry.second->CloseAllTabs();
+   }
+ 
+   if (!HasOpenWebPages()) {
+@@ -291,7 +291,7 @@ void CbfBrowserService::MaybeFinalizeShutdownRequest() {
+ 
+ bool CbfBrowserService::HasOpenWebPages() const {
+   for (const auto& entry : profile_services_) {
+-    if (entry.second->GetWebPageCount() > 0) {
++    if (entry.second->GetTabCount() > 0) {
+       return true;
+     }
+   }
+diff --git a/chrome/browser/cbf/cbf_browser_service.h b/chrome/browser/cbf/cbf_browser_service.h
+index 66932900005d7..37172b1c114ca 100644
+--- a/chrome/browser/cbf/cbf_browser_service.h
++++ b/chrome/browser/cbf/cbf_browser_service.h
+@@ -41,7 +41,7 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+   void RequestShutdown(uint64_t request_id) override;
+   void ConfirmShutdown(uint64_t request_id, bool proceed) override;
+   void ForceShutdown() override;
+-  void NotifyWebPageClosed();
++  void NotifyTabClosed();
+   bool IsShutdownRequested() const;
+   bool IsManagedWebContents(content::WebContents* web_contents) const;
+   void NotifyBeforeUnloadDialogRequested(TabId tab_id);
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 891a235c30db9..39dcfa3ad867b 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -203,13 +203,13 @@ CbfProfileService::~CbfProfileService() {
+     if (tab_id == kInvalidTabId) {
+       continue;
+     }
+-    context_menu_controller_->OnWebPageClosed(tab_id);
+-    input_controller_->OnWebPageClosed(tab_id);
+-    ime_controller_->OnWebPageClosed(tab_id);
+-    drag_controller_->OnWebPageClosed(tab_id);
+-    devtools_controller_->OnWebPageClosed(tab_id);
++    context_menu_controller_->OnTabClosed(tab_id);
++    input_controller_->OnTabClosed(tab_id);
++    ime_controller_->OnTabClosed(tab_id);
++    drag_controller_->OnTabClosed(tab_id);
++    devtools_controller_->OnTabClosed(tab_id);
+   }
+-  CloseAllWebPages();
++  CloseAllTabs();
+ }
+ 
+ void CbfProfileService::BindReceiver(
+@@ -225,39 +225,39 @@ void CbfProfileService::SetObserver(
+   observer_.Bind(std::move(observer));
+ }
+ 
+-void CbfProfileService::CreateWebPage(const std::string& initial_url,
++void CbfProfileService::CreateTab(const std::string& initial_url,
+                                       uint64_t request_id,
+                                       CreateWebPageCallback callback) {
+-  const TabId tab_id = page_controller_->CreateWebPage(initial_url);
++  const TabId tab_id = page_controller_->CreateTab(initial_url);
+   ime_controller_->RegisterWebContents(
+       tab_id, tab_manager_.GetWebContents(tab_id));
+   if (observer_ && tab_id != kInvalidTabId) {
+-    observer_->OnWebPageCreated(tab_id, request_id);
++    observer_->OnTabCreated(tab_id, request_id);
+   }
+   std::move(callback).Run(tab_id);
+ }
+ 
+-void CbfProfileService::RequestCloseWebPage(TabId tab_id) {
++void CbfProfileService::RequestCloseTab(TabId tab_id) {
+   content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
+   if (!web_contents) {
+     return;
+   }
+-  popup_controller_->MarkCloseWebPageBeforeUnloadReason(web_contents);
+-  page_controller_->RequestCloseWebPage(tab_id);
++  popup_controller_->MarkCloseTabBeforeUnloadReason(web_contents);
++  page_controller_->RequestCloseTab(tab_id);
+ }
+ 
+-void CbfProfileService::SetWebPageSize(const TabId tab_id,
++void CbfProfileService::SetTabSize(const TabId tab_id,
+                                        std::uint32_t width,
+                                        std::uint32_t height,
+                                        SetWebPageSizeCallback callback) {
+-  tab_manager_.SetWebPageSize(
++  tab_manager_.SetTabSize(
+       tab_id, width, height,
+       base::BindOnce(
+           [](base::WeakPtr<CbfProfileService> self, TabId tab_id,
+              SetWebPageSizeCallback callback) {
+             std::move(callback).Run();
+             if (self && self->observer_.is_bound()) {
+-              self->observer_->OnWebPageResizeAcknowledged(tab_id);
++              self->observer_->OnTabResizeAcknowledged(tab_id);
+             }
+           },
+           weak_factory_.GetWeakPtr(), tab_id, std::move(callback)));
+@@ -379,8 +379,8 @@ void CbfProfileService::InspectElement(uint64_t tab_id, int32_t x, int32_t y) {
+   devtools_controller_->InspectElement(tab_id, x, y);
+ }
+ 
+-void CbfProfileService::SetWebPageFocus(uint64_t tab_id, bool focused) {
+-  navigation_controller_->SetWebPageFocus(tab_id, focused);
++void CbfProfileService::SetTabFocus(uint64_t tab_id, bool focused) {
++  navigation_controller_->SetTabFocus(tab_id, focused);
+   if (!focused) {
+     return;
+   }
+@@ -397,7 +397,7 @@ void CbfProfileService::SetWebPageFocus(uint64_t tab_id, bool focused) {
+   }
+ }
+ 
+-void CbfProfileService::GetWebPageDomHtml(uint64_t tab_id,
++void CbfProfileService::GetTabDomHtml(uint64_t tab_id,
+                                           uint64_t request_id) {
+   content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
+   if (!web_contents || !observer_) {
+@@ -406,7 +406,7 @@ void CbfProfileService::GetWebPageDomHtml(uint64_t tab_id,
+   content::RenderFrameHost* main_frame = web_contents->GetPrimaryMainFrame();
+   if (!main_frame || !main_frame->IsRenderFrameLive()) {
+     if (observer_) {
+-      observer_->OnWebPageDomHtmlRead(tab_id, request_id, "");
++      observer_->OnTabDomHtmlRead(tab_id, request_id, "");
+     }
+     return;
+   }
+@@ -423,7 +423,7 @@ void CbfProfileService::GetWebPageDomHtml(uint64_t tab_id,
+             if (value.is_string()) {
+               html = value.GetString();
+             }
+-            self->observer_->OnWebPageDomHtmlRead(tab_id, request_id,
++            self->observer_->OnTabDomHtmlRead(tab_id, request_id,
+                                                    html);
+           },
+           weak_factory_.GetWeakPtr(), tab_id, request_id),
+@@ -656,12 +656,12 @@ std::vector<TabId> CbfProfileService::GetAllTabIds() const {
+   return page_controller_->GetAllTabIds();
+ }
+ 
+-size_t CbfProfileService::GetWebPageCount() const {
+-  return page_controller_->GetWebPageCount();
++size_t CbfProfileService::GetTabCount() const {
++  return page_controller_->GetTabCount();
+ }
+ 
+-void CbfProfileService::CloseAllWebPages() {
+-  page_controller_->CloseAllWebPages();
++void CbfProfileService::CloseAllTabs() {
++  page_controller_->CloseAllTabs();
+ }
+ 
+ void CbfProfileService::CloseWebContents(content::WebContents* web_contents) {
+@@ -677,13 +677,13 @@ void CbfProfileService::CloseWebContents(content::WebContents* web_contents) {
+               return;
+             }
+             if (tab_id != kInvalidTabId) {
+-              self->page_controller_->CloseWebPage(tab_id);
++              self->page_controller_->CloseTab(tab_id);
+             }
+             if (self->browser_service_) {
+-              self->browser_service_->NotifyWebPageClosed();
++              self->browser_service_->NotifyTabClosed();
+             }
+             if (tab_id != kInvalidTabId) {
+-              self->NotifyWebPageClosed(tab_id);
++              self->NotifyTabClosed(tab_id);
+             }
+           },
+           weak_factory_.GetWeakPtr(), tab_id));
+@@ -709,7 +709,7 @@ bool CbfProfileService::HandleContextMenu(
+   return context_menu_controller_->HandleContextMenu(render_frame_host, params);
+ }
+ 
+-void CbfProfileService::NotifyNewWebPageRequested(
++void CbfProfileService::NotifyNewTabRequested(
+     content::WebContents* source,
+     const GURL& target_url,
+     WindowOpenDisposition disposition,
+@@ -718,21 +718,21 @@ void CbfProfileService::NotifyNewWebPageRequested(
+                                                 user_gesture);
+ }
+ 
+-void CbfProfileService::NotifyWebPageClosed(TabId tab_id) {
++void CbfProfileService::NotifyTabClosed(TabId tab_id) {
+   if (tab_id != kInvalidTabId) {
+     ResolvePendingPermissionPromptsForTab(
+         tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
+-    context_menu_controller_->OnWebPageClosed(tab_id);
+-    input_controller_->OnWebPageClosed(tab_id);
+-    ime_controller_->OnWebPageClosed(tab_id);
+-    drag_controller_->OnWebPageClosed(tab_id);
+-    devtools_controller_->OnWebPageClosed(tab_id);
++    context_menu_controller_->OnTabClosed(tab_id);
++    input_controller_->OnTabClosed(tab_id);
++    ime_controller_->OnTabClosed(tab_id);
++    drag_controller_->OnTabClosed(tab_id);
++    devtools_controller_->OnTabClosed(tab_id);
+   }
+ 
+   if (!observer_ || tab_id == kInvalidTabId) {
+     return;
+   }
+-  observer_->OnWebPageClosed(tab_id);
++  observer_->OnTabClosed(tab_id);
+ }
+ 
+ void CbfProfileService::OnBeforeUnloadDialogRequested(
+@@ -761,7 +761,7 @@ void CbfProfileService::OnBeforeUnloadFired(
+   }
+ 
+   const bool is_close_request =
+-      popup_controller_->ConsumeCloseWebPageBeforeUnloadReason(web_contents);
++      popup_controller_->ConsumeCloseTabBeforeUnloadReason(web_contents);
+ 
+   browser_service_->NotifyBeforeUnloadFired(tab_id, proceed);
+ 
+@@ -1257,7 +1257,7 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
+   profile_observation_.Reset();
+   ResolvePendingPermissionPromptsForShutdown(
+       mojom::CbfPromptUiResolutionResult::kAborted);
+-  CloseAllWebPages();
++  CloseAllTabs();
+ }
+ 
+ void CbfProfileService::WebContentsDestroyed(content::WebContents* web_contents) {
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 164a2a38e659f..d7799c9ab4ec6 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -75,11 +75,11 @@ class CbfProfileService : public mojom::CbfProfileService,
+ 
+   void SetObserver(
+       mojo::PendingRemote<mojom::CbfProfileObserver> observer) override;
+-  void CreateWebPage(const std::string& initial_url,
++  void CreateTab(const std::string& initial_url,
+                      uint64_t request_id,
+                      CreateWebPageCallback callback) override;
+-  void RequestCloseWebPage(TabId tab_id) override;
+-  void SetWebPageSize(const TabId tab_id,
++  void RequestCloseTab(TabId tab_id) override;
++  void SetTabSize(const TabId tab_id,
+                       std::uint32_t width,
+                       std::uint32_t height,
+                       SetWebPageSizeCallback callback) override;
+@@ -108,9 +108,9 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void PrintPreview(uint64_t tab_id) override;
+   void OpenDevTools(uint64_t tab_id) override;
+   void InspectElement(uint64_t tab_id, int32_t x, int32_t y) override;
+-  void SetWebPageFocus(uint64_t tab_id, bool focused) override;
++  void SetTabFocus(uint64_t tab_id, bool focused) override;
+ 
+-  void GetWebPageDomHtml(uint64_t tab_id, uint64_t request_id) override;
++  void GetTabDomHtml(uint64_t tab_id, uint64_t request_id) override;
+   void ListExtensions(const std::string& profile_id,
+                       ListExtensionsCallback callback) override;
+   void OpenDefaultAuxiliaryWindow(uint64_t tab_id,
+@@ -143,8 +143,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void ResolveBeforeUnloadForShutdown(bool proceed);
+   std::vector<TabId> GetDirtyTabIds() const;
+   std::vector<TabId> GetAllTabIds() const;
+-  size_t GetWebPageCount() const;
+-  void CloseAllWebPages();
++  size_t GetTabCount() const;
++  void CloseAllTabs();
+   void CloseWebContents(content::WebContents* web_contents);
+   content::WebContentsDelegate* GetWebContentsDelegate();
+   TabId GetTabIdForWebContents(content::WebContents* web_contents) const;
+@@ -152,11 +152,11 @@ class CbfProfileService : public mojom::CbfProfileService,
+ 
+   bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
+                          const content::ContextMenuParams& params);
+-  void NotifyNewWebPageRequested(content::WebContents* source,
++  void NotifyNewTabRequested(content::WebContents* source,
+                                  const GURL& target_url,
+                                  WindowOpenDisposition disposition,
+                                  bool user_gesture);
+-  void NotifyWebPageClosed(TabId tab_id);
++  void NotifyTabClosed(TabId tab_id);
+ 
+   void OnBeforeUnloadDialogRequested(content::WebContents* web_contents);
+   void OnBeforeUnloadFired(content::WebContents* web_contents, bool proceed);
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index c5b12f66e9301..84ceddeee5696 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -45,9 +45,9 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     if (profile_service_) {
+       const auto tab_ids = profile_service_->GetAllTabIds();
+       for (TabId tab_id : tab_ids) {
+-        profile_service_->NotifyWebPageClosed(tab_id);
++        profile_service_->NotifyTabClosed(tab_id);
+       }
+-      profile_service_->CloseAllWebPages();
++      profile_service_->CloseAllTabs();
+       base::RunLoop().RunUntilIdle();
+       profile_service_.reset();
+     }
+@@ -58,7 +58,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+   TabId CreatePage(const std::string& url = "about:blank") {
+     TabId created_id = kInvalidTabId;
+     base::RunLoop run_loop;
+-    profile_service_->CreateWebPage(
++    profile_service_->CreateTab(
+         url, 1,
+         base::BindOnce(
+             [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
+@@ -108,7 +108,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+ };
+ 
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
+-  profile_service_->RequestCloseWebPage(kInvalidTabId);
++  profile_service_->RequestCloseTab(kInvalidTabId);
+   profile_service_->SendDragCancel(9999, kInvalidTabId);
+   profile_service_->OpenDevTools(kInvalidTabId);
+ }
+@@ -117,7 +117,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        NotifyWebPageClosedEmitsObserverEvent) {
+   TabId created_id = kInvalidTabId;
+   base::RunLoop run_loop;
+-  profile_service_->CreateWebPage(
++  profile_service_->CreateTab(
+       "about:blank", 1,
+       base::BindOnce(
+           [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
+@@ -128,7 +128,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   run_loop.Run();
+   ASSERT_NE(created_id, kInvalidTabId);
+ 
+-  profile_service_->NotifyWebPageClosed(created_id);
++  profile_service_->NotifyTabClosed(created_id);
+   observer_.WaitForWebPageClosedCount(1);
+   EXPECT_EQ(observer_.web_page_closed_events().front(), created_id);
+ }
+diff --git a/chrome/browser/cbf/cbf_settings_browsertest.cc b/chrome/browser/cbf/cbf_settings_browsertest.cc
+index 3a98498ffde26..b5497846b091b 100644
+--- a/chrome/browser/cbf/cbf_settings_browsertest.cc
++++ b/chrome/browser/cbf/cbf_settings_browsertest.cc
+@@ -38,9 +38,9 @@ class CbfSettingsBrowserTest : public InProcessBrowserTest {
+     if (profile_service_) {
+       const auto tab_ids = profile_service_->GetAllTabIds();
+       for (TabId tab_id : tab_ids) {
+-        profile_service_->NotifyWebPageClosed(tab_id);
++        profile_service_->NotifyTabClosed(tab_id);
+       }
+-      profile_service_->CloseAllWebPages();
++      profile_service_->CloseAllTabs();
+       base::RunLoop().RunUntilIdle();
+       profile_service_.reset();
+     }
+@@ -51,7 +51,7 @@ class CbfSettingsBrowserTest : public InProcessBrowserTest {
+   TabId CreatePage(const std::string& url) {
+     TabId created_id = kInvalidTabId;
+     base::RunLoop run_loop;
+-    profile_service_->CreateWebPage(
++    profile_service_->CreateTab(
+         url, 1,
+         base::BindOnce(
+             [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
+diff --git a/chrome/browser/cbf/cbf_tab_manager.cc b/chrome/browser/cbf/cbf_tab_manager.cc
+index 1e46f6d157d68..bd99a76c7d366 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.cc
++++ b/chrome/browser/cbf/cbf_tab_manager.cc
+@@ -87,7 +87,7 @@ CbfTabManager::~CbfTabManager() {
+   tabs_.clear();
+ }
+ 
+-TabId CbfTabManager::CreateWebPage(const GURL& initial_url) {
++TabId CbfTabManager::CreateTab(const GURL& initial_url) {
+   if (!profile_) {
+     return kInvalidTabId;
+   }
+@@ -206,7 +206,7 @@ std::vector<TabId> CbfTabManager::GetAllTabIds() const {
+   return ids;
+ }
+ 
+-size_t CbfTabManager::GetWebPageCount() const {
++size_t CbfTabManager::GetTabCount() const {
+   return GetAllTabIds().size();
+ }
+ 
+@@ -219,7 +219,7 @@ void CbfTabManager::DispatchBeforeUnloadForAll() {
+   }
+ }
+ 
+-void CbfTabManager::RequestCloseWebPage(TabId tab_id) {
++void CbfTabManager::RequestCloseTab(TabId tab_id) {
+   auto* web_contents = ResolveWebContentsForTab(tab_id);
+   if (!web_contents) {
+     return;
+@@ -227,7 +227,7 @@ void CbfTabManager::RequestCloseWebPage(TabId tab_id) {
+   web_contents->DispatchBeforeUnload(false);
+ }
+ 
+-void CbfTabManager::CloseWebPage(TabId tab_id) {
++void CbfTabManager::CloseTab(TabId tab_id) {
+   auto it = tabs_.find(tab_id);
+   if (it == tabs_.end()) {
+     return;
+@@ -292,17 +292,17 @@ void CbfTabManager::CloseWebContents(content::WebContents* web_contents) {
+   if (tab_it != tabs_.end()) {
+     tab_it->second.web_contents = web_contents;
+   }
+-  CloseWebPage(it->second);
++  CloseTab(it->second);
+ }
+ 
+-void CbfTabManager::CloseAllWebPages() {
++void CbfTabManager::CloseAllTabs() {
+   const std::vector<TabId> targets = GetAllTabIds();
+   for (const auto tab_id : targets) {
+-    CloseWebPage(tab_id);
++    CloseTab(tab_id);
+   }
+ }
+ 
+-void CbfTabManager::SetWebPageSize(TabId tab_id,
++void CbfTabManager::SetTabSize(TabId tab_id,
+                                    std::uint32_t width,
+                                    std::uint32_t height,
+                                    base::OnceClosure callback) {
+diff --git a/chrome/browser/cbf/cbf_tab_manager.h b/chrome/browser/cbf/cbf_tab_manager.h
+index b097330543359..1b1152d074bde 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.h
++++ b/chrome/browser/cbf/cbf_tab_manager.h
+@@ -38,18 +38,18 @@ class CbfTabManager {
+   CbfTabManager& operator=(const CbfTabManager&) = delete;
+   ~CbfTabManager();
+ 
+-  TabId CreateWebPage(const GURL& initial_url);
++  TabId CreateTab(const GURL& initial_url);
+   content::WebContents* GetWebContents(TabId tab_id) const;
+   TabId GetTabIdForWebContents(content::WebContents* web_contents) const;
+   std::vector<TabId> GetDirtyTabIds() const;
+   std::vector<TabId> GetAllTabIds() const;
+-  size_t GetWebPageCount() const;
++  size_t GetTabCount() const;
+   void DispatchBeforeUnloadForAll();
+-  void RequestCloseWebPage(TabId tab_id);
+-  void CloseWebPage(TabId tab_id);
++  void RequestCloseTab(TabId tab_id);
++  void CloseTab(TabId tab_id);
+   void CloseWebContents(content::WebContents* web_contents);
+-  void CloseAllWebPages();
+-  void SetWebPageSize(TabId tab_id,
++  void CloseAllTabs();
++  void SetTabSize(TabId tab_id,
+                       std::uint32_t width,
+                       std::uint32_t height,
+                       base::OnceClosure callback);
+diff --git a/chrome/browser/cbf/cbf_web_contents_delegate.cc b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+index 062c0cdd2d655..a94675fbb5bdb 100644
+--- a/chrome/browser/cbf/cbf_web_contents_delegate.cc
++++ b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+@@ -67,7 +67,7 @@ content::WebContents* CbfWebContentsDelegate::OpenURLFromTab(
+     case WindowOpenDisposition::NEW_BACKGROUND_TAB:
+     case WindowOpenDisposition::NEW_WINDOW:
+     case WindowOpenDisposition::NEW_POPUP:
+-      profile_service_->NotifyNewWebPageRequested(source, params.url,
++      profile_service_->NotifyNewTabRequested(source, params.url,
+                                                   params.disposition,
+                                                   params.user_gesture);
+       return nullptr;
+@@ -95,7 +95,7 @@ content::WebContents* CbfWebContentsDelegate::AddNewContents(
+   }
+ 
+   if (profile_service_ && source) {
+-    profile_service_->NotifyNewWebPageRequested(source, target_url, disposition,
++    profile_service_->NotifyNewTabRequested(source, target_url, disposition,
+                                                 user_gesture);
+   }
+ 
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 7289fc26e3d0e..1b3e8408079f3 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -207,7 +207,7 @@ enum CbfConfirmCompositionBehavior {
+ 
+ enum CbfBeforeUnloadReason {
+   kUnknown,
+-  kCloseWebPage,
++  kCloseTab,
+   kNavigate,
+   kReload,
+   kWindowClose,
+@@ -496,10 +496,10 @@ interface CbfBrowserObserver {
+ 
+ interface CbfProfileObserver {
+   OnSurfaceHandleUpdated(uint64 tab_id, uint32 ca_context_id);
+-  OnWebPageCreated(uint64 tab_id, uint64 request_id);
++  OnTabCreated(uint64 tab_id, uint64 request_id);
+   OnDevToolsOpened(uint64 tab_id, uint64 devtools_tab_id);
+-  OnWebPageClosed(uint64 tab_id);
+-  OnWebPageResizeAcknowledged(uint64 tab_id);
++  OnTabClosed(uint64 tab_id);
++  OnTabResizeAcknowledged(uint64 tab_id);
+   OnImeBoundsUpdated(CbfImeBoundsUpdate update);
+   OnContextMenuRequested(uint64 tab_id, CbfContextMenu menu);
+   OnTabOpenRequested(CbfTabOpenRequest request);
+@@ -515,7 +515,7 @@ interface CbfProfileObserver {
+                            bool can_go_back,
+                            bool can_go_forward,
+                            bool is_loading);
+-  OnWebPageDomHtmlRead(uint64 tab_id, uint64 request_id, string html);
++  OnTabDomHtmlRead(uint64 tab_id, uint64 request_id, string html);
+   OnDragStartRequested(CbfDragStartRequest request);
+   OnExtensionsListed(string profile_id, array<CbfExtensionInfo> extensions);
+   OnAuxiliaryWindowOpenRequested(uint64 tab_id,
+@@ -538,9 +538,9 @@ interface CbfProfileObserver {
+ 
+ interface CbfProfileService {
+   SetObserver(pending_remote<CbfProfileObserver> observer);
+-  CreateWebPage(string initial_url, uint64 request_id) => (uint64 tab_id);
+-  RequestCloseWebPage(uint64 tab_id);
+-  SetWebPageSize(uint64 tab_id, uint32 width, uint32 height) => ();
++  CreateTab(string initial_url, uint64 request_id) => (uint64 tab_id);
++  RequestCloseTab(uint64 tab_id);
++  SetTabSize(uint64 tab_id, uint32 width, uint32 height) => ();
+   SendKeyEvent(CbfKeyEvent event, array<string>? commands);
+   SendMouseEvent(CbfMouseEvent event);
+   SendMouseWheelEvent(CbfMouseWheelEvent event);
+@@ -561,9 +561,9 @@ interface CbfProfileService {
+   PrintPreview(uint64 tab_id);
+   OpenDevTools(uint64 tab_id);
+   InspectElement(uint64 tab_id, int32 x, int32 y);
+-  SetWebPageFocus(uint64 tab_id, bool focused);
++  SetTabFocus(uint64 tab_id, bool focused);
+ 
+-  GetWebPageDomHtml(uint64 tab_id, uint64 request_id);
++  GetTabDomHtml(uint64 tab_id, uint64 request_id);
+   ListExtensions(string profile_id) => (array<CbfExtensionInfo> extensions);
+   OpenDefaultAuxiliaryWindow(uint64 tab_id, uint64 request_id);
+   RespondAuxiliaryWindow(uint64 tab_id,
+diff --git a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
+index 58d13e19685ea..59a6b43fc1a93 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.cc
+@@ -166,7 +166,7 @@ void CbfProfileContextMenuController::DismissContextMenu(uint64_t menu_id) {
+   context_menus_.erase(it);
+ }
+ 
+-void CbfProfileContextMenuController::OnWebPageClosed(TabId tab_id) {
++void CbfProfileContextMenuController::OnTabClosed(TabId tab_id) {
+   for (auto it = context_menus_.begin(); it != context_menus_.end();) {
+     if (it->second && it->second->tab_id == tab_id) {
+       if (it->second->menu) {
+diff --git a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
+index 66dfb5491d930..8822f97034a33 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h
+@@ -40,7 +40,7 @@ class CbfProfileContextMenuController {
+                                  int32_t command_id,
+                                  int32_t event_flags);
+   void DismissContextMenu(uint64_t menu_id);
+-  void OnWebPageClosed(TabId tab_id);
++  void OnTabClosed(TabId tab_id);
+ 
+  private:
+   struct ContextMenuEntry {
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+index baee4aafedf03..9bdc9ae730381 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.cc
+@@ -213,11 +213,11 @@ void CbfProfileDevToolsController::OpenDevTools(TabId inspected_tab_id) {
+   if (devtools_tab_id == kInvalidTabId) {
+     const GURL devtools_frontend_url = BuildDevToolsFrontendUrl();
+ 
+-    // CreateWebPage navigates to the devtools:// URL internally via LoadURL.
++    // CreateTab navigates to the devtools:// URL internally via LoadURL.
+     // The WebUI system creates DevToolsUIBindings synchronously during
+     // LoadURL, so ForWebContents returns non-null immediately after this call.
+     devtools_tab_id =
+-        context_->tab_manager().CreateWebPage(devtools_frontend_url);
++        context_->tab_manager().CreateTab(devtools_frontend_url);
+     if (devtools_tab_id == kInvalidTabId) {
+       return;
+     }
+@@ -225,7 +225,7 @@ void CbfProfileDevToolsController::OpenDevTools(TabId inspected_tab_id) {
+     content::WebContents* devtools_contents =
+         context_->tab_manager().GetWebContents(devtools_tab_id);
+     if (!devtools_contents) {
+-      context_->tab_manager().CloseWebPage(devtools_tab_id);
++      context_->tab_manager().CloseTab(devtools_tab_id);
+       return;
+     }
+ 
+@@ -239,14 +239,14 @@ void CbfProfileDevToolsController::OpenDevTools(TabId inspected_tab_id) {
+     DevToolsUIBindings* bindings =
+         DevToolsUIBindings::ForWebContents(devtools_contents);
+     if (!bindings) {
+-      context_->tab_manager().CloseWebPage(devtools_tab_id);
++      context_->tab_manager().CloseTab(devtools_tab_id);
+       return;
+     }
+ 
+     scoped_refptr<content::DevToolsAgentHost> agent_host =
+         content::DevToolsAgentHost::GetOrCreateForTab(inspected_contents);
+     if (!agent_host) {
+-      context_->tab_manager().CloseWebPage(devtools_tab_id);
++      context_->tab_manager().CloseTab(devtools_tab_id);
+       return;
+     }
+ 
+@@ -320,7 +320,7 @@ void CbfProfileDevToolsController::InspectElementForFrame(
+   agent_host->InspectElement(frame, x, y);
+ }
+ 
+-void CbfProfileDevToolsController::OnWebPageClosed(TabId tab_id) {
++void CbfProfileDevToolsController::OnTabClosed(TabId tab_id) {
+   auto inspected_it = inspected_to_devtools_.find(tab_id);
+   if (inspected_it != inspected_to_devtools_.end()) {
+     const TabId devtools_tab_id = inspected_it->second;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
+index 11d9ce1a9358c..2c013d69966b0 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller.h
+@@ -38,7 +38,7 @@ class CbfProfileDevToolsController {
+       const std::optional<content::GlobalRenderFrameHostId>& inspected_frame_id,
+       int32_t x,
+       int32_t y);
+-  void OnWebPageClosed(TabId tab_id);
++  void OnTabClosed(TabId tab_id);
+ 
+  private:
+   struct DevToolsSession;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+index 08228fdc0f828..bdae92086a687 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+@@ -28,9 +28,9 @@ class CbfProfileDevToolsControllerBrowserTest : public InProcessBrowserTest {
+     if (profile_service_) {
+       const auto tab_ids = profile_service_->GetAllTabIds();
+       for (TabId tab_id : tab_ids) {
+-        profile_service_->NotifyWebPageClosed(tab_id);
++        profile_service_->NotifyTabClosed(tab_id);
+       }
+-      profile_service_->CloseAllWebPages();
++      profile_service_->CloseAllTabs();
+       base::RunLoop().RunUntilIdle();
+       profile_service_.reset();
+     }
+@@ -41,7 +41,7 @@ class CbfProfileDevToolsControllerBrowserTest : public InProcessBrowserTest {
+   TabId CreatePage() {
+     TabId created_id = kInvalidTabId;
+     base::RunLoop run_loop;
+-    profile_service_->CreateWebPage(
++    profile_service_->CreateTab(
+         "about:blank", 1,
+         base::BindOnce(
+             [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
+@@ -65,7 +65,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileDevToolsControllerBrowserTest,
+   profile_service_->OpenDevTools(tab_id);
+   observer_.WaitForDevToolsOpenedCount(1);
+ 
+-  profile_service_->NotifyWebPageClosed(tab_id);
++  profile_service_->NotifyTabClosed(tab_id);
+   profile_service_->OpenDevTools(tab_id);
+ }
+ 
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+index eff7d0cdf3be9..59b1259198492 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_unittest.cc
+@@ -33,8 +33,8 @@ class CbfProfileDevToolsControllerTest : public testing::Test {
+ 
+ TEST_F(CbfProfileDevToolsControllerTest, CloseDuringAttachRetryIsSafe) {
+   controller_.OpenDevTools(kInvalidTabId);
+-  controller_.OnWebPageClosed(42);
+-  controller_.OnWebPageClosed(42);
++  controller_.OnTabClosed(42);
++  controller_.OnTabClosed(42);
+   task_environment_.FastForwardBy(base::Milliseconds(2000));
+ }
+ 
+diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc b/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
+index 3ab196c947252..bc8691979be64 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
+@@ -235,7 +235,7 @@ void CbfProfileDragController::SendDragCancel(uint64_t session_id,
+   session.source_rwh->DragSourceSystemDragEnded();
+ }
+ 
+-void CbfProfileDragController::OnWebPageClosed(TabId tab_id) {
++void CbfProfileDragController::OnTabClosed(TabId tab_id) {
+   for (auto it = drag_sessions_.begin(); it != drag_sessions_.end();) {
+     if (it->second.tab_id == tab_id) {
+       it = drag_sessions_.erase(it);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller.h b/chrome/browser/cbf/profile/cbf_profile_drag_controller.h
+index 69c90c10e0e2a..099820b79b000 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_drag_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller.h
+@@ -48,7 +48,7 @@ class CbfProfileDragController {
+   void SendDragUpdate(mojom::CbfDragUpdatePtr update);
+   void SendDragDrop(mojom::CbfDragDropPtr drop);
+   void SendDragCancel(uint64_t session_id, uint64_t tab_id);
+-  void OnWebPageClosed(TabId tab_id);
++  void OnTabClosed(TabId tab_id);
+ 
+  private:
+   struct DragSessionState {
+diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
+index 1d9761a0e2257..f39ba0694717b 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
+@@ -42,8 +42,8 @@ TEST_F(CbfProfileDragControllerTest, InvalidSessionOperationsAreNoOp) {
+ }
+ 
+ TEST_F(CbfProfileDragControllerTest, DuplicateCloseIsSafe) {
+-  controller_.OnWebPageClosed(42);
+-  controller_.OnWebPageClosed(42);
++  controller_.OnTabClosed(42);
++  controller_.OnTabClosed(42);
+ }
+ 
+ }  // namespace
+diff --git a/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc b/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc
+index 21455e89d8fc2..e04ad8f13b74b 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc
+@@ -70,7 +70,7 @@ void CbfProfileImeController::RegisterWebContents(
+   text_input_map_[text_input_manager] = tab_id;
+ }
+ 
+-void CbfProfileImeController::OnWebPageClosed(TabId tab_id) {
++void CbfProfileImeController::OnTabClosed(TabId tab_id) {
+   for (auto it = text_input_map_.begin(); it != text_input_map_.end();) {
+     if (it->second != tab_id) {
+       ++it;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_ime_controller.h b/chrome/browser/cbf/profile/cbf_profile_ime_controller.h
+index 45c7e7096a83e..f8144f13abf01 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_ime_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_ime_controller.h
+@@ -28,7 +28,7 @@ class CbfProfileImeController final
+   ~CbfProfileImeController();
+ 
+   void RegisterWebContents(TabId tab_id, content::WebContents* web_contents);
+-  void OnWebPageClosed(TabId tab_id);
++  void OnTabClosed(TabId tab_id);
+ 
+   void SetComposition(mojom::CbfImeCompositionPtr composition);
+   void CommitText(mojom::CbfImeCommitTextPtr commit);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
+index 27dade06ebdad..ddc7d15298584 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
+@@ -289,7 +289,7 @@ void CbfProfileInputController::SendMouseWheelEvent(
+   widget_impl->ForwardWheelEventWithLatencyInfo(wheel_event, latency_info);
+ }
+ 
+-void CbfProfileInputController::OnWebPageClosed(TabId tab_id) {
++void CbfProfileInputController::OnTabClosed(TabId tab_id) {
+   wheel_phase_states_.erase(tab_id);
+ }
+ 
+diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.h b/chrome/browser/cbf/profile/cbf_profile_input_controller.h
+index f036c1d824513..b2aa25ea619ee 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_input_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.h
+@@ -30,7 +30,7 @@ class CbfProfileInputController {
+       const std::optional<std::vector<std::string>>& commands);
+   void SendMouseEvent(mojom::CbfMouseEventPtr event);
+   void SendMouseWheelEvent(mojom::CbfMouseWheelEventPtr event);
+-  void OnWebPageClosed(TabId tab_id);
++  void OnTabClosed(TabId tab_id);
+ 
+  private:
+   struct WheelPhaseState {
+diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
+index f86cf063707b1..828124ddd3a95 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
+@@ -52,8 +52,8 @@ TEST_F(CbfProfileInputControllerTest, InvalidTabIdInputEventsAreNoOp) {
+ }
+ 
+ TEST_F(CbfProfileInputControllerTest, DuplicateCloseIsSafe) {
+-  controller_.OnWebPageClosed(42);
+-  controller_.OnWebPageClosed(42);
++  controller_.OnTabClosed(42);
++  controller_.OnTabClosed(42);
+   task_environment_.FastForwardBy(base::Milliseconds(500));
+ }
+ 
+diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+index 7d0d4de40412c..4bb75e03e9467 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+@@ -96,7 +96,7 @@ void CbfProfileNavigationController::Reload(TabId tab_id,
+   web_contents->GetController().Reload(type, true);
+ }
+ 
+-void CbfProfileNavigationController::SetWebPageFocus(TabId tab_id,
++void CbfProfileNavigationController::SetTabFocus(TabId tab_id,
+                                                      bool focused) {
+   content::WebContents* web_contents =
+       context_->tab_manager().GetWebContents(tab_id);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
+index e5814f08b18c0..5bbabcaf5750c 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
+@@ -22,7 +22,7 @@ class CbfProfileNavigationController {
+   void GoBack(TabId tab_id);
+   void GoForward(TabId tab_id);
+   void Reload(TabId tab_id, bool ignore_cache);
+-  void SetWebPageFocus(TabId tab_id, bool focused);
++  void SetTabFocus(TabId tab_id, bool focused);
+ 
+  private:
+   raw_ptr<CbfProfileServiceContext> context_;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_page_controller.cc b/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
+index 9d7f89e5e09dc..89a99d8e6f473 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
+@@ -12,12 +12,12 @@ CbfProfilePageController::CbfProfilePageController(
+ 
+ CbfProfilePageController::~CbfProfilePageController() = default;
+ 
+-TabId CbfProfilePageController::CreateWebPage(const std::string& initial_url) {
+-  return context_->tab_manager().CreateWebPage(GURL(initial_url));
++TabId CbfProfilePageController::CreateTab(const std::string& initial_url) {
++  return context_->tab_manager().CreateTab(GURL(initial_url));
+ }
+ 
+-void CbfProfilePageController::RequestCloseWebPage(TabId tab_id) {
+-  context_->tab_manager().RequestCloseWebPage(tab_id);
++void CbfProfilePageController::RequestCloseTab(TabId tab_id) {
++  context_->tab_manager().RequestCloseTab(tab_id);
+ }
+ 
+ void CbfProfilePageController::DispatchBeforeUnloadForShutdown() {
+@@ -32,12 +32,12 @@ std::vector<TabId> CbfProfilePageController::GetAllTabIds() const {
+   return context_->tab_manager().GetAllTabIds();
+ }
+ 
+-size_t CbfProfilePageController::GetWebPageCount() const {
+-  return context_->tab_manager().GetWebPageCount();
++size_t CbfProfilePageController::GetTabCount() const {
++  return context_->tab_manager().GetTabCount();
+ }
+ 
+-void CbfProfilePageController::CloseAllWebPages() {
+-  context_->tab_manager().CloseAllWebPages();
++void CbfProfilePageController::CloseAllTabs() {
++  context_->tab_manager().CloseAllTabs();
+ }
+ 
+ TabId CbfProfilePageController::GetTabIdForWebContents(
+@@ -45,8 +45,8 @@ TabId CbfProfilePageController::GetTabIdForWebContents(
+   return context_->tab_manager().GetTabIdForWebContents(web_contents);
+ }
+ 
+-void CbfProfilePageController::CloseWebPage(TabId tab_id) {
+-  context_->tab_manager().CloseWebPage(tab_id);
++void CbfProfilePageController::CloseTab(TabId tab_id) {
++  context_->tab_manager().CloseTab(tab_id);
+ }
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_page_controller.h b/chrome/browser/cbf/profile/cbf_profile_page_controller.h
+index 1798af2ba4287..c46bcd864e626 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_page_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_page_controller.h
+@@ -25,15 +25,15 @@ class CbfProfilePageController {
+   CbfProfilePageController& operator=(const CbfProfilePageController&) = delete;
+   ~CbfProfilePageController();
+ 
+-  TabId CreateWebPage(const std::string& initial_url);
+-  void RequestCloseWebPage(TabId tab_id);
++  TabId CreateTab(const std::string& initial_url);
++  void RequestCloseTab(TabId tab_id);
+   void DispatchBeforeUnloadForShutdown();
+   std::vector<TabId> GetDirtyTabIds() const;
+   std::vector<TabId> GetAllTabIds() const;
+-  size_t GetWebPageCount() const;
+-  void CloseAllWebPages();
++  size_t GetTabCount() const;
++  void CloseAllTabs();
+   TabId GetTabIdForWebContents(content::WebContents* web_contents) const;
+-  void CloseWebPage(TabId tab_id);
++  void CloseTab(TabId tab_id);
+ 
+  private:
+   raw_ptr<CbfProfileServiceContext> context_;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
+index e73737016c6e5..6bae5c39890c0 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
+@@ -70,16 +70,16 @@ void CbfProfilePopupController::RespondTabOpen(
+   switch (response->action) {
+     case mojom::CbfTabOpenResponseAction::kAllowNewContext: {
+       const TabId tab_id =
+-          context_->page_controller().CreateWebPage(request.target_url.spec());
++          context_->page_controller().CreateTab(request.target_url.spec());
+       if (tab_id != kInvalidTabId) {
+         context_->ime_controller().RegisterWebContents(
+             tab_id, context_->tab_manager().GetWebContents(tab_id));
+         auto& observer = context_->observer_remote();
+         if (observer.is_bound()) {
+-          observer->OnWebPageCreated(tab_id, response->request_id);
++          observer->OnTabCreated(tab_id, response->request_id);
+         }
+         if (response->activate) {
+-          context_->navigation_controller().SetWebPageFocus(tab_id, true);
++          context_->navigation_controller().SetTabFocus(tab_id, true);
+         }
+         ResolveOpenRequest(response->request_id,
+                            mojom::CbfTabOpenResultKind::kOpenedNewContext,
+@@ -107,7 +107,7 @@ void CbfProfilePopupController::RespondTabOpen(
+       }
+       context_->navigation_controller().Navigate(target_id, request.target_url.spec());
+       if (response->activate) {
+-        context_->navigation_controller().SetWebPageFocus(target_id, true);
++        context_->navigation_controller().SetTabFocus(target_id, true);
+       }
+       ResolveOpenRequest(
+           response->request_id,
+@@ -158,13 +158,13 @@ void CbfProfilePopupController::ResolveOpenRequest(
+   pending_open_requests_.erase(request_id);
+ }
+ 
+-void CbfProfilePopupController::MarkCloseWebPageBeforeUnloadReason(
++void CbfProfilePopupController::MarkCloseTabBeforeUnloadReason(
+     content::WebContents* web_contents) {
+   if (!web_contents) {
+     return;
+   }
+   beforeunload_reasons_[web_contents] =
+-      mojom::CbfBeforeUnloadReason::kCloseWebPage;
++      mojom::CbfBeforeUnloadReason::kCloseTab;
+ }
+ 
+ void CbfProfilePopupController::ClearBeforeUnloadReason(
+@@ -175,7 +175,7 @@ void CbfProfilePopupController::ClearBeforeUnloadReason(
+   beforeunload_reasons_.erase(web_contents);
+ }
+ 
+-bool CbfProfilePopupController::ConsumeCloseWebPageBeforeUnloadReason(
++bool CbfProfilePopupController::ConsumeCloseTabBeforeUnloadReason(
+     content::WebContents* web_contents) {
+   if (!web_contents) {
+     return false;
+@@ -185,7 +185,7 @@ bool CbfProfilePopupController::ConsumeCloseWebPageBeforeUnloadReason(
+     return false;
+   }
+   const bool is_close_request =
+-      it->second == mojom::CbfBeforeUnloadReason::kCloseWebPage;
++      it->second == mojom::CbfBeforeUnloadReason::kCloseTab;
+   beforeunload_reasons_.erase(it);
+   return is_close_request;
+ }
+diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller.h b/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
+index 9e4e8311934dd..d46233534faa0 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller.h
+@@ -30,9 +30,9 @@ class CbfProfilePopupController {
+                                   WindowOpenDisposition disposition,
+                                   bool user_gesture);
+   void RespondTabOpen(mojom::CbfTabOpenResponsePtr response);
+-  void MarkCloseWebPageBeforeUnloadReason(content::WebContents* web_contents);
++  void MarkCloseTabBeforeUnloadReason(content::WebContents* web_contents);
+   void ClearBeforeUnloadReason(content::WebContents* web_contents);
+-  bool ConsumeCloseWebPageBeforeUnloadReason(content::WebContents* web_contents);
++  bool ConsumeCloseTabBeforeUnloadReason(content::WebContents* web_contents);
+   mojom::CbfBeforeUnloadReason ResolveBeforeUnloadReason(
+       content::WebContents* web_contents,
+       bool is_reload) const;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_popup_controller_unittest.cc
+index fbb63065c7779..625991dcffff3 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_popup_controller_unittest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller_unittest.cc
+@@ -35,9 +35,9 @@ TEST_F(CbfProfilePopupControllerTest, ResolveReasonUnknownForNullWebContents) {
+ }
+ 
+ TEST_F(CbfProfilePopupControllerTest, NullWebContentsOperationsAreNoOp) {
+-  controller_.MarkCloseWebPageBeforeUnloadReason(nullptr);
++  controller_.MarkCloseTabBeforeUnloadReason(nullptr);
+   controller_.ClearBeforeUnloadReason(nullptr);
+-  EXPECT_FALSE(controller_.ConsumeCloseWebPageBeforeUnloadReason(nullptr));
++  EXPECT_FALSE(controller_.ConsumeCloseTabBeforeUnloadReason(nullptr));
+ }
+ 
+ }  // namespace
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index 3166b37fa498d..ff43485f178e3 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -35,7 +35,7 @@ void CbfTestProfileObserver::WaitForDevToolsOpenedCount(size_t expected_count) {
+ void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t tab_id,
+                                                     uint32_t ca_context_id) {}
+ 
+-void CbfTestProfileObserver::OnWebPageCreated(uint64_t tab_id,
++void CbfTestProfileObserver::OnTabCreated(uint64_t tab_id,
+                                               uint64_t request_id) {}
+ 
+ void CbfTestProfileObserver::OnDevToolsOpened(uint64_t tab_id,
+@@ -44,12 +44,12 @@ void CbfTestProfileObserver::OnDevToolsOpened(uint64_t tab_id,
+   MaybeQuitWaitLoop();
+ }
+ 
+-void CbfTestProfileObserver::OnWebPageClosed(uint64_t tab_id) {
++void CbfTestProfileObserver::OnTabClosed(uint64_t tab_id) {
+   web_page_closed_events_.push_back(tab_id);
+   MaybeQuitWaitLoop();
+ }
+ 
+-void CbfTestProfileObserver::OnWebPageResizeAcknowledged(uint64_t tab_id) {}
++void CbfTestProfileObserver::OnTabResizeAcknowledged(uint64_t tab_id) {}
+ 
+ void CbfTestProfileObserver::OnImeBoundsUpdated(
+     cbf::mojom::CbfImeBoundsUpdatePtr update) {}
+@@ -85,7 +85,7 @@ void CbfTestProfileObserver::OnNavigationStateChanged(uint64_t tab_id,
+                                                       bool can_go_forward,
+                                                       bool is_loading) {}
+ 
+-void CbfTestProfileObserver::OnWebPageDomHtmlRead(uint64_t tab_id,
++void CbfTestProfileObserver::OnTabDomHtmlRead(uint64_t tab_id,
+                                                   uint64_t request_id,
+                                                   const std::string& html) {}
+ 
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index cf3045a29f44c..c3321319201cd 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -38,11 +38,11 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   // cbf::mojom::CbfProfileObserver
+   void OnSurfaceHandleUpdated(uint64_t tab_id,
+                               uint32_t ca_context_id) override;
+-  void OnWebPageCreated(uint64_t tab_id, uint64_t request_id) override;
++  void OnTabCreated(uint64_t tab_id, uint64_t request_id) override;
+   void OnDevToolsOpened(uint64_t tab_id,
+                         uint64_t devtools_tab_id) override;
+-  void OnWebPageClosed(uint64_t tab_id) override;
+-  void OnWebPageResizeAcknowledged(uint64_t tab_id) override;
++  void OnTabClosed(uint64_t tab_id) override;
++  void OnTabResizeAcknowledged(uint64_t tab_id) override;
+   void OnImeBoundsUpdated(cbf::mojom::CbfImeBoundsUpdatePtr update) override;
+   void OnContextMenuRequested(
+       uint64_t tab_id,
+@@ -65,7 +65,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+                                 bool can_go_back,
+                                 bool can_go_forward,
+                                 bool is_loading) override;
+-  void OnWebPageDomHtmlRead(uint64_t tab_id,
++  void OnTabDomHtmlRead(uint64_t tab_id,
+                             uint64_t request_id,
+                             const std::string& html) override;
+   void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
+-- 
+2.50.1 (Apple Git-155)
+
