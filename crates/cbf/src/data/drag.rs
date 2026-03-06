@@ -19,23 +19,31 @@ pub enum DragOperation {
 pub struct DragOperations(u32);
 
 impl DragOperations {
+    /// No operations allowed.
     pub const NONE: Self = Self(0);
+    /// Copy operation allowed.
     pub const COPY: Self = Self(1 << 0);
+    /// Link operation allowed.
     pub const LINK: Self = Self(1 << 1);
+    /// Move operation allowed.
     pub const MOVE: Self = Self(1 << 2);
 
+    /// Returns an empty (no-operation) bitmask.
     pub const fn empty() -> Self {
         Self::NONE
     }
 
+    /// Constructs a bitmask from raw bits.
     pub const fn from_bits(bits: u32) -> Self {
         Self(bits)
     }
 
+    /// Returns the raw bit representation.
     pub const fn bits(self) -> u32 {
         self.0
     }
 
+    /// Returns `true` if the given operation is included in this bitmask.
     pub const fn contains(self, operation: DragOperation) -> bool {
         let mask = match operation {
             DragOperation::None => 0,
@@ -53,6 +61,7 @@ impl Default for DragOperations {
     }
 }
 
+/// URL entry carried within a drag payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DragUrlInfo {
     pub url: String,
@@ -74,6 +83,7 @@ pub struct DragData {
     pub custom_data: BTreeMap<String, String>,
 }
 
+/// Drag image shown under the cursor during a drag session.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragImage {
     pub png_bytes: Vec<u8>,
@@ -84,6 +94,7 @@ pub struct DragImage {
     pub cursor_offset_y: i32,
 }
 
+/// Request emitted by the backend when a drag session begins.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragStartRequest {
     pub session_id: u64,
@@ -94,6 +105,7 @@ pub struct DragStartRequest {
     pub image: Option<DragImage>,
 }
 
+/// Position and modifier update delivered while a drag session is in progress.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragUpdate {
     pub session_id: u64,
@@ -106,6 +118,7 @@ pub struct DragUpdate {
     pub position_in_screen_y: f32,
 }
 
+/// Drop event payload delivered when the user releases a drag.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragDrop {
     pub session_id: u64,
