@@ -13,10 +13,8 @@ use cbf::data::{
 use cbf::event::{BrowserEvent, BrowsingContextEvent, DialogType};
 
 use crate::data::{
-    generic::{
-        ChromeBackendErrorInfo, ChromeBackendStopReason, ChromeBeforeUnloadReason,
-        ChromeProfileInfo,
-    },
+    lifecycle::{ChromeBackendErrorInfo, ChromeBackendStopReason, ChromeBeforeUnloadReason},
+    profile::ChromeProfileInfo,
     prompt_ui::{
         PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult, PromptUiId,
         PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,

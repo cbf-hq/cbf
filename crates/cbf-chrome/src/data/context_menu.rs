@@ -1,5 +1,7 @@
 use cbf::data::context_menu::{ContextMenu, ContextMenuItem, ContextMenuItemType};
 
+pub type ChromeContextMenu = ContextMenu;
+
 /// Command id for navigating back.
 pub const CMD_BACK: i32 = 33000;
 /// Command id for navigating forward.

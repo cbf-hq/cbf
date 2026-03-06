@@ -1,11 +1,12 @@
 use cursor_icon::CursorIcon;
 
 use crate::data::{
-    generic::{
-        ChromeBeforeUnloadReason, ChromeContextMenu, ChromeDragStartRequest, ChromeExtensionInfo,
-        ChromeImeBoundsUpdate,
-    },
+    context_menu::ChromeContextMenu,
+    drag::ChromeDragStartRequest,
+    extension::ChromeExtensionInfo,
     ids::TabId,
+    ime::ChromeImeBoundsUpdate,
+    lifecycle::ChromeBeforeUnloadReason,
     prompt_ui::{PromptUiCloseReason, PromptUiId, PromptUiKind, PromptUiResolution},
     surface::SurfaceHandle,
     tab_open::{TabOpenHint, TabOpenResult},

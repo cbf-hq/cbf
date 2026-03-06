@@ -1,14 +1,15 @@
 use cbf::command::BrowserCommand;
 
 use crate::data::{
-    generic::{
-        ChromeAuxiliaryWindowResponse, ChromeBrowsingContextOpenResponse,
-        ChromeConfirmCompositionBehavior, ChromeDragDrop, ChromeDragUpdate, ChromeImeCommitText,
-        ChromeImeComposition, ChromeMouseEvent, ChromeWindowOpenResponse,
-    },
+    browsing_context_open::ChromeBrowsingContextOpenResponse,
+    drag::{ChromeDragDrop, ChromeDragUpdate},
+    extension::ChromeAuxiliaryWindowResponse,
     ids::TabId,
+    ime::{ChromeConfirmCompositionBehavior, ChromeImeCommitText, ChromeImeComposition},
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+    mouse::ChromeMouseEvent,
     prompt_ui::{PromptUiId, PromptUiResponse},
+    window_open::ChromeWindowOpenResponse,
 };
 
 /// Chromium-specific transport command vocabulary.
