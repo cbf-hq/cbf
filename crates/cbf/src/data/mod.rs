@@ -5,11 +5,13 @@
 
 pub mod browsing_context_open;
 pub mod context_menu;
+pub mod dialog;
 pub mod drag;
 pub mod extension;
 pub mod ids;
 pub mod ime;
 pub mod key;
 pub mod mouse;
+pub mod permission;
 pub mod profile;
 pub mod window_open;

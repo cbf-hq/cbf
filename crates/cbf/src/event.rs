@@ -8,6 +8,7 @@ use cursor_icon::CursorIcon;
 use crate::data::{
     browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
     context_menu::ContextMenu,
+    dialog::{BeforeUnloadReason, DialogType},
     drag::DragStartRequest,
     extension::{
         AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
@@ -15,6 +16,7 @@ use crate::data::{
     },
     ids::BrowsingContextId,
     ime::ImeBoundsUpdate,
+    permission::PermissionType,
     profile::ProfileInfo,
     window_open::{WindowDescriptor, WindowOpenRequest, WindowOpenResult},
 };
@@ -242,42 +244,4 @@ pub enum BrowsingContextEvent {
         x: f64,
         y: f64,
     },
-}
-
-/// Types of JavaScript dialogs or beforeunload confirmations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DialogType {
-    Alert,
-    Confirm,
-    Prompt,
-    BeforeUnload,
-}
-
-/// Reasons for triggering a beforeunload confirmation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BeforeUnloadReason {
-    Unknown,
-    CloseBrowsingContext,
-    Navigate,
-    Reload,
-    WindowClose,
-}
-
-/// Response payload for a JavaScript dialog request.
-#[derive(Debug, Clone)]
-pub enum DialogResponse {
-    Success {
-        input: Option<String>, // Input text for prompt dialogs.
-    },
-    Cancel,
-}
-
-/// Permission categories that may be requested by a page.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PermissionType {
-    VideoCapture,
-    AudioCapture,
-    Notifications,
-    Geolocation,
-    // Extend as needed.
 }

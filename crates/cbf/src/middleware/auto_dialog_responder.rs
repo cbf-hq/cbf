@@ -11,9 +11,10 @@ use std::{
 
 use crate::{
     command::BrowserCommand,
+    data::dialog::DialogType,
     data::ids::BrowsingContextId,
     delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
-    event::{BrowserEvent, BrowsingContextEvent, DialogType},
+    event::{BrowserEvent, BrowsingContextEvent},
 };
 
 use super::DelegateLayer;

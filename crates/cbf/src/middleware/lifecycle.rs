@@ -8,9 +8,10 @@ use std::collections::HashSet;
 
 use crate::{
     command::BrowserCommand,
+    data::dialog::DialogType,
     data::ids::BrowsingContextId,
     delegate::{BackendDelegate, CommandDecision, DelegateContext, EventDecision},
-    event::{BackendStopReason, BrowserEvent, BrowsingContextEvent, DialogType},
+    event::{BackendStopReason, BrowserEvent, BrowsingContextEvent},
 };
 
 use super::DelegateLayer;
