@@ -1,4 +1,4 @@
-From e5eedd4695c461d791319bbbe6f11da1df727dd0 Mon Sep 17 00:00:00 2001
+From 7920242a71957d48a898f56e5c3786fd6bb5d76c Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 6 Mar 2026 11:43:12 +0900
 Subject: [PATCH 19/19] Rename CBF WebPage API vocabulary to Tab
@@ -7,11 +7,11 @@ Subject: [PATCH 19/19] Rename CBF WebPage API vocabulary to Tab
  chrome/browser/cbf/bridge/cbf_bridge_client.h | 10 +--
  .../cbf/bridge/cbf_bridge_client_impl.cc      |  8 +-
  .../cbf/bridge/cbf_bridge_client_impl.h       |  8 +-
- .../browser/cbf/bridge/cbf_bridge_web_page.cc | 30 ++++----
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc | 30 +++----
  chrome/browser/cbf/cbf_browser_service.cc     |  6 +-
  chrome/browser/cbf/cbf_browser_service.h      |  2 +-
- chrome/browser/cbf/cbf_profile_service.cc     | 74 +++++++++----------
- chrome/browser/cbf/cbf_profile_service.h      | 18 ++---
+ chrome/browser/cbf/cbf_profile_service.cc     | 80 +++++++++----------
+ chrome/browser/cbf/cbf_profile_service.h      | 22 ++---
  .../cbf/cbf_profile_service_browsertest.cc    | 12 +--
  .../browser/cbf/cbf_settings_browsertest.cc   |  6 +-
  chrome/browser/cbf/cbf_tab_manager.cc         | 16 ++--
@@ -41,7 +41,11 @@ Subject: [PATCH 19/19] Rename CBF WebPage API vocabulary to Tab
  .../cbf_profile_popup_controller_unittest.cc  |  4 +-
  .../cbf/test/cbf_test_profile_observer.cc     |  8 +-
  .../cbf/test/cbf_test_profile_observer.h      |  8 +-
- 37 files changed, 175 insertions(+), 175 deletions(-)
+ .../runtime/chrome_runtime_api_delegate.cc    |  2 +-
+ .../browser/extensions/api/tabs/tabs_api.cc   |  8 +-
+ .../browser/extensions/extension_tab_util.cc  |  4 +-
+ chrome/browser/extensions/open_tab_helper.cc  |  2 +-
+ 41 files changed, 188 insertions(+), 188 deletions(-)
 
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
 index 2d56864feade2..fb96a0cd06d00 100644
@@ -329,7 +333,7 @@ index 66932900005d7..37172b1c114ca 100644
    bool IsManagedWebContents(content::WebContents* web_contents) const;
    void NotifyBeforeUnloadDialogRequested(TabId tab_id);
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
-index 891a235c30db9..39dcfa3ad867b 100644
+index 891a235c30db9..2fd95cfbd4a16 100644
 --- a/chrome/browser/cbf/cbf_profile_service.cc
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
 @@ -203,13 +203,13 @@ CbfProfileService::~CbfProfileService() {
@@ -359,8 +363,9 @@ index 891a235c30db9..39dcfa3ad867b 100644
 -void CbfProfileService::CreateWebPage(const std::string& initial_url,
 +void CbfProfileService::CreateTab(const std::string& initial_url,
                                        uint64_t request_id,
-                                       CreateWebPageCallback callback) {
+-                                      CreateWebPageCallback callback) {
 -  const TabId tab_id = page_controller_->CreateWebPage(initial_url);
++                                      CreateTabCallback callback) {
 +  const TabId tab_id = page_controller_->CreateTab(initial_url);
    ime_controller_->RegisterWebContents(
        tab_id, tab_manager_.GetWebContents(tab_id));
@@ -387,13 +392,15 @@ index 891a235c30db9..39dcfa3ad867b 100644
 +void CbfProfileService::SetTabSize(const TabId tab_id,
                                         std::uint32_t width,
                                         std::uint32_t height,
-                                        SetWebPageSizeCallback callback) {
+-                                       SetWebPageSizeCallback callback) {
 -  tab_manager_.SetWebPageSize(
++                                       SetTabSizeCallback callback) {
 +  tab_manager_.SetTabSize(
        tab_id, width, height,
        base::BindOnce(
            [](base::WeakPtr<CbfProfileService> self, TabId tab_id,
-              SetWebPageSizeCallback callback) {
+-             SetWebPageSizeCallback callback) {
++             SetTabSizeCallback callback) {
              std::move(callback).Run();
              if (self && self->observer_.is_bound()) {
 -              self->observer_->OnWebPageResizeAcknowledged(tab_id);
@@ -530,24 +537,29 @@ index 891a235c30db9..39dcfa3ad867b 100644
  
  void CbfProfileService::WebContentsDestroyed(content::WebContents* web_contents) {
 diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
-index 164a2a38e659f..d7799c9ab4ec6 100644
+index 164a2a38e659f..1211c5bb64f81 100644
 --- a/chrome/browser/cbf/cbf_profile_service.h
 +++ b/chrome/browser/cbf/cbf_profile_service.h
-@@ -75,11 +75,11 @@ class CbfProfileService : public mojom::CbfProfileService,
+@@ -75,14 +75,14 @@ class CbfProfileService : public mojom::CbfProfileService,
  
    void SetObserver(
        mojo::PendingRemote<mojom::CbfProfileObserver> observer) override;
 -  void CreateWebPage(const std::string& initial_url,
 +  void CreateTab(const std::string& initial_url,
                       uint64_t request_id,
-                      CreateWebPageCallback callback) override;
+-                     CreateWebPageCallback callback) override;
 -  void RequestCloseWebPage(TabId tab_id) override;
 -  void SetWebPageSize(const TabId tab_id,
++                     CreateTabCallback callback) override;
 +  void RequestCloseTab(TabId tab_id) override;
 +  void SetTabSize(const TabId tab_id,
                        std::uint32_t width,
                        std::uint32_t height,
-                       SetWebPageSizeCallback callback) override;
+-                      SetWebPageSizeCallback callback) override;
++                      SetTabSizeCallback callback) override;
+   void SendKeyEvent(
+       mojom::CbfKeyEventPtr event,
+       const std::optional<std::vector<std::string>>& commands) override;
 @@ -108,9 +108,9 @@ class CbfProfileService : public mojom::CbfProfileService,
    void PrintPreview(uint64_t tab_id) override;
    void OpenDevTools(uint64_t tab_id) override;
@@ -1349,6 +1361,92 @@ index cf3045a29f44c..c3321319201cd 100644
                              uint64_t request_id,
                              const std::string& html) override;
    void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
+diff --git a/chrome/browser/extensions/api/runtime/chrome_runtime_api_delegate.cc b/chrome/browser/extensions/api/runtime/chrome_runtime_api_delegate.cc
+index 4e28eacc477d9..17d0c25c6bbe0 100644
+--- a/chrome/browser/extensions/api/runtime/chrome_runtime_api_delegate.cc
++++ b/chrome/browser/extensions/api/runtime/chrome_runtime_api_delegate.cc
+@@ -278,7 +278,7 @@ void ChromeRuntimeAPIDelegate::OpenURL(const GURL& uninstall_url) {
+     if (auto* profile_service =
+             cbf_service->browser_service()->GetProfileServiceForProfile(
+                 profile)) {
+-      profile_service->NotifyNewWebPageRequested(
++      profile_service->NotifyNewTabRequested(
+           /*source=*/nullptr, uninstall_url,
+           WindowOpenDisposition::NEW_FOREGROUND_TAB,
+           /*user_gesture=*/false);
+diff --git a/chrome/browser/extensions/api/tabs/tabs_api.cc b/chrome/browser/extensions/api/tabs/tabs_api.cc
+index f44a6d2e31473..77e260976fba0 100644
+--- a/chrome/browser/extensions/api/tabs/tabs_api.cc
++++ b/chrome/browser/extensions/api/tabs/tabs_api.cc
+@@ -934,13 +934,13 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
+                                     ->GetProfileServiceForProfile(
+                                         window_profile)) {
+       if (urls_.empty()) {
+-        profile_service->NotifyNewWebPageRequested(
++        profile_service->NotifyNewTabRequested(
+             /*source=*/nullptr, GURL(chrome::kChromeUINewTabURL),
+             WindowOpenDisposition::NEW_WINDOW, user_gesture());
+       } else {
+         bool first = true;
+         for (const auto& url : urls_) {
+-          profile_service->NotifyNewWebPageRequested(
++          profile_service->NotifyNewTabRequested(
+               /*source=*/nullptr, url,
+               first ? WindowOpenDisposition::NEW_WINDOW
+                     : WindowOpenDisposition::NEW_FOREGROUND_TAB,
+@@ -1963,7 +1963,7 @@ ExtensionFunction::ResponseAction TabsCreateFunction::Run() {
+     if (auto* cbf_service = cbf::CbfService::GetForProcess()) {
+       if (auto* profile_service = cbf_service->browser_service()
+                                       ->GetProfileServiceForProfile(profile)) {
+-        profile_service->NotifyNewWebPageRequested(
++        profile_service->NotifyNewTabRequested(
+             opener, validated_url_, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+             user_gesture());
+         return RespondNow(Error(kCbfNoBrowserWindowForTabsCreate));
+@@ -2053,7 +2053,7 @@ ExtensionFunction::ResponseAction TabsCreateFunction::Run() {
+     if (auto* profile_service = cbf_service->browser_service()
+                                     ->GetProfileServiceForProfile(
+                                         profile_to_use)) {
+-      profile_service->NotifyNewWebPageRequested(
++      profile_service->NotifyNewTabRequested(
+           opener, validated_url_, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+           user_gesture());
+       return RespondNow(Error(kCbfNoBrowserWindowForTabsCreate));
+diff --git a/chrome/browser/extensions/extension_tab_util.cc b/chrome/browser/extensions/extension_tab_util.cc
+index d2cc95d402383..40cf5ace8cb3a 100644
+--- a/chrome/browser/extensions/extension_tab_util.cc
++++ b/chrome/browser/extensions/extension_tab_util.cc
+@@ -1271,7 +1271,7 @@ bool ExtensionTabUtil::OpenOptionsPageFromWebContents(
+           Profile::FromBrowserContext(web_contents->GetBrowserContext());
+       if (auto* profile_service =
+               browser_service->GetProfileServiceForProfile(profile)) {
+-        profile_service->NotifyNewWebPageRequested(
++        profile_service->NotifyNewTabRequested(
+             web_contents, *url,
+             open_in_tab ? WindowOpenDisposition::NEW_FOREGROUND_TAB
+                         : WindowOpenDisposition::CURRENT_TAB,
+@@ -1327,7 +1327,7 @@ bool ExtensionTabUtil::OpenOptionsPageFromAPI(
+       if (auto* profile_service =
+               cbf_service->browser_service()->GetProfileServiceForProfile(
+                   profile)) {
+-        profile_service->NotifyNewWebPageRequested(
++        profile_service->NotifyNewTabRequested(
+             /*source=*/nullptr, *url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+             /*user_gesture=*/true);
+         return true;
+diff --git a/chrome/browser/extensions/open_tab_helper.cc b/chrome/browser/extensions/open_tab_helper.cc
+index 701935227d891..17c5ecb6e545e 100644
+--- a/chrome/browser/extensions/open_tab_helper.cc
++++ b/chrome/browser/extensions/open_tab_helper.cc
+@@ -138,7 +138,7 @@ OpenTabHelper::FindOrCreateBrowser(const GURL& validated_url,
+       if (auto* profile_service = cbf_service->browser_service()
+                                       ->GetProfileServiceForProfile(
+                                           profile_to_use)) {
+-        profile_service->NotifyNewWebPageRequested(
++        profile_service->NotifyNewTabRequested(
+             /*source=*/nullptr, validated_url,
+             WindowOpenDisposition::NEW_FOREGROUND_TAB,
+             function.user_gesture());
 -- 
 2.50.1 (Apple Git-155)
 
