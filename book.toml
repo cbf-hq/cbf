@@ -2,7 +2,11 @@
 authors = ["CBF contributors"]
 language = "en"
 src = "docs/"
-title = "CBF Book"
+title = "CBF Documentation"
+
+[output.html]
+git-repository-url = "https://github.com/tasuren/cbf"
+edit-url-template = "https://github.com/tasuren/cbf/edit/main/{path}"
 
 [build]
 build-dir = "target/mdbook"
