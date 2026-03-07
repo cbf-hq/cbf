@@ -5,19 +5,7 @@ It provides a stable, application-agnostic API surface for controlling browsing 
 
 ## Documentation
 
-Long-form documentation is moving to the mdBook source under `docs/book/src`.
-The repository root stays a short landing page; the book is intended to become the canonical beginner-friendly guide once published.
-
-Current sources:
-
-- mdBook source: `docs/book/src` (reader-facing structure and chapter flow)
-- Setup Guide (Overview): `docs/setup-guide.md` (choose user or contributor path)
-- User Setup Guide: `docs/user-setup-guide.md` (use prebuilt CBF/cbf_bridge artifacts)
-- Developer Setup Guide: `docs/developer-setup-guide.md` (build Chromium/cbf_bridge locally)
-- Chromium Fork Guide: `docs/chromium-fork-guide.md` (fork-specific layout and patch policy)
-- Architecture: `docs/architecture.md` (design intent and layering model)
-- Implementation Guide: `docs/implementation-guide.md` (IPC/threading/FFI rules for contributors)
-- Licensing Guide: `docs/licensing.md` (BSD-3 and third-party notice policy)
+- Most of documentation is in `docs/` (concepts, usage guides, chromium integration).
 - Contributing Guide: `CONTRIBUTING.md` (contribution process and commit conventions)
 
 ## Platform Support
@@ -66,28 +54,35 @@ Design principles:
 - Command/response boundaries are explicit.
 - Process crash/stop events are observable (`BackendReady`, `BackendStopped`, render crash events).
 
-## Current MVP Surface (from existing implementation/docs)
+## Feature Overview
 
-Implemented or already modeled at API level:
+- **Page Lifecycle & Navigation**
+  - ✅ Open / navigate / close webpage
+  - ✅ Go back / forward / reload
+  - ✅ beforeunload events
+- **Surface & Input**
+  - ✅ Surface creation & bounds
+  - ✅ Mouse / keyboard events
+  - 🚧 IME events
+- **Content & Interaction**
+  - ✅ Get DOM HTML
+  - ✅ Drag and drop on webpage
+  - 🚧 Context menu events
+  - ❌ Drag and drop from other apps
+- **Downloads & Print**
+  - ✅ Download management
+  - 🚧 Print dialog UI
+  - ❌ Print preview UI
+- **Profile & Extensions**
+  - ✅ Open webpage with profile
+  - ✅ Get profile / extension list & info
+  - ✅ Extension inline UI
+- **Developer Tools & Built-in Pages**
+  - 🚧 DevTools UI (embedded)
+  - ✅ `chrome://version`
+  - 🚧 `chrome://history` / `chrome://settings`
 
-- Open/manage browsing contexts (WebContents-based model)
-- Mouse/keyboard input handling pipeline (in progress at boundary level)
-- Window open requests (`NewBrowsingContextRequested`)
-- JavaScript dialog requests (alert/confirm/prompt, beforeunload)
-- Title updates
-- Cursor updates
-- Favicon updates
-- Loading/navigation state skeleton
-- Backend start/stop events
-- Render process crash notifications
-
-Still to expand:
-
-- URL update event granularity
-- Loading start/finish granularity
-- Resubmission dialog support
-- Profile/data-dir override ergonomics
-- Permission/download/file-picker surface completion
+→ See [docs/feature-matrix.md](docs/feature-matrix.md) for full details and notes.
 
 ## Ownership and Lifecycle
 
