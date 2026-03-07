@@ -1,7 +1,7 @@
 From 93dcbbe6177e222c2d3af1c61f464a5139ab4f14 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 4 Mar 2026 12:31:51 +0900
-Subject: [PATCH 13/19] Add per-session token handshake for IPC authentication
+Subject: [PATCH 13/20] Add per-session token handshake for IPC authentication
 
 Introduce a session token that must be verified before any Mojo API
 call is accepted:

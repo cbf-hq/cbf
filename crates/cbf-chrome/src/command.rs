@@ -2,6 +2,7 @@ use cbf::command::BrowserCommand;
 
 use crate::data::{
     browsing_context_open::ChromeBrowsingContextOpenResponse,
+    download::ChromeDownloadId,
     drag::{ChromeDragDrop, ChromeDragUpdate},
     extension::ChromeAuxiliaryWindowResponse,
     ids::TabId,
@@ -120,6 +121,15 @@ pub enum ChromeCommand {
     },
     DismissContextMenu {
         menu_id: u64,
+    },
+    PauseDownload {
+        download_id: ChromeDownloadId,
+    },
+    ResumeDownload {
+        download_id: ChromeDownloadId,
+    },
+    CancelDownload {
+        download_id: ChromeDownloadId,
     },
     ListExtensions {
         profile_id: Option<String>,
@@ -301,6 +311,15 @@ impl From<BrowserCommand> for ChromeCommand {
                 event_flags,
             },
             BrowserCommand::DismissContextMenu { menu_id } => Self::DismissContextMenu { menu_id },
+            BrowserCommand::PauseDownload { download_id } => Self::PauseDownload {
+                download_id: download_id.into(),
+            },
+            BrowserCommand::ResumeDownload { download_id } => Self::ResumeDownload {
+                download_id: download_id.into(),
+            },
+            BrowserCommand::CancelDownload { download_id } => Self::CancelDownload {
+                download_id: download_id.into(),
+            },
             BrowserCommand::ListExtensions { profile_id } => Self::ListExtensions { profile_id },
             BrowserCommand::OpenDefaultAuxiliaryWindow {
                 browsing_context_id,
@@ -321,6 +340,17 @@ impl From<BrowserCommand> for ChromeCommand {
                         response: PromptUiResponse::PermissionPrompt { allow },
                     }
                 }
+                ChromeAuxiliaryWindowResponse::DownloadPrompt {
+                    allow,
+                    destination_path,
+                } => Self::RespondPromptUi {
+                    browsing_context_id: browsing_context_id.into(),
+                    request_id,
+                    response: PromptUiResponse::DownloadPrompt {
+                        allow,
+                        destination_path,
+                    },
+                },
                 ChromeAuxiliaryWindowResponse::ExtensionInstallPrompt { proceed } => {
                     Self::RespondPromptUi {
                         browsing_context_id: browsing_context_id.into(),

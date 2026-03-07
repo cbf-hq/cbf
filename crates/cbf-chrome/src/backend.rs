@@ -599,6 +599,15 @@ impl ChromiumBackend {
             ChromeCommand::DismissContextMenu { menu_id } => client
                 .dismiss_context_menu(*menu_id)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::PauseDownload { download_id } => client
+                .pause_download(*download_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::ResumeDownload { download_id } => client
+                .resume_download(*download_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::CancelDownload { download_id } => client
+                .cancel_download(*download_id)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::RequestCloseTab {
                 browsing_context_id,
             } => client

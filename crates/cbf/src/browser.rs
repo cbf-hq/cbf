@@ -9,6 +9,7 @@ use crate::{
     command::BrowserCommand,
     data::{
         browsing_context_open::BrowsingContextOpenResponse,
+        download::DownloadId,
         drag::{DragDrop, DragUpdate},
         extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
         ids::BrowsingContextId,
@@ -448,6 +449,21 @@ impl<B: Backend> BrowserHandle<B> {
     /// Dismiss an open context menu by menu id.
     pub fn dismiss_context_menu(&self, menu_id: u64) -> Result<(), Error> {
         self.send(BrowserCommand::DismissContextMenu { menu_id })
+    }
+
+    /// Pause an in-progress download.
+    pub fn pause_download(&self, download_id: DownloadId) -> Result<(), Error> {
+        self.send(BrowserCommand::PauseDownload { download_id })
+    }
+
+    /// Resume a paused or resumable download.
+    pub fn resume_download(&self, download_id: DownloadId) -> Result<(), Error> {
+        self.send(BrowserCommand::ResumeDownload { download_id })
+    }
+
+    /// Cancel an active download.
+    pub fn cancel_download(&self, download_id: DownloadId) -> Result<(), Error> {
+        self.send(BrowserCommand::CancelDownload { download_id })
     }
 
     /// Ask backend to open Chromium default UI for a pending auxiliary request.

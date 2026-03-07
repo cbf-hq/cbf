@@ -4,8 +4,16 @@ use cbf::data::extension::{AuxiliaryWindowResponse, ExtensionInfo};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChromeAuxiliaryWindowResponse {
-    ExtensionInstallPrompt { proceed: bool },
-    PermissionPrompt { allow: bool },
+    ExtensionInstallPrompt {
+        proceed: bool,
+    },
+    PermissionPrompt {
+        allow: bool,
+    },
+    DownloadPrompt {
+        allow: bool,
+        destination_path: Option<String>,
+    },
     Unknown,
 }
 
@@ -16,6 +24,13 @@ impl From<AuxiliaryWindowResponse> for ChromeAuxiliaryWindowResponse {
                 Self::ExtensionInstallPrompt { proceed }
             }
             AuxiliaryWindowResponse::PermissionPrompt { allow } => Self::PermissionPrompt { allow },
+            AuxiliaryWindowResponse::DownloadPrompt {
+                allow,
+                destination_path,
+            } => Self::DownloadPrompt {
+                allow,
+                destination_path,
+            },
             AuxiliaryWindowResponse::Unknown => Self::Unknown,
         }
     }

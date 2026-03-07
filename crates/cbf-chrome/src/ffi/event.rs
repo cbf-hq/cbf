@@ -2,6 +2,7 @@ use cursor_icon::CursorIcon;
 
 use crate::data::{
     context_menu::ChromeContextMenu,
+    download::{ChromeDownloadCompletion, ChromeDownloadProgress, ChromeDownloadSnapshot},
     drag::ChromeDragStartRequest,
     extension::ChromeExtensionInfo,
     ids::TabId,
@@ -214,5 +215,20 @@ pub enum IpcEvent {
         prompt_ui_id: PromptUiId,
         kind: PromptUiKind,
         reason: PromptUiCloseReason,
+    },
+    /// Download lifecycle became visible to the host.
+    DownloadCreated {
+        profile_id: String,
+        download: ChromeDownloadSnapshot,
+    },
+    /// Download state changed.
+    DownloadUpdated {
+        profile_id: String,
+        download: ChromeDownloadProgress,
+    },
+    /// Download reached a terminal state.
+    DownloadCompleted {
+        profile_id: String,
+        download: ChromeDownloadCompletion,
     },
 }

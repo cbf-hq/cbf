@@ -9,6 +9,7 @@ use crate::data::{
     browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
     context_menu::ContextMenu,
     dialog::{BeforeUnloadReason, DialogType},
+    download::{DownloadId, DownloadOutcome, DownloadState},
     drag::DragStartRequest,
     extension::{
         AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
@@ -93,6 +94,42 @@ pub enum BrowserEvent {
     ExtensionsListed {
         profile_id: String,
         extensions: Vec<ExtensionInfo>,
+    },
+
+    /// A download became visible to the host lifecycle.
+    DownloadCreated {
+        profile_id: String,
+        download_id: DownloadId,
+        source_browsing_context_id: Option<BrowsingContextId>,
+        file_name: String,
+        total_bytes: Option<u64>,
+        target_path: Option<String>,
+    },
+
+    /// Download state was synchronized from the backend.
+    DownloadUpdated {
+        profile_id: String,
+        download_id: DownloadId,
+        source_browsing_context_id: Option<BrowsingContextId>,
+        state: DownloadState,
+        file_name: String,
+        received_bytes: u64,
+        total_bytes: Option<u64>,
+        target_path: Option<String>,
+        can_resume: bool,
+        is_paused: bool,
+    },
+
+    /// Download reached a terminal state.
+    DownloadCompleted {
+        profile_id: String,
+        download_id: DownloadId,
+        source_browsing_context_id: Option<BrowsingContextId>,
+        outcome: DownloadOutcome,
+        file_name: String,
+        received_bytes: u64,
+        total_bytes: Option<u64>,
+        target_path: Option<String>,
     },
 
     /// Shutdown is blocked by dirty pages that require confirmation.

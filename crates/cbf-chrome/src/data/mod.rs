@@ -2,6 +2,7 @@
 
 pub mod browsing_context_open;
 pub mod context_menu;
+pub mod download;
 pub mod drag;
 pub mod extension;
 pub mod ids;

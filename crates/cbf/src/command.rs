@@ -5,6 +5,7 @@
 
 use crate::data::{
     browsing_context_open::BrowsingContextOpenResponse,
+    download::DownloadId,
     drag::{DragDrop, DragUpdate},
     extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
     ids::BrowsingContextId,
@@ -160,6 +161,15 @@ pub enum BrowserCommand {
     /// Dismiss an open context menu.
     DismissContextMenu { menu_id: u64 },
 
+    /// Pause an in-progress download.
+    PauseDownload { download_id: DownloadId },
+
+    /// Resume a paused or resumable download.
+    ResumeDownload { download_id: DownloadId },
+
+    /// Cancel an active download.
+    CancelDownload { download_id: DownloadId },
+
     /// Ask backend to open Chromium's default UI for a pending auxiliary request.
     OpenDefaultAuxiliaryWindow {
         browsing_context_id: BrowsingContextId,
@@ -223,6 +233,9 @@ pub enum BrowserOperation {
     FinishComposingText,
     ExecuteContextMenuCommand,
     DismissContextMenu,
+    PauseDownload,
+    ResumeDownload,
+    CancelDownload,
     OpenDefaultAuxiliaryWindow,
     RespondAuxiliaryWindow,
     CloseAuxiliaryWindow,
@@ -261,6 +274,9 @@ impl BrowserOperation {
             BrowserCommand::FinishComposingText { .. } => Self::FinishComposingText,
             BrowserCommand::ExecuteContextMenuCommand { .. } => Self::ExecuteContextMenuCommand,
             BrowserCommand::DismissContextMenu { .. } => Self::DismissContextMenu,
+            BrowserCommand::PauseDownload { .. } => Self::PauseDownload,
+            BrowserCommand::ResumeDownload { .. } => Self::ResumeDownload,
+            BrowserCommand::CancelDownload { .. } => Self::CancelDownload,
             BrowserCommand::OpenDefaultAuxiliaryWindow { .. } => Self::OpenDefaultAuxiliaryWindow,
             BrowserCommand::RespondAuxiliaryWindow { .. } => Self::RespondAuxiliaryWindow,
             BrowserCommand::CloseAuxiliaryWindow { .. } => Self::CloseAuxiliaryWindow,
@@ -301,6 +317,9 @@ impl std::fmt::Display for BrowserOperation {
             Self::FinishComposingText => "finish_composing_text",
             Self::ExecuteContextMenuCommand => "execute_context_menu_command",
             Self::DismissContextMenu => "dismiss_context_menu",
+            Self::PauseDownload => "pause_download",
+            Self::ResumeDownload => "resume_download",
+            Self::CancelDownload => "cancel_download",
             Self::OpenDefaultAuxiliaryWindow => "open_default_auxiliary_window",
             Self::RespondAuxiliaryWindow => "respond_auxiliary_window",
             Self::CloseAuxiliaryWindow => "close_auxiliary_window",

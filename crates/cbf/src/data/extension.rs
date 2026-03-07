@@ -1,4 +1,6 @@
-//! Data models for browser extension metadata and install prompt results.
+//! Data models for browser extension metadata and auxiliary prompt results.
+
+use crate::data::download::{DownloadId, DownloadPromptResult};
 
 /// Extension metadata exposed by backends.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +66,12 @@ pub enum AuxiliaryWindowKind {
     PermissionPrompt {
         permission: PermissionPromptType,
     },
+    DownloadPrompt {
+        download_id: DownloadId,
+        file_name: String,
+        total_bytes: Option<u64>,
+        suggested_path: Option<String>,
+    },
     PrintPreviewDialog,
     Unknown,
 }
@@ -71,8 +79,16 @@ pub enum AuxiliaryWindowKind {
 /// Host response for an auxiliary window request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuxiliaryWindowResponse {
-    ExtensionInstallPrompt { proceed: bool },
-    PermissionPrompt { allow: bool },
+    ExtensionInstallPrompt {
+        proceed: bool,
+    },
+    PermissionPrompt {
+        allow: bool,
+    },
+    DownloadPrompt {
+        allow: bool,
+        destination_path: Option<String>,
+    },
     Unknown,
 }
 
@@ -87,6 +103,11 @@ pub enum AuxiliaryWindowResolution {
     PermissionPrompt {
         permission: PermissionPromptType,
         result: PermissionPromptResult,
+    },
+    DownloadPrompt {
+        download_id: DownloadId,
+        result: DownloadPromptResult,
+        destination_path: Option<String>,
     },
     Unknown,
 }

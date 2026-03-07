@@ -1,0 +1,2883 @@
+From bc776fd4864331647768379efe3db4ea4e74abb8 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Sat, 7 Mar 2026 10:51:45 +0900
+Subject: [PATCH 20/20] Add CBF download prompt and lifecycle events
+
+---
+ chrome/browser/cbf/BUILD.gn                   |   2 +
+ chrome/browser/cbf/bridge/cbf_bridge.h        |  12 +-
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |   6 +-
+ .../cbf/bridge/cbf_bridge_client_impl.cc      | 103 ++++
+ .../cbf/bridge/cbf_bridge_client_impl.h       |  18 +
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  55 ++
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  43 +-
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc | 131 ++++-
+ .../cbf/cbf_download_manager_delegate.cc      |  93 ++++
+ .../cbf/cbf_download_manager_delegate.h       |  67 +++
+ chrome/browser/cbf/cbf_profile_service.cc     | 527 +++++++++++++++++-
+ chrome/browser/cbf/cbf_profile_service.h      | 103 +++-
+ .../cbf/cbf_profile_service_browsertest.cc    | 370 ++++++++++++
+ .../browser/cbf/cbf_web_contents_delegate.cc  |  22 +
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  60 ++
+ .../profile/cbf_profile_input_controller.cc   |  15 +-
+ .../cbf/test/cbf_test_profile_observer.cc     | 237 +++++++-
+ .../cbf/test/cbf_test_profile_observer.h      | 131 +++++
+ .../download/download_core_service_impl.cc    |  29 +
+ .../download/download_core_service_impl.h     |   2 +
+ .../common/in_progress_download_manager.cc    |   6 +-
+ .../internal/common/resource_downloader.cc    |  15 +-
+ .../internal/common/resource_downloader.h     |   7 +-
+ .../browser/download/download_manager_impl.cc |   3 +-
+ 24 files changed, 2020 insertions(+), 37 deletions(-)
+ create mode 100644 chrome/browser/cbf/cbf_download_manager_delegate.cc
+ create mode 100644 chrome/browser/cbf/cbf_download_manager_delegate.h
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index ea79daf246587..8efc84eaf3689 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -7,6 +7,8 @@ import("//mojo/public/tools/bindings/mojom.gni")
+ 
+ source_set("cbf") {
+   sources = [
++    "cbf_download_manager_delegate.cc",
++    "cbf_download_manager_delegate.h",
+     "cbf_ca_context_id_observer.cc",
+     "cbf_ca_context_id_observer.h",
+     "cbf_embedded_browser_window.cc",
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index ce8a355fc9dd1..737648f422282 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -149,7 +149,17 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_respond_prompt_ui(
+     uint64_t tab_id,
+     uint64_t request_id,
+     uint8_t prompt_ui_kind,
+-    bool proceed);
++    bool proceed,
++    const char* destination_path);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_pause_download(
++    CbfBridgeClientHandle* client,
++    uint64_t download_id);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_resume_download(
++    CbfBridgeClientHandle* client,
++    uint64_t download_id);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_cancel_download(
++    CbfBridgeClientHandle* client,
++    uint64_t download_id);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_close_prompt_ui(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index fb96a0cd06d00..8dc2193772e88 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -63,7 +63,11 @@ class CbfBridgeClient {
+   bool RespondPromptUi(uint64_t tab_id,
+                        uint64_t request_id,
+                        uint8_t prompt_ui_kind,
+-                       bool allow);
++                       bool allow,
++                       const std::string& destination_path);
++  bool PauseDownload(uint64_t download_id);
++  bool ResumeDownload(uint64_t download_id);
++  bool CancelDownload(uint64_t download_id);
+   bool CloseAuxiliaryWindow(uint64_t tab_id, uint64_t window_id);
+   bool RespondTabOpen(uint64_t request_id,
+                                   uint8_t response_kind,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index be53536a7c1d5..96c073d500622 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -397,6 +397,15 @@ void CbfBridgeClientImpl::Observer::OnPromptUiRequested(
+   event.prompt_ui_kind = static_cast<uint8_t>(request->kind);
+   event.prompt_ui_permission = static_cast<uint8_t>(request->permission);
+   event.prompt_ui_permission_key = request->permission_key;
++  event.download_id = request->download_id;
++  event.download_file_name = request->file_name;
++  if (request->total_bytes.has_value()) {
++    event.download_has_total_bytes = true;
++    event.download_total_bytes = request->total_bytes.value();
++  }
++  if (request->suggested_path.has_value()) {
++    event.download_suggested_path = request->suggested_path.value();
++  }
+   std::lock_guard<std::mutex> lock(impl_->events_mutex);
+   impl_->events.push(std::move(event));
+ }
+@@ -416,10 +425,104 @@ void CbfBridgeClientImpl::Observer::OnPromptUiResolved(
+   event.prompt_ui_permission = static_cast<uint8_t>(resolution->permission);
+   event.prompt_ui_result = static_cast<uint8_t>(resolution->result);
+   event.prompt_ui_permission_key = resolution->permission_key;
++  event.download_id = resolution->download_id;
++  if (resolution->destination_path.has_value()) {
++    event.download_destination_path = resolution->destination_path.value();
++  }
+   std::lock_guard<std::mutex> lock(impl_->events_mutex);
+   impl_->events.push(std::move(event));
+ }
+ 
++void CbfBridgeClientImpl::Observer::OnDownloadCreated(
++    cbf::mojom::CbfDownloadCreatedPtr event_data) {
++  if (!event_data) {
++    return;
++  }
++  CbfBridgeEventData event;
++  event.kind = kEventDownloadCreated;
++  event.profile_id = profile_id_;
++  event.download_id = event_data->download_id;
++  if (event_data->source_tab_id.has_value()) {
++    event.download_has_source_tab_id = true;
++    event.download_source_tab_id = event_data->source_tab_id.value();
++  }
++  event.download_file_name = event_data->file_name;
++  if (event_data->total_bytes.has_value()) {
++    event.download_has_total_bytes = true;
++    event.download_total_bytes = event_data->total_bytes.value();
++  }
++  if (event_data->target_path.has_value()) {
++    event.download_target_path = event_data->target_path.value();
++  }
++  {
++    std::lock_guard<std::mutex> lock(impl_->events_mutex);
++    impl_->download_profiles[event.download_id] = profile_id_;
++    impl_->events.push(std::move(event));
++  }
++}
++
++void CbfBridgeClientImpl::Observer::OnDownloadUpdated(
++    cbf::mojom::CbfDownloadUpdatedPtr event_data) {
++  if (!event_data) {
++    return;
++  }
++  CbfBridgeEventData event;
++  event.kind = kEventDownloadUpdated;
++  event.profile_id = profile_id_;
++  event.download_id = event_data->download_id;
++  if (event_data->source_tab_id.has_value()) {
++    event.download_has_source_tab_id = true;
++    event.download_source_tab_id = event_data->source_tab_id.value();
++  }
++  event.download_file_name = event_data->file_name;
++  event.download_received_bytes = event_data->received_bytes;
++  if (event_data->total_bytes.has_value()) {
++    event.download_has_total_bytes = true;
++    event.download_total_bytes = event_data->total_bytes.value();
++  }
++  if (event_data->target_path.has_value()) {
++    event.download_target_path = event_data->target_path.value();
++  }
++  event.download_can_resume = event_data->can_resume;
++  event.download_is_paused = event_data->is_paused;
++  event.download_state = static_cast<uint8_t>(event_data->state);
++  {
++    std::lock_guard<std::mutex> lock(impl_->events_mutex);
++    impl_->download_profiles[event.download_id] = profile_id_;
++    impl_->events.push(std::move(event));
++  }
++}
++
++void CbfBridgeClientImpl::Observer::OnDownloadCompleted(
++    cbf::mojom::CbfDownloadCompletedPtr event_data) {
++  if (!event_data) {
++    return;
++  }
++  CbfBridgeEventData event;
++  event.kind = kEventDownloadCompleted;
++  event.profile_id = profile_id_;
++  event.download_id = event_data->download_id;
++  if (event_data->source_tab_id.has_value()) {
++    event.download_has_source_tab_id = true;
++    event.download_source_tab_id = event_data->source_tab_id.value();
++  }
++  event.download_file_name = event_data->file_name;
++  event.download_received_bytes = event_data->received_bytes;
++  if (event_data->total_bytes.has_value()) {
++    event.download_has_total_bytes = true;
++    event.download_total_bytes = event_data->total_bytes.value();
++  }
++  if (event_data->target_path.has_value()) {
++    event.download_target_path = event_data->target_path.value();
++  }
++  event.download_outcome = static_cast<uint8_t>(event_data->outcome);
++  {
++    std::lock_guard<std::mutex> lock(impl_->events_mutex);
++    impl_->download_profiles.erase(event.download_id);
++    impl_->events.push(std::move(event));
++  }
++}
++
+ void CbfBridgeClientImpl::Observer::OnExtensionRuntimeWarning(
+     uint64_t tab_id,
+     const std::string& detail) {
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+index 8ce5c71db617c..1627a17764033 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+@@ -63,6 +63,20 @@ struct CbfBridgeEventData {
+   uint8_t prompt_ui_permission = kCbfPromptUiPermissionTypeUnknown;
+   uint8_t prompt_ui_result = kCbfPromptUiResolutionResultUnknown;
+   std::string prompt_ui_permission_key;
++  uint64_t download_id = 0;
++  bool download_has_source_tab_id = false;
++  uint64_t download_source_tab_id = 0;
++  std::string download_file_name;
++  std::string download_target_path;
++  std::string download_suggested_path;
++  std::string download_destination_path;
++  uint64_t download_total_bytes = 0;
++  bool download_has_total_bytes = false;
++  uint64_t download_received_bytes = 0;
++  bool download_can_resume = false;
++  bool download_is_paused = false;
++  uint8_t download_state = kCbfDownloadStateUnknown;
++  uint8_t download_outcome = kCbfDownloadOutcomeUnknown;
+   bool has_source_tab_id = false;
+   uint64_t source_tab_id = 0;
+   uint8_t tab_open_hint = kCbfTabOpenHintUnknown;
+@@ -170,6 +184,9 @@ struct CbfBridgeClientImpl {
+     void OnPromptUiResolved(
+         uint64_t tab_id,
+         cbf::mojom::CbfPromptUiResolutionPtr resolution) override;
++    void OnDownloadCreated(cbf::mojom::CbfDownloadCreatedPtr event) override;
++    void OnDownloadUpdated(cbf::mojom::CbfDownloadUpdatedPtr event) override;
++    void OnDownloadCompleted(cbf::mojom::CbfDownloadCompletedPtr event) override;
+     void OnExtensionRuntimeWarning(uint64_t tab_id,
+                                    const std::string& detail) override;
+     void OnAuxiliaryWindowOpened(uint64_t tab_id,
+@@ -206,6 +223,7 @@ struct CbfBridgeClientImpl {
+   std::map<uint64_t, std::string> web_page_profiles;
+   std::map<uint64_t, std::string> context_menu_profiles;
+   std::map<uint64_t, std::string> tab_open_request_profiles;
++  std::map<uint64_t, std::string> download_profiles;
+ };
+ 
+ }  // namespace cbf_bridge::internal
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index 3ce7cb93fbe00..95cc5d79f6039 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -267,6 +267,20 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+   out_event->prompt_ui_permission = kCbfPromptUiPermissionTypeUnknown;
+   out_event->prompt_ui_result = kCbfPromptUiResolutionResultUnknown;
+   out_event->prompt_ui_permission_key = nullptr;
++  out_event->download_id = 0;
++  out_event->download_has_source_tab_id = false;
++  out_event->download_source_tab_id = 0;
++  out_event->download_file_name = nullptr;
++  out_event->download_target_path = nullptr;
++  out_event->download_suggested_path = nullptr;
++  out_event->download_destination_path = nullptr;
++  out_event->download_total_bytes = 0;
++  out_event->download_has_total_bytes = false;
++  out_event->download_received_bytes = 0;
++  out_event->download_can_resume = false;
++  out_event->download_is_paused = false;
++  out_event->download_state = kCbfDownloadStateUnknown;
++  out_event->download_outcome = kCbfDownloadOutcomeUnknown;
+   out_event->tab_open_hint = kCbfTabOpenHintUnknown;
+   out_event->tab_open_user_gesture = false;
+   out_event->tab_open_has_source = false;
+@@ -426,6 +440,15 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     out_event->prompt_ui_permission_key = event.prompt_ui_permission_key.empty()
+                                              ? nullptr
+                                              : CopyCString(event.prompt_ui_permission_key);
++    out_event->download_id = event.download_id;
++    out_event->download_file_name = event.download_file_name.empty()
++                                        ? nullptr
++                                        : CopyCString(event.download_file_name);
++    out_event->download_suggested_path = event.download_suggested_path.empty()
++                                             ? nullptr
++                                             : CopyCString(event.download_suggested_path);
++    out_event->download_has_total_bytes = event.download_has_total_bytes;
++    out_event->download_total_bytes = event.download_total_bytes;
+   }
+   if (event.kind == kEventPromptUiResolved) {
+     out_event->prompt_ui_kind = event.prompt_ui_kind;
+@@ -434,6 +457,30 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     out_event->prompt_ui_permission_key = event.prompt_ui_permission_key.empty()
+                                              ? nullptr
+                                              : CopyCString(event.prompt_ui_permission_key);
++    out_event->download_id = event.download_id;
++    out_event->download_destination_path =
++        event.download_destination_path.empty()
++            ? nullptr
++            : CopyCString(event.download_destination_path);
++  }
++  if (event.kind == kEventDownloadCreated || event.kind == kEventDownloadUpdated ||
++      event.kind == kEventDownloadCompleted) {
++    out_event->download_id = event.download_id;
++    out_event->download_has_source_tab_id = event.download_has_source_tab_id;
++    out_event->download_source_tab_id = event.download_source_tab_id;
++    out_event->download_file_name = event.download_file_name.empty()
++                                        ? nullptr
++                                        : CopyCString(event.download_file_name);
++    out_event->download_target_path = event.download_target_path.empty()
++                                          ? nullptr
++                                          : CopyCString(event.download_target_path);
++    out_event->download_has_total_bytes = event.download_has_total_bytes;
++    out_event->download_total_bytes = event.download_total_bytes;
++    out_event->download_received_bytes = event.download_received_bytes;
++    out_event->download_can_resume = event.download_can_resume;
++    out_event->download_is_paused = event.download_is_paused;
++    out_event->download_state = event.download_state;
++    out_event->download_outcome = event.download_outcome;
+   }
+   if (event.kind == kEventTabOpenRequested) {
+     out_event->target_url =
+@@ -564,6 +611,14 @@ extern "C" void cbf_bridge_event_free(CbfBridgeEvent* event) {
+   event->auxiliary_window_title = nullptr;
+   delete[] event->prompt_ui_permission_key;
+   event->prompt_ui_permission_key = nullptr;
++  delete[] event->download_file_name;
++  event->download_file_name = nullptr;
++  delete[] event->download_target_path;
++  event->download_target_path = nullptr;
++  delete[] event->download_suggested_path;
++  event->download_suggested_path = nullptr;
++  delete[] event->download_destination_path;
++  event->download_destination_path = nullptr;
+   FreeStringList(event->permission_names);
+   event->permission_names.items = nullptr;
+   event->permission_names.len = 0;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index f42511c2c6003..e00d3ceec7d7a 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -39,6 +39,9 @@ enum CbfEventKind {
+   kEventTabOpenResolved = 26,
+   kEventPromptUiRequested = 27,
+   kEventPromptUiResolved = 28,
++  kEventDownloadCreated = 29,
++  kEventDownloadUpdated = 30,
++  kEventDownloadCompleted = 31,
+   kEventTabCreated = kEventWebPageCreated,
+   kEventNewTabRequested = kEventNewWebPageRequested,
+   kEventTabClosed = kEventWebPageClosed,
+@@ -69,6 +72,7 @@ enum CbfAuxiliaryWindowCloseReason {
+ enum CbfPromptUiKind {
+   kCbfPromptUiKindUnknown = 0,
+   kCbfPromptUiKindPermissionPrompt = 1,
++  kCbfPromptUiKindDownloadPrompt = 2,
+ };
+ 
+ enum CbfPromptUiPermissionType {
+@@ -86,6 +90,22 @@ enum CbfPromptUiResolutionResult {
+   kCbfPromptUiResolutionResultAborted = 3,
+ };
+ 
++enum CbfDownloadState {
++  kCbfDownloadStateUnknown = 0,
++  kCbfDownloadStateInProgress = 1,
++  kCbfDownloadStatePaused = 2,
++  kCbfDownloadStateCompleted = 3,
++  kCbfDownloadStateCancelled = 4,
++  kCbfDownloadStateInterrupted = 5,
++};
++
++enum CbfDownloadOutcome {
++  kCbfDownloadOutcomeUnknown = 0,
++  kCbfDownloadOutcomeSucceeded = 1,
++  kCbfDownloadOutcomeCancelled = 2,
++  kCbfDownloadOutcomeInterrupted = 3,
++};
++
+ enum CbfTabOpenHint {
+   kCbfTabOpenHintUnknown = 0,
+   kCbfTabOpenHintCurrentContext = 1,
+@@ -534,6 +554,20 @@ typedef struct CbfBridgeEvent {
+   uint8_t prompt_ui_permission;
+   uint8_t prompt_ui_result;
+   char* prompt_ui_permission_key;
++  uint64_t download_id;
++  bool download_has_source_tab_id;
++  uint64_t download_source_tab_id;
++  char* download_file_name;
++  char* download_target_path;
++  char* download_suggested_path;
++  char* download_destination_path;
++  uint64_t download_total_bytes;
++  bool download_has_total_bytes;
++  uint64_t download_received_bytes;
++  bool download_can_resume;
++  bool download_is_paused;
++  uint8_t download_state;
++  uint8_t download_outcome;
+   uint8_t tab_open_hint;
+   bool tab_open_user_gesture;
+   bool tab_open_has_source;
+@@ -651,7 +685,14 @@ bool cbf_bridge_client_respond_prompt_ui(
+     uint64_t tab_id,
+     uint64_t request_id,
+     uint8_t prompt_ui_kind,
+-    bool proceed);
++    bool proceed,
++    const char* destination_path);
++bool cbf_bridge_client_pause_download(CbfBridgeClientHandle* client,
++                                      uint64_t download_id);
++bool cbf_bridge_client_resume_download(CbfBridgeClientHandle* client,
++                                       uint64_t download_id);
++bool cbf_bridge_client_cancel_download(CbfBridgeClientHandle* client,
++                                       uint64_t download_id);
+ bool cbf_bridge_client_close_prompt_ui(CbfBridgeClientHandle* client,
+                                        uint64_t tab_id,
+                                        uint64_t prompt_ui_id);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index 9183dfdeccc63..fb6e2b838ff9a 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -491,7 +491,8 @@ bool CbfBridgeClient::RespondAuxiliaryWindow(uint64_t tab_id,
+ bool CbfBridgeClient::RespondPromptUi(uint64_t tab_id,
+                                       uint64_t request_id,
+                                       uint8_t prompt_ui_kind,
+-                                      bool allow) {
++                                      bool allow,
++                                      const std::string& destination_path) {
+   if (!impl_) {
+     return false;
+   }
+@@ -504,7 +505,8 @@ bool CbfBridgeClient::RespondPromptUi(uint64_t tab_id,
+       FROM_HERE,
+       base::BindOnce(
+           [](CbfBridgeClientImpl* impl, uint64_t tab_id, uint64_t request_id,
+-             uint8_t prompt_ui_kind, bool allow) {
++             uint8_t prompt_ui_kind, bool allow,
++             std::string destination_path) {
+             auto it = impl->web_page_profiles.find(tab_id);
+             if (it == impl->web_page_profiles.end()) {
+               return;
+@@ -518,16 +520,103 @@ bool CbfBridgeClient::RespondPromptUi(uint64_t tab_id,
+               case kCbfPromptUiKindPermissionPrompt:
+                 response->kind = cbf::mojom::CbfPromptUiKind::kPermissionPrompt;
+                 break;
++              case kCbfPromptUiKindDownloadPrompt:
++                response->kind = cbf::mojom::CbfPromptUiKind::kDownloadPrompt;
++                break;
+               case kCbfPromptUiKindUnknown:
+               default:
+                 response->kind = cbf::mojom::CbfPromptUiKind::kUnknown;
+                 break;
+             }
+             response->allow = allow;
++            if (!destination_path.empty()) {
++              response->destination_path = destination_path;
++            }
+             remote_it->second.remote->RespondPromptUi(
+                 tab_id, request_id, std::move(response));
+           },
+-          impl, tab_id, request_id, prompt_ui_kind, allow));
++          impl, tab_id, request_id, prompt_ui_kind, allow, destination_path));
++  return true;
++}
++
++bool CbfBridgeClient::PauseDownload(uint64_t download_id) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t download_id) {
++            auto it = impl->download_profiles.find(download_id);
++            if (it == impl->download_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->PauseDownload(download_id);
++          },
++          impl, download_id));
++  return true;
++}
++
++bool CbfBridgeClient::ResumeDownload(uint64_t download_id) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t download_id) {
++            auto it = impl->download_profiles.find(download_id);
++            if (it == impl->download_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->ResumeDownload(download_id);
++          },
++          impl, download_id));
++  return true;
++}
++
++bool CbfBridgeClient::CancelDownload(uint64_t download_id) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t download_id) {
++            auto it = impl->download_profiles.find(download_id);
++            if (it == impl->download_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->CancelDownload(download_id);
++          },
++          impl, download_id));
+   return true;
+ }
+ 
+@@ -803,12 +892,44 @@ extern "C" bool cbf_bridge_client_respond_prompt_ui(
+     uint64_t tab_id,
+     uint64_t request_id,
+     uint8_t prompt_ui_kind,
+-    bool proceed) {
++    bool proceed,
++    const char* destination_path) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->RespondPromptUi(tab_id, request_id, prompt_ui_kind, proceed,
++                        destination_path ? destination_path : "");
++}
++
++extern "C" bool cbf_bridge_client_pause_download(
++    CbfBridgeClientHandle* client,
++    uint64_t download_id) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->PauseDownload(download_id);
++}
++
++extern "C" bool cbf_bridge_client_resume_download(
++    CbfBridgeClientHandle* client,
++    uint64_t download_id) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->ResumeDownload(download_id);
++}
++
++extern "C" bool cbf_bridge_client_cancel_download(
++    CbfBridgeClientHandle* client,
++    uint64_t download_id) {
+   if (!client) {
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->RespondPromptUi(tab_id, request_id, prompt_ui_kind, proceed);
++      ->CancelDownload(download_id);
+ }
+ 
+ extern "C" bool cbf_bridge_client_close_prompt_ui(
+diff --git a/chrome/browser/cbf/cbf_download_manager_delegate.cc b/chrome/browser/cbf/cbf_download_manager_delegate.cc
+new file mode 100644
+index 0000000000000..4c1bbb559ea5a
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_download_manager_delegate.cc
+@@ -0,0 +1,93 @@
++#include "chrome/browser/cbf/cbf_download_manager_delegate.h"
++
++#include <utility>
++
++#include "chrome/browser/cbf/cbf_profile_service.h"
++#include "components/download/public/common/download_target_info.h"
++
++namespace cbf {
++
++CbfDownloadManagerDelegate::CbfDownloadManagerDelegate(
++    Profile* profile,
++    base::WeakPtr<CbfProfileService> profile_service)
++    : ChromeDownloadManagerDelegate(profile),
++      profile_service_(std::move(profile_service)) {
++}
++
++CbfDownloadManagerDelegate::~CbfDownloadManagerDelegate() = default;
++
++void CbfDownloadManagerDelegate::OnDownloadCreated(
++    content::DownloadManager* manager,
++    download::DownloadItem* item) {
++}
++
++base::WeakPtr<CbfDownloadManagerDelegate> CbfDownloadManagerDelegate::GetWeakPtr() {
++  return weak_factory_.GetWeakPtr();
++}
++
++void CbfDownloadManagerDelegate::CheckDownloadAllowed(
++    const content::WebContents::Getter& web_contents_getter,
++    const GURL& url,
++    const std::string& request_method,
++    std::optional<url::Origin> request_initiator,
++    bool from_download_cross_origin_redirect,
++    bool content_initiated,
++    const std::string& mime_type,
++    std::optional<ui::PageTransition> page_transition,
++    content::CheckDownloadAllowedCallback check_download_allowed_cb) {
++  auto wrapped_cb = base::BindOnce(
++      [](content::CheckDownloadAllowedCallback cb, bool allow) {
++        std::move(cb).Run(allow);
++      },
++      std::move(check_download_allowed_cb));
++  ChromeDownloadManagerDelegate::CheckDownloadAllowed(
++      web_contents_getter, url, request_method, std::move(request_initiator),
++      from_download_cross_origin_redirect, content_initiated, mime_type,
++      page_transition, std::move(wrapped_cb));
++}
++
++bool CbfDownloadManagerDelegate::DetermineDownloadTarget(
++    download::DownloadItem* download,
++    download::DownloadTargetCallback* callback) {
++  return ChromeDownloadManagerDelegate::DetermineDownloadTarget(download,
++                                                                callback);
++}
++
++void CbfDownloadManagerDelegate::RequestConfirmation(
++    download::DownloadItem* download,
++    const base::FilePath& suggested_path,
++    DownloadConfirmationReason reason,
++    DownloadTargetDeterminerDelegate::ConfirmationCallback callback) {
++  if (!profile_service_ ||
++      !profile_service_->RequestDownloadPrompt(download, suggested_path, reason,
++                                              std::move(callback),
++                                              GetWeakPtr())) {
++    ChromeDownloadManagerDelegate::RequestConfirmation(
++        download, suggested_path, reason, std::move(callback));
++  }
++}
++
++void CbfDownloadManagerDelegate::GetNextId(
++    content::DownloadIdCallback callback) {
++  ChromeDownloadManagerDelegate::GetNextId(std::move(callback));
++}
++
++bool CbfDownloadManagerDelegate::OpenNativeDownloadPrompt(
++    const std::string& download_guid,
++    const base::FilePath& suggested_path,
++    DownloadConfirmationReason reason,
++    DownloadTargetDeterminerDelegate::ConfirmationCallback callback) {
++  content::DownloadManager* manager = download_manager_.get();
++  if (!manager) {
++    return false;
++  }
++  download::DownloadItem* download = manager->GetDownloadByGuid(download_guid);
++  if (!download) {
++    return false;
++  }
++  ChromeDownloadManagerDelegate::RequestConfirmation(
++      download, suggested_path, reason, std::move(callback));
++  return true;
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_download_manager_delegate.h b/chrome/browser/cbf/cbf_download_manager_delegate.h
+new file mode 100644
+index 0000000000000..7de5406394510
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_download_manager_delegate.h
+@@ -0,0 +1,67 @@
++#ifndef CHROME_BROWSER_CBF_CBF_DOWNLOAD_MANAGER_DELEGATE_H_
++#define CHROME_BROWSER_CBF_CBF_DOWNLOAD_MANAGER_DELEGATE_H_
++
++#include <string>
++
++#include "base/files/file_path.h"
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/download/chrome_download_manager_delegate.h"
++
++class Profile;
++
++namespace cbf {
++
++class CbfProfileService;
++
++class CbfDownloadManagerDelegate : public ChromeDownloadManagerDelegate {
++ public:
++  CbfDownloadManagerDelegate(Profile* profile,
++                             base::WeakPtr<CbfProfileService> profile_service);
++  CbfDownloadManagerDelegate(const CbfDownloadManagerDelegate&) = delete;
++  CbfDownloadManagerDelegate& operator=(const CbfDownloadManagerDelegate&) =
++      delete;
++  ~CbfDownloadManagerDelegate() override;
++
++  base::WeakPtr<CbfDownloadManagerDelegate> GetWeakPtr();
++
++  // content::DownloadManager::Observer
++  void OnDownloadCreated(content::DownloadManager* manager,
++                         download::DownloadItem* item) override;
++
++  void CheckDownloadAllowed(
++      const content::WebContents::Getter& web_contents_getter,
++      const GURL& url,
++      const std::string& request_method,
++      std::optional<url::Origin> request_initiator,
++      bool from_download_cross_origin_redirect,
++      bool content_initiated,
++      const std::string& mime_type,
++      std::optional<ui::PageTransition> page_transition,
++      content::CheckDownloadAllowedCallback check_download_allowed_cb) override;
++
++  void GetNextId(content::DownloadIdCallback callback) override;
++
++  bool DetermineDownloadTarget(
++      download::DownloadItem* download,
++      download::DownloadTargetCallback* callback) override;
++
++  void RequestConfirmation(
++      download::DownloadItem* download,
++      const base::FilePath& suggested_path,
++      DownloadConfirmationReason reason,
++      DownloadTargetDeterminerDelegate::ConfirmationCallback callback) override;
++
++  bool OpenNativeDownloadPrompt(
++      const std::string& download_guid,
++      const base::FilePath& suggested_path,
++      DownloadConfirmationReason reason,
++      DownloadTargetDeterminerDelegate::ConfirmationCallback callback);
++
++ private:
++  base::WeakPtr<CbfProfileService> profile_service_;
++  base::WeakPtrFactory<CbfDownloadManagerDelegate> weak_factory_{this};
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_CBF_DOWNLOAD_MANAGER_DELEGATE_H_
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 2fd95cfbd4a16..5aa5a5a089eff 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -7,6 +7,7 @@
+ 
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
++#include "base/files/file_path.h"
+ #include "base/logging.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/functional/bind.h"
+@@ -14,12 +15,23 @@
+ #include "base/values.h"
+ #include "base/time/time.h"
+ #include "chrome/browser/cbf/cbf_browser_service.h"
++#include "chrome/browser/cbf/cbf_download_manager_delegate.h"
+ #include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
++#include "chrome/browser/download/download_confirmation_result.h"
++#include "chrome/browser/download/download_core_service_factory.h"
++#include "chrome/browser/download/download_core_service_impl.h"
++#include "chrome/browser/download/simple_download_manager_coordinator_factory.h"
++#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
++#include "chrome/common/pref_names.h"
++#include "components/content_settings/core/browser/host_content_settings_map.h"
++#include "components/content_settings/core/common/content_settings.h"
++#include "components/content_settings/core/common/content_settings_types.h"
+ #include "chrome/browser/extensions/extension_install_prompt.h"
+ #include "chrome/browser/extensions/extension_install_prompt_show_params.h"
+ #include "chrome/browser/printing/print_preview_dialog_controller.h"
+ #include "chrome/browser/printing/print_view_manager_common.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_key.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_devtools_controller.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_drag_controller.h"
+@@ -32,7 +44,10 @@
+ #include "extensions/browser/extension_registry.h"
+ #include "extensions/common/extension.h"
+ #include "extensions/common/permissions/permissions_data.h"
++#include "components/download/public/common/download_item.h"
++#include "components/prefs/pref_service.h"
+ #include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/download_item_utils.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/isolated_world_ids.h"
+@@ -104,6 +119,56 @@ mojom::CbfAuxiliaryWindowCloseReason ToAuxiliaryWindowCloseReason(
+   }
+ }
+ 
++std::optional<uint64_t> ToOptionalTotalBytes(int64_t total_bytes) {
++  if (total_bytes <= 0) {
++    return std::nullopt;
++  }
++  return static_cast<uint64_t>(total_bytes);
++}
++
++std::optional<std::string> ToOptionalUtf8Path(const base::FilePath& path) {
++  if (path.empty()) {
++    return std::nullopt;
++  }
++  return path.AsUTF8Unsafe();
++}
++
++mojom::CbfDownloadState ToCbfDownloadState(download::DownloadItem* item) {
++  if (!item) {
++    return mojom::CbfDownloadState::kUnknown;
++  }
++  switch (item->GetState()) {
++    case download::DownloadItem::IN_PROGRESS:
++      return item->IsPaused() ? mojom::CbfDownloadState::kPaused
++                              : mojom::CbfDownloadState::kInProgress;
++    case download::DownloadItem::COMPLETE:
++      return mojom::CbfDownloadState::kCompleted;
++    case download::DownloadItem::CANCELLED:
++      return mojom::CbfDownloadState::kCancelled;
++    case download::DownloadItem::INTERRUPTED:
++      return mojom::CbfDownloadState::kInterrupted;
++    case download::DownloadItem::MAX_DOWNLOAD_STATE:
++      return mojom::CbfDownloadState::kUnknown;
++  }
++}
++
++mojom::CbfDownloadOutcome ToCbfDownloadOutcome(download::DownloadItem* item) {
++  if (!item) {
++    return mojom::CbfDownloadOutcome::kUnknown;
++  }
++  switch (item->GetState()) {
++    case download::DownloadItem::COMPLETE:
++      return mojom::CbfDownloadOutcome::kSucceeded;
++    case download::DownloadItem::CANCELLED:
++      return mojom::CbfDownloadOutcome::kCancelled;
++    case download::DownloadItem::INTERRUPTED:
++      return mojom::CbfDownloadOutcome::kInterrupted;
++    case download::DownloadItem::IN_PROGRESS:
++    case download::DownloadItem::MAX_DOWNLOAD_STATE:
++      return mojom::CbfDownloadOutcome::kUnknown;
++  }
++}
++
+ }  // namespace
+ 
+ CbfProfileService::PendingExtensionInstallPrompt::PendingExtensionInstallPrompt() =
+@@ -124,6 +189,14 @@ CbfProfileService::PendingPermissionPrompt&
+ CbfProfileService::PendingPermissionPrompt::operator=(PendingPermissionPrompt&&) =
+     default;
+ 
++CbfProfileService::PendingDownloadPrompt::PendingDownloadPrompt() = default;
++CbfProfileService::PendingDownloadPrompt::~PendingDownloadPrompt() = default;
++CbfProfileService::PendingDownloadPrompt::PendingDownloadPrompt(
++    PendingDownloadPrompt&&) = default;
++CbfProfileService::PendingDownloadPrompt&
++CbfProfileService::PendingDownloadPrompt::operator=(PendingDownloadPrompt&&) =
++    default;
++
+ CbfProfileService::CbfProfileService(::Profile* profile,
+                                      CbfBrowserService* browser_service)
+     : profile_(profile),
+@@ -155,6 +228,33 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+       print_preview_web_contents_collection_(this) {
+   if (profile_) {
+     profile_observation_.Observe(profile_);
++    PrefService* prefs = profile_->GetPrefs();
++    if (prefs && !prefs->FindPreference(prefs::kPromptForDownload)->IsManaged()) {
++      saved_prompt_for_download_pref_ =
++          prefs->GetBoolean(prefs::kPromptForDownload);
++      prefs->SetBoolean(prefs::kPromptForDownload, true);
++    }
++    auto* download_core_service = static_cast<DownloadCoreServiceImpl*>(
++        DownloadCoreServiceFactory::GetForBrowserContext(profile_));
++    if (download_core_service) {
++      download_core_service->SetDownloadManagerDelegate(
++          std::make_unique<CbfDownloadManagerDelegate>(
++              profile_, weak_factory_.GetWeakPtr()));
++      download_coordinator_ = SimpleDownloadManagerCoordinatorFactory::GetForKey(
++          profile_->GetProfileKey());
++      if (download_coordinator_ && download_coordinator_->GetNotifier()) {
++        download_coordinator_->GetNotifier()->AddObserver(this);
++      }
++    }
++    // Allow all downloads without Chrome's automatic-download blocking.
++    // Cross-origin redirect chains (e.g. GitHub Releases → S3) lose the user
++    // gesture context and are otherwise blocked before RequestConfirmation is
++    // ever called.
++    if (auto* settings_map =
++            HostContentSettingsMapFactory::GetForProfile(profile_)) {
++      settings_map->SetDefaultContentSetting(
++          ContentSettingsType::AUTOMATIC_DOWNLOADS, CONTENT_SETTING_ALLOW);
++    }
+   }
+   service_context_->SetControllers(page_controller_.get(),
+                                    navigation_controller_.get(),
+@@ -196,8 +296,19 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+ 
+ CbfProfileService::~CbfProfileService() {
+   profile_observation_.Reset();
++  if (download_coordinator_ && download_coordinator_->GetNotifier()) {
++    download_coordinator_->GetNotifier()->RemoveObserver(this);
++  }
++  if (profile_ && saved_prompt_for_download_pref_.has_value()) {
++    if (PrefService* prefs = profile_->GetPrefs()) {
++      prefs->SetBoolean(prefs::kPromptForDownload,
++                        saved_prompt_for_download_pref_.value());
++    }
++  }
+   ResolvePendingPermissionPromptsForShutdown(
+       mojom::CbfPromptUiResolutionResult::kAborted);
++  ResolvePendingDownloadPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult::kAborted);
+   const std::vector<TabId> tab_ids = GetAllTabIds();
+   for (const TabId tab_id : tab_ids) {
+     if (tab_id == kInvalidTabId) {
+@@ -528,16 +639,70 @@ bool CbfProfileService::RequestPermissionPromptForWebContents(
+   return true;
+ }
+ 
++bool CbfProfileService::RequestDownloadPrompt(
++    download::DownloadItem* download,
++    const base::FilePath& suggested_path,
++    DownloadConfirmationReason reason,
++    DownloadTargetDeterminerDelegate::ConfirmationCallback callback,
++    base::WeakPtr<CbfDownloadManagerDelegate> delegate) {
++  if (!download || !observer_ || !delegate) {
++    return false;
++  }
++
++  content::WebContents* web_contents =
++      content::DownloadItemUtils::GetWebContents(download);
++  if (!web_contents) {
++    return false;
++  }
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
++    return false;
++  }
++
++  const uint64_t request_id = next_prompt_ui_request_id_++;
++  const uint64_t download_id = next_download_id_++;
++
++  PendingDownloadPrompt pending;
++  pending.tab_id = tab_id;
++  pending.request_id = request_id;
++  pending.download_id = download_id;
++  pending.download_guid = download->GetGuid();
++  pending.file_name = download->GetFileNameToReportUser().AsUTF8Unsafe();
++  pending.total_bytes = ToOptionalTotalBytes(download->GetTotalBytes());
++  pending.suggested_path = suggested_path;
++  pending.reason = reason;
++  pending.callback = std::move(callback);
++  pending.delegate = std::move(delegate);
++  pending_download_prompts_[request_id] = std::move(pending);
++
++  NotifyPromptUiRequested(
++      tab_id, request_id, mojom::CbfPromptUiKind::kDownloadPrompt,
++      mojom::CbfPromptUiPermissionType::kUnknown, std::string(), download_id,
++      download->GetFileNameToReportUser().AsUTF8Unsafe(),
++      ToOptionalTotalBytes(download->GetTotalBytes()),
++      ToOptionalUtf8Path(suggested_path));
++  return true;
++}
++
+ void CbfProfileService::OpenDefaultAuxiliaryWindow(uint64_t tab_id,
+                                                    uint64_t request_id) {
+   auto it = pending_extension_prompts_.find(request_id);
+-  if (it == pending_extension_prompts_.end()) {
++  if (it != pending_extension_prompts_.end()) {
++    if (it->second.tab_id != tab_id) {
++      return;
++    }
++    OpenDefaultAuxiliaryWindowImpl(request_id);
+     return;
+   }
+-  if (it->second.tab_id != tab_id) {
++
++  auto download_it = pending_download_prompts_.find(request_id);
++  if (download_it == pending_download_prompts_.end()) {
++    return;
++  }
++  if (download_it->second.tab_id != tab_id) {
+     return;
+   }
+-  OpenDefaultAuxiliaryWindowImpl(request_id);
++  OpenDefaultDownloadPromptImpl(request_id);
+ }
+ 
+ void CbfProfileService::RespondAuxiliaryWindow(
+@@ -560,6 +725,40 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
+   if (!response) {
+     return;
+   }
++
++  if (response->kind == mojom::CbfPromptUiKind::kDownloadPrompt) {
++    auto it = pending_download_prompts_.find(request_id);
++    if (it == pending_download_prompts_.end()) {
++      return;
++    }
++    if (it->second.tab_id != tab_id) {
++      DCHECK(false);
++      return;
++    }
++
++    PendingDownloadPrompt pending = std::move(it->second);
++    pending_download_prompts_.erase(it);
++
++    base::FilePath selected_path = pending.suggested_path;
++    if (response->destination_path.has_value() &&
++        !response->destination_path->empty()) {
++      selected_path = base::FilePath::FromUTF8Unsafe(
++          response->destination_path.value());
++    }
++
++    if (response->allow) {
++      ResolvePendingDownloadPrompt(
++          std::move(pending), DownloadConfirmationResult::CONFIRMED,
++          ui::SelectedFileInfo(selected_path),
++          mojom::CbfPromptUiResolutionResult::kAllowed);
++    } else {
++      ResolvePendingDownloadPrompt(
++          std::move(pending), DownloadConfirmationResult::CANCELED,
++          ui::SelectedFileInfo(),
++          mojom::CbfPromptUiResolutionResult::kDenied);
++    }
++    return;
++  }
+   if (response->kind != mojom::CbfPromptUiKind::kPermissionPrompt) {
+     return;
+   }
+@@ -594,6 +793,24 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
+                          pending.permission, pending.permission_key, result);
+ }
+ 
++void CbfProfileService::PauseDownload(uint64_t download_id) {
++  if (auto* item = FindDownloadById(download_id)) {
++    item->Pause();
++  }
++}
++
++void CbfProfileService::ResumeDownload(uint64_t download_id) {
++  if (auto* item = FindDownloadById(download_id)) {
++    item->Resume(/*user_resume=*/true);
++  }
++}
++
++void CbfProfileService::CancelDownload(uint64_t download_id) {
++  if (auto* item = FindDownloadById(download_id)) {
++    item->Cancel(/*user_cancel=*/true);
++  }
++}
++
+ void CbfProfileService::CloseAuxiliaryWindow(uint64_t tab_id,
+                                              uint64_t window_id) {
+   auto print_it = print_preview_window_to_dialog_.find(window_id);
+@@ -722,6 +939,8 @@ void CbfProfileService::NotifyTabClosed(TabId tab_id) {
+   if (tab_id != kInvalidTabId) {
+     ResolvePendingPermissionPromptsForTab(
+         tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
++    ResolvePendingDownloadPromptsForTab(
++        tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
+     context_menu_controller_->OnTabClosed(tab_id);
+     input_controller_->OnTabClosed(tab_id);
+     ime_controller_->OnTabClosed(tab_id);
+@@ -1064,7 +1283,11 @@ void CbfProfileService::NotifyPromptUiRequested(
+     uint64_t request_id,
+     mojom::CbfPromptUiKind kind,
+     mojom::CbfPromptUiPermissionType permission,
+-    const std::string& permission_key) {
++    const std::string& permission_key,
++    uint64_t download_id,
++    const std::string& file_name,
++    std::optional<uint64_t> total_bytes,
++    const std::optional<std::string>& suggested_path) {
+   if (!observer_) {
+     return;
+   }
+@@ -1073,6 +1296,10 @@ void CbfProfileService::NotifyPromptUiRequested(
+   request->kind = kind;
+   request->permission = permission;
+   request->permission_key = permission_key;
++  request->download_id = download_id;
++  request->file_name = file_name;
++  request->total_bytes = total_bytes;
++  request->suggested_path = suggested_path;
+   observer_->OnPromptUiRequested(tab_id, std::move(request));
+ }
+ 
+@@ -1082,7 +1309,9 @@ void CbfProfileService::NotifyPromptUiResolved(
+     mojom::CbfPromptUiKind kind,
+     mojom::CbfPromptUiPermissionType permission,
+     const std::string& permission_key,
+-    mojom::CbfPromptUiResolutionResult result) {
++    mojom::CbfPromptUiResolutionResult result,
++    uint64_t download_id,
++    const std::optional<std::string>& destination_path) {
+   if (!observer_) {
+     return;
+   }
+@@ -1092,6 +1321,8 @@ void CbfProfileService::NotifyPromptUiResolved(
+   resolution->permission = permission;
+   resolution->permission_key = permission_key;
+   resolution->result = result;
++  resolution->download_id = download_id;
++  resolution->destination_path = destination_path;
+   observer_->OnPromptUiResolved(tab_id, std::move(resolution));
+ }
+ 
+@@ -1151,6 +1382,215 @@ void CbfProfileService::ResolvePendingPermissionPromptsForShutdown(
+   }
+ }
+ 
++bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
++  auto it = pending_download_prompts_.find(request_id);
++  if (it == pending_download_prompts_.end()) {
++    return false;
++  }
++
++  PendingDownloadPrompt pending = std::move(it->second);
++  pending_download_prompts_.erase(it);
++  if (!pending.delegate) {
++    ResolvePendingDownloadPrompt(
++        std::move(pending), DownloadConfirmationResult::FAILED,
++        ui::SelectedFileInfo(),
++        mojom::CbfPromptUiResolutionResult::kAborted);
++    return false;
++  }
++
++  const std::string download_guid = pending.download_guid;
++  const base::FilePath suggested_path = pending.suggested_path;
++  const DownloadConfirmationReason reason = pending.reason;
++  const TabId tab_id = pending.tab_id;
++  const uint64_t download_id = pending.download_id;
++  const uint64_t response_request_id = pending.request_id;
++  auto callback = std::move(pending.callback);
++  base::WeakPtr<CbfProfileService> weak_self = weak_factory_.GetWeakPtr();
++  if (!pending.delegate->OpenNativeDownloadPrompt(
++          download_guid, suggested_path, reason,
++          base::BindOnce(
++              [](base::WeakPtr<CbfProfileService> self, TabId tab_id,
++                 uint64_t request_id, uint64_t download_id,
++                 std::string download_guid,
++                 DownloadTargetDeterminerDelegate::ConfirmationCallback callback,
++                 DownloadConfirmationResult result,
++                 const ui::SelectedFileInfo& selected_file_info) mutable {
++                mojom::CbfPromptUiResolutionResult resolution =
++                    mojom::CbfPromptUiResolutionResult::kAborted;
++                if (result == DownloadConfirmationResult::CONFIRMED ||
++                    result ==
++                        DownloadConfirmationResult::CONTINUE_WITHOUT_CONFIRMATION) {
++                  resolution = mojom::CbfPromptUiResolutionResult::kAllowed;
++                } else if (result == DownloadConfirmationResult::CANCELED) {
++                  resolution = mojom::CbfPromptUiResolutionResult::kDenied;
++                }
++
++                if (self) {
++                  PendingDownloadPrompt resolved_pending;
++                  resolved_pending.tab_id = tab_id;
++                  resolved_pending.request_id = request_id;
++                  resolved_pending.download_id = download_id;
++                  resolved_pending.download_guid = std::move(download_guid);
++                  resolved_pending.callback = std::move(callback);
++                  self->ResolvePendingDownloadPrompt(
++                      std::move(resolved_pending), result, selected_file_info,
++                      resolution);
++                  return;
++                }
++
++                std::move(callback).Run(result, selected_file_info);
++              },
++              weak_self, tab_id, response_request_id, download_id, download_guid,
++              std::move(callback)))) {
++    ResolvePendingDownloadPrompt(
++        std::move(pending), DownloadConfirmationResult::FAILED,
++        ui::SelectedFileInfo(),
++        mojom::CbfPromptUiResolutionResult::kAborted);
++    return false;
++  }
++  return true;
++}
++
++void CbfProfileService::ResolvePendingDownloadPrompt(
++    PendingDownloadPrompt pending,
++    DownloadConfirmationResult confirmation_result,
++    const ui::SelectedFileInfo& selected_file_info,
++    mojom::CbfPromptUiResolutionResult result) {
++  std::optional<std::string> destination_path;
++  if (!selected_file_info.path().empty()) {
++    destination_path = selected_file_info.path().AsUTF8Unsafe();
++  }
++
++  if (result == mojom::CbfPromptUiResolutionResult::kAllowed &&
++      !pending.download_guid.empty()) {
++    TrackDownload(pending.download_id, pending.download_guid, pending.tab_id);
++  }
++
++  if (pending.callback) {
++    std::move(pending.callback).Run(confirmation_result, selected_file_info);
++  }
++
++  NotifyPromptUiResolved(
++      pending.tab_id, pending.request_id, mojom::CbfPromptUiKind::kDownloadPrompt,
++      mojom::CbfPromptUiPermissionType::kUnknown, std::string(), result,
++      pending.download_id, destination_path);
++}
++
++void CbfProfileService::ResolvePendingDownloadPromptsForTab(
++    TabId tab_id,
++    mojom::CbfPromptUiResolutionResult result) {
++  if (tab_id == kInvalidTabId) {
++    return;
++  }
++
++  for (auto it = pending_download_prompts_.begin();
++       it != pending_download_prompts_.end();) {
++    if (it->second.tab_id != tab_id) {
++      ++it;
++      continue;
++    }
++    PendingDownloadPrompt pending = std::move(it->second);
++    it = pending_download_prompts_.erase(it);
++    ResolvePendingDownloadPrompt(std::move(pending),
++                                 DownloadConfirmationResult::FAILED,
++                                 ui::SelectedFileInfo(), result);
++  }
++}
++
++void CbfProfileService::ResolvePendingDownloadPromptsForShutdown(
++    mojom::CbfPromptUiResolutionResult result) {
++  for (auto it = pending_download_prompts_.begin();
++       it != pending_download_prompts_.end();) {
++    PendingDownloadPrompt pending = std::move(it->second);
++    it = pending_download_prompts_.erase(it);
++    ResolvePendingDownloadPrompt(std::move(pending),
++                                 DownloadConfirmationResult::FAILED,
++                                 ui::SelectedFileInfo(), result);
++  }
++}
++
++download::DownloadItem* CbfProfileService::FindDownloadByGuid(
++    const std::string& guid) const {
++  if (!download_coordinator_ || guid.empty()) {
++    return nullptr;
++  }
++  return download_coordinator_->GetDownloadByGuid(guid);
++}
++
++download::DownloadItem* CbfProfileService::FindDownloadById(
++    uint64_t download_id) const {
++  auto it = active_downloads_.find(download_id);
++  if (it == active_downloads_.end()) {
++    return nullptr;
++  }
++  return FindDownloadByGuid(it->second.guid);
++}
++
++void CbfProfileService::TrackDownload(uint64_t download_id,
++                                      const std::string& guid,
++                                      std::optional<TabId> source_tab_id) {
++  auto& active = active_downloads_[download_id];
++  active.download_id = download_id;
++  active.guid = guid;
++  active.source_tab_id = source_tab_id;
++  download_guid_to_id_[guid] = download_id;
++}
++
++void CbfProfileService::NotifyDownloadCreated(download::DownloadItem* download,
++                                              const ActiveDownload& active) {
++  if (!observer_ || !download) {
++    return;
++  }
++  auto event = mojom::CbfDownloadCreated::New();
++  event->download_id = active.download_id;
++  if (active.source_tab_id.has_value()) {
++    event->source_tab_id = active.source_tab_id.value();
++  }
++  event->file_name = download->GetFileNameToReportUser().AsUTF8Unsafe();
++  event->total_bytes = ToOptionalTotalBytes(download->GetTotalBytes());
++  event->target_path = ToOptionalUtf8Path(download->GetTargetFilePath());
++  observer_->OnDownloadCreated(std::move(event));
++}
++
++void CbfProfileService::NotifyDownloadUpdated(download::DownloadItem* download,
++                                              const ActiveDownload& active) {
++  if (!observer_ || !download) {
++    return;
++  }
++  auto event = mojom::CbfDownloadUpdated::New();
++  event->download_id = active.download_id;
++  if (active.source_tab_id.has_value()) {
++    event->source_tab_id = active.source_tab_id.value();
++  }
++  event->state = ToCbfDownloadState(download);
++  event->file_name = download->GetFileNameToReportUser().AsUTF8Unsafe();
++  event->received_bytes = static_cast<uint64_t>(download->GetReceivedBytes());
++  event->total_bytes = ToOptionalTotalBytes(download->GetTotalBytes());
++  event->target_path = ToOptionalUtf8Path(download->GetTargetFilePath());
++  event->can_resume = download->CanResume();
++  event->is_paused = download->IsPaused();
++  observer_->OnDownloadUpdated(std::move(event));
++}
++
++void CbfProfileService::NotifyDownloadCompleted(
++    download::DownloadItem* download,
++    const ActiveDownload& active) {
++  if (!observer_ || !download) {
++    return;
++  }
++  auto event = mojom::CbfDownloadCompleted::New();
++  event->download_id = active.download_id;
++  if (active.source_tab_id.has_value()) {
++    event->source_tab_id = active.source_tab_id.value();
++  }
++  event->outcome = ToCbfDownloadOutcome(download);
++  event->file_name = download->GetFileNameToReportUser().AsUTF8Unsafe();
++  event->received_bytes = static_cast<uint64_t>(download->GetReceivedBytes());
++  event->total_bytes = ToOptionalTotalBytes(download->GetTotalBytes());
++  event->target_path = ToOptionalUtf8Path(download->GetTargetFilePath());
++  observer_->OnDownloadCompleted(std::move(event));
++}
++
+ void CbfProfileService::TryAttachPrintPreviewDialog(TabId tab_id,
+                                                     int attempts_remaining) {
+   if (attempts_remaining < 0) {
+@@ -1257,6 +1697,8 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
+   profile_observation_.Reset();
+   ResolvePendingPermissionPromptsForShutdown(
+       mojom::CbfPromptUiResolutionResult::kAborted);
++  ResolvePendingDownloadPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult::kAborted);
+   CloseAllTabs();
+ }
+ 
+@@ -1278,6 +1720,81 @@ void CbfProfileService::RenderProcessGone(content::WebContents* web_contents,
+   WebContentsDestroyed(web_contents);
+ }
+ 
++void CbfProfileService::OnDownloadsInitialized(
++    download::SimpleDownloadManagerCoordinator* manager,
++    bool active_downloads_only) {
++  (void)manager;
++  (void)active_downloads_only;
++}
++
++void CbfProfileService::OnManagerGoingDown(
++    download::SimpleDownloadManagerCoordinator* manager) {
++  if (manager == download_coordinator_) {
++    download_guid_to_id_.clear();
++    active_downloads_.clear();
++  }
++}
++
++void CbfProfileService::OnDownloadCreated(
++    download::SimpleDownloadManagerCoordinator* manager,
++    download::DownloadItem* item) {
++  (void)manager;
++  OnDownloadUpdated(manager, item);
++}
++
++void CbfProfileService::OnDownloadUpdated(
++    download::SimpleDownloadManagerCoordinator* manager,
++    download::DownloadItem* item) {
++  (void)manager;
++  if (!item) {
++    return;
++  }
++  auto id_it = download_guid_to_id_.find(item->GetGuid());
++  if (id_it == download_guid_to_id_.end()) {
++    return;
++  }
++  auto active_it = active_downloads_.find(id_it->second);
++  if (active_it == active_downloads_.end()) {
++    return;
++  }
++
++  if (!active_it->second.created_notified) {
++    NotifyDownloadCreated(item, active_it->second);
++    active_it->second.created_notified = true;
++  }
++
++  if (item->GetState() == download::DownloadItem::IN_PROGRESS) {
++    NotifyDownloadUpdated(item, active_it->second);
++    return;
++  }
++
++  NotifyDownloadCompleted(item, active_it->second);
++  download_guid_to_id_.erase(active_it->second.guid);
++  active_downloads_.erase(active_it);
++}
++
++void CbfProfileService::OnDownloadOpened(
++    download::SimpleDownloadManagerCoordinator* manager,
++    download::DownloadItem* item) {
++  (void)manager;
++  (void)item;
++}
++
++void CbfProfileService::OnDownloadRemoved(
++    download::SimpleDownloadManagerCoordinator* manager,
++    download::DownloadItem* item) {
++  (void)manager;
++  if (!item) {
++    return;
++  }
++  auto id_it = download_guid_to_id_.find(item->GetGuid());
++  if (id_it == download_guid_to_id_.end()) {
++    return;
++  }
++  active_downloads_.erase(id_it->second);
++  download_guid_to_id_.erase(id_it);
++}
++
+ void CbfProfileService::NotifyDragStartRequested(
+     content::WebContents* web_contents,
+     const content::DropData& drop_data,
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 1211c5bb64f81..4a62928cd40e0 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -10,6 +10,7 @@
+ #include <string>
+ #include <vector>
+ 
++#include "base/files/file_path.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/scoped_refptr.h"
+ #include "base/memory/weak_ptr.h"
+@@ -18,6 +19,10 @@
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
+ #include "chrome/browser/cbf/cbf_web_contents_delegate.h"
+ #include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "chrome/browser/download/download_confirmation_result.h"
++#include "chrome/browser/download/download_confirmation_reason.h"
++#include "chrome/browser/download/download_target_determiner_delegate.h"
++#include "components/download/public/common/all_download_event_notifier.h"
+ #include "chrome/browser/profiles/profile_observer.h"
+ #include "chrome/browser/tab_contents/web_contents_collection.h"
+ #include "chrome/browser/extensions/extension_install_prompt.h"
+@@ -50,6 +55,7 @@ class Extension;
+ namespace cbf {
+ 
+ class CbfBrowserService;
++class CbfDownloadManagerDelegate;
+ class CbfProfileContextMenuController;
+ class CbfProfileDevToolsController;
+ class CbfProfileDragController;
+@@ -63,7 +69,8 @@ class CbfProfileServiceContext;
+ class CbfProfileService : public mojom::CbfProfileService,
+                           public ProfileObserver,
+                           public views::WidgetObserver,
+-                          public WebContentsCollection::Observer {
++                          public WebContentsCollection::Observer,
++                          public download::AllDownloadEventNotifier::Observer {
+  public:
+   CbfProfileService(::Profile* profile, CbfBrowserService* browser_service);
+   CbfProfileService(const CbfProfileService&) = delete;
+@@ -122,6 +129,9 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void RespondPromptUi(uint64_t tab_id,
+                        uint64_t request_id,
+                        mojom::CbfPromptUiResponsePtr response) override;
++  void PauseDownload(uint64_t download_id) override;
++  void ResumeDownload(uint64_t download_id) override;
++  void CancelDownload(uint64_t download_id) override;
+   void CloseAuxiliaryWindow(uint64_t tab_id,
+                             uint64_t window_id) override;
+   void RespondTabOpen(
+@@ -187,6 +197,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+                                 content::RenderWidgetHost* source_rwh);
+ 
+  private:
++  friend class CbfDownloadManagerDelegate;
++
+   struct PendingExtensionInstallPrompt {
+     PendingExtensionInstallPrompt();
+     ~PendingExtensionInstallPrompt();
+@@ -223,6 +235,62 @@ class CbfProfileService : public mojom::CbfProfileService,
+     base::WeakPtr<permissions::PermissionPrompt::Delegate> delegate;
+   };
+ 
++  struct PendingDownloadPrompt {
++    PendingDownloadPrompt();
++    ~PendingDownloadPrompt();
++    PendingDownloadPrompt(PendingDownloadPrompt&&);
++    PendingDownloadPrompt& operator=(PendingDownloadPrompt&&);
++    PendingDownloadPrompt(const PendingDownloadPrompt&) = delete;
++    PendingDownloadPrompt& operator=(const PendingDownloadPrompt&) = delete;
++
++    TabId tab_id = kInvalidTabId;
++    uint64_t request_id = 0;
++    uint64_t download_id = 0;
++    std::string download_guid;
++    std::string file_name;
++    std::optional<uint64_t> total_bytes;
++    base::FilePath suggested_path;
++    DownloadConfirmationReason reason = DownloadConfirmationReason::PREFERENCE;
++    DownloadTargetDeterminerDelegate::ConfirmationCallback callback;
++    base::WeakPtr<CbfDownloadManagerDelegate> delegate;
++  };
++
++  struct ActiveDownload {
++    uint64_t download_id = 0;
++    std::string guid;
++    std::optional<TabId> source_tab_id;
++    bool created_notified = false;
++  };
++
++  bool RequestDownloadPrompt(
++      download::DownloadItem* download,
++      const base::FilePath& suggested_path,
++      DownloadConfirmationReason reason,
++      DownloadTargetDeterminerDelegate::ConfirmationCallback callback,
++      base::WeakPtr<CbfDownloadManagerDelegate> delegate);
++  bool OpenDefaultDownloadPromptImpl(uint64_t request_id);
++  void ResolvePendingDownloadPrompt(
++      PendingDownloadPrompt pending,
++      DownloadConfirmationResult confirmation_result,
++      const ui::SelectedFileInfo& selected_file_info,
++      mojom::CbfPromptUiResolutionResult result);
++  void ResolvePendingDownloadPromptsForTab(
++      TabId tab_id,
++      mojom::CbfPromptUiResolutionResult result);
++  void ResolvePendingDownloadPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult result);
++  download::DownloadItem* FindDownloadByGuid(const std::string& guid) const;
++  download::DownloadItem* FindDownloadById(uint64_t download_id) const;
++  void TrackDownload(uint64_t download_id,
++                     const std::string& guid,
++                     std::optional<TabId> source_tab_id);
++  void NotifyDownloadCreated(download::DownloadItem* download,
++                             const ActiveDownload& active_download);
++  void NotifyDownloadUpdated(download::DownloadItem* download,
++                             const ActiveDownload& active_download);
++  void NotifyDownloadCompleted(download::DownloadItem* download,
++                               const ActiveDownload& active_download);
++
+   void ResolveExtensionInstallPrompt(
+       uint64_t request_id,
+       mojom::CbfExtensionInstallPromptResult result,
+@@ -261,13 +329,21 @@ class CbfProfileService : public mojom::CbfProfileService,
+                                uint64_t request_id,
+                                mojom::CbfPromptUiKind kind,
+                                mojom::CbfPromptUiPermissionType permission,
+-                               const std::string& permission_key);
++                               const std::string& permission_key,
++                               uint64_t download_id = 0,
++                               const std::string& file_name = std::string(),
++                               std::optional<uint64_t> total_bytes = std::nullopt,
++                               const std::optional<std::string>& suggested_path =
++                                   std::nullopt);
+   void NotifyPromptUiResolved(uint64_t tab_id,
+                               uint64_t request_id,
+                               mojom::CbfPromptUiKind kind,
+                               mojom::CbfPromptUiPermissionType permission,
+                               const std::string& permission_key,
+-                              mojom::CbfPromptUiResolutionResult result);
++                              mojom::CbfPromptUiResolutionResult result,
++                              uint64_t download_id = 0,
++                              const std::optional<std::string>& destination_path =
++                                  std::nullopt);
+   void ResolvePendingPermissionPromptsForTab(
+       TabId tab_id,
+       mojom::CbfPromptUiResolutionResult result);
+@@ -288,6 +364,20 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void WebContentsDestroyed(content::WebContents* web_contents) override;
+   void RenderProcessGone(content::WebContents* web_contents,
+                          base::TerminationStatus status) override;
++  // download::AllDownloadEventNotifier::Observer:
++  void OnDownloadsInitialized(
++      download::SimpleDownloadManagerCoordinator* manager,
++      bool active_downloads_only) override;
++  void OnManagerGoingDown(
++      download::SimpleDownloadManagerCoordinator* manager) override;
++  void OnDownloadCreated(download::SimpleDownloadManagerCoordinator* manager,
++                         download::DownloadItem* item) override;
++  void OnDownloadUpdated(download::SimpleDownloadManagerCoordinator* manager,
++                         download::DownloadItem* item) override;
++  void OnDownloadOpened(download::SimpleDownloadManagerCoordinator* manager,
++                        download::DownloadItem* item) override;
++  void OnDownloadRemoved(download::SimpleDownloadManagerCoordinator* manager,
++                         download::DownloadItem* item) override;
+ 
+   raw_ptr<::Profile> profile_;
+   raw_ptr<CbfBrowserService> browser_service_;
+@@ -307,8 +397,13 @@ class CbfProfileService : public mojom::CbfProfileService,
+   uint64_t next_auxiliary_request_id_ = 1;
+   uint64_t next_prompt_ui_request_id_ = 1;
+   uint64_t next_auxiliary_window_id_ = 1;
++  uint64_t next_download_id_ = 1;
+   std::map<uint64_t, PendingExtensionInstallPrompt> pending_extension_prompts_;
+   std::map<uint64_t, PendingPermissionPrompt> pending_permission_prompts_;
++  std::map<uint64_t, PendingDownloadPrompt> pending_download_prompts_;
++  std::map<uint64_t, ActiveDownload> active_downloads_;
++  std::map<std::string, uint64_t> download_guid_to_id_;
++  std::optional<bool> saved_prompt_for_download_pref_;
+   std::map<uint64_t, uint64_t> auxiliary_window_to_prompt_request_;
+   std::map<raw_ptr<views::Widget>, uint64_t> auxiliary_widget_to_window_id_;
+   std::map<uint64_t, raw_ptr<content::WebContents>>
+@@ -318,6 +413,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+   std::map<uint64_t, TabId> print_preview_window_to_web_page_;
+   std::set<uint64_t> host_forced_print_preview_windows_;
+   WebContentsCollection print_preview_web_contents_collection_;
++  raw_ptr<download::SimpleDownloadManagerCoordinator> download_coordinator_ =
++      nullptr;
+   mojo::ReceiverSet<mojom::CbfProfileService> receivers_;
+   base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
+ 
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 84ceddeee5696..407291ee39f9a 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -1,14 +1,20 @@
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ 
+ #include <memory>
++#include <optional>
+ #include <string>
+ #include <utility>
++#include <algorithm>
+ 
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
+ #include "base/functional/bind.h"
+ #include "base/run_loop.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/task/cancelable_task_tracker.h"
++#include "base/threading/thread_restrictions.h"
+ #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
+ #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
+ #include "chrome/browser/history/history_service_factory.h"
+@@ -18,12 +24,15 @@
+ #include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "chrome/common/url_constants.h"
+ #include "chrome/test/base/in_process_browser_test.h"
++#include "chrome/test/base/ui_test_utils.h"
+ #include "components/history/core/browser/history_service.h"
+ #include "components/history/core/browser/history_types.h"
+ #include "components/tabs/public/tab_interface.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/test/browser_test.h"
+ #include "content/public/test/browser_test_utils.h"
++#include "content/public/test/slow_download_http_response.h"
++#include "content/public/test/slow_http_response.h"
+ #include "net/http/http_status_code.h"
+ #include "net/test/embedded_test_server/http_request.h"
+ #include "net/test/embedded_test_server/http_response.h"
+@@ -36,6 +45,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+  protected:
+   void SetUpOnMainThread() override {
+     InProcessBrowserTest::SetUpOnMainThread();
++    ASSERT_TRUE(download_temp_dir_.CreateUniqueTempDir());
+     profile_service_ =
+         std::make_unique<CbfProfileService>(browser()->profile(), nullptr);
+     profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
+@@ -103,8 +113,79 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     ASSERT_TRUE(content::WaitForLoadStop(web_contents));
+   }
+ 
++  void EnsureDownloadServerStarted() {
++    if (download_server_started_) {
++      return;
++    }
++
++    embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
++        [](const net::test_server::HttpRequest& request)
++            -> std::unique_ptr<net::test_server::HttpResponse> {
++          if (request.relative_url == "/cbf-download-page-fast") {
++            auto response =
++                std::make_unique<net::test_server::BasicHttpResponse>();
++            response->set_code(net::HTTP_OK);
++            response->set_content_type("text/html");
++            response->set_content(
++                "<!doctype html><a id='download-link' href='/cbf-download-file'>"
++                "download</a>");
++            return response;
++          }
++          if (request.relative_url == "/cbf-download-page-slow") {
++            auto response =
++                std::make_unique<net::test_server::BasicHttpResponse>();
++            response->set_code(net::HTTP_OK);
++            response->set_content_type("text/html");
++            response->set_content(
++                "<!doctype html><a id='download-link' href='/download-known-size'>"
++                "download</a>");
++            return response;
++          }
++          if (request.relative_url != "/cbf-download-file") {
++            return nullptr;
++          }
++
++          auto response =
++              std::make_unique<net::test_server::BasicHttpResponse>();
++          response->set_code(net::HTTP_OK);
++          response->set_content_type("application/octet-stream");
++          response->AddCustomHeader(
++              "Content-Disposition",
++              "attachment; filename=\"cbf-download-file.bin\"");
++          response->set_content("cbf-download-body");
++          return response;
++        }));
++    embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
++        &content::SlowDownloadHttpResponse::HandleSlowDownloadRequest));
++    ASSERT_TRUE(embedded_test_server()->Start());
++    download_server_started_ = true;
++  }
++
++  base::FilePath MakeDownloadDestination(const std::string& file_name_prefix) {
++    ++download_destination_index_;
++    return download_temp_dir_.GetPath().AppendASCII(
++        file_name_prefix + "-" + base::NumberToString(download_destination_index_) +
++        ".bin");
++  }
++
++  void RespondToDownloadPrompt(uint64_t tab_id,
++                               uint64_t request_id,
++                               bool allow,
++                               std::optional<base::FilePath> destination_path) {
++    auto response = mojom::CbfPromptUiResponse::New();
++    response->kind = mojom::CbfPromptUiKind::kDownloadPrompt;
++    response->allow = allow;
++    if (destination_path.has_value()) {
++      response->destination_path = destination_path->AsUTF8Unsafe();
++    }
++    profile_service_->RespondPromptUi(tab_id, request_id, std::move(response));
++  }
++
+   std::unique_ptr<CbfProfileService> profile_service_;
+   cbf::test::CbfTestProfileObserver observer_;
++  base::ScopedTempDir download_temp_dir_;
++  bool download_server_started_ = false;
++  int download_destination_index_ = 0;
+ };
+ 
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
+@@ -113,6 +194,295 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp)
+   profile_service_->OpenDevTools(kInvalidTabId);
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       DownloadPromptAllowStoresFileAtDestinationPath) {
++  EnsureDownloadServerStarted();
++
++  const TabId tab_id =
++      CreatePage(embedded_test_server()->GetURL("/cbf-download-page-fast").spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  ASSERT_TRUE(content::ExecJs(
++      web_contents, "document.getElementById('download-link').click();"));
++
++  observer_.WaitForPromptUiRequestedCount(1);
++  ASSERT_FALSE(observer_.prompt_ui_requested_events().empty());
++  const auto& prompt = observer_.prompt_ui_requested_events().back();
++  EXPECT_EQ(prompt.tab_id, tab_id);
++  EXPECT_EQ(prompt.kind, mojom::CbfPromptUiKind::kDownloadPrompt);
++
++  const base::FilePath destination =
++      MakeDownloadDestination("download-allow-path");
++  RespondToDownloadPrompt(prompt.tab_id, prompt.request_id, true, destination);
++
++  observer_.WaitForPromptUiResolvedCount(1);
++  ASSERT_FALSE(observer_.prompt_ui_resolved_events().empty());
++  const auto& resolution = observer_.prompt_ui_resolved_events().back();
++  EXPECT_EQ(resolution.request_id, prompt.request_id);
++  EXPECT_EQ(resolution.kind, mojom::CbfPromptUiKind::kDownloadPrompt);
++  EXPECT_EQ(resolution.result, mojom::CbfPromptUiResolutionResult::kAllowed);
++  ASSERT_TRUE(resolution.destination_path.has_value());
++  EXPECT_EQ(resolution.destination_path.value(), destination.AsUTF8Unsafe());
++
++  observer_.WaitForDownloadCreatedCount(1);
++  observer_.WaitForDownloadCompletedCount(1);
++  ASSERT_FALSE(observer_.download_completed_events().empty());
++  const auto& completed = observer_.download_completed_events().back();
++  EXPECT_EQ(completed.download_id, prompt.download_id);
++  EXPECT_EQ(completed.outcome, mojom::CbfDownloadOutcome::kSucceeded);
++  {
++    base::ScopedAllowBlockingForTesting allow_blocking;
++    EXPECT_TRUE(base::PathExists(destination));
++
++    std::string downloaded_body;
++    ASSERT_TRUE(base::ReadFileToString(destination, &downloaded_body));
++    EXPECT_EQ(downloaded_body, "cbf-download-body");
++  }
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       DownloadPromptDenyPreventsDownloadStart) {
++  EnsureDownloadServerStarted();
++
++  const TabId tab_id =
++      CreatePage(embedded_test_server()->GetURL("/cbf-download-page-fast").spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  ASSERT_TRUE(content::ExecJs(
++      web_contents, "document.getElementById('download-link').click();"));
++
++  observer_.WaitForPromptUiRequestedCount(1);
++  ASSERT_FALSE(observer_.prompt_ui_requested_events().empty());
++  const auto& prompt = observer_.prompt_ui_requested_events().back();
++  ASSERT_EQ(prompt.kind, mojom::CbfPromptUiKind::kDownloadPrompt);
++
++  RespondToDownloadPrompt(prompt.tab_id, prompt.request_id, false, std::nullopt);
++
++  observer_.WaitForPromptUiResolvedCount(1);
++  ASSERT_FALSE(observer_.prompt_ui_resolved_events().empty());
++  const auto& resolution = observer_.prompt_ui_resolved_events().back();
++  EXPECT_EQ(resolution.request_id, prompt.request_id);
++  EXPECT_EQ(resolution.result, mojom::CbfPromptUiResolutionResult::kDenied);
++
++  base::RunLoop().RunUntilIdle();
++  EXPECT_TRUE(observer_.download_created_events().empty());
++  EXPECT_TRUE(observer_.download_completed_events().empty());
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       PauseDownloadEmitsPausedDownloadUpdatedEvent) {
++  EnsureDownloadServerStarted();
++
++  const TabId tab_id =
++      CreatePage(embedded_test_server()->GetURL("/cbf-download-page-slow").spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  const base::FilePath destination = MakeDownloadDestination("download-pause");
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  ASSERT_TRUE(content::ExecJs(
++      web_contents, "document.getElementById('download-link').click();"));
++  observer_.WaitForPromptUiRequestedCount(1);
++  ASSERT_FALSE(observer_.prompt_ui_requested_events().empty());
++  const auto& prompt = observer_.prompt_ui_requested_events().back();
++  RespondToDownloadPrompt(prompt.tab_id, prompt.request_id, true, destination);
++
++  observer_.WaitForDownloadCreatedCount(1);
++  ASSERT_FALSE(observer_.download_created_events().empty());
++  const uint64_t download_id = observer_.download_created_events().back().download_id;
++  EXPECT_EQ(download_id, prompt.download_id);
++
++  profile_service_->PauseDownload(download_id);
++
++  bool paused_seen = false;
++  size_t inspected = 0;
++  while (!paused_seen) {
++    const auto& updates = observer_.download_updated_events();
++    for (; inspected < updates.size(); ++inspected) {
++      const auto& update = updates[inspected];
++      if (update.download_id == download_id &&
++          update.state == mojom::CbfDownloadState::kPaused &&
++          update.is_paused) {
++        paused_seen = true;
++        break;
++      }
++    }
++    if (!paused_seen) {
++      observer_.WaitForDownloadUpdatedCount(updates.size() + 1);
++    }
++  }
++
++  profile_service_->CancelDownload(download_id);
++  observer_.WaitForDownloadCompletedCount(1);
++  ASSERT_FALSE(observer_.download_completed_events().empty());
++  EXPECT_EQ(observer_.download_completed_events().back().outcome,
++            mojom::CbfDownloadOutcome::kCancelled);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       ResumeDownloadEmitsInProgressDownloadUpdatedEvent) {
++  EnsureDownloadServerStarted();
++
++  const TabId tab_id =
++      CreatePage(embedded_test_server()->GetURL("/cbf-download-page-slow").spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  const base::FilePath destination = MakeDownloadDestination("download-resume");
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  ASSERT_TRUE(content::ExecJs(
++      web_contents, "document.getElementById('download-link').click();"));
++  observer_.WaitForPromptUiRequestedCount(1);
++  ASSERT_FALSE(observer_.prompt_ui_requested_events().empty());
++  const auto& prompt = observer_.prompt_ui_requested_events().back();
++  RespondToDownloadPrompt(prompt.tab_id, prompt.request_id, true, destination);
++
++  observer_.WaitForDownloadCreatedCount(1);
++  ASSERT_FALSE(observer_.download_created_events().empty());
++  const uint64_t download_id = observer_.download_created_events().back().download_id;
++
++  profile_service_->PauseDownload(download_id);
++  bool paused_seen = false;
++  size_t inspected = 0;
++  while (!paused_seen) {
++    const auto& updates = observer_.download_updated_events();
++    for (; inspected < updates.size(); ++inspected) {
++      const auto& update = updates[inspected];
++      if (update.download_id == download_id &&
++          update.state == mojom::CbfDownloadState::kPaused &&
++          update.is_paused) {
++        paused_seen = true;
++        break;
++      }
++    }
++    if (!paused_seen) {
++      observer_.WaitForDownloadUpdatedCount(updates.size() + 1);
++    }
++  }
++
++  profile_service_->ResumeDownload(download_id);
++  bool resumed_seen = false;
++  inspected = 0;
++  while (!resumed_seen) {
++    const auto& updates = observer_.download_updated_events();
++    for (; inspected < updates.size(); ++inspected) {
++      const auto& update = updates[inspected];
++      if (update.download_id == download_id &&
++          update.state == mojom::CbfDownloadState::kInProgress &&
++          !update.is_paused) {
++        resumed_seen = true;
++        break;
++      }
++    }
++    if (!resumed_seen) {
++      observer_.WaitForDownloadUpdatedCount(updates.size() + 1);
++    }
++  }
++
++  profile_service_->CancelDownload(download_id);
++  observer_.WaitForDownloadCompletedCount(1);
++  ASSERT_FALSE(observer_.download_completed_events().empty());
++  EXPECT_EQ(observer_.download_completed_events().back().outcome,
++            mojom::CbfDownloadOutcome::kCancelled);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       CancelDownloadEmitsCancelledDownloadCompletedEvent) {
++  EnsureDownloadServerStarted();
++
++  const TabId tab_id =
++      CreatePage(embedded_test_server()->GetURL("/cbf-download-page-slow").spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  const base::FilePath destination = MakeDownloadDestination("download-cancel");
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  ASSERT_TRUE(content::ExecJs(
++      web_contents, "document.getElementById('download-link').click();"));
++  observer_.WaitForPromptUiRequestedCount(1);
++  ASSERT_FALSE(observer_.prompt_ui_requested_events().empty());
++  const auto& prompt = observer_.prompt_ui_requested_events().back();
++  RespondToDownloadPrompt(prompt.tab_id, prompt.request_id, true, destination);
++
++  observer_.WaitForDownloadCreatedCount(1);
++  ASSERT_FALSE(observer_.download_created_events().empty());
++  const uint64_t download_id = observer_.download_created_events().back().download_id;
++  profile_service_->CancelDownload(download_id);
++
++  observer_.WaitForDownloadCompletedCount(1);
++  ASSERT_FALSE(observer_.download_completed_events().empty());
++  const auto& completed = observer_.download_completed_events().back();
++  EXPECT_EQ(completed.download_id, download_id);
++  EXPECT_EQ(completed.outcome, mojom::CbfDownloadOutcome::kCancelled);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SuccessfulDownloadEmitsCreatedUpdatedCompletedOrder) {
++  EnsureDownloadServerStarted();
++
++  const TabId tab_id =
++      CreatePage(embedded_test_server()->GetURL("/cbf-download-page-slow").spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  const base::FilePath destination =
++      MakeDownloadDestination("download-order-success");
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  ASSERT_TRUE(content::ExecJs(
++      web_contents, "document.getElementById('download-link').click();"));
++  observer_.WaitForPromptUiRequestedCount(1);
++  ASSERT_FALSE(observer_.prompt_ui_requested_events().empty());
++  const auto& prompt = observer_.prompt_ui_requested_events().back();
++  RespondToDownloadPrompt(prompt.tab_id, prompt.request_id, true, destination);
++
++  observer_.WaitForDownloadCreatedCount(1);
++  ASSERT_FALSE(observer_.download_created_events().empty());
++  observer_.WaitForDownloadUpdatedCount(1);
++
++  ASSERT_TRUE(ui_test_utils::NavigateToURL(
++      browser(),
++      embedded_test_server()->GetURL(content::SlowHttpResponse::kFinishSlowResponseUrl)));
++
++  observer_.WaitForDownloadCompletedCount(1);
++  ASSERT_FALSE(observer_.download_completed_events().empty());
++  const auto& completed = observer_.download_completed_events().back();
++  EXPECT_EQ(completed.download_id, prompt.download_id);
++  EXPECT_EQ(completed.outcome, mojom::CbfDownloadOutcome::kSucceeded);
++  {
++    base::ScopedAllowBlockingForTesting allow_blocking;
++    EXPECT_TRUE(base::PathExists(destination));
++  }
++
++  const auto& order = observer_.download_event_order();
++  auto created_it = std::find(order.begin(), order.end(),
++                              cbf::test::CbfTestProfileObserver::DownloadEventKind::kCreated);
++  ASSERT_NE(created_it, order.end());
++  auto updated_it = std::find(
++      created_it + 1, order.end(),
++      cbf::test::CbfTestProfileObserver::DownloadEventKind::kUpdated);
++  ASSERT_NE(updated_it, order.end());
++  auto completed_it = std::find(
++      updated_it + 1, order.end(),
++      cbf::test::CbfTestProfileObserver::DownloadEventKind::kCompleted);
++  ASSERT_NE(completed_it, order.end());
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        NotifyWebPageClosedEmitsObserverEvent) {
+   TabId created_id = kInvalidTabId;
+diff --git a/chrome/browser/cbf/cbf_web_contents_delegate.cc b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+index a94675fbb5bdb..167a8ac314019 100644
+--- a/chrome/browser/cbf/cbf_web_contents_delegate.cc
++++ b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+@@ -7,6 +7,10 @@
+ #include "base/logging.h"
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ #include "chrome/browser/cbf/cbf_switches.h"
++#include "chrome/browser/ui/browser_navigator.h"
++#include "chrome/browser/ui/browser_navigator_params.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/page_navigator.h"
+ 
+@@ -63,6 +67,24 @@ content::WebContents* CbfWebContentsDelegate::OpenURLFromTab(
+   }
+ 
+   switch (params.disposition) {
++    case WindowOpenDisposition::SAVE_TO_DISK: {
++      BrowserWindowInterface* browser_window_interface =
++          webui::GetBrowserWindowInterface(source);
++      if (!browser_window_interface) {
++        return nullptr;
++      }
++      NavigateParams nav_params(browser_window_interface, params.url,
++                                params.transition);
++      nav_params.FillNavigateParamsFromOpenURLParams(params);
++      nav_params.source_contents = source;
++
++      base::WeakPtr<content::NavigationHandle> navigation_handle =
++          Navigate(&nav_params);
++      if (navigation_handle_callback && navigation_handle) {
++        std::move(navigation_handle_callback).Run(*navigation_handle);
++      }
++      return nav_params.navigated_or_inserted_contents;
++    }
+     case WindowOpenDisposition::NEW_FOREGROUND_TAB:
+     case WindowOpenDisposition::NEW_BACKGROUND_TAB:
+     case WindowOpenDisposition::NEW_WINDOW:
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 1b3e8408079f3..8df4177f6dc60 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -58,6 +58,7 @@ enum CbfAuxiliaryWindowCloseReason {
+ enum CbfPromptUiKind {
+   kUnknown,
+   kPermissionPrompt,
++  kDownloadPrompt,
+ };
+ 
+ enum CbfPromptUiPermissionType {
+@@ -80,11 +81,16 @@ struct CbfPromptUiRequest {
+   CbfPromptUiKind kind;
+   CbfPromptUiPermissionType permission;
+   string permission_key;
++  uint64 download_id;
++  string file_name;
++  uint64? total_bytes;
++  string? suggested_path;
+ };
+ 
+ struct CbfPromptUiResponse {
+   CbfPromptUiKind kind;
+   bool allow;
++  string? destination_path;
+ };
+ 
+ struct CbfPromptUiResolution {
+@@ -93,6 +99,54 @@ struct CbfPromptUiResolution {
+   CbfPromptUiPermissionType permission;
+   string permission_key;
+   CbfPromptUiResolutionResult result;
++  uint64 download_id;
++  string? destination_path;
++};
++
++enum CbfDownloadState {
++  kUnknown,
++  kInProgress,
++  kPaused,
++  kCompleted,
++  kCancelled,
++  kInterrupted,
++};
++
++enum CbfDownloadOutcome {
++  kUnknown,
++  kSucceeded,
++  kCancelled,
++  kInterrupted,
++};
++
++struct CbfDownloadCreated {
++  uint64 download_id;
++  uint64? source_tab_id;
++  string file_name;
++  uint64? total_bytes;
++  string? target_path;
++};
++
++struct CbfDownloadUpdated {
++  uint64 download_id;
++  uint64? source_tab_id;
++  CbfDownloadState state;
++  string file_name;
++  uint64 received_bytes;
++  uint64? total_bytes;
++  string? target_path;
++  bool can_resume;
++  bool is_paused;
++};
++
++struct CbfDownloadCompleted {
++  uint64 download_id;
++  uint64? source_tab_id;
++  CbfDownloadOutcome outcome;
++  string file_name;
++  uint64 received_bytes;
++  uint64? total_bytes;
++  string? target_path;
+ };
+ 
+ enum CbfTabOpenHint {
+@@ -524,6 +578,9 @@ interface CbfProfileObserver {
+                             CbfAuxiliaryWindowResolution resolution);
+   OnPromptUiRequested(uint64 tab_id, CbfPromptUiRequest request);
+   OnPromptUiResolved(uint64 tab_id, CbfPromptUiResolution resolution);
++  OnDownloadCreated(CbfDownloadCreated event);
++  OnDownloadUpdated(CbfDownloadUpdated event);
++  OnDownloadCompleted(CbfDownloadCompleted event);
+   OnExtensionRuntimeWarning(uint64 tab_id, string detail);
+   OnAuxiliaryWindowOpened(uint64 tab_id,
+                           uint64 window_id,
+@@ -570,6 +627,9 @@ interface CbfProfileService {
+                          uint64 request_id,
+                          CbfAuxiliaryWindowResponse response);
+   RespondPromptUi(uint64 tab_id, uint64 request_id, CbfPromptUiResponse response);
++  PauseDownload(uint64 download_id);
++  ResumeDownload(uint64 download_id);
++  CancelDownload(uint64 download_id);
+   CloseAuxiliaryWindow(uint64 tab_id, uint64 window_id);
+   RespondTabOpen(CbfTabOpenResponse response);
+ };
+diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
+index ddc7d15298584..16e0e9fdb7e9d 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
+@@ -8,6 +8,7 @@
+ #include "base/logging.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/time/time.h"
++#include "chrome/browser/cbf/cbf_embedded_browser_window.h"
+ #include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
+ #include "components/input/render_widget_host_input_event_router.h"
+@@ -199,19 +200,25 @@ void CbfProfileInputController::SendMouseEvent(mojom::CbfMouseEventPtr event) {
+   mouse_event.is_raw_movement_event = event->is_raw_movement_event;
+   mouse_event.pointer_type = mojo_converters::ToWebPointerType(event->pointer_type);
+ 
++  content::RenderWidgetHost* widget_host =
++      ResolveInputRenderWidgetHost(web_contents);
++  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
++  if (widget_impl &&
++      mouse_event.GetType() == blink::WebInputEvent::Type::kMouseDown) {
++    widget_impl->SimulateUserInteraction(mouse_event);
++  }
++
+   ui::LatencyInfo latency_info;
+-  if (RouteMouseEventViaInputRouter(web_contents, &mouse_event, latency_info)) {
++  if (!IsCbfEmbeddedBrowser(web_contents) &&
++      RouteMouseEventViaInputRouter(web_contents, &mouse_event, latency_info)) {
+     return;
+   }
+ 
+-  content::RenderWidgetHost* widget_host =
+-      ResolveInputRenderWidgetHost(web_contents);
+   if (!widget_host) {
+     DVLOG(1) << "SendMouseEvent dropped: no input widget host for tab_id="
+              << event->tab_id;
+     return;
+   }
+-  auto* widget_impl = content::RenderWidgetHostImpl::From(widget_host);
+   if (!widget_impl) {
+     return;
+   }
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index ff43485f178e3..2904b679e1909 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -2,6 +2,75 @@
+ 
+ namespace cbf::test {
+ 
++CbfTestProfileObserver::PromptUiRequestEvent::PromptUiRequestEvent() = default;
++CbfTestProfileObserver::PromptUiRequestEvent::~PromptUiRequestEvent() = default;
++CbfTestProfileObserver::PromptUiRequestEvent::PromptUiRequestEvent(
++    const PromptUiRequestEvent&) = default;
++CbfTestProfileObserver::PromptUiRequestEvent&
++CbfTestProfileObserver::PromptUiRequestEvent::operator=(
++    const PromptUiRequestEvent&) = default;
++CbfTestProfileObserver::PromptUiRequestEvent::PromptUiRequestEvent(
++    PromptUiRequestEvent&&) = default;
++CbfTestProfileObserver::PromptUiRequestEvent&
++CbfTestProfileObserver::PromptUiRequestEvent::operator=(PromptUiRequestEvent&&) =
++    default;
++
++CbfTestProfileObserver::PromptUiResolutionEvent::PromptUiResolutionEvent() =
++    default;
++CbfTestProfileObserver::PromptUiResolutionEvent::~PromptUiResolutionEvent() =
++    default;
++CbfTestProfileObserver::PromptUiResolutionEvent::PromptUiResolutionEvent(
++    const PromptUiResolutionEvent&) = default;
++CbfTestProfileObserver::PromptUiResolutionEvent&
++CbfTestProfileObserver::PromptUiResolutionEvent::operator=(
++    const PromptUiResolutionEvent&) = default;
++CbfTestProfileObserver::PromptUiResolutionEvent::PromptUiResolutionEvent(
++    PromptUiResolutionEvent&&) = default;
++CbfTestProfileObserver::PromptUiResolutionEvent&
++CbfTestProfileObserver::PromptUiResolutionEvent::operator=(
++    PromptUiResolutionEvent&&) = default;
++
++CbfTestProfileObserver::DownloadCreatedEvent::DownloadCreatedEvent() = default;
++CbfTestProfileObserver::DownloadCreatedEvent::~DownloadCreatedEvent() = default;
++CbfTestProfileObserver::DownloadCreatedEvent::DownloadCreatedEvent(
++    const DownloadCreatedEvent&) = default;
++CbfTestProfileObserver::DownloadCreatedEvent&
++CbfTestProfileObserver::DownloadCreatedEvent::operator=(
++    const DownloadCreatedEvent&) = default;
++CbfTestProfileObserver::DownloadCreatedEvent::DownloadCreatedEvent(
++    DownloadCreatedEvent&&) = default;
++CbfTestProfileObserver::DownloadCreatedEvent&
++CbfTestProfileObserver::DownloadCreatedEvent::operator=(DownloadCreatedEvent&&) =
++    default;
++
++CbfTestProfileObserver::DownloadUpdatedEvent::DownloadUpdatedEvent() = default;
++CbfTestProfileObserver::DownloadUpdatedEvent::~DownloadUpdatedEvent() = default;
++CbfTestProfileObserver::DownloadUpdatedEvent::DownloadUpdatedEvent(
++    const DownloadUpdatedEvent&) = default;
++CbfTestProfileObserver::DownloadUpdatedEvent&
++CbfTestProfileObserver::DownloadUpdatedEvent::operator=(
++    const DownloadUpdatedEvent&) = default;
++CbfTestProfileObserver::DownloadUpdatedEvent::DownloadUpdatedEvent(
++    DownloadUpdatedEvent&&) = default;
++CbfTestProfileObserver::DownloadUpdatedEvent&
++CbfTestProfileObserver::DownloadUpdatedEvent::operator=(DownloadUpdatedEvent&&) =
++    default;
++
++CbfTestProfileObserver::DownloadCompletedEvent::DownloadCompletedEvent() =
++    default;
++CbfTestProfileObserver::DownloadCompletedEvent::~DownloadCompletedEvent() =
++    default;
++CbfTestProfileObserver::DownloadCompletedEvent::DownloadCompletedEvent(
++    const DownloadCompletedEvent&) = default;
++CbfTestProfileObserver::DownloadCompletedEvent&
++CbfTestProfileObserver::DownloadCompletedEvent::operator=(
++    const DownloadCompletedEvent&) = default;
++CbfTestProfileObserver::DownloadCompletedEvent::DownloadCompletedEvent(
++    DownloadCompletedEvent&&) = default;
++CbfTestProfileObserver::DownloadCompletedEvent&
++CbfTestProfileObserver::DownloadCompletedEvent::operator=(
++    DownloadCompletedEvent&&) = default;
++
+ CbfTestProfileObserver::CbfTestProfileObserver() = default;
+ CbfTestProfileObserver::~CbfTestProfileObserver() = default;
+ 
+@@ -11,6 +80,7 @@ CbfTestProfileObserver::BindNewPipeAndPassRemote() {
+ }
+ 
+ void CbfTestProfileObserver::WaitForWebPageClosedCount(size_t expected_count) {
++  ResetWaitTargets();
+   wait_web_page_closed_count_ = expected_count;
+   if (web_page_closed_events_.size() >= wait_web_page_closed_count_) {
+     return;
+@@ -22,6 +92,7 @@ void CbfTestProfileObserver::WaitForWebPageClosedCount(size_t expected_count) {
+ }
+ 
+ void CbfTestProfileObserver::WaitForDevToolsOpenedCount(size_t expected_count) {
++  ResetWaitTargets();
+   wait_devtools_opened_count_ = expected_count;
+   if (devtools_opened_events_.size() >= wait_devtools_opened_count_) {
+     return;
+@@ -32,6 +103,67 @@ void CbfTestProfileObserver::WaitForDevToolsOpenedCount(size_t expected_count) {
+   quit_wait_loop_.Reset();
+ }
+ 
++void CbfTestProfileObserver::WaitForPromptUiRequestedCount(size_t expected_count) {
++  ResetWaitTargets();
++  wait_prompt_ui_requested_count_ = expected_count;
++  if (prompt_ui_requested_events_.size() >= wait_prompt_ui_requested_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
++void CbfTestProfileObserver::WaitForPromptUiResolvedCount(size_t expected_count) {
++  ResetWaitTargets();
++  wait_prompt_ui_resolved_count_ = expected_count;
++  if (prompt_ui_resolved_events_.size() >= wait_prompt_ui_resolved_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
++void CbfTestProfileObserver::WaitForDownloadCreatedCount(size_t expected_count) {
++  ResetWaitTargets();
++  wait_download_created_count_ = expected_count;
++  if (download_created_events_.size() >= wait_download_created_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
++void CbfTestProfileObserver::WaitForDownloadUpdatedCount(size_t expected_count) {
++  ResetWaitTargets();
++  wait_download_updated_count_ = expected_count;
++  if (download_updated_events_.size() >= wait_download_updated_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
++void CbfTestProfileObserver::WaitForDownloadCompletedCount(
++    size_t expected_count) {
++  ResetWaitTargets();
++  wait_download_completed_count_ = expected_count;
++  if (download_completed_events_.size() >= wait_download_completed_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
+ void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t tab_id,
+                                                     uint32_t ca_context_id) {}
+ 
+@@ -106,11 +238,77 @@ void CbfTestProfileObserver::OnAuxiliaryWindowResolved(
+ 
+ void CbfTestProfileObserver::OnPromptUiRequested(
+     uint64_t tab_id,
+-    cbf::mojom::CbfPromptUiRequestPtr request) {}
++    cbf::mojom::CbfPromptUiRequestPtr request) {
++  PromptUiRequestEvent event;
++  event.tab_id = tab_id;
++  event.request_id = request->request_id;
++  event.kind = request->kind;
++  event.download_id = request->download_id;
++  event.file_name = request->file_name;
++  event.total_bytes = request->total_bytes;
++  event.suggested_path = request->suggested_path;
++  prompt_ui_requested_events_.push_back(std::move(event));
++  MaybeQuitWaitLoop();
++}
+ 
+ void CbfTestProfileObserver::OnPromptUiResolved(
+     uint64_t tab_id,
+-    cbf::mojom::CbfPromptUiResolutionPtr resolution) {}
++    cbf::mojom::CbfPromptUiResolutionPtr resolution) {
++  PromptUiResolutionEvent event;
++  event.tab_id = tab_id;
++  event.request_id = resolution->request_id;
++  event.kind = resolution->kind;
++  event.result = resolution->result;
++  event.download_id = resolution->download_id;
++  event.destination_path = resolution->destination_path;
++  prompt_ui_resolved_events_.push_back(std::move(event));
++  MaybeQuitWaitLoop();
++}
++
++void CbfTestProfileObserver::OnDownloadCreated(
++    cbf::mojom::CbfDownloadCreatedPtr event) {
++  DownloadCreatedEvent created;
++  created.download_id = event->download_id;
++  created.source_tab_id = event->source_tab_id;
++  created.file_name = event->file_name;
++  created.total_bytes = event->total_bytes;
++  created.target_path = event->target_path;
++  download_created_events_.push_back(std::move(created));
++  download_event_order_.push_back(DownloadEventKind::kCreated);
++  MaybeQuitWaitLoop();
++}
++
++void CbfTestProfileObserver::OnDownloadUpdated(
++    cbf::mojom::CbfDownloadUpdatedPtr event) {
++  DownloadUpdatedEvent updated;
++  updated.download_id = event->download_id;
++  updated.source_tab_id = event->source_tab_id;
++  updated.state = event->state;
++  updated.file_name = event->file_name;
++  updated.received_bytes = event->received_bytes;
++  updated.total_bytes = event->total_bytes;
++  updated.target_path = event->target_path;
++  updated.can_resume = event->can_resume;
++  updated.is_paused = event->is_paused;
++  download_updated_events_.push_back(std::move(updated));
++  download_event_order_.push_back(DownloadEventKind::kUpdated);
++  MaybeQuitWaitLoop();
++}
++
++void CbfTestProfileObserver::OnDownloadCompleted(
++    cbf::mojom::CbfDownloadCompletedPtr event) {
++  DownloadCompletedEvent completed;
++  completed.download_id = event->download_id;
++  completed.source_tab_id = event->source_tab_id;
++  completed.outcome = event->outcome;
++  completed.file_name = event->file_name;
++  completed.received_bytes = event->received_bytes;
++  completed.total_bytes = event->total_bytes;
++  completed.target_path = event->target_path;
++  download_completed_events_.push_back(std::move(completed));
++  download_event_order_.push_back(DownloadEventKind::kCompleted);
++  MaybeQuitWaitLoop();
++}
+ 
+ void CbfTestProfileObserver::OnExtensionRuntimeWarning(
+     uint64_t tab_id,
+@@ -141,7 +339,42 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
+   if (wait_devtools_opened_count_ > 0 &&
+       devtools_opened_events_.size() >= wait_devtools_opened_count_) {
+     quit_wait_loop_.Run();
++    return;
++  }
++  if (wait_prompt_ui_requested_count_ > 0 &&
++      prompt_ui_requested_events_.size() >= wait_prompt_ui_requested_count_) {
++    quit_wait_loop_.Run();
++    return;
++  }
++  if (wait_prompt_ui_resolved_count_ > 0 &&
++      prompt_ui_resolved_events_.size() >= wait_prompt_ui_resolved_count_) {
++    quit_wait_loop_.Run();
++    return;
++  }
++  if (wait_download_created_count_ > 0 &&
++      download_created_events_.size() >= wait_download_created_count_) {
++    quit_wait_loop_.Run();
++    return;
++  }
++  if (wait_download_updated_count_ > 0 &&
++      download_updated_events_.size() >= wait_download_updated_count_) {
++    quit_wait_loop_.Run();
++    return;
+   }
++  if (wait_download_completed_count_ > 0 &&
++      download_completed_events_.size() >= wait_download_completed_count_) {
++    quit_wait_loop_.Run();
++  }
++}
++
++void CbfTestProfileObserver::ResetWaitTargets() {
++  wait_web_page_closed_count_ = 0;
++  wait_devtools_opened_count_ = 0;
++  wait_prompt_ui_requested_count_ = 0;
++  wait_prompt_ui_resolved_count_ = 0;
++  wait_download_created_count_ = 0;
++  wait_download_updated_count_ = 0;
++  wait_download_completed_count_ = 0;
+ }
+ 
+ }  // namespace cbf::test
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index c3321319201cd..87e93ff1b2ac2 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -2,6 +2,7 @@
+ #define CHROME_BROWSER_CBF_TEST_CBF_TEST_PROFILE_OBSERVER_H_
+ 
+ #include <cstdint>
++#include <optional>
+ #include <string>
+ #include <utility>
+ #include <vector>
+@@ -17,6 +18,98 @@ namespace cbf::test {
+ // Simple mojom observer implementation used by CBF tests.
+ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+  public:
++  struct PromptUiRequestEvent {
++    PromptUiRequestEvent();
++    ~PromptUiRequestEvent();
++    PromptUiRequestEvent(const PromptUiRequestEvent&);
++    PromptUiRequestEvent& operator=(const PromptUiRequestEvent&);
++    PromptUiRequestEvent(PromptUiRequestEvent&&);
++    PromptUiRequestEvent& operator=(PromptUiRequestEvent&&);
++
++    uint64_t tab_id = 0;
++    uint64_t request_id = 0;
++    cbf::mojom::CbfPromptUiKind kind = cbf::mojom::CbfPromptUiKind::kUnknown;
++    uint64_t download_id = 0;
++    std::string file_name;
++    std::optional<uint64_t> total_bytes;
++    std::optional<std::string> suggested_path;
++  };
++
++  struct PromptUiResolutionEvent {
++    PromptUiResolutionEvent();
++    ~PromptUiResolutionEvent();
++    PromptUiResolutionEvent(const PromptUiResolutionEvent&);
++    PromptUiResolutionEvent& operator=(const PromptUiResolutionEvent&);
++    PromptUiResolutionEvent(PromptUiResolutionEvent&&);
++    PromptUiResolutionEvent& operator=(PromptUiResolutionEvent&&);
++
++    uint64_t tab_id = 0;
++    uint64_t request_id = 0;
++    cbf::mojom::CbfPromptUiKind kind = cbf::mojom::CbfPromptUiKind::kUnknown;
++    cbf::mojom::CbfPromptUiResolutionResult result =
++        cbf::mojom::CbfPromptUiResolutionResult::kUnknown;
++    uint64_t download_id = 0;
++    std::optional<std::string> destination_path;
++  };
++
++  struct DownloadCreatedEvent {
++    DownloadCreatedEvent();
++    ~DownloadCreatedEvent();
++    DownloadCreatedEvent(const DownloadCreatedEvent&);
++    DownloadCreatedEvent& operator=(const DownloadCreatedEvent&);
++    DownloadCreatedEvent(DownloadCreatedEvent&&);
++    DownloadCreatedEvent& operator=(DownloadCreatedEvent&&);
++
++    uint64_t download_id = 0;
++    std::optional<uint64_t> source_tab_id;
++    std::string file_name;
++    std::optional<uint64_t> total_bytes;
++    std::optional<std::string> target_path;
++  };
++
++  struct DownloadUpdatedEvent {
++    DownloadUpdatedEvent();
++    ~DownloadUpdatedEvent();
++    DownloadUpdatedEvent(const DownloadUpdatedEvent&);
++    DownloadUpdatedEvent& operator=(const DownloadUpdatedEvent&);
++    DownloadUpdatedEvent(DownloadUpdatedEvent&&);
++    DownloadUpdatedEvent& operator=(DownloadUpdatedEvent&&);
++
++    uint64_t download_id = 0;
++    std::optional<uint64_t> source_tab_id;
++    cbf::mojom::CbfDownloadState state = cbf::mojom::CbfDownloadState::kUnknown;
++    std::string file_name;
++    uint64_t received_bytes = 0;
++    std::optional<uint64_t> total_bytes;
++    std::optional<std::string> target_path;
++    bool can_resume = false;
++    bool is_paused = false;
++  };
++
++  struct DownloadCompletedEvent {
++    DownloadCompletedEvent();
++    ~DownloadCompletedEvent();
++    DownloadCompletedEvent(const DownloadCompletedEvent&);
++    DownloadCompletedEvent& operator=(const DownloadCompletedEvent&);
++    DownloadCompletedEvent(DownloadCompletedEvent&&);
++    DownloadCompletedEvent& operator=(DownloadCompletedEvent&&);
++
++    uint64_t download_id = 0;
++    std::optional<uint64_t> source_tab_id;
++    cbf::mojom::CbfDownloadOutcome outcome =
++        cbf::mojom::CbfDownloadOutcome::kUnknown;
++    std::string file_name;
++    uint64_t received_bytes = 0;
++    std::optional<uint64_t> total_bytes;
++    std::optional<std::string> target_path;
++  };
++
++  enum class DownloadEventKind {
++    kCreated,
++    kUpdated,
++    kCompleted,
++  };
++
+   CbfTestProfileObserver();
+   CbfTestProfileObserver(const CbfTestProfileObserver&) = delete;
+   CbfTestProfileObserver& operator=(const CbfTestProfileObserver&) = delete;
+@@ -31,9 +124,32 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+       const {
+     return devtools_opened_events_;
+   }
++  const std::vector<PromptUiRequestEvent>& prompt_ui_requested_events() const {
++    return prompt_ui_requested_events_;
++  }
++  const std::vector<PromptUiResolutionEvent>& prompt_ui_resolved_events() const {
++    return prompt_ui_resolved_events_;
++  }
++  const std::vector<DownloadCreatedEvent>& download_created_events() const {
++    return download_created_events_;
++  }
++  const std::vector<DownloadUpdatedEvent>& download_updated_events() const {
++    return download_updated_events_;
++  }
++  const std::vector<DownloadCompletedEvent>& download_completed_events() const {
++    return download_completed_events_;
++  }
++  const std::vector<DownloadEventKind>& download_event_order() const {
++    return download_event_order_;
++  }
+ 
+   void WaitForWebPageClosedCount(size_t expected_count);
+   void WaitForDevToolsOpenedCount(size_t expected_count);
++  void WaitForPromptUiRequestedCount(size_t expected_count);
++  void WaitForPromptUiResolvedCount(size_t expected_count);
++  void WaitForDownloadCreatedCount(size_t expected_count);
++  void WaitForDownloadUpdatedCount(size_t expected_count);
++  void WaitForDownloadCompletedCount(size_t expected_count);
+ 
+   // cbf::mojom::CbfProfileObserver
+   void OnSurfaceHandleUpdated(uint64_t tab_id,
+@@ -83,6 +199,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void OnPromptUiResolved(
+       uint64_t tab_id,
+       cbf::mojom::CbfPromptUiResolutionPtr resolution) override;
++  void OnDownloadCreated(cbf::mojom::CbfDownloadCreatedPtr event) override;
++  void OnDownloadUpdated(cbf::mojom::CbfDownloadUpdatedPtr event) override;
++  void OnDownloadCompleted(cbf::mojom::CbfDownloadCompletedPtr event) override;
+   void OnExtensionRuntimeWarning(uint64_t tab_id,
+                                  const std::string& detail) override;
+   void OnAuxiliaryWindowOpened(uint64_t tab_id,
+@@ -98,13 +217,25 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+ 
+  private:
+   void MaybeQuitWaitLoop();
++  void ResetWaitTargets();
+ 
+   mojo::Receiver<cbf::mojom::CbfProfileObserver> receiver_{this};
+   std::vector<uint64_t> web_page_closed_events_;
+   std::vector<std::pair<uint64_t, uint64_t>> devtools_opened_events_;
++  std::vector<PromptUiRequestEvent> prompt_ui_requested_events_;
++  std::vector<PromptUiResolutionEvent> prompt_ui_resolved_events_;
++  std::vector<DownloadCreatedEvent> download_created_events_;
++  std::vector<DownloadUpdatedEvent> download_updated_events_;
++  std::vector<DownloadCompletedEvent> download_completed_events_;
++  std::vector<DownloadEventKind> download_event_order_;
+ 
+   size_t wait_web_page_closed_count_ = 0;
+   size_t wait_devtools_opened_count_ = 0;
++  size_t wait_prompt_ui_requested_count_ = 0;
++  size_t wait_prompt_ui_resolved_count_ = 0;
++  size_t wait_download_created_count_ = 0;
++  size_t wait_download_updated_count_ = 0;
++  size_t wait_download_completed_count_ = 0;
+   base::RepeatingClosure quit_wait_loop_;
+ };
+ 
+diff --git a/chrome/browser/download/download_core_service_impl.cc b/chrome/browser/download/download_core_service_impl.cc
+index 971bfd1ea88ca..97672692dd11d 100644
+--- a/chrome/browser/download/download_core_service_impl.cc
++++ b/chrome/browser/download/download_core_service_impl.cc
+@@ -138,6 +138,35 @@ void DownloadCoreServiceImpl::CancelDownloads(
+   }
+ }
+ 
++void DownloadCoreServiceImpl::SetDownloadManagerDelegate(
++    std::unique_ptr<ChromeDownloadManagerDelegate> delegate) {
++  if (!download_manager_created_) {
++    manager_delegate_ = std::move(delegate);
++    return;
++  }
++
++  manager_delegate_.swap(delegate);
++  DownloadManager* dm = profile_->GetDownloadManager();
++  dm->SetDelegate(manager_delegate_.get());
++  if (manager_delegate_) {
++    manager_delegate_->SetDownloadManager(dm);
++    // If the DownloadManager is already live, a newly installed delegate has
++    // not gone through GetDownloadManagerDelegate() bootstrap, so it may miss
++    // history-backed next-id initialization. Seed it here to avoid GetNextId()
++    // waiting indefinitely.
++    if (!profile_->IsOffTheRecord()) {
++      if (history::HistoryService* history = HistoryServiceFactory::GetForProfile(
++              profile_, ServiceAccessType::EXPLICIT_ACCESS)) {
++        history->GetNextDownloadId(
++            manager_delegate_->GetDownloadIdReceiverCallback());
++      }
++    }
++  }
++  if (delegate) {
++    delegate->Shutdown();
++  }
++}
++
+ void DownloadCoreServiceImpl::SetDownloadManagerDelegateForTesting(
+     std::unique_ptr<ChromeDownloadManagerDelegate> new_delegate) {
+   manager_delegate_.swap(new_delegate);
+diff --git a/chrome/browser/download/download_core_service_impl.h b/chrome/browser/download/download_core_service_impl.h
+index a92fdaed67abb..35d1fcf3779a7 100644
+--- a/chrome/browser/download/download_core_service_impl.h
++++ b/chrome/browser/download/download_core_service_impl.h
+@@ -48,6 +48,8 @@ class DownloadCoreServiceImpl : public DownloadCoreService {
+       DownloadCoreService::CancelDownloadsTrigger trigger) override;
+   void SetDownloadManagerDelegateForTesting(
+       std::unique_ptr<ChromeDownloadManagerDelegate> delegate) override;
++  void SetDownloadManagerDelegate(
++      std::unique_ptr<ChromeDownloadManagerDelegate> delegate);
+   bool IsDownloadUiEnabled() override;
+   DownloadUIController* GetDownloadUIController() override;
+   void SetDownloadHistoryForTesting(
+diff --git a/components/download/internal/common/in_progress_download_manager.cc b/components/download/internal/common/in_progress_download_manager.cc
+index 32e2ae4ac87e5..7badb5843e624 100644
+--- a/components/download/internal/common/in_progress_download_manager.cc
++++ b/components/download/internal/common/in_progress_download_manager.cc
+@@ -239,8 +239,7 @@ void InProgressDownloadManager::OnUrlDownloadStarted(
+   if (!download_create_info->guid.empty() &&
+       download_create_info->is_new_download &&
+       GetDownloadByGuid(download_create_info->guid)) {
+-    LOG(WARNING) << "A download with the same GUID already exists, the new "
+-                    "request is ignored.";
++    LOG(WARNING) << "A download with the same GUID already exists, the new " "request is ignored.";
+     return;
+   }
+   StartDownload(std::move(download_create_info), std::move(input_stream),
+@@ -510,8 +509,7 @@ void InProgressDownloadManager::StartDownload(
+   DCHECK(
+       (info->result == DOWNLOAD_INTERRUPT_REASON_NONE && !stream->IsEmpty()) ||
+       (info->result != DOWNLOAD_INTERRUPT_REASON_NONE && stream->IsEmpty()));
+-  DVLOG(20) << __func__
+-            << "() result=" << DownloadInterruptReasonToString(info->result);
++  DVLOG(20) << __func__;
+ 
+ 
+   // If the download cannot be found locally, ask |delegate_| to provide the
+diff --git a/components/download/internal/common/resource_downloader.cc b/components/download/internal/common/resource_downloader.cc
+index 916b38db15aea..123f43f81ba6b 100644
+--- a/components/download/internal/common/resource_downloader.cc
++++ b/components/download/internal/common/resource_downloader.cc
+@@ -113,7 +113,12 @@ void ResourceDownloader::InterceptNavigationResponse(
+       serialized_embedder_download_data, tab_url, tab_referrer_url, true,
+       task_runner, std::move(url_loader_factory), url_security_policy,
+       std::move(wake_lock_provider));
+-  ResourceDownloader* raw_downloader = downloader.get();
++
++  downloader->InterceptResponse(
++      std::move(url_chain), cert_status, std::move(response_head),
++      std::move(response_body), std::move(url_loader_client_endpoints),
++      is_transient);
++
+   task_runner->PostTask(
+       FROM_HERE,
+       base::BindOnce(
+@@ -122,10 +127,6 @@ void ResourceDownloader::InterceptNavigationResponse(
+               std::move(downloader).release(),
+               base::OnTaskRunnerDeleter(
+                   base::SingleThreadTaskRunner::GetCurrentDefault()))));
+-  raw_downloader->InterceptResponse(
+-      std::move(url_chain), cert_status, std::move(response_head),
+-      std::move(response_body), std::move(url_loader_client_endpoints),
+-      is_transient);
+ }
+ 
+ ResourceDownloader::ResourceDownloader(
+@@ -303,11 +304,11 @@ void ResourceDownloader::OnUploadProgress(uint64_t bytes_uploaded) {
+ void ResourceDownloader::Destroy() {
+   if (wake_lock_)
+     wake_lock_->CancelWakeLock();
+-  // TODO(crbug.com/40248618): Use Weak Pointers instead.
+   delegate_task_runner_->PostTask(
+       FROM_HERE,
+       base::BindOnce(&UrlDownloadHandler::Delegate::OnUrlDownloadStopped,
+-                     delegate_, reinterpret_cast<UrlDownloadHandlerID>(this)));
++                     delegate_,
++                     reinterpret_cast<UrlDownloadHandlerID>(this)));
+ }
+ 
+ void ResourceDownloader::RequestWakeLock(
+diff --git a/components/download/internal/common/resource_downloader.h b/components/download/internal/common/resource_downloader.h
+index 33c7e54f31e61..a0e377db07b19 100644
+--- a/components/download/internal/common/resource_downloader.h
++++ b/components/download/internal/common/resource_downloader.h
+@@ -6,6 +6,7 @@
+ #define COMPONENTS_DOWNLOAD_INTERNAL_COMMON_RESOURCE_DOWNLOADER_H_
+ 
+ #include "base/functional/callback.h"
++#include "base/memory/weak_ptr.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "components/download/public/common/download_export.h"
+ #include "components/download/public/common/download_response_handler.h"
+@@ -28,7 +29,7 @@ class COMPONENTS_DOWNLOAD_EXPORT ResourceDownloader
+  public:
+   // Called to start a download, must be called on IO thread.
+   static std::unique_ptr<ResourceDownloader> BeginDownload(
+-      base::WeakPtr<download::UrlDownloadHandler::Delegate> delegate,
++      base::WeakPtr<UrlDownloadHandler::Delegate> delegate,
+       std::unique_ptr<download::DownloadUrlParameters> download_url_parameters,
+       std::unique_ptr<network::ResourceRequest> request,
+       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+@@ -114,7 +115,9 @@ class COMPONENTS_DOWNLOAD_EXPORT ResourceDownloader
+   // Requests the wake lock using |provider|.
+   void RequestWakeLock(device::mojom::WakeLockProvider* provider);
+ 
+-  base::WeakPtr<download::UrlDownloadHandler::Delegate> delegate_;
++  // Weak ptr to delegate. InProgressDownloadManager (the delegate) can be
++  // destroyed before callbacks posted back to UI are executed.
++  base::WeakPtr<UrlDownloadHandler::Delegate> delegate_;
+ 
+   // The ResourceRequest for this object.
+   std::unique_ptr<network::ResourceRequest> resource_request_;
+diff --git a/content/browser/download/download_manager_impl.cc b/content/browser/download/download_manager_impl.cc
+index 7bedb1b17a20a..198da4c560668 100644
+--- a/content/browser/download/download_manager_impl.cc
++++ b/content/browser/download/download_manager_impl.cc
+@@ -699,8 +699,7 @@ void DownloadManagerImpl::StartDownloadItem(
+   } else {
+     // If the download already in system, it can only be resumed.
+     if (!info->guid.empty() && download) {
+-      LOG(WARNING) << "A download with the same GUID already exists, the new "
+-                      "request is ignored.";
++      LOG(WARNING) << "A download with the same GUID already exists, the new " "request is ignored.";
+       return;
+     }
+     GetNextId(base::BindOnce(&DownloadManagerImpl::OnNewDownloadIdRetrieved,
+-- 
+2.50.1 (Apple Git-155)
+

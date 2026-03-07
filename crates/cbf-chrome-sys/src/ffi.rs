@@ -36,6 +36,9 @@ pub const CBF_EVENT_TAB_OPEN_REQUESTED: u8 = 25;
 pub const CBF_EVENT_TAB_OPEN_RESOLVED: u8 = 26;
 pub const CBF_EVENT_PROMPT_UI_REQUESTED: u8 = 27;
 pub const CBF_EVENT_PROMPT_UI_RESOLVED: u8 = 28;
+pub const CBF_EVENT_DOWNLOAD_CREATED: u8 = 29;
+pub const CBF_EVENT_DOWNLOAD_UPDATED: u8 = 30;
+pub const CBF_EVENT_DOWNLOAD_COMPLETED: u8 = 31;
 
 pub const CBF_EVENT_PROMPT_UI_OPEN_REQUESTED: u8 = CBF_EVENT_PROMPT_UI_REQUESTED;
 pub const CBF_EVENT_PROMPT_UI_OPENED: u8 = CBF_EVENT_AUXILIARY_WINDOW_OPENED;
@@ -68,8 +71,10 @@ pub const CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG: u8 = 2;
 
 pub const CBF_PROMPT_UI_KIND_UNKNOWN: u8 = 0;
 pub const CBF_PROMPT_UI_KIND_PERMISSION_PROMPT: u8 = 1;
-pub const CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT: u8 = 2;
-pub const CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG: u8 = 3;
+pub const CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT: u8 = 2;
+// Legacy prompt-ui kind values kept for compatibility with older bridge events.
+pub const CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT: u8 = 3;
+pub const CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG: u8 = 4;
 
 pub const CBF_PROMPT_UI_CLOSE_REASON_UNKNOWN: u8 = 0;
 pub const CBF_PROMPT_UI_CLOSE_REASON_USER_CANCELED: u8 = 1;
@@ -98,6 +103,22 @@ pub const CBF_PROMPT_UI_DIALOG_RESULT_UNKNOWN: u8 = 0;
 pub const CBF_PROMPT_UI_DIALOG_RESULT_PROCEEDED: u8 = 1;
 pub const CBF_PROMPT_UI_DIALOG_RESULT_CANCELED: u8 = 2;
 pub const CBF_PROMPT_UI_DIALOG_RESULT_ABORTED: u8 = 3;
+
+pub const CBF_DOWNLOAD_PROMPT_RESULT_ALLOWED: u8 = 1;
+pub const CBF_DOWNLOAD_PROMPT_RESULT_DENIED: u8 = 2;
+pub const CBF_DOWNLOAD_PROMPT_RESULT_ABORTED: u8 = 3;
+
+pub const CBF_DOWNLOAD_STATE_UNKNOWN: u8 = 0;
+pub const CBF_DOWNLOAD_STATE_IN_PROGRESS: u8 = 1;
+pub const CBF_DOWNLOAD_STATE_PAUSED: u8 = 2;
+pub const CBF_DOWNLOAD_STATE_COMPLETED: u8 = 3;
+pub const CBF_DOWNLOAD_STATE_CANCELLED: u8 = 4;
+pub const CBF_DOWNLOAD_STATE_INTERRUPTED: u8 = 5;
+
+pub const CBF_DOWNLOAD_OUTCOME_UNKNOWN: u8 = 0;
+pub const CBF_DOWNLOAD_OUTCOME_SUCCEEDED: u8 = 1;
+pub const CBF_DOWNLOAD_OUTCOME_CANCELLED: u8 = 2;
+pub const CBF_DOWNLOAD_OUTCOME_INTERRUPTED: u8 = 3;
 
 pub const CBF_TAB_OPEN_HINT_UNKNOWN: u8 = 0;
 pub const CBF_TAB_OPEN_HINT_CURRENT_CONTEXT: u8 = 1;
@@ -259,14 +280,29 @@ pub struct CbfBridgeEvent {
     pub prompt_ui_extension_install_result: u8,
     pub prompt_ui_extension_install_detail: *mut c_char,
     pub extension_runtime_warning: *mut c_char,
-    pub prompt_ui_id: u64,
-    pub prompt_ui_close_reason: u8,
-    pub prompt_ui_title: *mut c_char,
-    pub prompt_ui_modal: bool,
+    pub auxiliary_window_id: u64,
+    pub auxiliary_window_kind: u8,
+    pub auxiliary_window_close_reason: u8,
+    pub auxiliary_window_title: *mut c_char,
+    pub auxiliary_window_modal: bool,
     pub prompt_ui_kind: u8,
     pub prompt_ui_permission: u8,
     pub prompt_ui_result: u8,
     pub prompt_ui_permission_key: *mut c_char,
+    pub download_id: u64,
+    pub download_has_source_tab_id: bool,
+    pub download_source_tab_id: u64,
+    pub download_file_name: *mut c_char,
+    pub download_target_path: *mut c_char,
+    pub download_suggested_path: *mut c_char,
+    pub download_destination_path: *mut c_char,
+    pub download_total_bytes: u64,
+    pub download_has_total_bytes: bool,
+    pub download_received_bytes: u64,
+    pub download_can_resume: bool,
+    pub download_is_paused: bool,
+    pub download_state: u8,
+    pub download_outcome: u8,
     pub tab_open_hint: u8,
     pub tab_open_user_gesture: bool,
     pub tab_open_has_source: bool,
@@ -807,6 +843,19 @@ unsafe extern "C" {
         request_id: u64,
         prompt_ui_kind: u8,
         proceed: bool,
+        destination_path: *const c_char,
+    ) -> bool;
+    pub fn cbf_bridge_client_pause_download(
+        client: *mut CbfBridgeClientHandle,
+        download_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_resume_download(
+        client: *mut CbfBridgeClientHandle,
+        download_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_cancel_download(
+        client: *mut CbfBridgeClientHandle,
+        download_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_close_prompt_ui(
         client: *mut CbfBridgeClientHandle,

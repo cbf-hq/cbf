@@ -9,6 +9,7 @@ use cbf::{
         browsing_context_open::BrowsingContextOpenHint,
         browsing_context_open::BrowsingContextOpenResponse,
         context_menu::ContextMenu,
+        download::{DownloadId, DownloadOutcome, DownloadState},
         drag::{DragOperations, DragStartRequest},
         extension::{AuxiliaryWindowKind, AuxiliaryWindowResponse},
         ids::{BrowsingContextId, WindowId},
@@ -22,7 +23,7 @@ use cbf::{
 };
 use cbf_chrome::{backend::ChromiumBackend, data::surface::SurfaceHandle};
 use cursor_icon::CursorIcon;
-use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use tracing::{error, info, warn};
 use winit::event::WindowEvent;
 
@@ -208,6 +209,20 @@ pub(crate) struct CoreState {
     page_create_requested: bool,
     /// Whether we've initiated shutdown sequence.
     shutdown_requested: bool,
+    /// Tracks the most recent page title per host window before download decoration.
+    window_base_titles: HashMap<WindowId, String>,
+    /// Tracks active and terminal download snapshots for title aggregation and logging.
+    downloads: HashMap<DownloadId, DownloadStatus>,
+}
+
+#[derive(Debug, Clone)]
+struct DownloadStatus {
+    source_browsing_context_id: Option<BrowsingContextId>,
+    file_name: String,
+    received_bytes: u64,
+    total_bytes: Option<u64>,
+    state: DownloadState,
+    is_paused: bool,
 }
 
 /// Actions that the core state wants the platform layer to execute.
@@ -261,11 +276,85 @@ impl CoreState {
             shared,
             page_create_requested: false,
             shutdown_requested: false,
+            window_base_titles: HashMap::new(),
+            downloads: HashMap::new(),
         }
     }
 
     pub(crate) fn browser_handle(&self) -> BrowserHandle<ChromiumBackend> {
         self.session.handle()
+    }
+
+    fn base_title_for_window(&self, window_id: WindowId) -> String {
+        self.window_base_titles
+            .get(&window_id)
+            .cloned()
+            .unwrap_or_else(|| "CBF SimpleApp".to_string())
+    }
+
+    fn is_active_download(state: DownloadState) -> bool {
+        matches!(state, DownloadState::InProgress | DownloadState::Paused)
+    }
+
+    fn format_progress(received_bytes: u64, total_bytes: Option<u64>) -> Option<String> {
+        total_bytes.and_then(|total| {
+            if total == 0 {
+                None
+            } else {
+                Some(format!("{}%", received_bytes.saturating_mul(100) / total))
+            }
+        })
+    }
+
+    fn download_title_suffix(&self) -> Option<String> {
+        let active: Vec<_> = self
+            .downloads
+            .values()
+            .filter(|download| Self::is_active_download(download.state))
+            .collect();
+        if active.is_empty() {
+            return None;
+        }
+
+        if active.len() == 1 {
+            let download = active[0];
+            let verb = if download.is_paused {
+                "Paused"
+            } else {
+                "Downloading"
+            };
+            return Some(
+                match Self::format_progress(download.received_bytes, download.total_bytes) {
+                    Some(progress) => format!("{verb} {progress} - {}", download.file_name),
+                    None => format!("{verb} - {}", download.file_name),
+                },
+            );
+        }
+
+        let paused = active.iter().filter(|download| download.is_paused).count();
+        Some(if paused > 0 {
+            format!("{} downloads active, {} paused", active.len(), paused)
+        } else {
+            format!("{} downloads active", active.len())
+        })
+    }
+
+    fn decorated_window_title(&self, window_id: WindowId) -> String {
+        let base_title = self.base_title_for_window(window_id);
+        match self.download_title_suffix() {
+            Some(suffix) => format!("{base_title} - {suffix}"),
+            None => base_title,
+        }
+    }
+
+    fn refresh_primary_window_title(&self) -> Vec<CoreAction> {
+        primary_host_window_id(&self.shared)
+            .map(|window_id| CoreAction::UpdateWindowTitle {
+                window_id,
+                title: self.decorated_window_title(window_id),
+            })
+            .into_iter()
+            .collect()
     }
 
     pub(crate) fn browsing_context_id_for_target(
@@ -524,6 +613,89 @@ impl CoreState {
                 println!("extensions: {profile_id} {extensions:?}");
                 Vec::new()
             }
+            BrowserEvent::DownloadCreated {
+                download_id,
+                source_browsing_context_id,
+                file_name,
+                total_bytes,
+                target_path,
+                ..
+            } => {
+                info!(
+                    "download created: id={download_id:?}, source={source_browsing_context_id:?}, file={file_name}, total_bytes={total_bytes:?}, target_path={target_path:?}"
+                );
+                self.downloads.insert(
+                    download_id,
+                    DownloadStatus {
+                        source_browsing_context_id,
+                        file_name,
+                        received_bytes: 0,
+                        total_bytes,
+                        state: DownloadState::InProgress,
+                        is_paused: false,
+                    },
+                );
+                self.refresh_primary_window_title()
+            }
+            BrowserEvent::DownloadUpdated {
+                download_id,
+                source_browsing_context_id,
+                state,
+                file_name,
+                received_bytes,
+                total_bytes,
+                target_path: _,
+                can_resume,
+                is_paused,
+                ..
+            } => {
+                info!(
+                    "download updated: id={download_id:?}, state={state:?}, file={file_name}, received={received_bytes}, total={total_bytes:?}, paused={is_paused}, resumable={can_resume}"
+                );
+                self.downloads.insert(
+                    download_id,
+                    DownloadStatus {
+                        source_browsing_context_id,
+                        file_name,
+                        received_bytes,
+                        total_bytes,
+                        state,
+                        is_paused,
+                    },
+                );
+                self.refresh_primary_window_title()
+            }
+            BrowserEvent::DownloadCompleted {
+                download_id,
+                source_browsing_context_id,
+                outcome,
+                file_name,
+                received_bytes,
+                total_bytes,
+                target_path,
+                ..
+            } => {
+                info!(
+                    "download completed: id={download_id:?}, outcome={outcome:?}, file={file_name}, received={received_bytes}, total={total_bytes:?}, target_path={target_path:?}"
+                );
+                self.downloads.insert(
+                    download_id,
+                    DownloadStatus {
+                        source_browsing_context_id,
+                        file_name,
+                        received_bytes,
+                        total_bytes,
+                        state: match outcome {
+                            DownloadOutcome::Succeeded => DownloadState::Completed,
+                            DownloadOutcome::Cancelled => DownloadState::Cancelled,
+                            DownloadOutcome::Interrupted => DownloadState::Interrupted,
+                            DownloadOutcome::Unknown => DownloadState::Unknown,
+                        },
+                        is_paused: false,
+                    },
+                );
+                self.refresh_primary_window_title()
+            }
         }
     }
 
@@ -612,7 +784,11 @@ impl CoreState {
                 if let Some(window_id) =
                     window_id_for_browsing_context(&self.shared, browsing_context_id)
                 {
-                    vec![CoreAction::UpdateWindowTitle { window_id, title }]
+                    self.window_base_titles.insert(window_id, title);
+                    vec![CoreAction::UpdateWindowTitle {
+                        window_id,
+                        title: self.decorated_window_title(window_id),
+                    }]
                 } else {
                     Vec::new()
                 }
@@ -675,6 +851,10 @@ impl CoreState {
             BrowsingContextEvent::Closed => {
                 let close_action = unbind_browsing_context(&self.shared, browsing_context_id)
                     .map(|window_id| CoreAction::CloseHostWindow { window_id });
+                self.downloads.retain(|_, download| {
+                    download.source_browsing_context_id != Some(browsing_context_id)
+                        || !Self::is_active_download(download.state)
+                });
 
                 if self.browsing_context_id_for_target(ViewTarget::Primary)
                     == Some(browsing_context_id)
@@ -688,9 +868,11 @@ impl CoreState {
                 }
 
                 let mut actions = Vec::new();
-                if let Some(action) = close_action {
-                    actions.push(action);
+                if let Some(CoreAction::CloseHostWindow { window_id }) = close_action {
+                    self.window_base_titles.remove(&window_id);
+                    actions.push(CoreAction::CloseHostWindow { window_id });
                 }
+                actions.extend(self.refresh_primary_window_title());
                 if !has_bound_windows(&self.shared) {
                     self.request_shutdown_once();
                     actions.push(CoreAction::ExitEventLoop);
@@ -708,6 +890,27 @@ impl CoreState {
                         AuxiliaryWindowResponse::PermissionPrompt { allow },
                     ) {
                         warn!("failed to respond permission prompt request_id={request_id}: {err}");
+                    }
+                    return Vec::new();
+                }
+
+                if let AuxiliaryWindowKind::DownloadPrompt {
+                    download_id,
+                    file_name,
+                    total_bytes,
+                    suggested_path,
+                } = &kind
+                {
+                    let response =
+                        show_download_prompt_dialog(file_name, *total_bytes, suggested_path);
+                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
+                        browsing_context_id,
+                        request_id,
+                        response,
+                    ) {
+                        warn!(
+                            "failed to respond download prompt request_id={request_id}, download_id={download_id:?}: {err}"
+                        );
                     }
                     return Vec::new();
                 }
@@ -789,6 +992,58 @@ fn show_permission_prompt_dialog(permission: &cbf::data::extension::PermissionPr
         .show();
 
     matches!(result, MessageDialogResult::Yes)
+}
+
+fn show_download_prompt_dialog(
+    file_name: &str,
+    total_bytes: Option<u64>,
+    suggested_path: &Option<String>,
+) -> AuxiliaryWindowResponse {
+    let size_line = total_bytes
+        .map(|bytes| format!("\nSize: {bytes} bytes"))
+        .unwrap_or_default();
+    let suggested_path_line = suggested_path
+        .as_ref()
+        .map(|path| format!("\nSuggested path: {path}"))
+        .unwrap_or_default();
+    let message =
+        format!("Download file:\n{file_name}{size_line}{suggested_path_line}\n\nContinue?");
+
+    let confirm = MessageDialog::new()
+        .set_level(MessageLevel::Info)
+        .set_title("Download Request")
+        .set_description(&message)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+
+    if !matches!(confirm, MessageDialogResult::Yes) {
+        return AuxiliaryWindowResponse::DownloadPrompt {
+            allow: false,
+            destination_path: None,
+        };
+    }
+
+    let mut dialog = FileDialog::new().set_file_name(file_name);
+    if let Some(suggested_path) = suggested_path {
+        let suggested = std::path::Path::new(suggested_path);
+        if let Some(parent) = suggested.parent() {
+            dialog = dialog.set_directory(parent);
+        }
+        if let Some(name) = suggested.file_name().and_then(|name| name.to_str()) {
+            dialog = dialog.set_file_name(name);
+        }
+    }
+
+    match dialog.save_file() {
+        Some(path) => AuxiliaryWindowResponse::DownloadPrompt {
+            allow: true,
+            destination_path: Some(path.to_string_lossy().into_owned()),
+        },
+        None => AuxiliaryWindowResponse::DownloadPrompt {
+            allow: false,
+            destination_path: None,
+        },
+    }
 }
 
 fn permission_prompt_description(

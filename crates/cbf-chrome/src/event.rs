@@ -1,4 +1,23 @@
+//! Chrome-specific event types and conversion utilities.
+//!
+//! This module defines [`ChromeEvent`], an event type that carries
+//! Chrome-specific vocabulary and serves as the primary event stream payload
+//! of the Chrome backend. The underlying FFI bindings live in `cbf-chrome-sys`;
+//! the types here are safe Rust abstractions on top of them.
+//!
+//! Two conversion functions translate Chrome-specific events into
+//! browser-generic ones where a mapping exists:
+//!
+//! - [`to_generic_event`] — converts a [`ChromeEvent`] into a
+//!   [`cbf::event::BrowserEvent`].
+//! - [`map_ipc_event_to_generic`] — converts a [`crate::ffi::IpcEvent`]
+//!   received over the IPC bridge into a [`cbf::event::BrowserEvent`].
+//!
+//! Not every Chrome-specific event has a generic counterpart; those return
+//! `None` and are intended to be consumed only by Chrome-aware code.
+
 use cbf::data::{
+    download::DownloadPromptResult,
     extension::{
         AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
         AuxiliaryWindowResolution, ExtensionInstallPromptResult, PermissionPromptResult,
@@ -14,6 +33,7 @@ use cbf::event::{BrowserEvent, BrowsingContextEvent};
 
 use crate::data::{
     browsing_context_open::ChromeBrowsingContextOpenResult,
+    download::ChromeDownloadPromptResult,
     extension::ChromeExtensionInfo,
     lifecycle::{ChromeBackendErrorInfo, ChromeBackendStopReason},
     profile::ChromeProfileInfo,
@@ -369,6 +389,51 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 reason: prompt_ui_close_reason_to_auxiliary_window_close_reason(reason),
             }),
         }),
+        IpcEvent::DownloadCreated {
+            profile_id,
+            download,
+        } => Some(BrowserEvent::DownloadCreated {
+            profile_id: profile_id.clone(),
+            download_id: download.download_id.into(),
+            source_browsing_context_id: download
+                .source_tab_id
+                .map(|tab_id| tab_id.to_browsing_context_id()),
+            file_name: download.file_name.clone(),
+            total_bytes: download.total_bytes,
+            target_path: download.target_path.clone(),
+        }),
+        IpcEvent::DownloadUpdated {
+            profile_id,
+            download,
+        } => Some(BrowserEvent::DownloadUpdated {
+            profile_id: profile_id.clone(),
+            download_id: download.download_id.into(),
+            source_browsing_context_id: download
+                .source_tab_id
+                .map(|tab_id| tab_id.to_browsing_context_id()),
+            state: download.state.into(),
+            file_name: download.file_name.clone(),
+            received_bytes: download.received_bytes,
+            total_bytes: download.total_bytes,
+            target_path: download.target_path.clone(),
+            can_resume: download.can_resume,
+            is_paused: download.is_paused,
+        }),
+        IpcEvent::DownloadCompleted {
+            profile_id,
+            download,
+        } => Some(BrowserEvent::DownloadCompleted {
+            profile_id: profile_id.clone(),
+            download_id: download.download_id.into(),
+            source_browsing_context_id: download
+                .source_tab_id
+                .map(|tab_id| tab_id.to_browsing_context_id()),
+            outcome: download.outcome.into(),
+            file_name: download.file_name.clone(),
+            received_bytes: download.received_bytes,
+            total_bytes: download.total_bytes,
+            target_path: download.target_path.clone(),
+        }),
     }
 }
 
@@ -421,6 +486,17 @@ fn prompt_ui_kind_to_auxiliary_window_kind(kind: &PromptUiKind) -> AuxiliaryWind
                 permission_key.as_deref(),
             ),
         },
+        PromptUiKind::DownloadPrompt {
+            download_id,
+            file_name,
+            total_bytes,
+            suggested_path,
+        } => AuxiliaryWindowKind::DownloadPrompt {
+            download_id: (*download_id).into(),
+            file_name: file_name.clone(),
+            total_bytes: *total_bytes,
+            suggested_path: suggested_path.clone(),
+        },
         PromptUiKind::ExtensionInstallPrompt {
             extension_id,
             extension_name,
@@ -453,6 +529,19 @@ fn prompt_ui_resolution_to_auxiliary_window_resolution(
                 PromptUiResolutionResult::Denied => PermissionPromptResult::Denied,
                 PromptUiResolutionResult::Aborted => PermissionPromptResult::Aborted,
                 PromptUiResolutionResult::Unknown => PermissionPromptResult::Unknown,
+            },
+        },
+        PromptUiResolution::DownloadPrompt {
+            download_id,
+            destination_path,
+            result,
+        } => AuxiliaryWindowResolution::DownloadPrompt {
+            download_id: (*download_id).into(),
+            destination_path: destination_path.clone(),
+            result: match result {
+                ChromeDownloadPromptResult::Allowed => DownloadPromptResult::Allowed,
+                ChromeDownloadPromptResult::Denied => DownloadPromptResult::Denied,
+                ChromeDownloadPromptResult::Aborted => DownloadPromptResult::Aborted,
             },
         },
         PromptUiResolution::ExtensionInstallPrompt {

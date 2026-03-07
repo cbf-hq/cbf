@@ -15,6 +15,7 @@ use super::utils::{c_string_to_string, to_optional_cstring};
 use super::{Error, IpcEvent};
 use crate::data::{
     browsing_context_open::ChromeBrowsingContextOpenResponse,
+    download::ChromeDownloadId,
     drag::{ChromeDragDrop, ChromeDragUpdate},
     extension::ChromeExtensionInfo,
     ids::TabId,
@@ -489,17 +490,25 @@ impl IpcClient {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
-        let (prompt_ui_kind, proceed) = match response {
+        let (prompt_ui_kind, proceed, destination_path) = match response {
             PromptUiResponse::PermissionPrompt { allow } => {
-                (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow)
+                (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow, None)
             }
+            PromptUiResponse::DownloadPrompt {
+                allow,
+                destination_path,
+            } => (
+                CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT,
+                *allow,
+                to_optional_cstring(destination_path)?,
+            ),
             PromptUiResponse::ExtensionInstallPrompt { proceed } => {
-                (CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT, *proceed)
+                (CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT, *proceed, None)
             }
             PromptUiResponse::PrintPreviewDialog { proceed } => {
-                (CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG, *proceed)
+                (CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG, *proceed, None)
             }
-            PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false),
+            PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None),
         };
         debug!(
             %browsing_context_id,
@@ -516,6 +525,9 @@ impl IpcClient {
                 request_id,
                 prompt_ui_kind,
                 proceed,
+                destination_path
+                    .as_ref()
+                    .map_or(ptr::null(), |path| path.as_ptr()),
             )
         } {
             Ok(())
@@ -545,6 +557,42 @@ impl IpcClient {
                 prompt_ui_id.get(),
             )
         } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Pause an in-progress download.
+    pub fn pause_download(&mut self, download_id: ChromeDownloadId) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+        if unsafe { cbf_bridge_client_pause_download(self.inner, download_id.get()) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Resume a paused download.
+    pub fn resume_download(&mut self, download_id: ChromeDownloadId) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+        if unsafe { cbf_bridge_client_resume_download(self.inner, download_id.get()) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Cancel an active download.
+    pub fn cancel_download(&mut self, download_id: ChromeDownloadId) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+        if unsafe { cbf_bridge_client_cancel_download(self.inner, download_id.get()) } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
