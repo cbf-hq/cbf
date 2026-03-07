@@ -93,7 +93,9 @@ Tooling helpers (from repo root):
 - Use `start_chromium` as the default runtime path; manual launch is for debugging only.
 - `--enable-features=Cbf`, `--cbf-ipc-handle`, `--cbf-session-token` are injected automatically by `start_chromium`.
 - `depot_tools` lives at `./depot_tools`; do not add as a git submodule.
-- CBF Chromium code: `chromium/src/chrome/browser/cbf/`; patch queue: `chromium/patches/cbf/`.
+- CBF Chromium-fork (`chrome`) code: `chromium/src/chrome/browser/cbf/`
+- `cbf_bridge` code: `chromium/src/chrome/browser/cbf/bridge`
+- Patch queue: `chromium/patches/cbf/`.
 - Patch principles: one responsibility per patch, keep each buildable, fold fixes with `fixup`/`squash`,
   use short imperative English subjects (no Conventional Commits in patch titles).
 - Debug flags: `--enable-logging=stderr`, `--log-file=/tmp/chromium_debug.log`.
