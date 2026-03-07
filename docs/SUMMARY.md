@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](./index.md)
+[Feature Matrix](./feature-matrix.md)
 
 # Getting Started
 
