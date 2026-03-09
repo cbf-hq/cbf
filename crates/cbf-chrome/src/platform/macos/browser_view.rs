@@ -152,6 +152,7 @@ define_class!(
     impl BrowserViewMac {
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
+            let had_marked_text = self.ivars().has_marked_text.get();
             self.ivars().ime_handled.set(false);
             self.ivars().suppress_key_up.set(false);
             self.ivars().edit_commands.borrow_mut().clear();
@@ -160,6 +161,18 @@ define_class!(
             self.interpretKeyEvents(&events);
 
             if self.ivars().ime_handled.get() {
+                self.ivars().suppress_key_up.set(true);
+                return;
+            }
+
+            if had_marked_text && should_ignore_accelerator_with_marked_text(event) {
+                // Match Chromium's macOS text input handling here: while marked
+                // text is active, AppKit can consume keys such as Return
+                // directly inside the IME candidate UI without invoking our
+                // NSTextInputClient callbacks. If we forward that key as a
+                // normal RawKeyDown/KeyDown anyway, the page can observe it as
+                // an accelerator and submit a form even though the IME already
+                // consumed it to confirm or navigate candidates.
                 self.ivars().suppress_key_up.set(true);
                 return;
             }
@@ -1095,6 +1108,48 @@ fn extract_may_be_ns_attributed_string(value: &AnyObject) -> Option<String> {
     Some(text)
 }
 
+// These values are Chromium-compatible Windows virtual-key codes, not raw
+// macOS `NSEvent.keyCode` values. `convert_nsevent_to_key_event` populates
+// `KeyEvent.key_code` from Chromium's `windows_key_code`, so this guard must
+// compare against the same VKEY values used by Chromium's
+// `ShouldIgnoreAcceleratorWithMarkedText`.
+const VKEY_TAB: i32 = 0x09;
+const VKEY_RETURN: i32 = 0x0D;
+const VKEY_ESCAPE: i32 = 0x1B;
+const VKEY_PRIOR: i32 = 0x21;
+const VKEY_NEXT: i32 = 0x22;
+const VKEY_LEFT: i32 = 0x25;
+const VKEY_UP: i32 = 0x26;
+const VKEY_RIGHT: i32 = 0x27;
+const VKEY_DOWN: i32 = 0x28;
+
+fn should_ignore_accelerator_with_marked_text(event: &NSEvent) -> bool {
+    let nsevent_ptr = NonNull::from(event).cast::<c_void>();
+    let key_event = convert_nsevent_to_key_event(0, nsevent_ptr);
+    should_ignore_accelerator_with_marked_text_key_event(&key_event)
+}
+
+// Mirrors Chromium's macOS IME guard in
+// components/remote_cocoa/app_shim/bridged_content_view.mm
+// `ShouldIgnoreAcceleratorWithMarkedText`. While marked text is active,
+// AppKit may consume these navigation/confirmation keys inside IME handling
+// without calling our NSTextInputClient callbacks, so they must not be
+// forwarded as page accelerators.
+fn should_ignore_accelerator_with_marked_text_key_event(event: &KeyEvent) -> bool {
+    matches!(
+        event.key_code,
+        VKEY_RETURN
+            | VKEY_TAB
+            | VKEY_ESCAPE
+            | VKEY_LEFT
+            | VKEY_UP
+            | VKEY_RIGHT
+            | VKEY_DOWN
+            | VKEY_PRIOR
+            | VKEY_NEXT
+    )
+}
+
 fn rect_for_composition_range(
     range: NSRange,
     composition: &ImeCompositionBounds,
@@ -1172,4 +1227,40 @@ fn offset_rect(rect: CGRect, offset_x: f64, offset_y: f64) -> CGRect {
 fn flip_rect_in_layer(rect: CGRect, layer_height: f64) -> CGRect {
     let flipped_y = (layer_height - (rect.origin.y + rect.size.height)).max(0.0);
     CGRect::new(CGPoint::new(rect.origin.x, flipped_y), rect.size)
+}
+
+#[cfg(test)]
+mod tests {
+    use cbf::data::key::KeyEvent;
+
+    use super::{
+        VKEY_DOWN, VKEY_ESCAPE, VKEY_LEFT, VKEY_NEXT, VKEY_PRIOR, VKEY_RETURN, VKEY_RIGHT,
+        VKEY_TAB, VKEY_UP, should_ignore_accelerator_with_marked_text_key_event,
+    };
+
+    #[test]
+    fn marked_text_guard_matches_chromium_ime_navigation_keys() {
+        for key_code in [
+            VKEY_RETURN,
+            VKEY_TAB,
+            VKEY_ESCAPE,
+            VKEY_PRIOR,
+            VKEY_NEXT,
+            VKEY_LEFT,
+            VKEY_UP,
+            VKEY_RIGHT,
+            VKEY_DOWN,
+        ] {
+            let event = KeyEvent::raw_key_down(0, key_code, 0);
+            assert!(should_ignore_accelerator_with_marked_text_key_event(&event));
+        }
+    }
+
+    #[test]
+    fn marked_text_guard_leaves_regular_typing_keys_alone() {
+        let event = KeyEvent::raw_key_down(0, 0x41, 0);
+        assert!(!should_ignore_accelerator_with_marked_text_key_event(
+            &event
+        ));
+    }
 }
