@@ -31,13 +31,12 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tracing::warn;
 use winit::{
     dpi::LogicalSize,
-    event_loop::ActiveEventLoop,
+    event_loop::{ActiveEventLoop, EventLoopProxy},
     window::{Window, WindowAttributes, WindowId as WinitWindowId},
 };
 
 use crate::{
-    app::PlatformApp,
-    app::run_with_platform,
+    app::{PlatformApp, UserEvent, run_with_platform},
     core::{
         CoreAction, CoreState, PRIMARY_HOST_WINDOW_ID, SharedState, ViewTarget,
         browsing_context_id_for_target, browsing_context_id_for_window, drag_allowed_operations,
@@ -534,11 +533,12 @@ impl PlatformApp for SimpleAppMac {
     fn new(
         browser_handle: BrowserHandle<ChromiumBackend>,
         shared: Arc<Mutex<SharedState>>,
+        proxy: EventLoopProxy<UserEvent>,
     ) -> Self {
         Self {
             browser_handle,
             shared,
-            menu: None,
+            menu: Some(menu::MacMenu::new(proxy).expect("failed to create macOS menu")),
             windows: HashMap::new(),
             winit_id_by_host_window: HashMap::new(),
         }
@@ -551,11 +551,8 @@ impl PlatformApp for SimpleAppMac {
     }
 
     fn ensure_window_and_view(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
-        if self.menu.is_none() {
-            let menu =
-                menu::MacMenu::new().map_err(|err| format!("failed to create menu: {err}"))?;
+        if let Some(menu) = self.menu.as_ref() {
             menu.setup();
-            self.menu = Some(menu);
         }
 
         if self
@@ -582,10 +579,6 @@ impl PlatformApp for SimpleAppMac {
         core: &mut CoreState,
         actions: Vec<CoreAction>,
     ) {
-        if let Some(menu) = self.menu.as_ref() {
-            menu.drain_pending_events();
-        }
-
         for action in actions {
             match action {
                 CoreAction::ExitEventLoop => event_loop.exit(),
@@ -650,6 +643,16 @@ impl PlatformApp for SimpleAppMac {
                             request.session_id,
                             request.allowed_operations,
                         );
+                    }
+                }
+                CoreAction::SetExtensionsMenuLoading => {
+                    if let Some(menu) = self.menu.as_ref() {
+                        menu.show_extensions_loading();
+                    }
+                }
+                CoreAction::ReplaceExtensionsMenu { extensions } => {
+                    if let Some(menu) = self.menu.as_ref() {
+                        menu.replace_extensions(&extensions);
                     }
                 }
             }

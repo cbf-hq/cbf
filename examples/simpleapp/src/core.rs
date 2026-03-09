@@ -11,7 +11,7 @@ use cbf::{
         context_menu::ContextMenu,
         download::{DownloadId, DownloadOutcome, DownloadPromptActionHint, DownloadState},
         drag::{DragOperations, DragStartRequest},
-        extension::{AuxiliaryWindowKind, AuxiliaryWindowResponse},
+        extension::{AuxiliaryWindowKind, AuxiliaryWindowResponse, ExtensionInfo},
         ids::{BrowsingContextId, WindowId},
         ime::ImeBoundsUpdate,
         window_open::{
@@ -27,7 +27,7 @@ use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, Messag
 use tracing::{error, info, warn};
 use winit::event::WindowEvent;
 
-use crate::cli::Cli;
+use crate::{app::MenuCommand, cli::Cli};
 
 /// Shared state between the core logic and platform-specific code.
 /// This struct is protected by a mutex and can be accessed from multiple parts of the application.
@@ -261,6 +261,10 @@ pub(crate) enum CoreAction {
         browsing_context_id: BrowsingContextId,
         menu: ContextMenu,
     },
+    SetExtensionsMenuLoading,
+    ReplaceExtensionsMenu {
+        extensions: Vec<ExtensionInfo>,
+    },
     StartPlatformDrag(DragStartRequest),
 }
 
@@ -283,6 +287,22 @@ impl CoreState {
 
     pub(crate) fn browser_handle(&self) -> BrowserHandle<ChromiumBackend> {
         self.session.handle()
+    }
+
+    pub(crate) fn handle_menu_command(&mut self, command: MenuCommand) -> Vec<CoreAction> {
+        match command {
+            MenuCommand::ReloadExtensions => {
+                if let Err(err) = self.browser_handle().request_list_extensions(None) {
+                    warn!("failed to request extension list: {err}");
+                    return Vec::new();
+                }
+                vec![CoreAction::SetExtensionsMenuLoading]
+            }
+            MenuCommand::ActivateExtension { extension_id } => {
+                info!("extension menu item activated: {extension_id}");
+                Vec::new()
+            }
+        }
     }
 
     fn base_title_for_window(&self, window_id: WindowId) -> String {
@@ -430,6 +450,7 @@ impl CoreState {
         match event {
             BrowserEvent::BackendReady => {
                 info!("backend ready");
+                let mut actions = vec![CoreAction::SetExtensionsMenuLoading];
 
                 if !self.page_create_requested {
                     self.page_create_requested = true;
@@ -443,7 +464,12 @@ impl CoreState {
                     }
                 }
 
-                Vec::new()
+                if let Err(err) = self.browser_handle().request_list_extensions(None) {
+                    warn!("failed to request extension list on startup: {err}");
+                    actions.clear();
+                }
+
+                actions
             }
             BrowserEvent::BackendStopped { reason } => {
                 match reason {
@@ -607,11 +633,10 @@ impl CoreState {
                 Vec::new()
             }
             BrowserEvent::ExtensionsListed {
-                profile_id,
+                profile_id: _,
                 extensions,
             } => {
-                println!("extensions: {profile_id} {extensions:?}");
-                Vec::new()
+                vec![CoreAction::ReplaceExtensionsMenu { extensions }]
             }
             BrowserEvent::DownloadCreated {
                 download_id,

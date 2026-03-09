@@ -33,11 +33,18 @@ use crate::{
 };
 use cbf::data::ids::WindowId as HostWindowId;
 
+#[derive(Debug, Clone)]
+pub(crate) enum MenuCommand {
+    ReloadExtensions,
+    ActivateExtension { extension_id: String },
+}
+
 /// Custom event type for the winit event loop.
 /// This wraps browser events so they can be delivered through the event loop.
 #[derive(Debug)]
 pub(crate) enum UserEvent {
     Browser(BrowserEvent),
+    Menu(MenuCommand),
     SurfaceHandleUpdated {
         browsing_context_id: BrowsingContextId,
         handle: SurfaceHandle,
@@ -114,8 +121,11 @@ pub(crate) fn spawn_browser_event_forwarder(
 /// this trait to provide its own native window and browser view handling.
 pub(crate) trait PlatformApp {
     /// Creates a new platform application instance.
-    fn new(browser_handle: BrowserHandle<ChromiumBackend>, shared: Arc<Mutex<SharedState>>)
-    -> Self;
+    fn new(
+        browser_handle: BrowserHandle<ChromiumBackend>,
+        shared: Arc<Mutex<SharedState>>,
+        proxy: EventLoopProxy<UserEvent>,
+    ) -> Self;
 
     /// Resolves a winit window ID to host window ID, if managed by this app.
     fn host_window_id_for_winit_window(&self, window_id: WindowId) -> Option<HostWindowId>;
@@ -156,6 +166,7 @@ impl<P: PlatformApp> ApplicationHandler<UserEvent> for AppRunner<P> {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         let actions = match event {
             UserEvent::Browser(event) => self.core.handle_browser_event(event),
+            UserEvent::Menu(command) => self.core.handle_menu_command(command),
             UserEvent::SurfaceHandleUpdated {
                 browsing_context_id,
                 handle,
@@ -253,14 +264,14 @@ pub(crate) fn run_with_platform<P: PlatformApp + 'static>() {
             return;
         }
     };
+    let proxy = event_loop.create_proxy();
 
     // Create shared state, core logic, and platform implementation.
     let shared = Arc::new(Mutex::new(SharedState::default()));
     let core = CoreState::new(cli, session, Arc::clone(&shared));
-    let platform = P::new(core.browser_handle(), shared);
+    let platform = P::new(core.browser_handle(), shared, proxy.clone());
 
     // Spawn background thread to forward browser events to the event loop.
-    let proxy = event_loop.create_proxy();
     spawn_browser_event_forwarder(events, proxy);
 
     let mut runner = AppRunner {
