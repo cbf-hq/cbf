@@ -1,4 +1,4 @@
-From f3b6fe564df229f6b0e848092e1d60a36c8108e8 Mon Sep 17 00:00:00 2001
+From 94256b005ffff8323f68750fce1602116cf904dc Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 4 Mar 2026 12:31:16 +0900
 Subject: [PATCH 12/21] Replace named channel bootstrap with inherited endpoint

@@ -1,4 +1,4 @@
-From 7920242a71957d48a898f56e5c3786fd6bb5d76c Mon Sep 17 00:00:00 2001
+From 4c26c1cc307958158b0c2d11807c16690e62d830 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 6 Mar 2026 11:43:12 +0900
 Subject: [PATCH 19/21] Rename CBF WebPage API vocabulary to Tab
@@ -598,10 +598,10 @@ index 164a2a38e659f..1211c5bb64f81 100644
    void OnBeforeUnloadDialogRequested(content::WebContents* web_contents);
    void OnBeforeUnloadFired(content::WebContents* web_contents, bool proceed);
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index c5b12f66e9301..84ceddeee5696 100644
+index b0470d5ed34d6..3565100f07274 100644
 --- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-@@ -45,9 +45,9 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -46,9 +46,9 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
      if (profile_service_) {
        const auto tab_ids = profile_service_->GetAllTabIds();
        for (TabId tab_id : tab_ids) {
@@ -613,7 +613,7 @@ index c5b12f66e9301..84ceddeee5696 100644
        base::RunLoop().RunUntilIdle();
        profile_service_.reset();
      }
-@@ -58,7 +58,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -59,7 +59,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
    TabId CreatePage(const std::string& url = "about:blank") {
      TabId created_id = kInvalidTabId;
      base::RunLoop run_loop;
@@ -622,7 +622,7 @@ index c5b12f66e9301..84ceddeee5696 100644
          url, 1,
          base::BindOnce(
              [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
-@@ -108,7 +108,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -109,7 +109,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
  };
  
  IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
@@ -631,7 +631,7 @@ index c5b12f66e9301..84ceddeee5696 100644
    profile_service_->SendDragCancel(9999, kInvalidTabId);
    profile_service_->OpenDevTools(kInvalidTabId);
  }
-@@ -117,7 +117,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+@@ -118,7 +118,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
                         NotifyWebPageClosedEmitsObserverEvent) {
    TabId created_id = kInvalidTabId;
    base::RunLoop run_loop;
@@ -640,7 +640,7 @@ index c5b12f66e9301..84ceddeee5696 100644
        "about:blank", 1,
        base::BindOnce(
            [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
-@@ -128,7 +128,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+@@ -129,7 +129,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
    run_loop.Run();
    ASSERT_NE(created_id, kInvalidTabId);
  

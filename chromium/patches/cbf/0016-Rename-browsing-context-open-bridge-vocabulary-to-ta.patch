@@ -1,4 +1,4 @@
-From babc5cf243efc6bd1956420dcaa344547a77542f Mon Sep 17 00:00:00 2001
+From dede5dceb9b68c8d3c339f1a1f25b8507303dfb1 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 5 Mar 2026 12:21:24 +0900
 Subject: [PATCH 16/21] Rename browsing-context-open bridge vocabulary to
@@ -488,7 +488,7 @@ index 35547fe746926..6e9d4937bd271 100644
        content::WebContents* web_contents,
        const extensions::Extension* extension,
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index 5c964c01b33f2..c5b12f66e9301 100644
+index 8d5c73cfe394f..b0470d5ed34d6 100644
 --- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 @@ -1,5 +1,6 @@
@@ -498,7 +498,7 @@ index 5c964c01b33f2..c5b12f66e9301 100644
  #include <string>
  #include <utility>
  
-@@ -7,18 +8,25 @@
+@@ -7,19 +8,26 @@
  #include "build/buildflag.h"
  #include "base/functional/bind.h"
  #include "base/run_loop.h"
@@ -509,6 +509,7 @@ index 5c964c01b33f2..c5b12f66e9301 100644
  #include "chrome/browser/ui/browser.h"
 -#include "chrome/common/url_constants.h"
  #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
  #include "chrome/browser/ui/webui/webui_embedding_context.h"
 +#include "chrome/common/url_constants.h"
@@ -525,7 +526,7 @@ index 5c964c01b33f2..c5b12f66e9301 100644
  #include "testing/gtest/include/gtest/gtest.h"
  
  namespace cbf {
-@@ -273,6 +281,121 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+@@ -287,6 +295,121 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
    )"));
  }
  

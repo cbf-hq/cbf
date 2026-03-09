@@ -1,4 +1,4 @@
-From 8c68f6393508ba61596eff27c56815b1316241c8 Mon Sep 17 00:00:00 2001
+From 66d8c0d353eddf23aa7a67456c68828bc791cccd Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 7 Mar 2026 10:51:45 +0900
 Subject: [PATCH 20/21] Add CBF download prompt and lifecycle events
@@ -1682,7 +1682,7 @@ index 1211c5bb64f81..a6e2df5bba275 100644
    base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
  
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index 84ceddeee5696..73f2fe98e3840 100644
+index 3565100f07274..401a3b8768bc3 100644
 --- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 @@ -1,14 +1,20 @@
@@ -1706,7 +1706,7 @@ index 84ceddeee5696..73f2fe98e3840 100644
  #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
  #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
  #include "chrome/browser/history/history_service_factory.h"
-@@ -18,12 +24,15 @@
+@@ -19,12 +25,15 @@
  #include "chrome/browser/ui/webui/webui_embedding_context.h"
  #include "chrome/common/url_constants.h"
  #include "chrome/test/base/in_process_browser_test.h"
@@ -1722,7 +1722,7 @@ index 84ceddeee5696..73f2fe98e3840 100644
  #include "net/http/http_status_code.h"
  #include "net/test/embedded_test_server/http_request.h"
  #include "net/test/embedded_test_server/http_response.h"
-@@ -36,6 +45,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -37,6 +46,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
   protected:
    void SetUpOnMainThread() override {
      InProcessBrowserTest::SetUpOnMainThread();
@@ -1730,7 +1730,7 @@ index 84ceddeee5696..73f2fe98e3840 100644
      profile_service_ =
          std::make_unique<CbfProfileService>(browser()->profile(), nullptr);
      profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
-@@ -103,8 +113,79 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -104,8 +114,79 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
      ASSERT_TRUE(content::WaitForLoadStop(web_contents));
    }
  
@@ -1810,7 +1810,7 @@ index 84ceddeee5696..73f2fe98e3840 100644
  };
  
  IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
-@@ -113,6 +194,297 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp)
+@@ -114,6 +195,297 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp)
    profile_service_->OpenDevTools(kInvalidTabId);
  }
  

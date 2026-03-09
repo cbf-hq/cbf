@@ -1,4 +1,4 @@
-From 724ae129ca1ee011b8f7f6302f534db34d041766 Mon Sep 17 00:00:00 2001
+From aab68024f1b0d744bc255a5522bd4c19f92e1ec4 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 9 Mar 2026 12:05:51 +0900
 Subject: [PATCH 21/21] Expose extension icons
@@ -348,7 +348,7 @@ index 2cfb7e56fae81..84047553c5efb 100644
  
  bool CbfProfileService::RequestAuxiliaryInstallPromptForWebstore(
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index 73f2fe98e3840..6bab7a93b9d5e 100644
+index 401a3b8768bc3..1beb69d6d8826 100644
 --- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 @@ -12,12 +12,14 @@
@@ -365,8 +365,8 @@ index 73f2fe98e3840..6bab7a93b9d5e 100644
 +#include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/ui/browser.h"
  #include "chrome/browser/ui/browser_window.h"
- #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-@@ -33,10 +35,15 @@
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+@@ -34,10 +36,15 @@
  #include "content/public/test/browser_test_utils.h"
  #include "content/public/test/slow_download_http_response.h"
  #include "content/public/test/slow_http_response.h"
@@ -382,7 +382,7 @@ index 73f2fe98e3840..6bab7a93b9d5e 100644
  
  namespace cbf {
  namespace {
-@@ -181,11 +188,72 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -182,11 +189,72 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
      profile_service_->RespondPromptUi(tab_id, request_id, std::move(response));
    }
  
@@ -455,7 +455,7 @@ index 73f2fe98e3840..6bab7a93b9d5e 100644
  };
  
  IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
-@@ -194,6 +262,35 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp)
+@@ -195,6 +263,35 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp)
    profile_service_->OpenDevTools(kInvalidTabId);
  }
  

@@ -1,4 +1,4 @@
-From 26188d729e77f96072c9b583389d215260b01a20 Mon Sep 17 00:00:00 2001
+From 9ad210b730cc5c8088b48260f725f0f8b20c546b Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 3 Mar 2026 11:44:19 +0900
 Subject: [PATCH 11/21] Preserve embedded rendering for browser-backed tabs
@@ -9,7 +9,7 @@ Subject: [PATCH 11/21] Preserve embedded rendering for browser-backed tabs
  .../browser/cbf/cbf_embedded_browser_window.h |  15 +
  chrome/browser/cbf/cbf_profile_service.cc     |   5 +
  chrome/browser/cbf/cbf_profile_service.h      |   1 +
- .../cbf/cbf_profile_service_browsertest.cc    | 149 ++++++
+ .../cbf/cbf_profile_service_browsertest.cc    | 163 ++++++
  chrome/browser/cbf/cbf_tab_manager.cc         |  40 +-
  .../cbf_profile_devtools_controller.cc        |   6 +
  ...profile_devtools_controller_browsertest.cc |  22 +
@@ -17,8 +17,9 @@ Subject: [PATCH 11/21] Preserve embedded rendering for browser-backed tabs
  chrome/browser/ui/browser.h                   |  11 +-
  .../browser/ui/browser_command_controller.cc  |  15 +
  chrome/browser/ui/browser_commands.cc         |   3 +-
+ .../internal/browser_window_features.cc       |   5 +-
  .../read_anything_side_panel_controller.cc    |   4 +
- 14 files changed, 745 insertions(+), 17 deletions(-)
+ 15 files changed, 763 insertions(+), 18 deletions(-)
  create mode 100644 chrome/browser/cbf/cbf_embedded_browser_window.cc
  create mode 100644 chrome/browser/cbf/cbf_embedded_browser_window.h
 
@@ -592,10 +593,10 @@ index 419b285bf6a6b..35547fe746926 100644
    bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
                           const content::ContextMenuParams& params);
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index 1b815c419088b..c9160f426b337 100644
+index 1b815c419088b..58b7c1ccb4bf7 100644
 --- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-@@ -1,12 +1,20 @@
+@@ -1,12 +1,21 @@
  #include "chrome/browser/cbf/cbf_profile_service.h"
  
 +#include <string>
@@ -609,6 +610,7 @@ index 1b815c419088b..c9160f426b337 100644
  #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
  #include "chrome/browser/ui/browser.h"
 +#include "chrome/browser/ui/browser_window.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/webui/webui_embedding_context.h"
  #include "chrome/test/base/in_process_browser_test.h"
@@ -616,7 +618,7 @@ index 1b815c419088b..c9160f426b337 100644
  #include "content/public/test/browser_test.h"
  #include "testing/gtest/include/gtest/gtest.h"
  
-@@ -22,6 +30,47 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -22,6 +31,47 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
      profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
    }
  
@@ -664,7 +666,7 @@ index 1b815c419088b..c9160f426b337 100644
    std::unique_ptr<CbfProfileService> profile_service_;
    cbf::test::CbfTestProfileObserver observer_;
  };
-@@ -52,5 +101,105 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+@@ -52,5 +102,118 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
    EXPECT_EQ(observer_.web_page_closed_events().front(), created_id);
  }
  
@@ -705,6 +707,19 @@ index 1b815c419088b..c9160f426b337 100644
 +  EXPECT_EQ(host_browser->window()->AsBrowserView(), nullptr);
 +  EXPECT_EQ(host_browser->window()->GetNativeWindow(), gfx::NativeWindow());
 +  EXPECT_FALSE(host_browser->window()->IsVisibleOnScreen());
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       EmbeddedBrowserWindowDoesNotExposeToastController) {
++  const TabId tab_id = CreatePage();
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  Browser* host_browser = GetHostBrowserForTab(tab_id);
++  ASSERT_NE(host_browser, nullptr);
++
++  BrowserWindowFeatures& features = host_browser->GetFeatures();
++  EXPECT_EQ(features.toast_service(), nullptr);
++  EXPECT_EQ(features.toast_controller(), nullptr);
 +}
 +
 +IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
@@ -1013,6 +1028,22 @@ index 3f477375e099d..b8cb6deb65503 100644
        content_restrictions |= CONTENT_RESTRICTION_SAVE;
      }
    }
+diff --git a/chrome/browser/ui/browser_window/internal/browser_window_features.cc b/chrome/browser/ui/browser_window/internal/browser_window_features.cc
+index 7421f3a332306..dd6a8b1c4e4e7 100644
+--- a/chrome/browser/ui/browser_window/internal/browser_window_features.cc
++++ b/chrome/browser/ui/browser_window/internal/browser_window_features.cc
+@@ -617,7 +617,10 @@ void BrowserWindowFeatures::InitPostWindowConstruction(Browser* browser) {
+       browser, browser->GetTabStripModel(), profile, browser->GetWindow(),
+       browser->GetType(), browser->app_name(), browser->GetSessionID());
+ 
+-  if (browser->is_type_normal() || browser->is_type_app()) {
++  // Toasts require a standard BrowserView anchor. Embedded browser-backed
++  // windows such as CBF tabs intentionally run without BrowserView, so expose
++  // no ToastService there and let callsites skip toast requests via null-checks.
++  if ((browser->is_type_normal() || browser->is_type_app()) && browser_view) {
+     toast_service_ = std::make_unique<ToastService>(browser);
+   }
+ 
 diff --git a/chrome/browser/ui/read_anything/read_anything_side_panel_controller.cc b/chrome/browser/ui/read_anything/read_anything_side_panel_controller.cc
 index 0beca48b95636..745bbfba592b7 100644
 --- a/chrome/browser/ui/read_anything/read_anything_side_panel_controller.cc

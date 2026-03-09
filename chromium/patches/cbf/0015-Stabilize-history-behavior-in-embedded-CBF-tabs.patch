@@ -1,4 +1,4 @@
-From 10a1021dd6062c9c015de1575c52b8840789311f Mon Sep 17 00:00:00 2001
+From db7c7fee9cd02911ade95a6ec28f744e613577d4 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 5 Mar 2026 09:39:18 +0900
 Subject: [PATCH 15/21] Stabilize history behavior in embedded CBF tabs
@@ -101,15 +101,16 @@ index b391256a7b814..dea6666f12bdd 100644
  }
  
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index c9160f426b337..5c964c01b33f2 100644
+index 58b7c1ccb4bf7..8d5c73cfe394f 100644
 --- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-@@ -10,12 +10,15 @@
+@@ -10,13 +10,16 @@
  #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
  #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
  #include "chrome/browser/ui/browser.h"
 +#include "chrome/common/url_constants.h"
  #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
  #include "chrome/browser/ui/webui/webui_embedding_context.h"
  #include "chrome/test/base/in_process_browser_test.h"
@@ -120,7 +121,7 @@ index c9160f426b337..5c964c01b33f2 100644
  #include "testing/gtest/include/gtest/gtest.h"
  
  namespace cbf {
-@@ -30,6 +33,20 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -31,6 +34,20 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
      profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
    }
  
@@ -141,7 +142,7 @@ index c9160f426b337..5c964c01b33f2 100644
    TabId CreatePage(const std::string& url = "about:blank") {
      TabId created_id = kInvalidTabId;
      base::RunLoop run_loop;
-@@ -71,6 +88,13 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -72,6 +89,13 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
      return host_browser->window() ? host_browser : nullptr;
    }
  
@@ -155,7 +156,7 @@ index c9160f426b337..5c964c01b33f2 100644
    std::unique_ptr<CbfProfileService> profile_service_;
    cbf::test::CbfTestProfileObserver observer_;
  };
-@@ -138,6 +162,8 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, UsesEmbeddedBrowserWindow)
+@@ -139,6 +163,8 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, UsesEmbeddedBrowserWindow)
    EXPECT_EQ(host_browser->window()->AsBrowserView(), nullptr);
    EXPECT_EQ(host_browser->window()->GetNativeWindow(), gfx::NativeWindow());
    EXPECT_FALSE(host_browser->window()->IsVisibleOnScreen());
@@ -164,7 +165,7 @@ index c9160f426b337..5c964c01b33f2 100644
  }
  
  IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
-@@ -188,6 +214,65 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+@@ -202,6 +228,65 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
    EXPECT_FALSE(host_browser->window()->IsLocationBarVisible());
  }
  
