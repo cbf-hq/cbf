@@ -1,6 +1,8 @@
 //! Chrome-specific prompt UI types for permission prompts, extension install dialogs, print preview, and download prompts.
 
-use crate::data::download::{ChromeDownloadId, ChromeDownloadPromptResult};
+use crate::data::download::{
+    ChromeDownloadId, ChromeDownloadPromptReason, ChromeDownloadPromptResult,
+};
 
 /// Chrome-specific permission categories exposed through PromptUi.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +40,7 @@ pub enum PromptUiKind {
         file_name: String,
         total_bytes: Option<u64>,
         suggested_path: Option<String>,
+        reason: ChromeDownloadPromptReason,
     },
     ExtensionInstallPrompt {
         extension_id: String,

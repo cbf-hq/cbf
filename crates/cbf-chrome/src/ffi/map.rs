@@ -19,7 +19,8 @@ use crate::data::{
     },
     download::{
         ChromeDownloadCompletion, ChromeDownloadId, ChromeDownloadOutcome, ChromeDownloadProgress,
-        ChromeDownloadPromptResult, ChromeDownloadSnapshot, ChromeDownloadState,
+        ChromeDownloadPromptReason, ChromeDownloadPromptResult, ChromeDownloadSnapshot,
+        ChromeDownloadState,
     },
     drag::{
         ChromeDragData, ChromeDragImage, ChromeDragOperations, ChromeDragStartRequest,
@@ -203,6 +204,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.prompt_ui_kind,
                 event.prompt_ui_permission,
                 event.prompt_ui_permission_key,
+                event.download_reason,
                 event.download_id,
                 event.download_file_name,
                 event.download_total_bytes,
@@ -568,6 +570,7 @@ fn prompt_ui_kind_from_ffi(
     kind: u8,
     permission: u8,
     permission_key: *mut std::ffi::c_char,
+    download_reason: u8,
     download_id: u64,
     download_file_name: *mut std::ffi::c_char,
     download_total_bytes: u64,
@@ -594,6 +597,7 @@ fn prompt_ui_kind_from_ffi(
                 let value = c_string_to_string(download_suggested_path);
                 if value.is_empty() { None } else { Some(value) }
             },
+            reason: download_prompt_reason_from_ffi(download_reason),
         },
         CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT => PromptUiKind::ExtensionInstallPrompt {
             extension_id: c_string_to_string(extension_id),
@@ -704,6 +708,23 @@ fn download_prompt_result_from_ffi(value: u8) -> ChromeDownloadPromptResult {
         CBF_DOWNLOAD_PROMPT_RESULT_DENIED => ChromeDownloadPromptResult::Denied,
         CBF_DOWNLOAD_PROMPT_RESULT_ABORTED => ChromeDownloadPromptResult::Aborted,
         _ => ChromeDownloadPromptResult::Aborted,
+    }
+}
+
+fn download_prompt_reason_from_ffi(value: u8) -> ChromeDownloadPromptReason {
+    match value {
+        CBF_DOWNLOAD_PROMPT_REASON_NONE => ChromeDownloadPromptReason::None,
+        CBF_DOWNLOAD_PROMPT_REASON_UNEXPECTED => ChromeDownloadPromptReason::Unexpected,
+        CBF_DOWNLOAD_PROMPT_REASON_SAVE_AS => ChromeDownloadPromptReason::SaveAs,
+        CBF_DOWNLOAD_PROMPT_REASON_PREFERENCE => ChromeDownloadPromptReason::Preference,
+        CBF_DOWNLOAD_PROMPT_REASON_NAME_TOO_LONG => ChromeDownloadPromptReason::NameTooLong,
+        CBF_DOWNLOAD_PROMPT_REASON_TARGET_CONFLICT => ChromeDownloadPromptReason::TargetConflict,
+        CBF_DOWNLOAD_PROMPT_REASON_TARGET_PATH_NOT_WRITEABLE => {
+            ChromeDownloadPromptReason::TargetPathNotWriteable
+        }
+        CBF_DOWNLOAD_PROMPT_REASON_TARGET_NO_SPACE => ChromeDownloadPromptReason::TargetNoSpace,
+        CBF_DOWNLOAD_PROMPT_REASON_DLP_BLOCKED => ChromeDownloadPromptReason::DlpBlocked,
+        _ => ChromeDownloadPromptReason::Unknown,
     }
 }
 
@@ -1329,6 +1350,7 @@ mod tests {
         event.tab_id = 31;
         event.request_id = 109;
         event.prompt_ui_kind = CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT;
+        event.download_reason = CBF_DOWNLOAD_PROMPT_REASON_SAVE_AS;
         event.download_id = 55;
         let file_name = CString::new("sample.zip").unwrap();
         let suggested_path = CString::new("/tmp/sample.zip").unwrap();
@@ -1348,6 +1370,7 @@ mod tests {
                     file_name,
                     total_bytes: Some(1234),
                     suggested_path: Some(ref suggested_path),
+                    reason: crate::data::download::ChromeDownloadPromptReason::SaveAs,
                 },
                 ..
             } if browsing_context_id == TabId::new(31)
@@ -1355,6 +1378,30 @@ mod tests {
                 && download_id == crate::data::download::ChromeDownloadId::new(55)
                 && file_name == "sample.zip"
                 && suggested_path == "/tmp/sample.zip"
+        ));
+    }
+
+    #[test]
+    fn parse_event_prompt_ui_open_requested_maps_unknown_download_reason() {
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_OPEN_REQUESTED);
+        event.tab_id = 31;
+        event.request_id = 110;
+        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT;
+        event.download_reason = 250;
+        event.download_id = 56;
+        let file_name = CString::new("sample-2.zip").unwrap();
+        event.download_file_name = file_name.as_ptr() as *mut _;
+
+        let parsed = parse_event(event).expect("download prompt requested should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::PromptUiOpenRequested {
+                kind: PromptUiKind::DownloadPrompt {
+                    reason: crate::data::download::ChromeDownloadPromptReason::Unknown,
+                    ..
+                },
+                ..
+            }
         ));
     }
 

@@ -108,6 +108,17 @@ pub const CBF_DOWNLOAD_PROMPT_RESULT_ALLOWED: u8 = 1;
 pub const CBF_DOWNLOAD_PROMPT_RESULT_DENIED: u8 = 2;
 pub const CBF_DOWNLOAD_PROMPT_RESULT_ABORTED: u8 = 3;
 
+pub const CBF_DOWNLOAD_PROMPT_REASON_NONE: u8 = 0;
+pub const CBF_DOWNLOAD_PROMPT_REASON_UNEXPECTED: u8 = 1;
+pub const CBF_DOWNLOAD_PROMPT_REASON_SAVE_AS: u8 = 2;
+pub const CBF_DOWNLOAD_PROMPT_REASON_PREFERENCE: u8 = 3;
+pub const CBF_DOWNLOAD_PROMPT_REASON_NAME_TOO_LONG: u8 = 4;
+pub const CBF_DOWNLOAD_PROMPT_REASON_TARGET_CONFLICT: u8 = 5;
+pub const CBF_DOWNLOAD_PROMPT_REASON_TARGET_PATH_NOT_WRITEABLE: u8 = 6;
+pub const CBF_DOWNLOAD_PROMPT_REASON_TARGET_NO_SPACE: u8 = 7;
+pub const CBF_DOWNLOAD_PROMPT_REASON_DLP_BLOCKED: u8 = 8;
+pub const CBF_DOWNLOAD_PROMPT_REASON_UNKNOWN: u8 = 255;
+
 pub const CBF_DOWNLOAD_STATE_UNKNOWN: u8 = 0;
 pub const CBF_DOWNLOAD_STATE_IN_PROGRESS: u8 = 1;
 pub const CBF_DOWNLOAD_STATE_PAUSED: u8 = 2;
@@ -289,6 +300,7 @@ pub struct CbfBridgeEvent {
     pub prompt_ui_permission: u8,
     pub prompt_ui_result: u8,
     pub prompt_ui_permission_key: *mut c_char,
+    pub download_reason: u8,
     pub download_id: u64,
     pub download_has_source_tab_id: bool,
     pub download_source_tab_id: u64,
