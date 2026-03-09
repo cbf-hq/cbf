@@ -147,6 +147,8 @@ pub const CMD_CONTENT_OPEN_LINK_NEW_TAB: i32 = 50100;
 pub const CMD_CONTENT_OPEN_LINK_NEW_WINDOW: i32 = 50101;
 /// Command id for copying a link location.
 pub const CMD_CONTENT_COPY_LINK_LOCATION: i32 = 50104;
+/// Command id for saving an image as a file.
+pub const CMD_CONTENT_SAVE_IMAGE_AS: i32 = 50120;
 /// Command id for copying an image location.
 pub const CMD_CONTENT_COPY_IMAGE_LOCATION: i32 = 50121;
 /// Command id for copying an image.
@@ -179,6 +181,7 @@ const CONTEXT_MENU_ALLOWLIST: &[i32] = &[
     CMD_CONTENT_OPEN_LINK_NEW_TAB,
     CMD_CONTENT_OPEN_LINK_NEW_WINDOW,
     CMD_CONTENT_COPY_LINK_LOCATION,
+    CMD_CONTENT_SAVE_IMAGE_AS,
     CMD_CONTENT_COPY_IMAGE_LOCATION,
     CMD_CONTENT_COPY_IMAGE,
     CMD_CONTENT_COPY,
@@ -253,4 +256,43 @@ fn trim_menu_separators(items: Vec<ChromeContextMenuItem>) -> Vec<ChromeContextM
     }
 
     trimmed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_supported_keeps_save_image_as_item() {
+        let menu = ChromeContextMenu {
+            menu_id: 1,
+            x: 0,
+            y: 0,
+            source_type: 0,
+            items: vec![ChromeContextMenuItem {
+                r#type: ChromeContextMenuItemType::Command,
+                command_id: CMD_CONTENT_SAVE_IMAGE_AS,
+                label: String::new(),
+                secondary_label: String::new(),
+                minor_text: String::new(),
+                accessible_name: String::new(),
+                enabled: true,
+                visible: true,
+                checked: false,
+                group_id: 0,
+                is_new_feature: false,
+                is_alerted: false,
+                may_have_mnemonics: false,
+                accelerator: None,
+                icon: None,
+                minor_icon: None,
+                submenu: Vec::new(),
+            }],
+        };
+
+        let filtered = filter_supported(menu);
+
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].command_id, CMD_CONTENT_SAVE_IMAGE_AS);
+    }
 }
