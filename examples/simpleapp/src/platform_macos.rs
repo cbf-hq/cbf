@@ -3,6 +3,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod menu;
+
 use cbf::{
     browser::BrowserHandle,
     data::{
@@ -298,6 +300,7 @@ struct WindowEntry {
 struct SimpleAppMac {
     browser_handle: BrowserHandle<ChromiumBackend>,
     shared: Arc<Mutex<SharedState>>,
+    menu: Option<menu::MacMenu>,
     windows: HashMap<WinitWindowId, WindowEntry>,
     winit_id_by_host_window: HashMap<HostWindowId, WinitWindowId>,
 }
@@ -535,6 +538,7 @@ impl PlatformApp for SimpleAppMac {
         Self {
             browser_handle,
             shared,
+            menu: None,
             windows: HashMap::new(),
             winit_id_by_host_window: HashMap::new(),
         }
@@ -547,6 +551,13 @@ impl PlatformApp for SimpleAppMac {
     }
 
     fn ensure_window_and_view(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
+        if self.menu.is_none() {
+            let menu =
+                menu::MacMenu::new().map_err(|err| format!("failed to create menu: {err}"))?;
+            menu.setup();
+            self.menu = Some(menu);
+        }
+
         if self
             .winit_id_by_host_window
             .contains_key(&PRIMARY_HOST_WINDOW_ID)
@@ -571,6 +582,10 @@ impl PlatformApp for SimpleAppMac {
         core: &mut CoreState,
         actions: Vec<CoreAction>,
     ) {
+        if let Some(menu) = self.menu.as_ref() {
+            menu.drain_pending_events();
+        }
+
         for action in actions {
             match action {
                 CoreAction::ExitEventLoop => event_loop.exit(),

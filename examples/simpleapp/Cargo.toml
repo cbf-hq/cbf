@@ -30,6 +30,7 @@ rfd = "0.15"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }
 objc2-core-foundation = { workspace = true, features = ["CFCGTypes"] }
+muda = "0.17"
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
 workspace = true
