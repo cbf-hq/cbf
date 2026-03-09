@@ -37,7 +37,7 @@ This document provides a high-level overview of the features supported by CBF, c
 | --- | --- | --- | --- |
 | Get DOM html | ✅ | macOS | |
 | Drag and Drop on webpage | ✅ | macOS | |
-| Context menu events | 🚧 | macOS | Some native items are not yet supported e.g. "Save Image As..." |
+| Context menu events | 🚧 | macOS | Some native items are not yet supported |
 | Drag and Drop from other apps | ❌ | | |
 
 ## Downloads & Print
