@@ -566,6 +566,7 @@ fn prompt_ui_extension_install_result_from_ffi(value: u8) -> PromptUiExtensionIn
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prompt_ui_kind_from_ffi(
     kind: u8,
     permission: u8,
@@ -637,6 +638,7 @@ fn prompt_ui_dialog_result_from_ffi(value: u8) -> PromptUiDialogResult {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prompt_ui_resolution_from_ffi(
     kind: u8,
     permission: u8,
