@@ -26,7 +26,7 @@ use crate::data::{
         ChromeDragData, ChromeDragImage, ChromeDragOperations, ChromeDragStartRequest,
         ChromeDragUrlInfo,
     },
-    extension::ChromeExtensionInfo,
+    extension::{ChromeExtensionInfo, ChromeIconData},
     ids::TabId,
     ime::{
         ChromeImeBoundsUpdate, ChromeImeCompositionBounds, ChromeImeRect, ChromeImeTextRange,
@@ -361,7 +361,7 @@ fn parse_string_list(list: CbfStringList) -> Vec<String> {
         .collect()
 }
 
-fn parse_extension_list(list: CbfExtensionInfoList) -> Vec<ChromeExtensionInfo> {
+pub(crate) fn parse_extension_list(list: CbfExtensionInfoList) -> Vec<ChromeExtensionInfo> {
     if list.len == 0 || list.items.is_null() {
         return Vec::new();
     }
@@ -374,8 +374,52 @@ fn parse_extension_list(list: CbfExtensionInfoList) -> Vec<ChromeExtensionInfo> 
             version: c_string_to_string(value.version),
             enabled: value.enabled,
             permission_names: parse_string_list(value.permission_names),
+            icon: parse_icon_data(value.icon),
         })
         .collect()
+}
+
+pub(crate) fn parse_icon_data(icon: CbfIconData) -> Option<ChromeIconData> {
+    match icon.kind {
+        CBF_ICON_DATA_KIND_NONE => None,
+        CBF_ICON_DATA_KIND_URL => {
+            let url = c_string_to_string(icon.url);
+            if url.is_empty() {
+                None
+            } else {
+                Some(ChromeIconData::Url(url))
+            }
+        }
+        CBF_ICON_DATA_KIND_PNG => {
+            if icon.bytes.is_null() || icon.len == 0 {
+                return None;
+            }
+            let bytes = unsafe { std::slice::from_raw_parts(icon.bytes, icon.len as usize) };
+            if bytes.is_empty() {
+                None
+            } else {
+                Some(ChromeIconData::Png(bytes.to_vec()))
+            }
+        }
+        CBF_ICON_DATA_KIND_BINARY => {
+            if icon.bytes.is_null() || icon.len == 0 {
+                return None;
+            }
+            let bytes = unsafe { std::slice::from_raw_parts(icon.bytes, icon.len as usize) };
+            if bytes.is_empty() {
+                return None;
+            }
+            let media_type = {
+                let value = c_string_to_string(icon.media_type);
+                if value.is_empty() { None } else { Some(value) }
+            };
+            Some(ChromeIconData::Binary {
+                media_type,
+                bytes: bytes.to_vec(),
+            })
+        }
+        _ => None,
+    }
 }
 
 fn parse_string_pair_list(list: CbfStringPairList) -> std::collections::BTreeMap<String, String> {
@@ -1245,6 +1289,7 @@ mod tests {
     use cbf_chrome_sys::ffi::*;
 
     use crate::data::{
+        extension::ChromeIconData,
         ids::TabId,
         prompt_ui::{
             PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult, PromptUiId,
@@ -1260,6 +1305,10 @@ mod tests {
             kind,
             ..Default::default()
         }
+    }
+
+    fn leaked_c_string(value: &str) -> *mut i8 {
+        CString::new(value).unwrap().into_raw()
     }
 
     #[test]
@@ -1477,6 +1526,111 @@ mod tests {
                 && permission_names == vec!["tabs".to_string(), "storage".to_string()]
                 && title == "Install extension"
                 && modal
+        ));
+    }
+
+    #[test]
+    fn parse_event_extensions_listed_maps_png_icon() {
+        let bytes = [1_u8, 2, 3];
+        let extensions = [CbfExtensionInfo {
+            id: leaked_c_string("ext"),
+            name: leaked_c_string("Example"),
+            version: leaked_c_string("1.0.0"),
+            enabled: true,
+            permission_names: CbfStringList::default(),
+            icon: CbfIconData {
+                kind: CBF_ICON_DATA_KIND_PNG,
+                bytes: bytes.as_ptr(),
+                len: bytes.len() as u32,
+                ..Default::default()
+            },
+        }];
+        let mut event = make_event(CBF_EVENT_EXTENSIONS_LISTED);
+        event.extensions = CbfExtensionInfoList {
+            items: extensions.as_ptr() as *mut _,
+            len: 1,
+        };
+
+        let parsed = parse_event(event).expect("extensions listed should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::ExtensionsListed { extensions, .. }
+                if matches!(
+                    extensions.as_slice(),
+                    [crate::data::extension::ChromeExtensionInfo {
+                        icon: Some(ChromeIconData::Png(icon)),
+                        ..
+                    }] if icon == &vec![1, 2, 3]
+                )
+        ));
+    }
+
+    #[test]
+    fn parse_event_extensions_listed_maps_missing_icon_to_none() {
+        let extensions = [CbfExtensionInfo {
+            id: leaked_c_string("ext"),
+            name: leaked_c_string("Example"),
+            version: leaked_c_string("1.0.0"),
+            enabled: false,
+            permission_names: CbfStringList::default(),
+            icon: CbfIconData {
+                kind: CBF_ICON_DATA_KIND_PNG,
+                len: 0,
+                bytes: std::ptr::null(),
+                ..Default::default()
+            },
+        }];
+        let mut event = make_event(CBF_EVENT_EXTENSIONS_LISTED);
+        event.extensions = CbfExtensionInfoList {
+            items: extensions.as_ptr() as *mut _,
+            len: 1,
+        };
+
+        let parsed = parse_event(event).expect("extensions listed should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::ExtensionsListed { extensions, .. }
+                if matches!(
+                    extensions.as_slice(),
+                    [crate::data::extension::ChromeExtensionInfo { icon: None, .. }]
+                )
+        ));
+    }
+
+    #[test]
+    fn parse_event_extensions_listed_maps_binary_icon() {
+        let bytes = [4_u8, 5, 6];
+        let extensions = [CbfExtensionInfo {
+            id: leaked_c_string("ext"),
+            name: leaked_c_string("Example"),
+            version: leaked_c_string("1.0.0"),
+            enabled: true,
+            permission_names: CbfStringList::default(),
+            icon: CbfIconData {
+                kind: CBF_ICON_DATA_KIND_BINARY,
+                bytes: bytes.as_ptr(),
+                len: bytes.len() as u32,
+                media_type: leaked_c_string("image/webp"),
+                ..Default::default()
+            },
+        }];
+        let mut event = make_event(CBF_EVENT_EXTENSIONS_LISTED);
+        event.extensions = CbfExtensionInfoList {
+            items: extensions.as_ptr() as *mut _,
+            len: 1,
+        };
+
+        let parsed = parse_event(event).expect("extensions listed should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::ExtensionsListed { extensions, .. }
+                if matches!(
+                    extensions.as_slice(),
+                    [crate::data::extension::ChromeExtensionInfo {
+                        icon: Some(ChromeIconData::Binary { media_type: Some(media_type), bytes: icon_bytes }),
+                        ..
+                    }] if media_type == "image/webp" && icon_bytes == &vec![4, 5, 6]
+                )
         ));
     }
 

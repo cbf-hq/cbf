@@ -9,7 +9,8 @@ use tracing::{debug, warn};
 
 use super::map::{
     ime_range_to_ffi, key_event_type_to_ffi, mouse_button_to_ffi, mouse_event_type_to_ffi,
-    parse_event, pointer_type_to_ffi, scroll_granularity_to_ffi, to_ffi_ime_text_spans,
+    parse_event, parse_extension_list, pointer_type_to_ffi, scroll_granularity_to_ffi,
+    to_ffi_ime_text_spans,
 };
 use super::utils::{c_string_to_string, to_optional_cstring};
 use super::{Error, IpcEvent};
@@ -197,36 +198,7 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        let values = if list.len == 0 || list.items.is_null() {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(list.items, list.len as usize) }
-        };
-        let mut result = Vec::with_capacity(values.len());
-        for value in values {
-            let permission_names =
-                if value.permission_names.len == 0 || value.permission_names.items.is_null() {
-                    Vec::new()
-                } else {
-                    let permission_items = unsafe {
-                        std::slice::from_raw_parts(
-                            value.permission_names.items,
-                            value.permission_names.len as usize,
-                        )
-                    };
-                    permission_items
-                        .iter()
-                        .map(|entry| c_string_to_string(*entry))
-                        .collect()
-                };
-            result.push(ChromeExtensionInfo {
-                id: c_string_to_string(value.id),
-                name: c_string_to_string(value.name),
-                version: c_string_to_string(value.version),
-                enabled: value.enabled,
-                permission_names,
-            });
-        }
+        let result = parse_extension_list(list);
 
         unsafe { cbf_bridge_extension_list_free(&mut list) };
         Ok(result)

@@ -119,6 +119,11 @@ pub const CBF_DOWNLOAD_PROMPT_REASON_TARGET_NO_SPACE: u8 = 7;
 pub const CBF_DOWNLOAD_PROMPT_REASON_DLP_BLOCKED: u8 = 8;
 pub const CBF_DOWNLOAD_PROMPT_REASON_UNKNOWN: u8 = 255;
 
+pub const CBF_ICON_DATA_KIND_NONE: u8 = 0;
+pub const CBF_ICON_DATA_KIND_URL: u8 = 1;
+pub const CBF_ICON_DATA_KIND_PNG: u8 = 2;
+pub const CBF_ICON_DATA_KIND_BINARY: u8 = 3;
+
 pub const CBF_DOWNLOAD_STATE_UNKNOWN: u8 = 0;
 pub const CBF_DOWNLOAD_STATE_IN_PROGRESS: u8 = 1;
 pub const CBF_DOWNLOAD_STATE_PAUSED: u8 = 2;
@@ -426,12 +431,23 @@ pub struct CbfStringList {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
+pub struct CbfIconData {
+    pub kind: u8,
+    pub url: *mut c_char,
+    pub bytes: *const u8,
+    pub len: u32,
+    pub media_type: *mut c_char,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct CbfExtensionInfo {
     pub id: *mut c_char,
     pub name: *mut c_char,
     pub version: *mut c_char,
     pub enabled: bool,
     pub permission_names: CbfStringList,
+    pub icon: CbfIconData,
 }
 
 #[repr(C)]

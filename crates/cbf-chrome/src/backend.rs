@@ -213,7 +213,7 @@ impl ChromiumBackend {
         }
 
         if let Some(stop_reason) =
-            Self::process_command_queue(command_rx, client, event_tx, dispatcher, raw_delegate)
+            Self::process_next_command(command_rx, client, event_tx, dispatcher, raw_delegate)
         {
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
@@ -430,30 +430,20 @@ impl ChromiumBackend {
         )
     }
 
-    fn process_command_queue(
+    fn process_next_command(
         command_rx: &Receiver<CommandEnvelope<Self>>,
         client: &mut IpcClient,
         event_tx: &Sender<ChromeEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
         raw_delegate: &mut dyn ChromeRawDelegate,
     ) -> Option<BackendStopReason> {
-        loop {
-            let envelope = match command_rx.try_recv() {
-                Ok(envelope) => envelope,
-                Err(TryRecvError::Empty) => break None,
-                Err(TryRecvError::Closed) => break Some(BackendStopReason::Disconnected),
-            };
+        let envelope = match command_rx.try_recv() {
+            Ok(envelope) => envelope,
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Closed) => return Some(BackendStopReason::Disconnected),
+        };
 
-            if let Some(reason) = Self::dispatch_command_envelope(
-                envelope,
-                client,
-                event_tx,
-                dispatcher,
-                raw_delegate,
-            ) {
-                return Some(reason);
-            }
-        }
+        Self::dispatch_command_envelope(envelope, client, event_tx, dispatcher, raw_delegate)
     }
 
     fn execute_raw_command(
