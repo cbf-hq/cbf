@@ -26,6 +26,10 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub(crate) user_data_dir: Option<PathBuf>,
 
+    /// Optional default destination directory for non-`Save As` downloads.
+    #[arg(long)]
+    pub(crate) download_dir: Option<PathBuf>,
+
     /// Runtime selection gate.
     ///
     /// `chrome` is the default and the only currently supported runtime.
@@ -132,5 +136,12 @@ mod tests {
         let cli = Cli::try_parse_from(["simpleapp", "--runtime", "alloy"]).unwrap();
 
         assert_eq!(cli.runtime, RuntimeSelection::Alloy);
+    }
+
+    #[test]
+    fn cli_accepts_download_dir() {
+        let cli = Cli::try_parse_from(["simpleapp", "--download-dir", "/tmp/downloads"]).unwrap();
+
+        assert_eq!(cli.download_dir, Some(PathBuf::from("/tmp/downloads")));
     }
 }
