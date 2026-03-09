@@ -1,6 +1,8 @@
 //! Chrome-specific download lifecycle types.
 
-use cbf::data::download::{DownloadId, DownloadOutcome, DownloadPromptResult, DownloadState};
+use cbf::data::download::{
+    DownloadId, DownloadOutcome, DownloadPromptActionHint, DownloadPromptResult, DownloadState,
+};
 
 use crate::data::ids::TabId;
 
@@ -47,6 +49,92 @@ impl From<ChromeDownloadPromptResult> for DownloadPromptResult {
             ChromeDownloadPromptResult::Denied => Self::Denied,
             ChromeDownloadPromptResult::Aborted => Self::Aborted,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChromeDownloadPromptReason {
+    None,
+    Unexpected,
+    SaveAs,
+    Preference,
+    NameTooLong,
+    TargetConflict,
+    TargetPathNotWriteable,
+    TargetNoSpace,
+    DlpBlocked,
+    Unknown,
+}
+
+impl From<ChromeDownloadPromptReason> for DownloadPromptActionHint {
+    fn from(value: ChromeDownloadPromptReason) -> Self {
+        match value {
+            ChromeDownloadPromptReason::None => Self::AutoSave,
+            ChromeDownloadPromptReason::Unexpected
+            | ChromeDownloadPromptReason::SaveAs
+            | ChromeDownloadPromptReason::Preference
+            | ChromeDownloadPromptReason::NameTooLong
+            | ChromeDownloadPromptReason::TargetConflict
+            | ChromeDownloadPromptReason::TargetPathNotWriteable
+            | ChromeDownloadPromptReason::TargetNoSpace => Self::SelectDestination,
+            ChromeDownloadPromptReason::DlpBlocked => Self::Deny,
+            ChromeDownloadPromptReason::Unknown => Self::Unknown,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cbf::data::download::DownloadPromptActionHint;
+
+    use super::ChromeDownloadPromptReason;
+
+    #[test]
+    fn chrome_download_prompt_reason_maps_to_action_hint() {
+        assert_eq!(
+            DownloadPromptActionHint::from(ChromeDownloadPromptReason::None),
+            DownloadPromptActionHint::AutoSave
+        );
+        assert_eq!(
+            DownloadPromptActionHint::from(ChromeDownloadPromptReason::SaveAs),
+            DownloadPromptActionHint::SelectDestination
+        );
+        assert_eq!(
+            DownloadPromptActionHint::from(ChromeDownloadPromptReason::Preference),
+            DownloadPromptActionHint::SelectDestination
+        );
+        assert_eq!(
+            DownloadPromptActionHint::from(ChromeDownloadPromptReason::NameTooLong),
+            DownloadPromptActionHint::SelectDestination
+        );
+        assert_eq!(
+            DownloadPromptActionHint::from(ChromeDownloadPromptReason::TargetConflict),
+            DownloadPromptActionHint::SelectDestination
+        );
+        assert_eq!(
+            DownloadPromptActionHint::from(ChromeDownloadPromptReason::TargetPathNotWriteable),
+            DownloadPromptActionHint::SelectDestination
+        );
+        assert_eq!(
+            DownloadPromptActionHint::from(ChromeDownloadPromptReason::TargetNoSpace),
+            DownloadPromptActionHint::SelectDestination
+        );
+        assert_eq!(
+            DownloadPromptActionHint::from(ChromeDownloadPromptReason::Unexpected),
+            DownloadPromptActionHint::SelectDestination
+        );
+        assert_eq!(
+            DownloadPromptActionHint::from(ChromeDownloadPromptReason::DlpBlocked),
+            DownloadPromptActionHint::Deny
+        );
+    }
+
+    #[test]
+    fn chrome_download_prompt_reason_unknown_maps_to_unknown_action_hint() {
+        assert_eq!(
+            DownloadPromptActionHint::from(ChromeDownloadPromptReason::Unknown),
+            DownloadPromptActionHint::Unknown
+        );
     }
 }
 

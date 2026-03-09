@@ -491,11 +491,13 @@ fn prompt_ui_kind_to_auxiliary_window_kind(kind: &PromptUiKind) -> AuxiliaryWind
             file_name,
             total_bytes,
             suggested_path,
+            reason,
         } => AuxiliaryWindowKind::DownloadPrompt {
             download_id: (*download_id).into(),
             file_name: file_name.clone(),
             total_bytes: *total_bytes,
             suggested_path: suggested_path.clone(),
+            action_hint: (*reason).into(),
         },
         PromptUiKind::ExtensionInstallPrompt {
             extension_id,
@@ -591,6 +593,7 @@ fn prompt_ui_close_reason_to_auxiliary_window_close_reason(
 mod tests {
     use cbf::{
         data::{
+            download::DownloadPromptActionHint,
             extension::{
                 AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
                 AuxiliaryWindowResolution, ExtensionInstallPromptResult, PermissionPromptResult,
@@ -604,6 +607,7 @@ mod tests {
     use super::map_ipc_event_to_generic;
     use crate::{
         data::{
+            download::ChromeDownloadPromptReason,
             ids::TabId,
             prompt_ui::{
                 PromptUiCloseReason, PromptUiExtensionInstallResult, PromptUiId, PromptUiKind,
@@ -745,6 +749,78 @@ mod tests {
                             permission: PermissionPromptType::Other(ref key)
                         }
                     } if key == "window_management"
+                )
+        ));
+    }
+
+    #[test]
+    fn prompt_ui_requested_maps_download_reason_into_auxiliary_window() {
+        let event = IpcEvent::PromptUiOpenRequested {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(12),
+            request_id: 71,
+            kind: PromptUiKind::DownloadPrompt {
+                download_id: crate::data::download::ChromeDownloadId::new(55),
+                file_name: "file.bin".to_string(),
+                total_bytes: Some(42),
+                suggested_path: Some("/tmp/file.bin".to_string()),
+                reason: ChromeDownloadPromptReason::SaveAs,
+            },
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::BrowsingContext {
+                browsing_context_id,
+                event,
+                ..
+            } if browsing_context_id == BrowsingContextId::new(12)
+                && matches!(
+                    *event,
+                    BrowsingContextEvent::AuxiliaryWindowOpenRequested {
+                        request_id: 71,
+                        kind: AuxiliaryWindowKind::DownloadPrompt {
+                            action_hint: DownloadPromptActionHint::SelectDestination,
+                            ..
+                        }
+                    }
+                )
+        ));
+    }
+
+    #[test]
+    fn prompt_ui_requested_maps_dlp_reason_into_deny_action_hint() {
+        let event = IpcEvent::PromptUiOpenRequested {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(12),
+            request_id: 72,
+            kind: PromptUiKind::DownloadPrompt {
+                download_id: crate::data::download::ChromeDownloadId::new(56),
+                file_name: "file.bin".to_string(),
+                total_bytes: Some(42),
+                suggested_path: Some("/tmp/file.bin".to_string()),
+                reason: ChromeDownloadPromptReason::DlpBlocked,
+            },
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::BrowsingContext {
+                browsing_context_id,
+                event,
+                ..
+            } if browsing_context_id == BrowsingContextId::new(12)
+                && matches!(
+                    *event,
+                    BrowsingContextEvent::AuxiliaryWindowOpenRequested {
+                        request_id: 72,
+                        kind: AuxiliaryWindowKind::DownloadPrompt {
+                            action_hint: DownloadPromptActionHint::Deny,
+                            ..
+                        }
+                    }
                 )
         ));
     }

@@ -53,7 +53,9 @@ Design constraints:
 - `cbf` public API must not introduce chrome-specific nouns or Chromium internal concepts.
 - Prompt UI vocabulary boundary is explicit:
   - `cbf` public surface keeps browser-generic `AuxiliaryWindow*` terms.
+  - `cbf` download prompts expose browser-generic action hints only; backend-specific detailed reasons are intentionally excluded.
   - `cbf-chrome` raw/internal event and command vocabularies use chrome-specific `PromptUi*` terms.
+  - applications that need exact download reason details must inspect backend raw events (for example `cbf-chrome` raw events).
   - `cbf-chrome-sys` FFI/wire contracts use `PromptUi*` terms only.
   - Vocabulary translation is owned by `cbf-chrome` conversion boundaries (`to_generic_event` and command mapping).
 

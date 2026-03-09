@@ -1,6 +1,6 @@
 //! Data models for browser extension metadata and auxiliary prompt results.
 
-use crate::data::download::{DownloadId, DownloadPromptResult};
+use crate::data::download::{DownloadId, DownloadPromptActionHint, DownloadPromptResult};
 
 /// Extension metadata exposed by backends.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +71,12 @@ pub enum AuxiliaryWindowKind {
         file_name: String,
         total_bytes: Option<u64>,
         suggested_path: Option<String>,
+        /// Browser-generic action hint for host behavior.
+        ///
+        /// Detailed backend-specific reasons are intentionally not exposed in
+        /// `cbf`; inspect backend raw events (for example from `cbf-chrome`)
+        /// if your application needs exact reason codes.
+        action_hint: DownloadPromptActionHint,
     },
     PrintPreviewDialog,
     Unknown,

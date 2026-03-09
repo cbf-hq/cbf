@@ -9,7 +9,7 @@ use cbf::{
         browsing_context_open::BrowsingContextOpenHint,
         browsing_context_open::BrowsingContextOpenResponse,
         context_menu::ContextMenu,
-        download::{DownloadId, DownloadOutcome, DownloadState},
+        download::{DownloadId, DownloadOutcome, DownloadPromptActionHint, DownloadState},
         drag::{DragOperations, DragStartRequest},
         extension::{AuxiliaryWindowKind, AuxiliaryWindowResponse},
         ids::{BrowsingContextId, WindowId},
@@ -897,12 +897,17 @@ impl CoreState {
                 if let AuxiliaryWindowKind::DownloadPrompt {
                     download_id,
                     file_name,
-                    total_bytes,
+                    total_bytes: _,
                     suggested_path,
+                    action_hint,
                 } = &kind
                 {
-                    let response =
-                        show_download_prompt_dialog(file_name, *total_bytes, suggested_path);
+                    let response = download_prompt_response_for_simpleapp(
+                        *action_hint,
+                        file_name,
+                        suggested_path,
+                        self.cli.download_dir.as_deref(),
+                    );
                     if let Err(err) = self.browser_handle().respond_auxiliary_window(
                         browsing_context_id,
                         request_id,
@@ -994,35 +999,10 @@ fn show_permission_prompt_dialog(permission: &cbf::data::extension::PermissionPr
     matches!(result, MessageDialogResult::Yes)
 }
 
-fn show_download_prompt_dialog(
+fn show_download_save_as_dialog(
     file_name: &str,
-    total_bytes: Option<u64>,
     suggested_path: &Option<String>,
 ) -> AuxiliaryWindowResponse {
-    let size_line = total_bytes
-        .map(|bytes| format!("\nSize: {bytes} bytes"))
-        .unwrap_or_default();
-    let suggested_path_line = suggested_path
-        .as_ref()
-        .map(|path| format!("\nSuggested path: {path}"))
-        .unwrap_or_default();
-    let message =
-        format!("Download file:\n{file_name}{size_line}{suggested_path_line}\n\nContinue?");
-
-    let confirm = MessageDialog::new()
-        .set_level(MessageLevel::Info)
-        .set_title("Download Request")
-        .set_description(&message)
-        .set_buttons(MessageButtons::YesNo)
-        .show();
-
-    if !matches!(confirm, MessageDialogResult::Yes) {
-        return AuxiliaryWindowResponse::DownloadPrompt {
-            allow: false,
-            destination_path: None,
-        };
-    }
-
     let mut dialog = FileDialog::new().set_file_name(file_name);
     if let Some(suggested_path) = suggested_path {
         let suggested = std::path::Path::new(suggested_path);
@@ -1046,6 +1026,90 @@ fn show_download_prompt_dialog(
     }
 }
 
+fn show_download_blocked_dialog() {
+    let _ = MessageDialog::new()
+        .set_level(MessageLevel::Error)
+        .set_title("Download Blocked")
+        .set_description("This download is blocked by policy and cannot be saved.")
+        .set_buttons(MessageButtons::Ok)
+        .show();
+}
+
+fn build_default_download_destination_path(
+    download_dir: Option<&std::path::Path>,
+    file_name: &str,
+) -> Option<String> {
+    let file_name = file_name.trim();
+    if file_name.is_empty() {
+        return None;
+    }
+    download_dir.map(|dir| dir.join(file_name).to_string_lossy().into_owned())
+}
+
+fn download_prompt_response_for_simpleapp(
+    action_hint: DownloadPromptActionHint,
+    file_name: &str,
+    suggested_path: &Option<String>,
+    default_download_dir: Option<&std::path::Path>,
+) -> AuxiliaryWindowResponse {
+    match download_prompt_handling(action_hint) {
+        DownloadPromptHandling::ImmediateAllow => {
+            if prompt_dialog() {
+                AuxiliaryWindowResponse::DownloadPrompt {
+                    allow: true,
+                    destination_path: build_default_download_destination_path(
+                        default_download_dir,
+                        file_name,
+                    ),
+                }
+            } else {
+                AuxiliaryWindowResponse::DownloadPrompt {
+                    allow: false,
+                    destination_path: None,
+                }
+            }
+        }
+        DownloadPromptHandling::ShowSaveDialog => {
+            show_download_save_as_dialog(file_name, suggested_path)
+        }
+        DownloadPromptHandling::DenyBlocked => {
+            show_download_blocked_dialog();
+            AuxiliaryWindowResponse::DownloadPrompt {
+                allow: false,
+                destination_path: None,
+            }
+        }
+    }
+}
+
+fn prompt_dialog() -> bool {
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Info)
+        .set_title("Download Request")
+        .set_description("This site wants to download a file. Allow this request?")
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+
+    result == MessageDialogResult::Yes
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DownloadPromptHandling {
+    ImmediateAllow,
+    ShowSaveDialog,
+    DenyBlocked,
+}
+
+fn download_prompt_handling(action_hint: DownloadPromptActionHint) -> DownloadPromptHandling {
+    match action_hint {
+        DownloadPromptActionHint::AutoSave => DownloadPromptHandling::ImmediateAllow,
+        DownloadPromptActionHint::SelectDestination | DownloadPromptActionHint::Unknown => {
+            DownloadPromptHandling::ShowSaveDialog
+        }
+        DownloadPromptActionHint::Deny => DownloadPromptHandling::DenyBlocked,
+    }
+}
+
 fn permission_prompt_description(
     permission: &cbf::data::extension::PermissionPromptType,
 ) -> String {
@@ -1060,5 +1124,77 @@ fn permission_prompt_description(
         PermissionPromptType::Unknown => {
             "This site requests a permission that could not be identified.".to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_default_download_destination_path_joins_file_name() {
+        let dir = std::path::Path::new("/tmp/downloads");
+        let path =
+            build_default_download_destination_path(Some(dir), "file.bin").expect("path expected");
+
+        assert_eq!(path, "/tmp/downloads/file.bin");
+    }
+
+    #[test]
+    fn build_default_download_destination_path_returns_none_without_dir() {
+        assert_eq!(
+            build_default_download_destination_path(None, "file.bin"),
+            None
+        );
+    }
+
+    #[test]
+    fn download_prompt_response_for_none_is_immediate_allow() {
+        let response = download_prompt_response_for_simpleapp(
+            DownloadPromptActionHint::AutoSave,
+            "file.bin",
+            &None,
+            Some(std::path::Path::new("/tmp/downloads")),
+        );
+
+        assert_eq!(
+            response,
+            AuxiliaryWindowResponse::DownloadPrompt {
+                allow: true,
+                destination_path: Some("/tmp/downloads/file.bin".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn download_prompt_handling_none_is_immediate_allow() {
+        assert_eq!(
+            download_prompt_handling(DownloadPromptActionHint::AutoSave),
+            DownloadPromptHandling::ImmediateAllow
+        );
+    }
+
+    #[test]
+    fn download_prompt_handling_dlp_is_denied() {
+        assert_eq!(
+            download_prompt_handling(DownloadPromptActionHint::Deny),
+            DownloadPromptHandling::DenyBlocked
+        );
+    }
+
+    #[test]
+    fn download_prompt_handling_save_as_shows_dialog() {
+        assert_eq!(
+            download_prompt_handling(DownloadPromptActionHint::SelectDestination),
+            DownloadPromptHandling::ShowSaveDialog
+        );
+    }
+
+    #[test]
+    fn download_prompt_handling_unknown_shows_dialog() {
+        assert_eq!(
+            download_prompt_handling(DownloadPromptActionHint::Unknown),
+            DownloadPromptHandling::ShowSaveDialog
+        );
     }
 }
