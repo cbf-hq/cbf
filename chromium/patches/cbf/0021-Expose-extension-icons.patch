@@ -1,0 +1,522 @@
+From 724ae129ca1ee011b8f7f6302f534db34d041766 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Mon, 9 Mar 2026 12:05:51 +0900
+Subject: [PATCH 21/21] Expose extension icons
+
+---
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  34 ++++++
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  16 +++
+ .../browser/cbf/bridge/cbf_bridge_profiles.cc |  37 +++++-
+ chrome/browser/cbf/cbf_profile_service.cc     | 109 ++++++++++++++++--
+ .../cbf/cbf_profile_service_browsertest.cc    |  97 ++++++++++++++++
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  15 +++
+ 6 files changed, 298 insertions(+), 10 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index 4921f24689190..821ebc4994778 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -38,6 +38,32 @@ CbfContextMenuIcon ToCbfMenuIcon(const cbf::mojom::CbfMenuIconPtr& icon) {
+   return out;
+ }
+ 
++CbfIconData ToCbfIconData(const cbf::mojom::CbfIconDataPtr& icon) {
++  CbfIconData out = {};
++  if (!icon) {
++    return out;
++  }
++
++  out.kind = static_cast<uint8_t>(icon->kind);
++  if (icon->url.has_value()) {
++    out.url = CopyCString(icon->url.value());
++  }
++  if (icon->media_type.has_value()) {
++    out.media_type = CopyCString(icon->media_type.value());
++  }
++  if (icon->bytes.has_value() && !icon->bytes->empty()) {
++    const size_t len = icon->bytes->size();
++    uint8_t* bytes = new uint8_t[len];
++    auto out_bytes = UNSAFE_BUFFERS(base::span(bytes, len));
++    for (size_t i = 0; i < out_bytes.size(); ++i) {
++      out_bytes[i] = icon->bytes.value()[i];
++    }
++    out.bytes = bytes;
++    out.len = static_cast<uint32_t>(len);
++  }
++  return out;
++}
++
+ CbfContextMenuItemList ToCbfMenuItems(
+     const std::vector<cbf::mojom::CbfMenuItemPtr>& items);
+ 
+@@ -164,6 +190,7 @@ CbfExtensionInfoList ToCbfExtensionInfoList(
+     out_span[i].version = CopyCString(values[i]->version);
+     out_span[i].enabled = values[i]->enabled;
+     out_span[i].permission_names = ToCbfStringList(values[i]->permission_names);
++    out_span[i].icon = ToCbfIconData(values[i]->icon);
+   }
+   out.items = out_items;
+   out.len = static_cast<uint32_t>(values.size());
+@@ -579,6 +606,13 @@ void FreeExtensionInfoList(CbfExtensionInfoList list) {
+     FreeStringList(item.permission_names);
+     item.permission_names.items = nullptr;
+     item.permission_names.len = 0;
++    delete[] item.icon.url;
++    item.icon.url = nullptr;
++    delete[] item.icon.bytes;
++    item.icon.bytes = nullptr;
++    item.icon.len = 0;
++    delete[] item.icon.media_type;
++    item.icon.media_type = nullptr;
+   }
+   delete[] list.items;
+ }
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index 82043a756bd66..5f194a453a427 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -119,6 +119,13 @@ enum CbfDownloadOutcome {
+   kCbfDownloadOutcomeInterrupted = 3,
+ };
+ 
++enum CbfIconDataKind {
++  kCbfIconDataKindNone = 0,
++  kCbfIconDataKindUrl = 1,
++  kCbfIconDataKindPng = 2,
++  kCbfIconDataKindBinary = 3,
++};
++
+ enum CbfTabOpenHint {
+   kCbfTabOpenHintUnknown = 0,
+   kCbfTabOpenHintCurrentContext = 1,
+@@ -377,12 +384,21 @@ typedef struct CbfStringList {
+   uint32_t len;
+ } CbfStringList;
+ 
++typedef struct CbfIconData {
++  uint8_t kind;
++  char* url;
++  const uint8_t* bytes;
++  uint32_t len;
++  char* media_type;
++} CbfIconData;
++
+ typedef struct CbfExtensionInfo {
+   char* id;
+   char* name;
+   char* version;
+   bool enabled;
+   CbfStringList permission_names;
++  CbfIconData icon;
+ } CbfExtensionInfo;
+ 
+ typedef struct CbfExtensionInfoList {
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc b/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc
+index fe960365b5f18..bb9396997f16c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc
+@@ -11,6 +11,37 @@
+ 
+ namespace cbf_bridge::internal {
+ 
++namespace {
++
++CbfIconData ToCbfIconData(const cbf::mojom::CbfIconDataPtr& icon) {
++  CbfIconData out = {};
++  if (!icon) {
++    return out;
++  }
++
++  out.kind = static_cast<uint8_t>(icon->kind);
++  if (icon->url.has_value()) {
++    out.url = CopyCString(icon->url.value());
++  }
++  if (icon->media_type.has_value()) {
++    out.media_type = CopyCString(icon->media_type.value());
++  }
++  if (icon->bytes.has_value() && !icon->bytes->empty()) {
++    const size_t len = icon->bytes->size();
++    uint8_t* bytes = new uint8_t[len];
++    auto out_bytes = UNSAFE_BUFFERS(base::span(bytes, len));
++    for (size_t i = 0; i < out_bytes.size(); ++i) {
++      out_bytes[i] = icon->bytes.value()[i];
++    }
++    out.bytes = bytes;
++    out.len = static_cast<uint32_t>(len);
++  }
++
++  return out;
++}
++
++}  // namespace
++
+ bool CbfBridgeClient::GetProfiles(CbfProfileList* out_list) {
+   if (!impl_ || !out_list) {
+     return false;
+@@ -133,7 +164,7 @@ bool CbfBridgeClient::ListExtensions(const std::string& profile_id,
+ 
+   out_list->len = static_cast<uint32_t>(extensions.size());
+   out_list->items =
+-      extensions.empty() ? nullptr : new CbfExtensionInfo[extensions.size()];
++      extensions.empty() ? nullptr : new CbfExtensionInfo[extensions.size()]();
+   auto out_extensions =
+       UNSAFE_BUFFERS(base::span(out_list->items, out_list->len));
+   size_t index = 0;
+@@ -153,6 +184,7 @@ bool CbfBridgeClient::ListExtensions(const std::string& profile_id,
+     for (size_t i = 0; i < out_permissions.size(); ++i) {
+       out_permissions[i] = CopyCString(extension->permission_names[i]);
+     }
++    entry.icon = ToCbfIconData(extension->icon);
+   }
+   return true;
+ }
+@@ -203,6 +235,9 @@ extern "C" void cbf_bridge_extension_list_free(CbfExtensionInfoList* list) {
+     delete[] extension.id;
+     delete[] extension.name;
+     delete[] extension.version;
++    delete[] extension.icon.url;
++    delete[] extension.icon.bytes;
++    delete[] extension.icon.media_type;
+     if (extension.permission_names.items) {
+       auto permissions = UNSAFE_BUFFERS(
+           base::span(extension.permission_names.items, extension.permission_names.len));
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 2cfb7e56fae81..84047553c5efb 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -8,9 +8,12 @@
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
+ #include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
+ #include "base/logging.h"
+ #include "base/strings/utf_string_conversions.h"
+-#include "base/functional/bind.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/values.h"
+ #include "base/time/time.h"
+@@ -42,7 +45,9 @@
+ #include "chrome/browser/cbf/profile/cbf_profile_popup_controller.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
+ #include "extensions/browser/extension_registry.h"
++#include "extensions/common/constants.h"
+ #include "extensions/common/extension.h"
++#include "extensions/common/manifest_handlers/icons_handler.h"
+ #include "extensions/common/permissions/permissions_data.h"
+ #include "components/download/public/common/download_item.h"
+ #include "components/prefs/pref_service.h"
+@@ -73,6 +78,39 @@ std::vector<std::string> BuildPermissionNames(const extensions::Extension* exten
+   return names;
+ }
+ 
++std::optional<base::FilePath> ResolveExtensionIconPath(
++    const extensions::Extension* extension) {
++  if (!extension) {
++    return std::nullopt;
++  }
++  const extensions::ExtensionResource icon_resource =
++      extensions::IconsInfo::GetIconResource(
++          extension, extension_misc::EXTENSION_ICON_LARGE,
++          ExtensionIconSet::Match::kBigger);
++  if (icon_resource.relative_path().empty()) {
++    return std::nullopt;
++  }
++
++  base::FilePath icon_path = extension->path().Append(icon_resource.relative_path());
++  if (!icon_path.MatchesExtension(FILE_PATH_LITERAL(".png"))) {
++    return std::nullopt;
++  }
++
++  return icon_path;
++}
++
++mojom::CbfIconDataPtr ReadExtensionIcon(const base::FilePath& icon_path) {
++  auto encoded = base::ReadFileToBytes(icon_path);
++  if (!encoded.has_value() || encoded->empty()) {
++    return nullptr;
++  }
++
++  auto icon = mojom::CbfIconData::New();
++  icon->kind = mojom::CbfIconDataKind::kPng;
++  icon->bytes = std::move(*encoded);
++  return icon;
++}
++
+ mojom::CbfExtensionInstallPromptResult ToCbfInstallPromptResult(
+     extensions::ExtensionInstallPromptClient::Result result) {
+   switch (result) {
+@@ -567,20 +605,62 @@ void CbfProfileService::GetTabDomHtml(uint64_t tab_id,
+ 
+ void CbfProfileService::ListExtensions(const std::string& profile_id,
+                                        ListExtensionsCallback callback) {
+-  std::vector<mojom::CbfExtensionInfoPtr> result;
++  struct PendingRequest {
++    std::string profile_id;
++    ListExtensionsCallback callback;
++    std::vector<mojom::CbfExtensionInfoPtr> result;
++    size_t pending_icons = 0;
++  };
++
++  auto request = std::make_shared<PendingRequest>();
++  request->profile_id = profile_id;
++  request->callback = std::move(callback);
++
++  auto finalize = base::BindRepeating(
++      [](base::WeakPtr<CbfProfileService> self,
++         std::shared_ptr<PendingRequest> request) {
++        if (!self) {
++          return;
++        }
++        if (self->observer_) {
++          self->observer_->OnExtensionsListed(request->profile_id,
++                                              mojo::Clone(request->result));
++        }
++        std::move(request->callback).Run(std::move(request->result));
++      },
++      weak_factory_.GetWeakPtr());
++
+   if (!profile_) {
+-    std::move(callback).Run(std::move(result));
++    finalize.Run(request);
+     return;
+   }
+ 
+   extensions::ExtensionRegistry* registry =
+       extensions::ExtensionRegistry::Get(profile_.get());
+   if (!registry) {
+-    std::move(callback).Run(std::move(result));
++    finalize.Run(request);
+     return;
+   }
+ 
+-  auto append_set = [&result](const extensions::ExtensionSet& set, bool enabled) {
++  auto on_icon_read = base::BindRepeating(
++      [](base::RepeatingCallback<void(std::shared_ptr<PendingRequest>)> finalize,
++         std::shared_ptr<PendingRequest> request, size_t index,
++         mojom::CbfIconDataPtr icon) {
++        if (index < request->result.size() && request->result[index]) {
++          request->result[index]->icon = std::move(icon);
++        }
++        if (request->pending_icons == 0) {
++          return;
++        }
++        request->pending_icons--;
++        if (request->pending_icons == 0) {
++          finalize.Run(request);
++        }
++      },
++      finalize);
++
++  auto append_set = [&request, &on_icon_read](
++                        const extensions::ExtensionSet& set, bool enabled) {
+     for (const auto& extension : set) {
+       if (!extension) {
+         continue;
+@@ -591,16 +671,27 @@ void CbfProfileService::ListExtensions(const std::string& profile_id,
+       info->version = extension->version().GetString();
+       info->enabled = enabled;
+       info->permission_names = BuildPermissionNames(extension.get());
+-      result.push_back(std::move(info));
++      request->result.push_back(std::move(info));
++
++      auto icon_path = ResolveExtensionIconPath(extension.get());
++      if (!icon_path.has_value()) {
++        continue;
++      }
++
++      const size_t index = request->result.size() - 1;
++      request->pending_icons++;
++      base::ThreadPool::PostTaskAndReplyWithResult(
++          FROM_HERE, {base::MayBlock()},
++          base::BindOnce(&ReadExtensionIcon, *icon_path),
++          base::BindOnce(on_icon_read, request, index));
+     }
+   };
+   append_set(registry->enabled_extensions(), true);
+   append_set(registry->disabled_extensions(), false);
+ 
+-  if (observer_) {
+-    observer_->OnExtensionsListed(profile_id, mojo::Clone(result));
++  if (request->pending_icons == 0) {
++    finalize.Run(request);
+   }
+-  std::move(callback).Run(std::move(result));
+ }
+ 
+ bool CbfProfileService::RequestAuxiliaryInstallPromptForWebstore(
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 73f2fe98e3840..6bab7a93b9d5e 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -12,12 +12,14 @@
+ #include "base/files/scoped_temp_dir.h"
+ #include "base/functional/bind.h"
+ #include "base/run_loop.h"
++#include "base/values.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/task/cancelable_task_tracker.h"
+ #include "base/threading/thread_restrictions.h"
+ #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
+ #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
+ #include "chrome/browser/history/history_service_factory.h"
++#include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+@@ -33,10 +35,15 @@
+ #include "content/public/test/browser_test_utils.h"
+ #include "content/public/test/slow_download_http_response.h"
+ #include "content/public/test/slow_http_response.h"
++#include "extensions/browser/extension_registry.h"
++#include "extensions/common/constants.h"
++#include "extensions/common/extension_builder.h"
+ #include "net/http/http_status_code.h"
+ #include "net/test/embedded_test_server/http_request.h"
+ #include "net/test/embedded_test_server/http_response.h"
++#include "third_party/skia/include/core/SkBitmap.h"
+ #include "testing/gtest/include/gtest/gtest.h"
++#include "ui/gfx/codec/png_codec.h"
+ 
+ namespace cbf {
+ namespace {
+@@ -181,11 +188,72 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     profile_service_->RespondPromptUi(tab_id, request_id, std::move(response));
+   }
+ 
++  std::vector<mojom::CbfExtensionInfoPtr> ListExtensions() {
++    std::vector<mojom::CbfExtensionInfoPtr> extensions;
++    base::RunLoop run_loop;
++    profile_service_->ListExtensions(
++        "default",
++        base::BindOnce(
++            [](std::vector<mojom::CbfExtensionInfoPtr>* out_extensions,
++               base::RunLoop* run_loop,
++               std::vector<mojom::CbfExtensionInfoPtr> in_extensions) {
++              *out_extensions = std::move(in_extensions);
++              run_loop->Quit();
++            },
++            &extensions, &run_loop));
++    run_loop.Run();
++    return extensions;
++  }
++
++  const mojom::CbfExtensionInfo* FindExtensionByName(
++      const std::vector<mojom::CbfExtensionInfoPtr>& extensions,
++      const std::string& name) {
++    for (const auto& extension : extensions) {
++      if (extension && extension->name == name) {
++        return extension.get();
++      }
++    }
++    return nullptr;
++  }
++
++  scoped_refptr<const extensions::Extension> CreateTestExtensionWithOptionalIcon(
++      const std::string& name,
++      bool write_icon) {
++    base::ScopedAllowBlockingForTesting allow_blocking;
++    auto extension_dir = std::make_unique<base::ScopedTempDir>();
++    CHECK(extension_dir->CreateUniqueTempDir());
++
++    if (write_icon) {
++      SkBitmap bitmap;
++      bitmap.allocN32Pixels(24, 24);
++      bitmap.eraseColor(SK_ColorGREEN);
++      auto encoded = gfx::PNGCodec::EncodeBGRASkBitmap(
++          bitmap, /*discard_transparency=*/false);
++      CHECK(encoded.has_value());
++      CHECK(base::WriteFile(
++          extension_dir->GetPath().AppendASCII("icon.png"), *encoded));
++    }
++
++    extensions::ExtensionBuilder builder(name);
++    builder.SetPath(extension_dir->GetPath());
++    if (write_icon) {
++      base::DictValue icons;
++      icons.Set(base::NumberToString(extension_misc::EXTENSION_ICON_LARGE),
++                "icon.png");
++      builder.SetManifestKey("icons", std::move(icons));
++    }
++
++    auto extension = builder.Build();
++    extension_dirs_.push_back(std::move(extension_dir));
++    return extension;
++  }
++
+   std::unique_ptr<CbfProfileService> profile_service_;
+   cbf::test::CbfTestProfileObserver observer_;
+   base::ScopedTempDir download_temp_dir_;
+   bool download_server_started_ = false;
+   int download_destination_index_ = 0;
++  std::vector<std::unique_ptr<base::ScopedTempDir>> extension_dirs_;
+ };
+ 
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
+@@ -194,6 +262,35 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp)
+   profile_service_->OpenDevTools(kInvalidTabId);
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       ListExtensionsReturnsPngIconBytesWhenPresent) {
++  auto extension = CreateTestExtensionWithOptionalIcon("Icon Extension", true);
++  ASSERT_TRUE(extension);
++  extensions::ExtensionRegistry::Get(browser()->profile())->AddEnabled(extension);
++
++  auto extensions = ListExtensions();
++  const mojom::CbfExtensionInfo* listed =
++      FindExtensionByName(extensions, "Icon Extension");
++  ASSERT_NE(listed, nullptr);
++  ASSERT_TRUE(listed->icon);
++  EXPECT_EQ(listed->icon->kind, mojom::CbfIconDataKind::kPng);
++  ASSERT_TRUE(listed->icon->bytes.has_value());
++  EXPECT_FALSE(listed->icon->bytes->empty());
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       ListExtensionsReturnsNoIconWhenMissing) {
++  auto extension = CreateTestExtensionWithOptionalIcon("No Icon Extension", false);
++  ASSERT_TRUE(extension);
++  extensions::ExtensionRegistry::Get(browser()->profile())->AddEnabled(extension);
++
++  auto extensions = ListExtensions();
++  const mojom::CbfExtensionInfo* listed =
++      FindExtensionByName(extensions, "No Icon Extension");
++  ASSERT_NE(listed, nullptr);
++  EXPECT_FALSE(listed->icon);
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        DownloadPromptAllowStoresFileAtDestinationPath) {
+   EnsureDownloadServerStarted();
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index e48ed1138dc1c..faf19a804b851 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -12,6 +12,21 @@ struct CbfExtensionInfo {
+   string version;
+   bool enabled;
+   array<string> permission_names;
++  CbfIconData? icon;
++};
++
++enum CbfIconDataKind {
++  kNone,
++  kUrl,
++  kPng,
++  kBinary,
++};
++
++struct CbfIconData {
++  CbfIconDataKind kind;
++  string? url;
++  array<uint8>? bytes;
++  string? media_type;
+ };
+ 
+ enum CbfExtensionInstallPromptResult {
+-- 
+2.50.1 (Apple Git-155)
+
