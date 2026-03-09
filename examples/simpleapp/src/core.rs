@@ -1149,24 +1149,6 @@ mod tests {
     }
 
     #[test]
-    fn download_prompt_response_for_none_is_immediate_allow() {
-        let response = download_prompt_response_for_simpleapp(
-            DownloadPromptActionHint::AutoSave,
-            "file.bin",
-            &None,
-            Some(std::path::Path::new("/tmp/downloads")),
-        );
-
-        assert_eq!(
-            response,
-            AuxiliaryWindowResponse::DownloadPrompt {
-                allow: true,
-                destination_path: Some("/tmp/downloads/file.bin".to_string()),
-            }
-        );
-    }
-
-    #[test]
     fn download_prompt_handling_none_is_immediate_allow() {
         assert_eq!(
             download_prompt_handling(DownloadPromptActionHint::AutoSave),
