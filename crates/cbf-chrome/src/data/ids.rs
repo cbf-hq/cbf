@@ -1,10 +1,17 @@
 //! Chrome-facing stable identifiers; primarily `TabId` as the Chromium-layer counterpart of `BrowsingContextId`.
 
-use cbf::data::ids::BrowsingContextId;
+use cbf::data::ids::{BrowsingContextId, TransientBrowsingContextId};
 
 /// Chrome-facing stable identifier for a tab managed by Chromium runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TabId(pub u64);
+
+/// Chrome-facing stable identifier for an extension popup.
+///
+/// This is the current Chromium-side carrier for generic
+/// `TransientBrowsingContextId` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PopupId(pub u64);
 
 impl std::fmt::Display for TabId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -34,6 +41,28 @@ impl TabId {
     }
 }
 
+impl PopupId {
+    /// Create a new identifier from a raw numeric value.
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    /// Get the raw numeric value of this identifier.
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// Convert from generic-layer transient browsing context ID.
+    pub const fn from_transient_browsing_context_id(id: TransientBrowsingContextId) -> Self {
+        Self(id.get())
+    }
+
+    /// Convert into generic-layer transient browsing context ID.
+    pub const fn to_transient_browsing_context_id(self) -> TransientBrowsingContextId {
+        TransientBrowsingContextId::new(self.get())
+    }
+}
+
 impl From<BrowsingContextId> for TabId {
     fn from(value: BrowsingContextId) -> Self {
         Self::from_browsing_context_id(value)
@@ -46,11 +75,23 @@ impl From<TabId> for BrowsingContextId {
     }
 }
 
+impl From<TransientBrowsingContextId> for PopupId {
+    fn from(value: TransientBrowsingContextId) -> Self {
+        Self::from_transient_browsing_context_id(value)
+    }
+}
+
+impl From<PopupId> for TransientBrowsingContextId {
+    fn from(value: PopupId) -> Self {
+        value.to_transient_browsing_context_id()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use cbf::data::ids::BrowsingContextId;
+    use cbf::data::ids::{BrowsingContextId, TransientBrowsingContextId};
 
-    use super::TabId;
+    use super::{PopupId, TabId};
 
     #[test]
     fn tab_id_round_trip_preserves_raw_value() {
@@ -61,5 +102,16 @@ mod tests {
 
         assert_eq!(round_trip, BrowsingContextId::new(4242));
         assert_eq!(tab_id, TabId::new(4242));
+    }
+
+    #[test]
+    fn popup_id_round_trip_preserves_raw_value() {
+        let original = TransientBrowsingContextId::new(77);
+
+        let popup_id = PopupId::from(original);
+        let round_trip = popup_id.to_transient_browsing_context_id();
+
+        assert_eq!(round_trip, TransientBrowsingContextId::new(77));
+        assert_eq!(popup_id, PopupId::new(77));
     }
 }

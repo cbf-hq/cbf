@@ -4,6 +4,7 @@ use async_channel::{Receiver, Sender, TryRecvError};
 use cbf::{
     browser::{Backend, CommandEnvelope, CommandSender, EventStream},
     command::{BrowserCommand, BrowserOperation},
+    data::dialog::DialogResponse,
     delegate::{BackendDelegate, CommandDecision, DelegateDispatcher, EventDecision},
     error::{ApiErrorKind, BackendErrorInfo, Error},
     event::{BackendStopReason, BrowserEvent},
@@ -40,6 +41,10 @@ enum CommandExecutionError {
         operation: Option<BrowserOperation>,
         source: IpcError,
     },
+    Unsupported {
+        operation: BrowserOperation,
+        detail: &'static str,
+    },
 }
 
 impl CommandExecutionError {
@@ -57,6 +62,11 @@ impl CommandExecutionError {
                 },
                 operation,
                 detail: Some(format!("{source:?}")),
+            },
+            Self::Unsupported { operation, detail } => BackendErrorInfo {
+                kind: ApiErrorKind::Unsupported,
+                operation: Some(operation),
+                detail: Some(detail.to_string()),
             },
         }
     }
@@ -490,6 +500,36 @@ impl ChromiumBackend {
             } => client
                 .confirm_beforeunload(*browsing_context_id, *request_id, *proceed)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::RespondJavaScriptDialog {
+                browsing_context_id,
+                request_id,
+                response,
+            } => {
+                let (accept, prompt_text) = dialog_response_parts(response);
+                client
+                    .respond_javascript_dialog(
+                        *browsing_context_id,
+                        *request_id,
+                        accept,
+                        prompt_text.as_deref(),
+                    )
+                    .map(|_| (None, Vec::new()))
+            }
+            ChromeCommand::RespondExtensionPopupJavaScriptDialog {
+                popup_id,
+                request_id,
+                response,
+            } => {
+                let (accept, prompt_text) = dialog_response_parts(response);
+                client
+                    .respond_extension_popup_javascript_dialog(
+                        *popup_id,
+                        *request_id,
+                        accept,
+                        prompt_text.as_deref(),
+                    )
+                    .map(|_| (None, Vec::new()))
+            }
             ChromeCommand::ConfirmPermission {
                 browsing_context_id,
                 request_id,
@@ -536,6 +576,38 @@ impl ChromiumBackend {
                     )
                 })
             }
+            ChromeCommand::ActivateExtensionAction {
+                browsing_context_id,
+                extension_id,
+            } => client
+                .activate_extension_action(*browsing_context_id, extension_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::CloseExtensionPopup { popup_id } => client
+                .close_extension_popup(*popup_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SetExtensionPopupSize {
+                popup_id,
+                width,
+                height,
+            } => client
+                .set_extension_popup_size(*popup_id, *width, *height)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SetExtensionPopupFocus { popup_id, focused } => client
+                .set_extension_popup_focus(*popup_id, *focused)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SendExtensionPopupKeyEvent {
+                popup_id,
+                event,
+                commands,
+            } => client
+                .send_extension_popup_key_event_raw(*popup_id, event, commands)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SendExtensionPopupMouseEvent { popup_id, event } => client
+                .send_extension_popup_mouse_event(*popup_id, event)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SendExtensionPopupMouseWheelEvent { popup_id, event } => client
+                .send_extension_popup_mouse_wheel_event_raw(*popup_id, event)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::SendKeyEvent {
                 browsing_context_id,
                 event,
@@ -570,14 +642,23 @@ impl ChromiumBackend {
             ChromeCommand::SetImeComposition { composition } => client
                 .set_composition(composition)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::SetExtensionPopupComposition { composition } => client
+                .set_extension_popup_composition(composition)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::CommitImeText { commit } => {
                 client.commit_text(commit).map(|_| (None, Vec::new()))
             }
+            ChromeCommand::CommitExtensionPopupText { commit } => client
+                .commit_extension_popup_text(commit)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::FinishComposingText {
                 browsing_context_id,
                 behavior,
             } => client
                 .finish_composing_text(*browsing_context_id, *behavior)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::FinishExtensionPopupComposingText { popup_id, behavior } => client
+                .finish_extension_popup_composing_text(*popup_id, *behavior)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::ExecuteContextMenuCommand {
                 menu_id,
@@ -685,9 +766,22 @@ impl ChromiumBackend {
             } => client
                 .respond_window_open(*request_id, response)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::UnsupportedGenericCommand { operation } => {
+                return Err(CommandExecutionError::Unsupported {
+                    operation: *operation,
+                    detail: "transient browsing context commands are not yet implemented in the Chromium transport",
+                });
+            }
         };
 
         result.map_err(|source| CommandExecutionError::from_ipc_call(operation, source))
+    }
+}
+
+fn dialog_response_parts(response: &DialogResponse) -> (bool, Option<String>) {
+    match response {
+        DialogResponse::Success { input } => (true, input.clone()),
+        DialogResponse::Cancel => (false, None),
     }
 }
 

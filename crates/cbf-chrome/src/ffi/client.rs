@@ -19,8 +19,11 @@ use crate::data::{
     download::ChromeDownloadId,
     drag::{ChromeDragDrop, ChromeDragUpdate},
     extension::ChromeExtensionInfo,
-    ids::TabId,
-    ime::{ChromeConfirmCompositionBehavior, ChromeImeCommitText, ChromeImeComposition},
+    ids::{PopupId, TabId},
+    ime::{
+        ChromeConfirmCompositionBehavior, ChromeImeCommitText, ChromeImeComposition,
+        ChromeTransientImeCommitText, ChromeTransientImeComposition,
+    },
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
     mouse::ChromeMouseEvent,
     profile::ChromeProfileInfo,
@@ -204,6 +207,29 @@ impl IpcClient {
         Ok(result)
     }
 
+    pub fn activate_extension_action(
+        &mut self,
+        browsing_context_id: TabId,
+        extension_id: &str,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let extension_id = CString::new(extension_id).map_err(|_| Error::InvalidInput)?;
+        if unsafe {
+            cbf_bridge_client_activate_extension_action(
+                self.inner,
+                browsing_context_id.get(),
+                extension_id.as_ptr(),
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
     /// Create a tab via the IPC bridge.
     pub fn create_tab(
         &mut self,
@@ -296,6 +322,66 @@ impl IpcClient {
                 browsing_context_id.get(),
                 request_id,
                 proceed,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Respond to a JavaScript dialog request for a tab.
+    pub fn respond_javascript_dialog(
+        &mut self,
+        browsing_context_id: TabId,
+        request_id: u64,
+        accept: bool,
+        prompt_text: Option<&str>,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let prompt_text = to_optional_cstring(&prompt_text.map(ToOwned::to_owned))
+            .map_err(|_| Error::InvalidInput)?;
+
+        if unsafe {
+            cbf_bridge_client_respond_javascript_dialog(
+                self.inner,
+                browsing_context_id.get(),
+                request_id,
+                accept,
+                prompt_text.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Respond to a JavaScript dialog request for an extension popup.
+    pub fn respond_extension_popup_javascript_dialog(
+        &mut self,
+        popup_id: PopupId,
+        request_id: u64,
+        accept: bool,
+        prompt_text: Option<&str>,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let prompt_text = to_optional_cstring(&prompt_text.map(ToOwned::to_owned))
+            .map_err(|_| Error::InvalidInput)?;
+
+        if unsafe {
+            cbf_bridge_client_respond_extension_popup_javascript_dialog(
+                self.inner,
+                popup_id.get(),
+                request_id,
+                accept,
+                prompt_text.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
             )
         } {
             Ok(())
@@ -687,6 +773,68 @@ impl IpcClient {
         }
     }
 
+    /// Send a Chromium-shaped keyboard event to an extension popup.
+    pub fn send_extension_popup_key_event_raw(
+        &mut self,
+        popup_id: PopupId,
+        event: &ChromeKeyEvent,
+        commands: &[String],
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let dom_code = to_optional_cstring(&event.dom_code)?;
+        let dom_key = to_optional_cstring(&event.dom_key)?;
+        let text = to_optional_cstring(&event.text)?;
+        let unmodified_text = to_optional_cstring(&event.unmodified_text)?;
+
+        let command_cstrings = commands
+            .iter()
+            .map(|command| CString::new(command.as_str()).map_err(|_| Error::InvalidInput))
+            .collect::<Result<Vec<_>, _>>()?;
+        let command_ptrs: Vec<*const std::os::raw::c_char> =
+            command_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
+
+        let ffi_event = CbfKeyEvent {
+            tab_id: 0,
+            type_: key_event_type_to_ffi(event.type_),
+            modifiers: event.modifiers,
+            windows_key_code: event.windows_key_code,
+            native_key_code: event.native_key_code,
+            dom_code: dom_code.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            dom_key: dom_key.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            text: text.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            unmodified_text: unmodified_text.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            auto_repeat: event.auto_repeat,
+            is_keypad: event.is_keypad,
+            is_system_key: event.is_system_key,
+            location: event.location,
+        };
+
+        let ffi_commands = CbfCommandList {
+            items: if command_ptrs.is_empty() {
+                ptr::null()
+            } else {
+                command_ptrs.as_ptr()
+            },
+            len: command_ptrs.len() as u32,
+        };
+
+        if unsafe {
+            cbf_bridge_client_send_extension_popup_key_event(
+                self.inner,
+                popup_id.get(),
+                &ffi_event,
+                &ffi_commands,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
     /// Send a mouse event to the page.
     pub fn send_mouse_event(
         &mut self,
@@ -714,6 +862,45 @@ impl IpcClient {
         };
 
         if unsafe { cbf_bridge_client_send_mouse_event(self.inner, &ffi_event) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Send a mouse event to an extension popup.
+    pub fn send_extension_popup_mouse_event(
+        &mut self,
+        popup_id: PopupId,
+        event: &ChromeMouseEvent,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let ffi_event = CbfMouseEvent {
+            tab_id: 0,
+            type_: mouse_event_type_to_ffi(event.type_),
+            modifiers: event.modifiers,
+            button: mouse_button_to_ffi(event.button),
+            click_count: event.click_count,
+            position_in_widget_x: event.position_in_widget_x,
+            position_in_widget_y: event.position_in_widget_y,
+            position_in_screen_x: event.position_in_screen_x,
+            position_in_screen_y: event.position_in_screen_y,
+            movement_x: event.movement_x,
+            movement_y: event.movement_y,
+            is_raw_movement_event: event.is_raw_movement_event,
+            pointer_type: pointer_type_to_ffi(event.pointer_type),
+        };
+
+        if unsafe {
+            cbf_bridge_client_send_extension_popup_mouse_event(
+                self.inner,
+                popup_id.get(),
+                &ffi_event,
+            )
+        } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -750,6 +937,48 @@ impl IpcClient {
         };
 
         if unsafe { cbf_bridge_client_send_mouse_wheel_event(self.inner, &ffi_event) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Send a Chromium-shaped mouse wheel event to an extension popup.
+    pub fn send_extension_popup_mouse_wheel_event_raw(
+        &mut self,
+        popup_id: PopupId,
+        event: &ChromeMouseWheelEvent,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let ffi_event = CbfMouseWheelEvent {
+            tab_id: 0,
+            modifiers: event.modifiers,
+            position_in_widget_x: event.position_in_widget_x,
+            position_in_widget_y: event.position_in_widget_y,
+            position_in_screen_x: event.position_in_screen_x,
+            position_in_screen_y: event.position_in_screen_y,
+            movement_x: event.movement_x,
+            movement_y: event.movement_y,
+            is_raw_movement_event: event.is_raw_movement_event,
+            delta_x: event.delta_x,
+            delta_y: event.delta_y,
+            wheel_ticks_x: event.wheel_ticks_x,
+            wheel_ticks_y: event.wheel_ticks_y,
+            phase: event.phase,
+            momentum_phase: event.momentum_phase,
+            delta_units: scroll_granularity_to_ffi(event.delta_units),
+        };
+
+        if unsafe {
+            cbf_bridge_client_send_extension_popup_mouse_wheel_event(
+                self.inner,
+                popup_id.get(),
+                &ffi_event,
+            )
+        } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -857,6 +1086,50 @@ impl IpcClient {
         }
     }
 
+    /// Update the IME composition state for an extension popup.
+    pub fn set_extension_popup_composition(
+        &mut self,
+        composition: &ChromeTransientImeComposition,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let text = CString::new(composition.text.as_str()).map_err(|_| Error::InvalidInput)?;
+        let spans = to_ffi_ime_text_spans(&composition.spans);
+        let span_list = CbfImeTextSpanList {
+            items: if spans.is_empty() {
+                ptr::null()
+            } else {
+                spans.as_ptr()
+            },
+            len: spans.len() as u32,
+        };
+        let (replacement_start, replacement_end) = ime_range_to_ffi(&composition.replacement_range);
+
+        let ffi_composition = CbfImeComposition {
+            tab_id: 0,
+            text: text.as_ptr(),
+            selection_start: composition.selection_start,
+            selection_end: composition.selection_end,
+            replacement_range_start: replacement_start,
+            replacement_range_end: replacement_end,
+            spans: span_list,
+        };
+
+        if unsafe {
+            cbf_bridge_client_set_extension_popup_composition(
+                self.inner,
+                composition.popup_id.get(),
+                &ffi_composition,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
     /// Commit IME text input to the page.
     pub fn commit_text(&mut self, commit: &ChromeImeCommitText) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -891,6 +1164,49 @@ impl IpcClient {
         }
     }
 
+    /// Commit IME text input to an extension popup.
+    pub fn commit_extension_popup_text(
+        &mut self,
+        commit: &ChromeTransientImeCommitText,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let text = CString::new(commit.text.as_str()).map_err(|_| Error::InvalidInput)?;
+        let spans = to_ffi_ime_text_spans(&commit.spans);
+        let span_list = CbfImeTextSpanList {
+            items: if spans.is_empty() {
+                ptr::null()
+            } else {
+                spans.as_ptr()
+            },
+            len: spans.len() as u32,
+        };
+        let (replacement_start, replacement_end) = ime_range_to_ffi(&commit.replacement_range);
+
+        let ffi_commit = CbfImeCommitText {
+            tab_id: 0,
+            text: text.as_ptr(),
+            relative_caret_position: commit.relative_caret_position,
+            replacement_range_start: replacement_start,
+            replacement_range_end: replacement_end,
+            spans: span_list,
+        };
+
+        if unsafe {
+            cbf_bridge_client_commit_extension_popup_text(
+                self.inner,
+                commit.popup_id.get(),
+                &ffi_commit,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
     /// Finish composing IME text with the specified behavior.
     pub fn finish_composing_text(
         &mut self,
@@ -911,6 +1227,85 @@ impl IpcClient {
         if unsafe {
             cbf_bridge_client_finish_composing_text(self.inner, browsing_context_id.get(), behavior)
         } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Finish composing IME text inside an extension popup.
+    pub fn finish_extension_popup_composing_text(
+        &mut self,
+        popup_id: PopupId,
+        behavior: ChromeConfirmCompositionBehavior,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let behavior = match behavior {
+            ChromeConfirmCompositionBehavior::DoNotKeepSelection => {
+                CBF_IME_CONFIRM_DO_NOT_KEEP_SELECTION
+            }
+            ChromeConfirmCompositionBehavior::KeepSelection => CBF_IME_CONFIRM_KEEP_SELECTION,
+        };
+
+        if unsafe {
+            cbf_bridge_client_finish_extension_popup_composing_text(
+                self.inner,
+                popup_id.get(),
+                behavior,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    pub fn set_extension_popup_focus(
+        &mut self,
+        popup_id: PopupId,
+        focused: bool,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe {
+            cbf_bridge_client_set_extension_popup_focus(self.inner, popup_id.get(), focused)
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    pub fn set_extension_popup_size(
+        &mut self,
+        popup_id: PopupId,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe {
+            cbf_bridge_client_set_extension_popup_size(self.inner, popup_id.get(), width, height)
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    pub fn close_extension_popup(&mut self, popup_id: PopupId) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe { cbf_bridge_client_close_extension_popup(self.inner, popup_id.get()) } {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)

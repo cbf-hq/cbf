@@ -1,6 +1,6 @@
 //! Chrome-specific IME (Input Method Editor) text span types and composition state, with conversions to/from `cbf` equivalents.
 
-use super::ids::TabId;
+use super::ids::{PopupId, TabId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChromeImeTextSpanType {
@@ -286,6 +286,54 @@ impl From<cbf::data::ime::ImeCommitText> for ChromeImeCommitText {
     fn from(value: cbf::data::ime::ImeCommitText) -> Self {
         Self {
             browsing_context_id: value.browsing_context_id.into(),
+            text: value.text,
+            relative_caret_position: value.relative_caret_position,
+            replacement_range: value.replacement_range.map(Into::into),
+            spans: value.spans.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChromeTransientImeComposition {
+    pub popup_id: PopupId,
+    pub text: String,
+    pub selection_start: i32,
+    pub selection_end: i32,
+    pub replacement_range: Option<ChromeImeTextRange>,
+    pub spans: Vec<ChromeImeTextSpan>,
+}
+
+impl From<cbf::data::transient_browsing_context::TransientImeComposition>
+    for ChromeTransientImeComposition
+{
+    fn from(value: cbf::data::transient_browsing_context::TransientImeComposition) -> Self {
+        Self {
+            popup_id: value.transient_browsing_context_id.into(),
+            text: value.text,
+            selection_start: value.selection_start,
+            selection_end: value.selection_end,
+            replacement_range: value.replacement_range.map(Into::into),
+            spans: value.spans.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChromeTransientImeCommitText {
+    pub popup_id: PopupId,
+    pub text: String,
+    pub relative_caret_position: i32,
+    pub replacement_range: Option<ChromeImeTextRange>,
+    pub spans: Vec<ChromeImeTextSpan>,
+}
+
+impl From<cbf::data::transient_browsing_context::TransientImeCommitText>
+    for ChromeTransientImeCommitText
+{
+    fn from(value: cbf::data::transient_browsing_context::TransientImeCommitText) -> Self {
+        Self {
+            popup_id: value.transient_browsing_context_id.into(),
             text: value.text,
             relative_caret_position: value.relative_caret_position,
             replacement_range: value.replacement_range.map(Into::into),

@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 use std::{ffi::c_void, ptr::NonNull};
 
+use cbf::data::dialog::DialogType;
 use cbf_chrome_sys::ffi::*;
 use cursor_icon::CursorIcon;
 use tracing::debug;
@@ -27,7 +28,7 @@ use crate::data::{
         ChromeDragUrlInfo,
     },
     extension::{ChromeExtensionInfo, ChromeIconData},
-    ids::TabId,
+    ids::{PopupId, TabId},
     ime::{
         ChromeImeBoundsUpdate, ChromeImeCompositionBounds, ChromeImeRect, ChromeImeTextRange,
         ChromeImeTextSpan, ChromeImeTextSpanStyle, ChromeImeTextSpanThickness,
@@ -55,6 +56,82 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 handle,
             })
         }
+        CBF_EVENT_EXTENSION_POPUP_OPENED => Ok(IpcEvent::ExtensionPopupOpened {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            popup_id: event.extension_popup_id,
+            extension_id: c_string_to_string(event.extension_id),
+            title: c_string_to_string(event.title),
+        }),
+        CBF_EVENT_EXTENSION_POPUP_SURFACE_HANDLE_UPDATED => {
+            let handle = parse_surface_handle(event.surface_handle)?;
+
+            Ok(IpcEvent::ExtensionPopupSurfaceHandleUpdated {
+                profile_id: c_string_to_string(event.profile_id),
+                browsing_context_id: TabId::new(event.tab_id),
+                popup_id: event.extension_popup_id,
+                handle,
+            })
+        }
+        CBF_EVENT_EXTENSION_POPUP_PREFERRED_SIZE_CHANGED => {
+            Ok(IpcEvent::ExtensionPopupPreferredSizeChanged {
+                profile_id: c_string_to_string(event.profile_id),
+                browsing_context_id: TabId::new(event.tab_id),
+                popup_id: event.extension_popup_id,
+                width: event.width,
+                height: event.height,
+            })
+        }
+        CBF_EVENT_EXTENSION_POPUP_CONTEXT_MENU_REQUESTED => {
+            Ok(IpcEvent::ExtensionPopupContextMenuRequested {
+                profile_id: c_string_to_string(event.profile_id),
+                browsing_context_id: TabId::new(event.tab_id),
+                popup_id: PopupId::new(event.extension_popup_id),
+                menu: parse_context_menu(event.context_menu),
+            })
+        }
+        CBF_EVENT_EXTENSION_POPUP_CURSOR_CHANGED => Ok(IpcEvent::ExtensionPopupCursorChanged {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            popup_id: PopupId::new(event.extension_popup_id),
+            cursor_type: cursor_icon_from_ffi(event.cursor_type),
+        }),
+        CBF_EVENT_EXTENSION_POPUP_TITLE_UPDATED => Ok(IpcEvent::ExtensionPopupTitleUpdated {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            popup_id: PopupId::new(event.extension_popup_id),
+            title: c_string_to_string(event.title),
+        }),
+        CBF_EVENT_EXTENSION_POPUP_JAVASCRIPT_DIALOG_REQUESTED => {
+            Ok(IpcEvent::ExtensionPopupJavaScriptDialogRequested {
+                profile_id: c_string_to_string(event.profile_id),
+                browsing_context_id: TabId::new(event.tab_id),
+                popup_id: PopupId::new(event.extension_popup_id),
+                request_id: event.request_id,
+                r#type: javascript_dialog_type_from_ffi(event.javascript_dialog_type),
+                message: c_string_to_string(event.message),
+                default_prompt_text: optional_string_from_ffi(event.default_prompt_text),
+                reason: beforeunload_reason_from_ffi(event.beforeunload_reason),
+            })
+        }
+        CBF_EVENT_EXTENSION_POPUP_CLOSE_REQUESTED => Ok(IpcEvent::ExtensionPopupCloseRequested {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            popup_id: PopupId::new(event.extension_popup_id),
+        }),
+        CBF_EVENT_EXTENSION_POPUP_RENDER_PROCESS_GONE => {
+            Ok(IpcEvent::ExtensionPopupRenderProcessGone {
+                profile_id: c_string_to_string(event.profile_id),
+                browsing_context_id: TabId::new(event.tab_id),
+                popup_id: PopupId::new(event.extension_popup_id),
+                crashed: event.crashed,
+            })
+        }
+        CBF_EVENT_EXTENSION_POPUP_CLOSED => Ok(IpcEvent::ExtensionPopupClosed {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            popup_id: event.extension_popup_id,
+        }),
         CBF_EVENT_TAB_CREATED => Ok(IpcEvent::TabCreated {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
@@ -70,6 +147,14 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             browsing_context_id: TabId::new(event.tab_id),
             update: parse_ime_bounds(event.ime_bounds),
         }),
+        CBF_EVENT_EXTENSION_POPUP_IME_BOUNDS_UPDATED => {
+            Ok(IpcEvent::ExtensionPopupImeBoundsUpdated {
+                profile_id: c_string_to_string(event.profile_id),
+                browsing_context_id: TabId::new(event.tab_id),
+                popup_id: PopupId::new(event.extension_popup_id),
+                update: parse_ime_bounds(event.ime_bounds),
+            })
+        }
         CBF_EVENT_SHUTDOWN_BLOCKED => Ok(IpcEvent::ShutdownBlocked {
             request_id: event.request_id,
             dirty_browsing_context_ids: parse_browsing_context_ids(event.dirty_tab_ids),
@@ -147,6 +232,15 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 reason,
             })
         }
+        CBF_EVENT_JAVASCRIPT_DIALOG_REQUESTED => Ok(IpcEvent::JavaScriptDialogRequested {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            request_id: event.request_id,
+            r#type: javascript_dialog_type_from_ffi(event.javascript_dialog_type),
+            message: c_string_to_string(event.message),
+            default_prompt_text: optional_string_from_ffi(event.default_prompt_text),
+            reason: beforeunload_reason_from_ffi(event.beforeunload_reason),
+        }),
         CBF_EVENT_TAB_CLOSED => Ok(IpcEvent::TabClosed {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
@@ -594,6 +688,21 @@ fn beforeunload_reason_from_ffi(value: u8) -> ChromeBeforeUnloadReason {
         CBF_BEFOREUNLOAD_REASON_WINDOW_CLOSE => ChromeBeforeUnloadReason::WindowClose,
         _ => ChromeBeforeUnloadReason::Unknown,
     }
+}
+
+fn javascript_dialog_type_from_ffi(value: u8) -> DialogType {
+    match value {
+        CBF_JAVASCRIPT_DIALOG_ALERT => DialogType::Alert,
+        CBF_JAVASCRIPT_DIALOG_CONFIRM => DialogType::Confirm,
+        CBF_JAVASCRIPT_DIALOG_PROMPT => DialogType::Prompt,
+        CBF_JAVASCRIPT_DIALOG_BEFOREUNLOAD => DialogType::BeforeUnload,
+        _ => DialogType::Alert,
+    }
+}
+
+fn optional_string_from_ffi(value: *mut std::ffi::c_char) -> Option<String> {
+    let value = c_string_to_string(value);
+    if value.is_empty() { None } else { Some(value) }
 }
 
 fn prompt_ui_extension_install_result_from_ffi(value: u8) -> PromptUiExtensionInstallResult {
@@ -1290,7 +1399,7 @@ mod tests {
 
     use crate::data::{
         extension::ChromeIconData,
-        ids::TabId,
+        ids::{PopupId, TabId},
         prompt_ui::{
             PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult, PromptUiId,
             PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
@@ -1346,6 +1455,41 @@ mod tests {
                 dirty_browsing_context_ids
             } if request_id == 9
                 && dirty_browsing_context_ids == vec![TabId::new(2), TabId::new(3)]
+        ));
+    }
+
+    #[test]
+    fn parse_event_extension_popup_ime_bounds_maps_popup_id() {
+        let mut event = make_event(CBF_EVENT_EXTENSION_POPUP_IME_BOUNDS_UPDATED);
+        event.tab_id = 44;
+        event.extension_popup_id = 88;
+        event.ime_bounds.has_selection = true;
+        event.ime_bounds.selection.range_start = 1;
+        event.ime_bounds.selection.range_end = 1;
+        event.ime_bounds.selection.caret_rect = CbfRect {
+            x: 10,
+            y: 20,
+            width: 2,
+            height: 16,
+        };
+        event.ime_bounds.selection.first_selection_rect = CbfRect {
+            x: 10,
+            y: 20,
+            width: 2,
+            height: 16,
+        };
+
+        let parsed = parse_event(event).expect("popup ime bounds should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::ExtensionPopupImeBoundsUpdated {
+                browsing_context_id,
+                popup_id,
+                update,
+                ..
+            } if browsing_context_id == TabId::new(44)
+                && popup_id == PopupId::new(88)
+                && update.selection.as_ref().is_some_and(|selection| selection.range_start == 1)
         ));
     }
 

@@ -17,6 +17,7 @@
 //! `None` and are intended to be consumed only by Chrome-aware code.
 
 use cbf::data::{
+    dialog::DialogType,
     download::DownloadPromptResult,
     extension::{
         AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
@@ -24,17 +25,21 @@ use cbf::data::{
         PermissionPromptType,
     },
     ids::WindowId,
+    transient_browsing_context::{
+        TransientBrowsingContextCloseReason, TransientBrowsingContextKind,
+    },
     window_open::{
         WindowBounds, WindowDescriptor, WindowKind, WindowOpenReason, WindowOpenRequest,
         WindowOpenResult, WindowState,
     },
 };
-use cbf::event::{BrowserEvent, BrowsingContextEvent};
+use cbf::event::{BrowserEvent, BrowsingContextEvent, TransientBrowsingContextEvent};
 
 use crate::data::{
     browsing_context_open::ChromeBrowsingContextOpenResult,
     download::ChromeDownloadPromptResult,
     extension::ChromeExtensionInfo,
+    ids::PopupId,
     lifecycle::{ChromeBackendErrorInfo, ChromeBackendStopReason},
     profile::ChromeProfileInfo,
     prompt_ui::{
@@ -96,6 +101,139 @@ pub fn to_generic_event(event: &ChromeEvent) -> Option<BrowserEvent> {
 pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
     match event {
         IpcEvent::SurfaceHandleUpdated { .. } => None,
+        IpcEvent::ExtensionPopupOpened {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+            title,
+            ..
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: PopupId::new(*popup_id)
+                .to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::Opened {
+                kind: TransientBrowsingContextKind::Popup,
+                title: Some(title.clone()),
+            }),
+        }),
+        IpcEvent::ExtensionPopupSurfaceHandleUpdated { .. } => None,
+        IpcEvent::ExtensionPopupPreferredSizeChanged {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+            width,
+            height,
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: PopupId::new(*popup_id)
+                .to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::Resized {
+                width: *width,
+                height: *height,
+            }),
+        }),
+        IpcEvent::ExtensionPopupContextMenuRequested {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+            menu,
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: popup_id.to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::ContextMenuRequested {
+                menu: menu.clone().into(),
+            }),
+        }),
+        IpcEvent::ExtensionPopupCursorChanged {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+            cursor_type,
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: popup_id.to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::CursorChanged {
+                cursor_type: *cursor_type,
+            }),
+        }),
+        IpcEvent::ExtensionPopupTitleUpdated {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+            title,
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: popup_id.to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::TitleUpdated {
+                title: title.clone(),
+            }),
+        }),
+        IpcEvent::ExtensionPopupJavaScriptDialogRequested {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+            request_id,
+            r#type,
+            message,
+            default_prompt_text,
+            reason,
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: popup_id.to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::JavaScriptDialogRequested {
+                request_id: *request_id,
+                message: message.clone(),
+                default_prompt_text: default_prompt_text.clone(),
+                r#type: *r#type,
+                beforeunload_reason: if *r#type == DialogType::BeforeUnload {
+                    Some((*reason).into())
+                } else {
+                    None
+                },
+            }),
+        }),
+        IpcEvent::ExtensionPopupCloseRequested {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: popup_id.to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::CloseRequested),
+        }),
+        IpcEvent::ExtensionPopupRenderProcessGone {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+            crashed,
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: popup_id.to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::RenderProcessGone {
+                crashed: *crashed,
+            }),
+        }),
+        IpcEvent::ExtensionPopupClosed {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: PopupId::new(*popup_id)
+                .to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::Closed {
+                reason: TransientBrowsingContextCloseReason::Unknown,
+            }),
+        }),
         IpcEvent::TabCreated {
             profile_id,
             browsing_context_id,
@@ -116,6 +254,19 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             profile_id: profile_id.clone(),
             browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::ImeBoundsUpdated {
+                update: update.clone().into(),
+            }),
+        }),
+        IpcEvent::ExtensionPopupImeBoundsUpdated {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+            update,
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: popup_id.to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::ImeBoundsUpdated {
                 update: update.clone().into(),
             }),
         }),
@@ -257,6 +408,29 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 default_prompt_text: None,
                 r#type: cbf::data::dialog::DialogType::BeforeUnload,
                 beforeunload_reason: Some((*reason).into()),
+            }),
+        }),
+        IpcEvent::JavaScriptDialogRequested {
+            profile_id,
+            browsing_context_id,
+            request_id,
+            r#type,
+            message,
+            default_prompt_text,
+            reason,
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(BrowsingContextEvent::JavaScriptDialogRequested {
+                request_id: *request_id,
+                message: message.clone(),
+                default_prompt_text: default_prompt_text.clone(),
+                r#type: *r#type,
+                beforeunload_reason: if *r#type == DialogType::BeforeUnload {
+                    Some((*reason).into())
+                } else {
+                    None
+                },
             }),
         }),
         IpcEvent::TabClosed {
@@ -599,16 +773,19 @@ mod tests {
                 AuxiliaryWindowResolution, ExtensionInstallPromptResult, PermissionPromptResult,
                 PermissionPromptType,
             },
-            ids::BrowsingContextId,
+            ids::{BrowsingContextId, TransientBrowsingContextId},
+            transient_browsing_context::{
+                TransientBrowsingContextCloseReason, TransientBrowsingContextKind,
+            },
         },
-        event::{BrowserEvent, BrowsingContextEvent},
+        event::{BrowserEvent, BrowsingContextEvent, TransientBrowsingContextEvent},
     };
 
     use super::map_ipc_event_to_generic;
     use crate::{
         data::{
             download::ChromeDownloadPromptReason,
-            ids::TabId,
+            ids::{PopupId, TabId},
             prompt_ui::{
                 PromptUiCloseReason, PromptUiExtensionInstallResult, PromptUiId, PromptUiKind,
                 PromptUiResolution,
@@ -652,6 +829,108 @@ mod tests {
                 dirty_browsing_context_ids
             } if dirty_browsing_context_ids
                 == vec![BrowsingContextId::new(2), BrowsingContextId::new(3)]
+        ));
+    }
+
+    #[test]
+    fn extension_popup_opened_maps_into_transient_browsing_context() {
+        let event = IpcEvent::ExtensionPopupOpened {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(44),
+            popup_id: 88,
+            extension_id: "ext".to_string(),
+            title: "Popup".to_string(),
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::TransientBrowsingContext {
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                event,
+                ..
+            } if transient_browsing_context_id == TransientBrowsingContextId::new(88)
+                && parent_browsing_context_id == BrowsingContextId::new(44)
+                && matches!(
+                    *event,
+                    TransientBrowsingContextEvent::Opened {
+                        kind: TransientBrowsingContextKind::Popup,
+                        title: Some(ref title),
+                    } if title == "Popup"
+                )
+        ));
+    }
+
+    #[test]
+    fn extension_popup_closed_maps_into_transient_browsing_context() {
+        let event = IpcEvent::ExtensionPopupClosed {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(44),
+            popup_id: 88,
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::TransientBrowsingContext {
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                event,
+                ..
+            } if transient_browsing_context_id == TransientBrowsingContextId::new(88)
+                && parent_browsing_context_id == BrowsingContextId::new(44)
+                && matches!(
+                    *event,
+                    TransientBrowsingContextEvent::Closed {
+                        reason: TransientBrowsingContextCloseReason::Unknown
+                    }
+                )
+        ));
+    }
+
+    #[test]
+    fn extension_popup_ime_bounds_maps_into_transient_browsing_context() {
+        let event = IpcEvent::ExtensionPopupImeBoundsUpdated {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(44),
+            popup_id: PopupId::new(88),
+            update: crate::data::ime::ChromeImeBoundsUpdate {
+                composition: None,
+                selection: Some(crate::data::ime::ChromeTextSelectionBounds {
+                    range_start: 1,
+                    range_end: 1,
+                    caret_rect: crate::data::ime::ChromeImeRect {
+                        x: 10,
+                        y: 20,
+                        width: 2,
+                        height: 16,
+                    },
+                    first_selection_rect: crate::data::ime::ChromeImeRect {
+                        x: 10,
+                        y: 20,
+                        width: 2,
+                        height: 16,
+                    },
+                }),
+            },
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::TransientBrowsingContext {
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                event,
+                ..
+            } if transient_browsing_context_id == TransientBrowsingContextId::new(88)
+                && parent_browsing_context_id == BrowsingContextId::new(44)
+                && matches!(
+                    *event,
+                    TransientBrowsingContextEvent::ImeBoundsUpdated { ref update }
+                        if update.selection.as_ref().is_some_and(|selection| selection.range_start == 1)
+                )
         ));
     }
 

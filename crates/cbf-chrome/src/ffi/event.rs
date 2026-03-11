@@ -1,11 +1,13 @@
 use cursor_icon::CursorIcon;
 
+use cbf::data::dialog::DialogType;
+
 use crate::data::{
     context_menu::ChromeContextMenu,
     download::{ChromeDownloadCompletion, ChromeDownloadProgress, ChromeDownloadSnapshot},
     drag::ChromeDragStartRequest,
     extension::ChromeExtensionInfo,
-    ids::TabId,
+    ids::{PopupId, TabId},
     ime::ChromeImeBoundsUpdate,
     lifecycle::ChromeBeforeUnloadReason,
     prompt_ui::{PromptUiCloseReason, PromptUiId, PromptUiKind, PromptUiResolution},
@@ -25,6 +27,80 @@ pub enum IpcEvent {
         profile_id: String,
         browsing_context_id: TabId,
         handle: SurfaceHandle,
+    },
+    /// An extension action popup lifecycle started.
+    ExtensionPopupOpened {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: u64,
+        extension_id: String,
+        title: String,
+    },
+    /// The rendering surface handle for an extension popup was updated.
+    ExtensionPopupSurfaceHandleUpdated {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: u64,
+        handle: SurfaceHandle,
+    },
+    /// The effective popup size changed after Chromium-side clamping.
+    ExtensionPopupPreferredSizeChanged {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: u64,
+        width: u32,
+        height: u32,
+    },
+    /// A context menu was requested for an extension popup.
+    ExtensionPopupContextMenuRequested {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: PopupId,
+        menu: ChromeContextMenu,
+    },
+    /// The cursor appearance changed for an extension popup.
+    ExtensionPopupCursorChanged {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: PopupId,
+        cursor_type: CursorIcon,
+    },
+    /// The title changed for an extension popup.
+    ExtensionPopupTitleUpdated {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: PopupId,
+        title: String,
+    },
+    /// A JavaScript dialog was requested for an extension popup.
+    ExtensionPopupJavaScriptDialogRequested {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: PopupId,
+        request_id: u64,
+        r#type: DialogType,
+        message: String,
+        default_prompt_text: Option<String>,
+        reason: ChromeBeforeUnloadReason,
+    },
+    /// The extension popup requested to close.
+    ExtensionPopupCloseRequested {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: PopupId,
+    },
+    /// The extension popup renderer exited or crashed.
+    ExtensionPopupRenderProcessGone {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: PopupId,
+        crashed: bool,
+    },
+    /// An extension action popup closed.
+    ExtensionPopupClosed {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: u64,
     },
     /// A new tab was created by the backend.
     ///
@@ -49,6 +125,16 @@ pub enum IpcEvent {
     ImeBoundsUpdated {
         profile_id: String,
         browsing_context_id: TabId,
+        update: ChromeImeBoundsUpdate,
+    },
+    /// IME bounds information changed for an extension popup.
+    ///
+    /// Maps to `BrowserEvent::TransientBrowsingContext` with
+    /// `TransientBrowsingContextEvent::ImeBoundsUpdated`.
+    ExtensionPopupImeBoundsUpdated {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: PopupId,
         update: ChromeImeBoundsUpdate,
     },
     /// The backend requested a context menu.
@@ -121,6 +207,16 @@ pub enum IpcEvent {
         profile_id: String,
         browsing_context_id: TabId,
         request_id: u64,
+        reason: ChromeBeforeUnloadReason,
+    },
+    /// A JavaScript dialog was requested for a tab.
+    JavaScriptDialogRequested {
+        profile_id: String,
+        browsing_context_id: TabId,
+        request_id: u64,
+        r#type: DialogType,
+        message: String,
+        default_prompt_text: Option<String>,
         reason: ChromeBeforeUnloadReason,
     },
     /// A tab closed event was observed.

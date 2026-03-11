@@ -4,6 +4,7 @@
 //! integration while keeping `cbf` browser-generic.
 
 pub mod backend;
+pub mod browser;
 pub mod command;
 pub mod data;
 pub mod event;

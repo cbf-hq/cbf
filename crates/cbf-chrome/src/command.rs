@@ -1,12 +1,16 @@
-use cbf::command::BrowserCommand;
+use cbf::command::{BrowserCommand, BrowserOperation};
+use cbf::data::dialog::DialogResponse;
 
 use crate::data::{
     browsing_context_open::ChromeBrowsingContextOpenResponse,
     download::ChromeDownloadId,
     drag::{ChromeDragDrop, ChromeDragUpdate},
     extension::ChromeAuxiliaryWindowResponse,
-    ids::TabId,
-    ime::{ChromeConfirmCompositionBehavior, ChromeImeCommitText, ChromeImeComposition},
+    ids::{PopupId, TabId},
+    ime::{
+        ChromeConfirmCompositionBehavior, ChromeImeCommitText, ChromeImeComposition,
+        ChromeTransientImeCommitText, ChromeTransientImeComposition,
+    },
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
     mouse::ChromeMouseEvent,
     prompt_ui::{PromptUiId, PromptUiResponse},
@@ -14,6 +18,11 @@ use crate::data::{
 };
 
 /// Chromium-specific transport command vocabulary.
+///
+/// Transient browsing context operations are currently transported through
+/// Chromium's extension popup plumbing. The public `cbf` API remains generic,
+/// and this layer performs the boundary translation into the current Chrome
+/// implementation model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChromeCommand {
     RequestShutdown {
@@ -28,6 +37,16 @@ pub enum ChromeCommand {
         browsing_context_id: TabId,
         request_id: u64,
         proceed: bool,
+    },
+    RespondJavaScriptDialog {
+        browsing_context_id: TabId,
+        request_id: u64,
+        response: DialogResponse,
+    },
+    RespondExtensionPopupJavaScriptDialog {
+        popup_id: PopupId,
+        request_id: u64,
+        response: DialogResponse,
     },
     ConfirmPermission {
         browsing_context_id: TabId,
@@ -134,6 +153,45 @@ pub enum ChromeCommand {
     ListExtensions {
         profile_id: Option<String>,
     },
+    ActivateExtensionAction {
+        browsing_context_id: TabId,
+        extension_id: String,
+    },
+    CloseExtensionPopup {
+        popup_id: PopupId,
+    },
+    SetExtensionPopupSize {
+        popup_id: PopupId,
+        width: u32,
+        height: u32,
+    },
+    SetExtensionPopupFocus {
+        popup_id: PopupId,
+        focused: bool,
+    },
+    SendExtensionPopupKeyEvent {
+        popup_id: PopupId,
+        event: ChromeKeyEvent,
+        commands: Vec<String>,
+    },
+    SendExtensionPopupMouseEvent {
+        popup_id: PopupId,
+        event: ChromeMouseEvent,
+    },
+    SendExtensionPopupMouseWheelEvent {
+        popup_id: PopupId,
+        event: ChromeMouseWheelEvent,
+    },
+    SetExtensionPopupComposition {
+        composition: ChromeTransientImeComposition,
+    },
+    CommitExtensionPopupText {
+        commit: ChromeTransientImeCommitText,
+    },
+    FinishExtensionPopupComposingText {
+        popup_id: PopupId,
+        behavior: ChromeConfirmCompositionBehavior,
+    },
     OpenDefaultPromptUi {
         browsing_context_id: TabId,
         request_id: u64,
@@ -154,6 +212,9 @@ pub enum ChromeCommand {
     RespondWindowOpen {
         request_id: u64,
         response: ChromeWindowOpenResponse,
+    },
+    UnsupportedGenericCommand {
+        operation: BrowserOperation,
     },
 }
 
@@ -177,6 +238,24 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id: browsing_context_id.into(),
                 request_id,
                 proceed,
+            },
+            BrowserCommand::RespondJavaScriptDialog {
+                browsing_context_id,
+                request_id,
+                response,
+            } => Self::RespondJavaScriptDialog {
+                browsing_context_id: browsing_context_id.into(),
+                request_id,
+                response,
+            },
+            BrowserCommand::RespondJavaScriptDialogInTransientBrowsingContext {
+                transient_browsing_context_id,
+                request_id,
+                response,
+            } => Self::RespondExtensionPopupJavaScriptDialog {
+                popup_id: transient_browsing_context_id.into(),
+                request_id,
+                response,
             },
             BrowserCommand::ConfirmPermission {
                 browsing_context_id,
@@ -202,12 +281,26 @@ impl From<BrowserCommand> for ChromeCommand {
             } => Self::RequestCloseTab {
                 browsing_context_id: browsing_context_id.into(),
             },
+            BrowserCommand::CloseTransientBrowsingContext {
+                transient_browsing_context_id,
+            } => Self::CloseExtensionPopup {
+                popup_id: transient_browsing_context_id.into(),
+            },
             BrowserCommand::ResizeBrowsingContext {
                 browsing_context_id,
                 width,
                 height,
             } => Self::SetTabSize {
                 browsing_context_id: browsing_context_id.into(),
+                width,
+                height,
+            },
+            BrowserCommand::ResizeTransientBrowsingContext {
+                transient_browsing_context_id,
+                width,
+                height,
+            } => Self::SetExtensionPopupSize {
+                popup_id: transient_browsing_context_id.into(),
                 width,
                 height,
             },
@@ -254,12 +347,28 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id: browsing_context_id.into(),
                 focused,
             },
+            BrowserCommand::SetTransientBrowsingContextFocus {
+                transient_browsing_context_id,
+                focused,
+            } => Self::SetExtensionPopupFocus {
+                popup_id: transient_browsing_context_id.into(),
+                focused,
+            },
             BrowserCommand::SendKeyEvent {
                 browsing_context_id,
                 event,
                 commands,
             } => Self::SendKeyEvent {
                 browsing_context_id: browsing_context_id.into(),
+                event: event.into(),
+                commands,
+            },
+            BrowserCommand::SendKeyEventToTransientBrowsingContext {
+                transient_browsing_context_id,
+                event,
+                commands,
+            } => Self::SendExtensionPopupKeyEvent {
+                popup_id: transient_browsing_context_id.into(),
                 event: event.into(),
                 commands,
             },
@@ -270,11 +379,25 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id: browsing_context_id.into(),
                 event: event.into(),
             },
+            BrowserCommand::SendMouseEventToTransientBrowsingContext {
+                transient_browsing_context_id,
+                event,
+            } => Self::SendExtensionPopupMouseEvent {
+                popup_id: transient_browsing_context_id.into(),
+                event: event.into(),
+            },
             BrowserCommand::SendMouseWheelEvent {
                 browsing_context_id,
                 event,
             } => Self::SendMouseWheelEvent {
                 browsing_context_id: browsing_context_id.into(),
+                event: event.into(),
+            },
+            BrowserCommand::SendMouseWheelEventToTransientBrowsingContext {
+                transient_browsing_context_id,
+                event,
+            } => Self::SendExtensionPopupMouseWheelEvent {
+                popup_id: transient_browsing_context_id.into(),
                 event: event.into(),
             },
             BrowserCommand::SendDragUpdate { update } => Self::SendDragUpdate {
@@ -294,11 +417,26 @@ impl From<BrowserCommand> for ChromeCommand {
             BrowserCommand::CommitText { commit } => Self::CommitImeText {
                 commit: commit.into(),
             },
+            BrowserCommand::SetTransientComposition { composition } => {
+                Self::SetExtensionPopupComposition {
+                    composition: composition.into(),
+                }
+            }
+            BrowserCommand::CommitTransientText { commit } => Self::CommitExtensionPopupText {
+                commit: commit.into(),
+            },
             BrowserCommand::FinishComposingText {
                 browsing_context_id,
                 behavior,
             } => Self::FinishComposingText {
                 browsing_context_id: browsing_context_id.into(),
+                behavior: behavior.into(),
+            },
+            BrowserCommand::FinishComposingTextInTransientBrowsingContext {
+                transient_browsing_context_id,
+                behavior,
+            } => Self::FinishExtensionPopupComposingText {
+                popup_id: transient_browsing_context_id.into(),
                 behavior: behavior.into(),
             },
             BrowserCommand::ExecuteContextMenuCommand {
@@ -393,12 +531,15 @@ impl From<BrowserCommand> for ChromeCommand {
 mod tests {
     use cbf::{
         command::BrowserCommand,
-        data::{extension::AuxiliaryWindowResponse, ids::BrowsingContextId},
+        data::{
+            extension::AuxiliaryWindowResponse,
+            ids::{BrowsingContextId, TransientBrowsingContextId},
+        },
     };
 
     use super::ChromeCommand;
     use crate::data::{
-        ids::TabId,
+        ids::{PopupId, TabId},
         prompt_ui::{PromptUiId, PromptUiResponse},
     };
 
@@ -488,6 +629,20 @@ mod tests {
                 browsing_context_id,
                 prompt_ui_id,
             } if browsing_context_id == TabId::new(15) && prompt_ui_id == PromptUiId::new(33)
+        ));
+    }
+
+    #[test]
+    fn transient_close_command_maps_to_extension_popup_close() {
+        let command = BrowserCommand::CloseTransientBrowsingContext {
+            transient_browsing_context_id: TransientBrowsingContextId::new(99),
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::CloseExtensionPopup { popup_id }
+                if popup_id == PopupId::new(99)
         ));
     }
 }
