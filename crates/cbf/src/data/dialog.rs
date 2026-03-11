@@ -20,7 +20,7 @@ pub enum BeforeUnloadReason {
 }
 
 /// Response payload for a JavaScript dialog request.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogResponse {
     Success {
         input: Option<String>, // Input text for prompt dialogs.

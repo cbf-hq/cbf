@@ -12,10 +12,11 @@ use crate::{
         download::DownloadId,
         drag::{DragDrop, DragUpdate},
         extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
-        ids::BrowsingContextId,
+        ids::{BrowsingContextId, TransientBrowsingContextId},
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         key::KeyEvent,
         mouse::{MouseEvent, MouseWheelEvent},
+        transient_browsing_context::{TransientImeCommitText, TransientImeComposition},
         window_open::WindowOpenResponse,
     },
     delegate::BackendDelegate,
@@ -235,6 +236,11 @@ impl<B: Backend> BrowserHandle<B> {
         self.command_tx.send(command)
     }
 
+    /// Send a backend-native raw command directly.
+    pub fn send_raw(&self, raw: B::RawCommand) -> Result<(), Error> {
+        self.command_tx.send_raw(raw)
+    }
+
     /// Create a new web page (tab) with an optional initial URL and profile.
     pub fn create_browsing_context(
         &self,
@@ -262,6 +268,20 @@ impl<B: Backend> BrowserHandle<B> {
         })
     }
 
+    /// Resize a transient browsing context surface.
+    pub fn resize_transient_browsing_context(
+        &self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::ResizeTransientBrowsingContext {
+            transient_browsing_context_id,
+            width,
+            height,
+        })
+    }
+
     /// Request closing the given web page.
     pub fn request_close_browsing_context(
         &self,
@@ -269,6 +289,16 @@ impl<B: Backend> BrowserHandle<B> {
     ) -> Result<(), Error> {
         self.send(BrowserCommand::RequestCloseBrowsingContext {
             browsing_context_id,
+        })
+    }
+
+    /// Request closing the given transient browsing context.
+    pub fn close_transient_browsing_context(
+        &self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::CloseTransientBrowsingContext {
+            transient_browsing_context_id,
         })
     }
 
@@ -340,6 +370,18 @@ impl<B: Backend> BrowserHandle<B> {
         })
     }
 
+    /// Update whether the transient browsing context should receive text input focus.
+    pub fn set_transient_browsing_context_focus(
+        &self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        focused: bool,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::SetTransientBrowsingContextFocus {
+            transient_browsing_context_id,
+            focused,
+        })
+    }
+
     /// Request the list of available profiles from the backend.
     pub fn request_list_profiles(&self) -> Result<(), Error> {
         self.send(BrowserCommand::ListProfiles)
@@ -364,6 +406,20 @@ impl<B: Backend> BrowserHandle<B> {
         })
     }
 
+    /// Send a keyboard input event to the transient browsing context.
+    pub fn send_key_event_to_transient_browsing_context(
+        &self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        event: KeyEvent,
+        commands: Vec<String>,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::SendKeyEventToTransientBrowsingContext {
+            transient_browsing_context_id,
+            event,
+            commands,
+        })
+    }
+
     /// Send a mouse input event to the web page.
     pub fn send_mouse_event(
         &self,
@@ -372,6 +428,18 @@ impl<B: Backend> BrowserHandle<B> {
     ) -> Result<(), Error> {
         self.send(BrowserCommand::SendMouseEvent {
             browsing_context_id,
+            event,
+        })
+    }
+
+    /// Send a mouse input event to the transient browsing context.
+    pub fn send_mouse_event_to_transient_browsing_context(
+        &self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        event: MouseEvent,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::SendMouseEventToTransientBrowsingContext {
+            transient_browsing_context_id,
             event,
         })
     }
@@ -386,6 +454,20 @@ impl<B: Backend> BrowserHandle<B> {
             browsing_context_id,
             event,
         })
+    }
+
+    /// Send a mouse wheel event to the transient browsing context.
+    pub fn send_mouse_wheel_event_to_transient_browsing_context(
+        &self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        event: MouseWheelEvent,
+    ) -> Result<(), Error> {
+        self.send(
+            BrowserCommand::SendMouseWheelEventToTransientBrowsingContext {
+                transient_browsing_context_id,
+                event,
+            },
+        )
     }
 
     /// Send a drag update event for host-owned drag session.
@@ -415,9 +497,22 @@ impl<B: Backend> BrowserHandle<B> {
         self.send(BrowserCommand::SetComposition { composition })
     }
 
+    /// Update the current IME composition state for a transient browsing context.
+    pub fn set_transient_composition(
+        &self,
+        composition: TransientImeComposition,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::SetTransientComposition { composition })
+    }
+
     /// Commit IME text input to the web page.
     pub fn commit_text(&self, commit: ImeCommitText) -> Result<(), Error> {
         self.send(BrowserCommand::CommitText { commit })
+    }
+
+    /// Commit IME text input to the transient browsing context.
+    pub fn commit_transient_text(&self, commit: TransientImeCommitText) -> Result<(), Error> {
+        self.send(BrowserCommand::CommitTransientText { commit })
     }
 
     /// Finish IME composing with the specified selection behavior.
@@ -430,6 +525,20 @@ impl<B: Backend> BrowserHandle<B> {
             browsing_context_id,
             behavior,
         })
+    }
+
+    /// Finish IME composing inside a transient browsing context.
+    pub fn finish_composing_text_in_transient_browsing_context(
+        &self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        behavior: ConfirmCompositionBehavior,
+    ) -> Result<(), Error> {
+        self.send(
+            BrowserCommand::FinishComposingTextInTransientBrowsingContext {
+                transient_browsing_context_id,
+                behavior,
+            },
+        )
     }
 
     /// Execute a context menu command produced by the backend.
@@ -588,6 +697,34 @@ impl<B: Backend> BrowserHandle<B> {
             browsing_context_id,
             request_id,
             proceed,
+        })
+    }
+
+    /// Respond to a JavaScript dialog request for a page.
+    pub fn respond_javascript_dialog(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        response: crate::data::dialog::DialogResponse,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::RespondJavaScriptDialog {
+            browsing_context_id,
+            request_id,
+            response,
+        })
+    }
+
+    /// Respond to a JavaScript dialog request for a transient browsing context.
+    pub fn respond_javascript_dialog_in_transient_browsing_context(
+        &self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        request_id: u64,
+        response: crate::data::dialog::DialogResponse,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::RespondJavaScriptDialogInTransientBrowsingContext {
+            transient_browsing_context_id,
+            request_id,
+            response,
         })
     }
 

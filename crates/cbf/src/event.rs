@@ -15,10 +15,13 @@ use crate::data::{
         AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
         AuxiliaryWindowResolution, ExtensionInfo,
     },
-    ids::BrowsingContextId,
+    ids::{BrowsingContextId, TransientBrowsingContextId},
     ime::ImeBoundsUpdate,
     permission::PermissionType,
     profile::ProfileInfo,
+    transient_browsing_context::{
+        TransientBrowsingContextCloseReason, TransientBrowsingContextKind,
+    },
     window_open::{WindowDescriptor, WindowOpenRequest, WindowOpenResult},
 };
 use crate::error::BackendErrorInfo;
@@ -43,6 +46,14 @@ pub enum BrowserEvent {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
         event: Box<BrowsingContextEvent>,
+    },
+
+    /// An event scoped to a transient browsing context.
+    TransientBrowsingContext {
+        profile_id: String,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        parent_browsing_context_id: BrowsingContextId,
+        event: Box<TransientBrowsingContextEvent>,
     },
 
     /// Host-mediated open request for a new browsing context.
@@ -280,5 +291,59 @@ pub enum BrowsingContextEvent {
         // TODO: Define a dedicated coordinate type.
         x: f64,
         y: f64,
+    },
+}
+
+/// Events emitted from a transient browsing context.
+#[derive(Debug, Clone)]
+pub enum TransientBrowsingContextEvent {
+    /// The transient browsing context was opened and is ready for host lifecycle.
+    Opened {
+        kind: TransientBrowsingContextKind,
+        title: Option<String>,
+    },
+
+    /// Focus moved to this transient browsing context.
+    Focused,
+
+    /// Focus left this transient browsing context.
+    Blurred,
+
+    /// The transient browsing context surface size changed.
+    Resized { width: u32, height: u32 },
+
+    /// IME bounds information was updated for this transient browsing context.
+    ///
+    /// This payload is browser-generic. Backend-specific IME visual details
+    /// should not be carried through this event.
+    ImeBoundsUpdated { update: ImeBoundsUpdate },
+
+    /// The cursor shape should be updated for this transient browsing context.
+    CursorChanged { cursor_type: CursorIcon },
+
+    /// A context menu display was requested for this transient browsing context.
+    ContextMenuRequested { menu: ContextMenu },
+
+    /// A JavaScript dialog (alert/confirm/prompt/beforeunload) was requested.
+    JavaScriptDialogRequested {
+        request_id: u64,
+        message: String,
+        default_prompt_text: Option<String>,
+        r#type: DialogType,
+        beforeunload_reason: Option<BeforeUnloadReason>,
+    },
+
+    /// The transient browsing context title was updated.
+    TitleUpdated { title: String },
+
+    /// The transient browsing context requested to close itself.
+    CloseRequested,
+
+    /// The renderer process for the transient browsing context exited or crashed.
+    RenderProcessGone { crashed: bool },
+
+    /// The transient browsing context closed.
+    Closed {
+        reason: TransientBrowsingContextCloseReason,
     },
 }

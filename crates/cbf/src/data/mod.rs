@@ -15,4 +15,5 @@ pub mod key;
 pub mod mouse;
 pub mod permission;
 pub mod profile;
+pub mod transient_browsing_context;
 pub mod window_open;
