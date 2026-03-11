@@ -5,7 +5,7 @@ use std::{
 
 use cbf::{
     browser::{BrowserHandle, EventStream, RawOpaqueEventExt},
-    data::ids::BrowsingContextId,
+    data::ids::{BrowsingContextId, TransientBrowsingContextId},
     event::BrowserEvent,
     middleware::{
         MiddlewareBuilder, error_guard::ErrorGuardLayer, lifecycle::LifecycleLayer,
@@ -19,7 +19,7 @@ use cbf_chrome::{
     ffi::IpcEvent,
     process::{ChromiumProcess, start_chromium},
 };
-use tracing::{Level, error, warn};
+use tracing::{Level, debug, error, warn};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -48,6 +48,17 @@ pub(crate) enum UserEvent {
     SurfaceHandleUpdated {
         browsing_context_id: BrowsingContextId,
         handle: SurfaceHandle,
+    },
+    ExtensionPopupSurfaceHandleUpdated {
+        transient_browsing_context_id: TransientBrowsingContextId,
+        parent_browsing_context_id: BrowsingContextId,
+        handle: SurfaceHandle,
+    },
+    ExtensionPopupPreferredSizeChanged {
+        transient_browsing_context_id: TransientBrowsingContextId,
+        parent_browsing_context_id: BrowsingContextId,
+        width: u32,
+        height: u32,
     },
     DevToolsOpened {
         browsing_context_id: BrowsingContextId,
@@ -78,6 +89,63 @@ pub(crate) fn spawn_browser_event_forwarder(
                             .send_event(UserEvent::SurfaceHandleUpdated {
                                 browsing_context_id: browsing_context_id.into(),
                                 handle,
+                            })
+                            .is_err()
+                    {
+                        return;
+                    }
+                    if let ChromeEvent::Ipc(ipc_event) = event.as_raw().clone()
+                        && let IpcEvent::ExtensionPopupSurfaceHandleUpdated {
+                            browsing_context_id,
+                            popup_id,
+                            handle,
+                            ..
+                        } = *ipc_event
+                        && proxy
+                            .send_event(UserEvent::ExtensionPopupSurfaceHandleUpdated {
+                                transient_browsing_context_id: TransientBrowsingContextId::new(
+                                    popup_id,
+                                ),
+                                parent_browsing_context_id: browsing_context_id.into(),
+                                handle,
+                            })
+                            .is_err()
+                    {
+                        return;
+                    }
+                    if let ChromeEvent::Ipc(ipc_event) = event.as_raw().clone()
+                        && let IpcEvent::ExtensionPopupPreferredSizeChanged {
+                            browsing_context_id,
+                            popup_id,
+                            width,
+                            height,
+                            ..
+                        } = *ipc_event
+                    {
+                        debug!(
+                            popup_id,
+                            parent_browsing_context_id = %browsing_context_id,
+                            width,
+                            height,
+                            "received extension popup preferred size update"
+                        );
+                    }
+                    if let ChromeEvent::Ipc(ipc_event) = event.as_raw().clone()
+                        && let IpcEvent::ExtensionPopupPreferredSizeChanged {
+                            browsing_context_id,
+                            popup_id,
+                            width,
+                            height,
+                            ..
+                        } = *ipc_event
+                        && proxy
+                            .send_event(UserEvent::ExtensionPopupPreferredSizeChanged {
+                                transient_browsing_context_id: TransientBrowsingContextId::new(
+                                    popup_id,
+                                ),
+                                parent_browsing_context_id: browsing_context_id.into(),
+                                width,
+                                height,
                             })
                             .is_err()
                     {
@@ -171,6 +239,26 @@ impl<P: PlatformApp> ApplicationHandler<UserEvent> for AppRunner<P> {
                 browsing_context_id,
                 handle,
             } => self.core.handle_surface_update(browsing_context_id, handle),
+            UserEvent::ExtensionPopupSurfaceHandleUpdated {
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                handle,
+            } => self.core.handle_extension_popup_surface_update(
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                handle,
+            ),
+            UserEvent::ExtensionPopupPreferredSizeChanged {
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                width,
+                height,
+            } => self.core.handle_extension_popup_preferred_size_update(
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                width,
+                height,
+            ),
             UserEvent::DevToolsOpened {
                 browsing_context_id,
                 inspected_browsing_context_id,

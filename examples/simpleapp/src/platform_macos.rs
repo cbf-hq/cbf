@@ -9,10 +9,11 @@ use cbf::{
     browser::BrowserHandle,
     data::{
         drag::{DragDrop, DragUpdate},
-        ids::{BrowsingContextId, WindowId as HostWindowId},
+        ids::{BrowsingContextId, TransientBrowsingContextId, WindowId as HostWindowId},
         ime::{
             ConfirmCompositionBehavior, ImeCommitText, ImeComposition, ImeTextSpan, ImeTextSpanType,
         },
+        transient_browsing_context::{TransientImeCommitText, TransientImeComposition},
         window_open::WindowDescriptor,
     },
 };
@@ -28,7 +29,7 @@ use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::NSView;
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use tracing::warn;
+use tracing::{debug, warn};
 use winit::{
     dpi::LogicalSize,
     event_loop::{ActiveEventLoop, EventLoopProxy},
@@ -39,8 +40,10 @@ use crate::{
     app::{PlatformApp, UserEvent, run_with_platform},
     core::{
         CoreAction, CoreState, PRIMARY_HOST_WINDOW_ID, SharedState, ViewTarget,
-        browsing_context_id_for_target, browsing_context_id_for_window, drag_allowed_operations,
-        remove_drag_session, set_drag_allowed_operations, set_primary_host_window_id,
+        bind_transient_to_window, browsing_context_id_for_target, browsing_context_id_for_window,
+        drag_allowed_operations, remove_drag_session, set_drag_allowed_operations,
+        set_primary_host_window_id, transient_browsing_context_id_for_window,
+        window_id_for_transient_browsing_context,
     },
 };
 
@@ -49,6 +52,7 @@ enum BrowserViewBinding {
     Primary,
     DevTools,
     HostWindow(HostWindowId),
+    Transient(TransientBrowsingContextId),
 }
 
 /// Delegate for the macOS browser view that handles input events, IME, drag-and-drop, etc.
@@ -73,9 +77,27 @@ impl SimpleBrowserViewDelegate {
             BrowserViewBinding::HostWindow(window_id) => {
                 browsing_context_id_for_window(&self.shared, window_id)
             }
+            BrowserViewBinding::Transient(_) => None,
         };
         if let Some(browsing_context_id) = browsing_context_id {
             f(browsing_context_id);
+        }
+    }
+
+    fn with_transient_id<F>(&self, f: F)
+    where
+        F: FnOnce(TransientBrowsingContextId),
+    {
+        let transient_browsing_context_id = match self.binding {
+            BrowserViewBinding::Transient(transient_browsing_context_id) => {
+                Some(transient_browsing_context_id)
+            }
+            BrowserViewBinding::Primary
+            | BrowserViewBinding::DevTools
+            | BrowserViewBinding::HostWindow(_) => None,
+        };
+        if let Some(transient_browsing_context_id) = transient_browsing_context_id {
+            f(transient_browsing_context_id);
         }
     }
 }
@@ -87,6 +109,8 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         event: cbf::data::key::KeyEvent,
         commands: Vec<String>,
     ) {
+        let transient_event = event.clone();
+        let transient_commands = commands.clone();
         self.with_page_id(|browsing_context_id| {
             if let Err(err) = self
                 .handle
@@ -95,9 +119,19 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
                 warn!("failed to forward key event: {err}");
             }
         });
+        self.with_transient_id(|transient_browsing_context_id| {
+            if let Err(err) = self.handle.send_key_event_to_transient_browsing_context(
+                transient_browsing_context_id,
+                transient_event,
+                transient_commands,
+            ) {
+                warn!("failed to forward transient key event: {err}");
+            }
+        });
     }
 
     fn on_ime_event(&self, _view: &BrowserViewMac, event: BrowserViewMacImeEvent) {
+        let transient_event = event.clone();
         self.with_page_id(|browsing_context_id| match event {
             BrowserViewMacImeEvent::SetComposition {
                 text,
@@ -159,9 +193,74 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
                 }
             }
         });
+        self.with_transient_id(|transient_browsing_context_id| match transient_event {
+            BrowserViewMacImeEvent::SetComposition {
+                text,
+                selection,
+                replacement,
+            } => {
+                let utf16_len = text.encode_utf16().count();
+                let (selection_start, selection_end) = selection
+                    .map(|range| (range.start, range.end))
+                    .unwrap_or_else(|| {
+                        let len = text.chars().count() as i32;
+                        (len, len)
+                    });
+
+                let composition = TransientImeComposition {
+                    transient_browsing_context_id,
+                    text,
+                    selection_start,
+                    selection_end,
+                    replacement_range: replacement,
+                    spans: vec![ImeTextSpan::no_decoration(
+                        ImeTextSpanType::Composition,
+                        0,
+                        utf16_len as u32,
+                    )],
+                };
+
+                if let Err(err) = self.handle.set_transient_composition(composition) {
+                    warn!("failed to send transient ime composition: {err}");
+                }
+            }
+            BrowserViewMacImeEvent::CommitText {
+                text,
+                replacement,
+                relative_caret_position,
+            } => {
+                let commit = TransientImeCommitText {
+                    transient_browsing_context_id,
+                    text,
+                    relative_caret_position,
+                    replacement_range: replacement,
+                    spans: Vec::new(),
+                };
+                if let Err(err) = self.handle.commit_transient_text(commit) {
+                    warn!("failed to commit transient ime text: {err}");
+                }
+            }
+            BrowserViewMacImeEvent::FinishComposingText { keep_selection } => {
+                let behavior = if keep_selection {
+                    ConfirmCompositionBehavior::KeepSelection
+                } else {
+                    ConfirmCompositionBehavior::DoNotKeepSelection
+                };
+                if let Err(err) = self
+                    .handle
+                    .finish_composing_text_in_transient_browsing_context(
+                        transient_browsing_context_id,
+                        behavior,
+                    )
+                {
+                    warn!("failed to finish transient ime composition: {err}");
+                }
+            }
+        });
     }
 
     fn on_char_event(&self, _view: &BrowserViewMac, text: String) {
+        let transient_text = text.clone();
         self.with_page_id(|browsing_context_id| {
             let event = cbf::data::key::KeyEvent {
                 type_: cbf::data::key::KeyEventType::Char,
@@ -185,12 +284,45 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
                 warn!("failed to send char input: {err}");
             }
         });
+        self.with_transient_id(|transient_browsing_context_id| {
+            let event = cbf::data::key::KeyEvent {
+                type_: cbf::data::key::KeyEventType::Char,
+                modifiers: 0,
+                key_code: 0,
+                platform_key_code: 0,
+                dom_code: None,
+                dom_key: None,
+                text: Some(transient_text.clone()),
+                unmodified_text: Some(transient_text),
+                auto_repeat: false,
+                is_keypad: false,
+                is_system_key: false,
+                location: 0,
+            };
+
+            if let Err(err) = self.handle.send_key_event_to_transient_browsing_context(
+                transient_browsing_context_id,
+                event,
+                Vec::new(),
+            ) {
+                warn!("failed to send transient char input: {err}");
+            }
+        });
     }
 
     fn on_mouse_event(&self, _view: &BrowserViewMac, event: cbf::data::mouse::MouseEvent) {
+        let transient_event = event.clone();
         self.with_page_id(|browsing_context_id| {
             if let Err(err) = self.handle.send_mouse_event(browsing_context_id, event) {
                 warn!("failed to forward mouse event: {err}");
+            }
+        });
+        self.with_transient_id(|transient_browsing_context_id| {
+            if let Err(err) = self.handle.send_mouse_event_to_transient_browsing_context(
+                transient_browsing_context_id,
+                transient_event,
+            ) {
+                warn!("failed to forward transient mouse event: {err}");
             }
         });
     }
@@ -200,12 +332,24 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         _view: &BrowserViewMac,
         event: cbf::data::mouse::MouseWheelEvent,
     ) {
+        let transient_event = event.clone();
         self.with_page_id(|browsing_context_id| {
             if let Err(err) = self
                 .handle
                 .send_mouse_wheel_event(browsing_context_id, event)
             {
                 warn!("failed to forward mouse wheel event: {err}");
+            }
+        });
+        self.with_transient_id(|transient_browsing_context_id| {
+            if let Err(err) = self
+                .handle
+                .send_mouse_wheel_event_to_transient_browsing_context(
+                    transient_browsing_context_id,
+                    transient_event,
+                )
+            {
+                warn!("failed to forward transient mouse wheel event: {err}");
             }
         });
     }
@@ -232,6 +376,14 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
                 .set_browsing_context_focus(browsing_context_id, focused)
             {
                 warn!("failed to sync page focus: {err}");
+            }
+        });
+        self.with_transient_id(|transient_browsing_context_id| {
+            if let Err(err) = self
+                .handle
+                .set_transient_browsing_context_focus(transient_browsing_context_id, focused)
+            {
+                warn!("failed to sync transient focus: {err}");
             }
         });
     }
@@ -305,6 +457,12 @@ struct SimpleAppMac {
 }
 
 impl SimpleAppMac {
+    fn transient_host_window_id(
+        transient_browsing_context_id: TransientBrowsingContextId,
+    ) -> HostWindowId {
+        HostWindowId::new((1_u64 << 63) | transient_browsing_context_id.get())
+    }
+
     fn create_and_attach_browser_view(
         window: &Window,
         frame: CGRect,
@@ -346,6 +504,7 @@ impl SimpleAppMac {
         host_window_id: HostWindowId,
         title: &str,
         size: LogicalSize<f64>,
+        resizable: bool,
         binding: BrowserViewBinding,
     ) -> Result<(), String> {
         if self.winit_id_by_host_window.contains_key(&host_window_id) {
@@ -354,7 +513,8 @@ impl SimpleAppMac {
 
         let attrs: WindowAttributes = Window::default_attributes()
             .with_title(title)
-            .with_inner_size(size);
+            .with_inner_size(size)
+            .with_resizable(resizable);
 
         let window = event_loop
             .create_window(attrs)
@@ -431,6 +591,14 @@ impl SimpleAppMac {
             return;
         }
 
+        if transient_browsing_context_id_for_window(&self.shared, host_window_id).is_some() {
+            // Chromium IPC for transient context resize is sent exclusively from the
+            // ResizeTransientBrowsingContext action handler (driven by preferred size changes).
+            // Sending it here too would re-send stale sizes from delayed winit Resized events,
+            // causing a feedback loop.
+            return;
+        }
+
         if let Some(id) = browsing_context_id_for_window(&self.shared, host_window_id) {
             core.sync_page_size(id, primary_size.0, primary_size.1);
         }
@@ -498,6 +666,39 @@ impl SimpleAppMac {
             .map(|entry| entry.primary_browser_view.as_ref())
     }
 
+    fn view_for_transient_id(
+        &self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+    ) -> Option<&BrowserViewMac> {
+        let host_window_id =
+            window_id_for_transient_browsing_context(&self.shared, transient_browsing_context_id)?;
+        let winit_id = self.winit_id_by_host_window.get(&host_window_id)?;
+        self.windows
+            .get(winit_id)
+            .map(|entry| entry.primary_browser_view.as_ref())
+    }
+
+    fn create_transient_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        title: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        let host_window_id = Self::transient_host_window_id(transient_browsing_context_id);
+        self.create_window_for_host(
+            event_loop,
+            host_window_id,
+            title,
+            LogicalSize::new(f64::from(width.max(25)), f64::from(height.max(25))),
+            false,
+            BrowserViewBinding::Transient(transient_browsing_context_id),
+        )?;
+        bind_transient_to_window(&self.shared, transient_browsing_context_id, host_window_id);
+        Ok(())
+    }
+
     fn ensure_host_window_for_descriptor(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -517,6 +718,7 @@ impl SimpleAppMac {
             window.window_id,
             "CBF SimpleApp",
             size,
+            true,
             BrowserViewBinding::HostWindow(window.window_id),
         ) {
             warn!("failed to create host window {}: {err}", window.window_id);
@@ -567,6 +769,7 @@ impl PlatformApp for SimpleAppMac {
             PRIMARY_HOST_WINDOW_ID,
             "CBF SimpleApp",
             LogicalSize::new(1280.0, 800.0),
+            true,
             BrowserViewBinding::Primary,
         )?;
         set_primary_host_window_id(&self.shared, PRIMARY_HOST_WINDOW_ID);
@@ -615,6 +818,63 @@ impl PlatformApp for SimpleAppMac {
                         browser_view.set_context_id(context_id);
                     }
                 }
+                CoreAction::EnsureTransientHostWindow {
+                    transient_browsing_context_id,
+                    title,
+                    width,
+                    height,
+                } => {
+                    if let Err(err) = self.create_transient_window(
+                        event_loop,
+                        transient_browsing_context_id,
+                        &title,
+                        width,
+                        height,
+                    ) {
+                        warn!(
+                            "failed to create transient popup window {}: {err}",
+                            transient_browsing_context_id
+                        );
+                    }
+                }
+                CoreAction::ResizeTransientBrowsingContext {
+                    transient_browsing_context_id,
+                    width,
+                    height,
+                } => {
+                    debug!(
+                        transient_browsing_context_id = %transient_browsing_context_id,
+                        width,
+                        height,
+                        "requesting transient popup host window resize"
+                    );
+                    if let Some(window) = self.window_for_host_id(Self::transient_host_window_id(
+                        transient_browsing_context_id,
+                    )) {
+                        let _ = window.request_inner_size(LogicalSize::new(
+                            f64::from(width.max(25)),
+                            f64::from(height.max(25)),
+                        ));
+                    }
+                }
+                CoreAction::CloseTransientHostWindow {
+                    transient_browsing_context_id,
+                } => {
+                    self.close_window_for_host(Self::transient_host_window_id(
+                        transient_browsing_context_id,
+                    ));
+                }
+                CoreAction::ApplyTransientSurfaceHandle {
+                    transient_browsing_context_id,
+                    handle,
+                } => {
+                    if let (Some(browser_view), SurfaceHandle::MacCaContextId(context_id)) = (
+                        self.view_for_transient_id(transient_browsing_context_id),
+                        handle,
+                    ) {
+                        browser_view.set_context_id(context_id);
+                    }
+                }
                 CoreAction::ApplyImeBounds {
                     browsing_context_id,
                     update,
@@ -624,11 +884,31 @@ impl PlatformApp for SimpleAppMac {
                         browser_view.set_ime_bounds(update);
                     }
                 }
+                CoreAction::ApplyTransientImeBounds {
+                    transient_browsing_context_id,
+                    update,
+                } => {
+                    if let Some(browser_view) =
+                        self.view_for_transient_id(transient_browsing_context_id)
+                    {
+                        browser_view.set_ime_bounds(update);
+                    }
+                }
                 CoreAction::ShowContextMenu {
                     browsing_context_id,
                     menu,
                 } => {
                     if let Some(browser_view) = self.view_for_context_id(core, browsing_context_id)
+                    {
+                        browser_view.show_context_menu(menu);
+                    }
+                }
+                CoreAction::ShowContextMenuInTransientBrowsingContext {
+                    transient_browsing_context_id,
+                    menu,
+                } => {
+                    if let Some(browser_view) =
+                        self.view_for_transient_id(transient_browsing_context_id)
                     {
                         browser_view.show_context_menu(menu);
                     }

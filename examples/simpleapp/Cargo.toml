@@ -30,9 +30,10 @@ image = "0.25"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }
+objc2-foundation = { workspace = true }
 objc2-core-foundation = { workspace = true, features = ["CFCGTypes"] }
 muda = "0.17"
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
 workspace = true
-features = ["NSView"]
+features = ["NSAlert", "NSApplication", "NSControl", "NSResponder", "NSTextField", "NSView"]

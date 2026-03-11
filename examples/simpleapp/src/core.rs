@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -9,22 +9,26 @@ use cbf::{
         browsing_context_open::BrowsingContextOpenHint,
         browsing_context_open::BrowsingContextOpenResponse,
         context_menu::ContextMenu,
+        dialog::{BeforeUnloadReason, DialogResponse, DialogType},
         download::{DownloadId, DownloadOutcome, DownloadPromptActionHint, DownloadState},
         drag::{DragOperations, DragStartRequest},
         extension::{AuxiliaryWindowKind, AuxiliaryWindowResponse, ExtensionInfo},
-        ids::{BrowsingContextId, WindowId},
+        ids::{BrowsingContextId, TransientBrowsingContextId, WindowId},
         ime::ImeBoundsUpdate,
+        transient_browsing_context::TransientBrowsingContextKind,
         window_open::{
             WindowBounds, WindowDescriptor, WindowKind, WindowOpenResponse, WindowOpenResult,
             WindowState,
         },
     },
-    event::{BackendStopReason, BrowserEvent, BrowsingContextEvent},
+    event::{BackendStopReason, BrowserEvent, BrowsingContextEvent, TransientBrowsingContextEvent},
 };
-use cbf_chrome::{backend::ChromiumBackend, data::surface::SurfaceHandle};
+use cbf_chrome::{
+    backend::ChromiumBackend, browser::ChromiumBrowserHandleExt, data::surface::SurfaceHandle,
+};
 use cursor_icon::CursorIcon;
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use winit::event::WindowEvent;
 
 use crate::{app::MenuCommand, cli::Cli};
@@ -45,6 +49,10 @@ pub(crate) struct SharedState {
     pub(crate) window_to_browsing_context: HashMap<WindowId, BrowsingContextId>,
     /// Tracks pending backend window-open request IDs to the host window ID selected by app.
     pub(crate) pending_window_open_requests: HashMap<u64, WindowId>,
+    /// Maps transient browsing contexts to host window IDs.
+    pub(crate) transient_to_window: HashMap<TransientBrowsingContextId, WindowId>,
+    /// Maps host window IDs to transient browsing contexts.
+    pub(crate) window_to_transient: HashMap<WindowId, TransientBrowsingContextId>,
     /// Maps drag session IDs to their allowed operations.
     pub(crate) drag_allowed_operations: HashMap<u64, DragOperations>,
 }
@@ -163,7 +171,54 @@ pub(crate) fn browsing_context_id_for_window(
 
 pub(crate) fn has_bound_windows(shared: &Arc<Mutex<SharedState>>) -> bool {
     let guard = shared.lock().expect("shared state lock poisoned");
-    !guard.window_to_browsing_context.is_empty()
+    !guard.window_to_browsing_context.is_empty() || !guard.window_to_transient.is_empty()
+}
+
+pub(crate) fn bind_transient_to_window(
+    shared: &Arc<Mutex<SharedState>>,
+    transient_browsing_context_id: TransientBrowsingContextId,
+    window_id: WindowId,
+) {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    guard
+        .transient_to_window
+        .insert(transient_browsing_context_id, window_id);
+    guard
+        .window_to_transient
+        .insert(window_id, transient_browsing_context_id);
+}
+
+pub(crate) fn unbind_transient_browsing_context(
+    shared: &Arc<Mutex<SharedState>>,
+    transient_browsing_context_id: TransientBrowsingContextId,
+) -> Option<WindowId> {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    let window_id = guard
+        .transient_to_window
+        .remove(&transient_browsing_context_id);
+    if let Some(window_id) = window_id {
+        guard.window_to_transient.remove(&window_id);
+    }
+    window_id
+}
+
+pub(crate) fn transient_browsing_context_id_for_window(
+    shared: &Arc<Mutex<SharedState>>,
+    window_id: WindowId,
+) -> Option<TransientBrowsingContextId> {
+    let guard = shared.lock().expect("shared state lock poisoned");
+    guard.window_to_transient.get(&window_id).copied()
+}
+
+pub(crate) fn window_id_for_transient_browsing_context(
+    shared: &Arc<Mutex<SharedState>>,
+    transient_browsing_context_id: TransientBrowsingContextId,
+) -> Option<WindowId> {
+    let guard = shared.lock().expect("shared state lock poisoned");
+    guard
+        .transient_to_window
+        .get(&transient_browsing_context_id)
+        .copied()
 }
 
 /// Gets the allowed drag operations for a given drag session.
@@ -213,6 +268,12 @@ pub(crate) struct CoreState {
     window_base_titles: HashMap<WindowId, String>,
     /// Tracks active and terminal download snapshots for title aggregation and logging.
     downloads: HashMap<DownloadId, DownloadStatus>,
+    /// Tracks transient popup metadata until a surface is available.
+    transient_popups: HashMap<TransientBrowsingContextId, TransientPopupState>,
+    /// Holds popup sizes that arrive before the generic opened event.
+    pending_transient_popup_sizes: HashMap<TransientBrowsingContextId, (u32, u32)>,
+    /// Popup blur-close activates only after the popup was focused once.
+    blur_close_armed_transients: HashSet<TransientBrowsingContextId>,
 }
 
 #[derive(Debug, Clone)]
@@ -223,6 +284,16 @@ struct DownloadStatus {
     total_bytes: Option<u64>,
     state: DownloadState,
     is_paused: bool,
+}
+
+#[derive(Debug, Clone)]
+struct TransientPopupState {
+    parent_browsing_context_id: BrowsingContextId,
+    title: String,
+    /// The last preferred size that was actually applied for the popup host.
+    size: Option<(u32, u32)>,
+    /// The size applied one step before `size`, used to detect A→B→A oscillation.
+    prev_sent_size: Option<(u32, u32)>,
 }
 
 /// Actions that the core state wants the platform layer to execute.
@@ -253,12 +324,38 @@ pub(crate) enum CoreAction {
         browsing_context_id: BrowsingContextId,
         handle: SurfaceHandle,
     },
+    EnsureTransientHostWindow {
+        transient_browsing_context_id: TransientBrowsingContextId,
+        title: String,
+        width: u32,
+        height: u32,
+    },
+    ResizeTransientBrowsingContext {
+        transient_browsing_context_id: TransientBrowsingContextId,
+        width: u32,
+        height: u32,
+    },
+    CloseTransientHostWindow {
+        transient_browsing_context_id: TransientBrowsingContextId,
+    },
+    ApplyTransientSurfaceHandle {
+        transient_browsing_context_id: TransientBrowsingContextId,
+        handle: SurfaceHandle,
+    },
     ApplyImeBounds {
         browsing_context_id: BrowsingContextId,
         update: ImeBoundsUpdate,
     },
+    ApplyTransientImeBounds {
+        transient_browsing_context_id: TransientBrowsingContextId,
+        update: ImeBoundsUpdate,
+    },
     ShowContextMenu {
         browsing_context_id: BrowsingContextId,
+        menu: ContextMenu,
+    },
+    ShowContextMenuInTransientBrowsingContext {
+        transient_browsing_context_id: TransientBrowsingContextId,
         menu: ContextMenu,
     },
     SetExtensionsMenuLoading,
@@ -282,6 +379,9 @@ impl CoreState {
             shutdown_requested: false,
             window_base_titles: HashMap::new(),
             downloads: HashMap::new(),
+            transient_popups: HashMap::new(),
+            pending_transient_popup_sizes: HashMap::new(),
+            blur_close_armed_transients: HashSet::new(),
         }
     }
 
@@ -300,6 +400,18 @@ impl CoreState {
             }
             MenuCommand::ActivateExtension { extension_id } => {
                 info!("extension menu item activated: {extension_id}");
+                let Some(browsing_context_id) =
+                    browsing_context_id_for_target(&self.shared, ViewTarget::Primary)
+                else {
+                    warn!("ignoring extension activation without a primary browsing context");
+                    return Vec::new();
+                };
+                if let Err(err) = self
+                    .browser_handle()
+                    .activate_extension_action(browsing_context_id, extension_id)
+                {
+                    warn!("failed to activate extension action: {err}");
+                }
                 Vec::new()
             }
         }
@@ -429,6 +541,116 @@ impl CoreState {
         }]
     }
 
+    pub(crate) fn handle_extension_popup_surface_update(
+        &mut self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        parent_browsing_context_id: BrowsingContextId,
+        handle: SurfaceHandle,
+    ) -> Vec<CoreAction> {
+        let Some(state) = self
+            .transient_popups
+            .get(&transient_browsing_context_id)
+            .cloned()
+        else {
+            warn!(
+                "ignoring popup surface update for unknown transient browsing context {}",
+                transient_browsing_context_id
+            );
+            return Vec::new();
+        };
+
+        if state.parent_browsing_context_id != parent_browsing_context_id {
+            warn!(
+                "popup parent mismatch for transient {}: expected {}, got {}",
+                transient_browsing_context_id,
+                state.parent_browsing_context_id,
+                parent_browsing_context_id
+            );
+        }
+
+        let mut actions = Vec::new();
+        if window_id_for_transient_browsing_context(&self.shared, transient_browsing_context_id)
+            .is_none()
+        {
+            let (width, height) = state.size.unwrap_or((420, 600));
+            actions.push(CoreAction::EnsureTransientHostWindow {
+                transient_browsing_context_id,
+                title: state.title.clone(),
+                width,
+                height,
+            });
+        }
+        actions.push(CoreAction::ApplyTransientSurfaceHandle {
+            transient_browsing_context_id,
+            handle,
+        });
+        actions
+    }
+
+    pub(crate) fn handle_extension_popup_preferred_size_update(
+        &mut self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        parent_browsing_context_id: BrowsingContextId,
+        width: u32,
+        height: u32,
+    ) -> Vec<CoreAction> {
+        let Some(state) = self
+            .transient_popups
+            .get_mut(&transient_browsing_context_id)
+        else {
+            self.pending_transient_popup_sizes
+                .insert(transient_browsing_context_id, (width, height));
+            return Vec::new();
+        };
+
+        if state.parent_browsing_context_id != parent_browsing_context_id {
+            warn!(
+                "popup parent mismatch for transient {}: expected {}, got {}",
+                transient_browsing_context_id,
+                state.parent_browsing_context_id,
+                parent_browsing_context_id
+            );
+        }
+
+        let new_size = (width, height);
+        let size_changed = state.size != Some(new_size);
+        // Detect A→B→A oscillation: the incoming size equals the size sent two steps ago.
+        // When this happens, suppress the resize and leave state.size unchanged so that
+        // repeated oscillating preferred-size events keep being suppressed.
+        let is_oscillating = size_changed && state.prev_sent_size == Some(new_size);
+        let is_bound =
+            window_id_for_transient_browsing_context(&self.shared, transient_browsing_context_id)
+                .is_some();
+        debug!(
+            transient_browsing_context_id = %transient_browsing_context_id,
+            parent_browsing_context_id = %parent_browsing_context_id,
+            width,
+            height,
+            is_bound,
+            size_changed,
+            is_oscillating,
+            "processing extension popup preferred size update"
+        );
+
+        if is_oscillating {
+            return Vec::new();
+        }
+
+        let prev_size = state.size;
+        state.size = Some(new_size);
+
+        if is_bound && size_changed {
+            state.prev_sent_size = prev_size;
+            vec![CoreAction::ResizeTransientBrowsingContext {
+                transient_browsing_context_id,
+                width,
+                height,
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(crate) fn handle_devtools_opened(
         &mut self,
         browsing_context_id: BrowsingContextId,
@@ -503,6 +725,16 @@ impl CoreState {
                 event,
                 ..
             } => self.handle_browsing_context_event(browsing_context_id, *event),
+            BrowserEvent::TransientBrowsingContext {
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                event,
+                ..
+            } => self.handle_transient_browsing_context_event(
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                *event,
+            ),
             BrowserEvent::BrowsingContextOpenRequested {
                 request_id,
                 source_browsing_context_id,
@@ -732,6 +964,20 @@ impl CoreState {
     ) -> Vec<CoreAction> {
         match event {
             WindowEvent::CloseRequested => {
+                if let Some(transient_browsing_context_id) =
+                    transient_browsing_context_id_for_window(&self.shared, window_id)
+                {
+                    if let Err(err) = self
+                        .browser_handle()
+                        .close_transient_browsing_context(transient_browsing_context_id)
+                    {
+                        warn!("failed to close transient browsing context: {err}");
+                        return vec![CoreAction::CloseTransientHostWindow {
+                            transient_browsing_context_id,
+                        }];
+                    }
+                    return Vec::new();
+                }
                 if let Some(browsing_context_id) =
                     browsing_context_id_for_window(&self.shared, window_id)
                 {
@@ -748,6 +994,10 @@ impl CoreState {
                 }
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                debug!(window_id = %window_id, event = ?event, "received host window resize event");
+                if transient_browsing_context_id_for_window(&self.shared, window_id).is_some() {
+                    return vec![CoreAction::SyncWindowAndResize { window_id }];
+                }
                 vec![CoreAction::SyncWindowAndResize { window_id }]
             }
             WindowEvent::DroppedFile(path) => {
@@ -763,6 +1013,34 @@ impl CoreState {
                 Vec::new()
             }
             WindowEvent::Focused(focused) => {
+                if let Some(transient_browsing_context_id) =
+                    transient_browsing_context_id_for_window(&self.shared, window_id)
+                {
+                    if *focused {
+                        self.blur_close_armed_transients
+                            .insert(transient_browsing_context_id);
+                        if let Err(err) =
+                            self.browser_handle().set_transient_browsing_context_focus(
+                                transient_browsing_context_id,
+                                true,
+                            )
+                        {
+                            warn!("failed to focus transient browsing context: {err}");
+                        }
+                    } else if self
+                        .blur_close_armed_transients
+                        .contains(&transient_browsing_context_id)
+                        && let Err(err) = self
+                            .browser_handle()
+                            .close_transient_browsing_context(transient_browsing_context_id)
+                    {
+                        warn!("failed to close blurred transient browsing context: {err}");
+                        return vec![CoreAction::CloseTransientHostWindow {
+                            transient_browsing_context_id,
+                        }];
+                    }
+                    return Vec::new();
+                }
                 if let Some(id) = browsing_context_id_for_window(&self.shared, window_id) {
                     self.set_page_focus(id, *focused);
                 }
@@ -845,12 +1123,28 @@ impl CoreState {
             BrowsingContextEvent::DragStartRequested { request } => {
                 vec![CoreAction::StartPlatformDrag(request)]
             }
-            BrowsingContextEvent::JavaScriptDialogRequested { request_id, .. } => {
-                _ = self.browser_handle().confirm_beforeunload(
+            BrowsingContextEvent::JavaScriptDialogRequested {
+                request_id,
+                message,
+                default_prompt_text,
+                r#type,
+                beforeunload_reason,
+            } => {
+                let response = show_javascript_dialog(
+                    r#type,
+                    &message,
+                    default_prompt_text.as_deref(),
+                    beforeunload_reason.as_ref(),
+                );
+                if let Err(err) = respond_javascript_dialog_for_browsing_context(
+                    self.browser_handle(),
                     browsing_context_id,
                     request_id,
-                    false,
-                );
+                    r#type,
+                    response,
+                ) {
+                    warn!("failed to respond javascript dialog: {err}");
+                }
                 Vec::new()
             }
             BrowsingContextEvent::PermissionRequested { request_id, .. } => {
@@ -1005,6 +1299,273 @@ impl CoreState {
             | BrowsingContextEvent::DomHtmlRead { .. }
             | BrowsingContextEvent::ExtensionRuntimeWarning { .. } => Vec::new(),
         }
+    }
+
+    fn handle_transient_browsing_context_event(
+        &mut self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        parent_browsing_context_id: BrowsingContextId,
+        event: TransientBrowsingContextEvent,
+    ) -> Vec<CoreAction> {
+        match event {
+            TransientBrowsingContextEvent::Opened { kind, title } => {
+                if kind != TransientBrowsingContextKind::Popup {
+                    return Vec::new();
+                }
+                self.transient_popups.insert(
+                    transient_browsing_context_id,
+                    TransientPopupState {
+                        parent_browsing_context_id,
+                        title: title.unwrap_or_else(|| "Extension Popup".to_string()),
+                        size: self
+                            .pending_transient_popup_sizes
+                            .remove(&transient_browsing_context_id),
+                        prev_sent_size: None,
+                    },
+                );
+                Vec::new()
+            }
+            TransientBrowsingContextEvent::Closed { .. } => {
+                self.transient_popups.remove(&transient_browsing_context_id);
+                self.pending_transient_popup_sizes
+                    .remove(&transient_browsing_context_id);
+                self.blur_close_armed_transients
+                    .remove(&transient_browsing_context_id);
+                unbind_transient_browsing_context(&self.shared, transient_browsing_context_id)
+                    .map(|_| CoreAction::CloseTransientHostWindow {
+                        transient_browsing_context_id,
+                    })
+                    .into_iter()
+                    .collect()
+            }
+            TransientBrowsingContextEvent::Focused => Vec::new(),
+            TransientBrowsingContextEvent::Blurred => Vec::new(),
+            TransientBrowsingContextEvent::Resized { width, height } => self
+                .handle_extension_popup_preferred_size_update(
+                    transient_browsing_context_id,
+                    parent_browsing_context_id,
+                    width,
+                    height,
+                ),
+            TransientBrowsingContextEvent::ImeBoundsUpdated { update } => {
+                vec![CoreAction::ApplyTransientImeBounds {
+                    transient_browsing_context_id,
+                    update,
+                }]
+            }
+            TransientBrowsingContextEvent::CursorChanged { cursor_type } => {
+                if let Some(window_id) = window_id_for_transient_browsing_context(
+                    &self.shared,
+                    transient_browsing_context_id,
+                ) {
+                    vec![CoreAction::UpdateCursor {
+                        window_id,
+                        cursor: cursor_type,
+                    }]
+                } else {
+                    Vec::new()
+                }
+            }
+            TransientBrowsingContextEvent::ContextMenuRequested { menu } => {
+                vec![CoreAction::ShowContextMenuInTransientBrowsingContext {
+                    transient_browsing_context_id,
+                    menu,
+                }]
+            }
+            TransientBrowsingContextEvent::JavaScriptDialogRequested {
+                request_id,
+                message,
+                default_prompt_text,
+                r#type,
+                beforeunload_reason,
+            } => {
+                let response = show_javascript_dialog(
+                    r#type,
+                    &message,
+                    default_prompt_text.as_deref(),
+                    beforeunload_reason.as_ref(),
+                );
+                if let Err(err) = self
+                    .browser_handle()
+                    .respond_javascript_dialog_in_transient_browsing_context(
+                        transient_browsing_context_id,
+                        request_id,
+                        response,
+                    )
+                {
+                    warn!("failed to respond transient javascript dialog: {err}");
+                }
+                Vec::new()
+            }
+            TransientBrowsingContextEvent::TitleUpdated { title } => {
+                if let Some(state) = self.transient_popups.get_mut(&transient_browsing_context_id) {
+                    state.title = title.clone();
+                }
+                window_id_for_transient_browsing_context(&self.shared, transient_browsing_context_id)
+                    .map(|window_id| CoreAction::UpdateWindowTitle { window_id, title })
+                    .into_iter()
+                    .collect()
+            }
+            TransientBrowsingContextEvent::CloseRequested => {
+                if let Err(err) = self
+                    .browser_handle()
+                    .close_transient_browsing_context(transient_browsing_context_id)
+                {
+                    warn!(
+                        "failed to close transient browsing context {}: {err}",
+                        transient_browsing_context_id
+                    );
+                    return vec![CoreAction::CloseTransientHostWindow {
+                        transient_browsing_context_id,
+                    }];
+                }
+                Vec::new()
+            }
+            TransientBrowsingContextEvent::RenderProcessGone { crashed } => {
+                warn!(
+                    transient_browsing_context_id = %transient_browsing_context_id,
+                    crashed,
+                    "transient renderer exited"
+                );
+                vec![CoreAction::CloseTransientHostWindow {
+                    transient_browsing_context_id,
+                }]
+            }
+        }
+    }
+}
+
+fn respond_javascript_dialog_for_browsing_context(
+    browser: BrowserHandle<ChromiumBackend>,
+    browsing_context_id: BrowsingContextId,
+    request_id: u64,
+    dialog_type: DialogType,
+    response: DialogResponse,
+) -> Result<(), cbf::error::Error> {
+    if dialog_type == DialogType::BeforeUnload {
+        return browser.confirm_beforeunload(
+            browsing_context_id,
+            request_id,
+            matches!(response, DialogResponse::Success { .. }),
+        );
+    }
+
+    browser.respond_javascript_dialog(browsing_context_id, request_id, response)
+}
+
+fn show_javascript_dialog(
+    dialog_type: DialogType,
+    message: &str,
+    default_prompt_text: Option<&str>,
+    beforeunload_reason: Option<&BeforeUnloadReason>,
+) -> DialogResponse {
+    match dialog_type {
+        DialogType::Alert => {
+            let _ = MessageDialog::new()
+                .set_level(MessageLevel::Info)
+                .set_title("JavaScript Alert")
+                .set_description(message)
+                .set_buttons(MessageButtons::Ok)
+                .show();
+            DialogResponse::Success { input: None }
+        }
+        DialogType::Confirm => {
+            let confirmed = MessageDialog::new()
+                .set_level(MessageLevel::Info)
+                .set_title("JavaScript Confirm")
+                .set_description(message)
+                .set_buttons(MessageButtons::YesNo)
+                .show();
+            if confirmed == MessageDialogResult::Yes {
+                DialogResponse::Success { input: None }
+            } else {
+                DialogResponse::Cancel
+            }
+        }
+        DialogType::Prompt => show_prompt_dialog(message, default_prompt_text),
+        DialogType::BeforeUnload => {
+            let reason_suffix = beforeunload_reason
+                .map(beforeunload_reason_description)
+                .unwrap_or("The page requested confirmation before closing.");
+            let description = format!("{message}\n\n{reason_suffix}");
+            let confirmed = MessageDialog::new()
+                .set_level(MessageLevel::Warning)
+                .set_title("Leave Page?")
+                .set_description(&description)
+                .set_buttons(MessageButtons::YesNo)
+                .show();
+            if confirmed == MessageDialogResult::Yes {
+                DialogResponse::Success { input: None }
+            } else {
+                DialogResponse::Cancel
+            }
+        }
+    }
+}
+
+fn beforeunload_reason_description(reason: &BeforeUnloadReason) -> &'static str {
+    match reason {
+        BeforeUnloadReason::CloseBrowsingContext => "Closing this page may discard unsaved changes.",
+        BeforeUnloadReason::Navigate => "Navigating away may discard unsaved changes.",
+        BeforeUnloadReason::Reload => "Reloading may discard unsaved changes.",
+        BeforeUnloadReason::WindowClose => "Closing the window may discard unsaved changes.",
+        BeforeUnloadReason::Unknown => "The page requested confirmation before closing.",
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn show_prompt_dialog(message: &str, default_prompt_text: Option<&str>) -> DialogResponse {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{
+        NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSTextField,
+    };
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+    use objc2_foundation::NSString;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return DialogResponse::Cancel;
+    };
+
+    let alert = NSAlert::new(mtm);
+    let message_text = NSString::from_str("JavaScript Prompt");
+    let informative_text = NSString::from_str(message);
+    let ok = NSString::from_str("OK");
+    let cancel = NSString::from_str("Cancel");
+    let initial = NSString::from_str(default_prompt_text.unwrap_or_default());
+
+    alert.setMessageText(&message_text);
+    alert.setInformativeText(&informative_text);
+    alert.setAlertStyle(NSAlertStyle::Informational);
+    alert.addButtonWithTitle(&ok);
+    alert.addButtonWithTitle(&cancel);
+
+    let input = NSTextField::textFieldWithString(&initial, mtm);
+    input.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(320.0, 24.0)));
+    alert.setAccessoryView(Some(&input));
+
+    if alert.runModal() == NSAlertFirstButtonReturn {
+        DialogResponse::Success {
+            input: Some(input.stringValue().to_string()),
+        }
+    } else {
+        DialogResponse::Cancel
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show_prompt_dialog(message: &str, default_prompt_text: Option<&str>) -> DialogResponse {
+    let confirmed = MessageDialog::new()
+        .set_level(MessageLevel::Info)
+        .set_title("JavaScript Prompt")
+        .set_description(message)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+    if confirmed == MessageDialogResult::Yes {
+        DialogResponse::Success {
+            input: default_prompt_text.map(ToOwned::to_owned),
+        }
+    } else {
+        DialogResponse::Cancel
     }
 }
 
