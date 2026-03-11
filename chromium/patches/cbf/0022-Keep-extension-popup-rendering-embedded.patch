@@ -1,0 +1,1417 @@
+From f2915f4aa48975854e134617c7c837cd4ac486ee Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Tue, 10 Mar 2026 14:00:00 +0900
+Subject: [PATCH 22/23] Keep extension popup rendering embedded
+
+---
+ chrome/browser/cbf/cbf_profile_service.cc | 978 +++++++++++++++++-----
+ 1 file changed, 791 insertions(+), 187 deletions(-)
+
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 84047553c5efb..dd29d87d3257c 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -1,62 +1,79 @@
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ 
++#include <atomic>
+ #include <optional>
+ #include <utility>
+-#include <vector>
+ #include <variant>
++#include <vector>
+ 
+-#include "build/build_config.h"
+-#include "build/buildflag.h"
+ #include "base/files/file_path.h"
+ #include "base/files/file_util.h"
+ #include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
+ #include "base/logging.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "base/task/single_thread_task_runner.h"
+ #include "base/task/task_traits.h"
+ #include "base/task/thread_pool.h"
+-#include "base/task/single_thread_task_runner.h"
+-#include "base/values.h"
+ #include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "base/values.h"
++#include "build/build_config.h"
++#include "build/buildflag.h"
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+ #include "chrome/browser/cbf/cbf_download_manager_delegate.h"
++#include "chrome/browser/cbf/cbf_surface_provider_mac.h"
+ #include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
++#include "chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_devtools_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_drag_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_ime_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_input_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_navigation_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_page_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_popup_controller.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+ #include "chrome/browser/download/download_confirmation_result.h"
+ #include "chrome/browser/download/download_core_service_factory.h"
+ #include "chrome/browser/download/download_core_service_impl.h"
+ #include "chrome/browser/download/simple_download_manager_coordinator_factory.h"
+-#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+-#include "chrome/common/pref_names.h"
+-#include "components/content_settings/core/browser/host_content_settings_map.h"
+-#include "components/content_settings/core/common/content_settings.h"
+-#include "components/content_settings/core/common/content_settings_types.h"
++#include "chrome/browser/extensions/extension_action_runner.h"
+ #include "chrome/browser/extensions/extension_install_prompt.h"
+ #include "chrome/browser/extensions/extension_install_prompt_show_params.h"
++#include "chrome/browser/extensions/extension_view.h"
++#include "chrome/browser/extensions/extension_view_host.h"
++#include "chrome/browser/extensions/extension_view_host_factory.h"
+ #include "chrome/browser/printing/print_preview_dialog_controller.h"
+ #include "chrome/browser/printing/print_view_manager_common.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_key.h"
+-#include "chrome/browser/cbf/profile/cbf_profile_context_menu_controller.h"
+-#include "chrome/browser/cbf/profile/cbf_profile_devtools_controller.h"
+-#include "chrome/browser/cbf/profile/cbf_profile_drag_controller.h"
+-#include "chrome/browser/cbf/profile/cbf_profile_ime_controller.h"
+-#include "chrome/browser/cbf/profile/cbf_profile_input_controller.h"
+-#include "chrome/browser/cbf/profile/cbf_profile_navigation_controller.h"
+-#include "chrome/browser/cbf/profile/cbf_profile_page_controller.h"
+-#include "chrome/browser/cbf/profile/cbf_profile_popup_controller.h"
+-#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
+-#include "extensions/browser/extension_registry.h"
+-#include "extensions/common/constants.h"
+-#include "extensions/common/extension.h"
+-#include "extensions/common/manifest_handlers/icons_handler.h"
+-#include "extensions/common/permissions/permissions_data.h"
++#include "chrome/browser/ui/webui/webui_embedding_context.h"
++#include "chrome/common/pref_names.h"
++#include "components/content_settings/core/browser/host_content_settings_map.h"
++#include "components/content_settings/core/common/content_settings.h"
++#include "components/content_settings/core/common/content_settings_types.h"
+ #include "components/download/public/common/download_item.h"
++#include "components/permissions/resolvers/permission_prompt_options.h"
+ #include "components/prefs/pref_service.h"
+-#include "content/public/browser/render_frame_host.h"
++#include "components/sessions/content/session_tab_helper.h"
++#include "content/browser/renderer_host/render_widget_host_impl.h"
+ #include "content/public/browser/download_item_utils.h"
+ #include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_view_host.h"
++#include "content/public/browser/render_widget_host.h"
++#include "content/public/browser/render_widget_host_view.h"
+ #include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_contents_observer.h"
+ #include "content/public/common/isolated_world_ids.h"
+-#include "components/permissions/resolvers/permission_prompt_options.h"
++#include "extensions/browser/extension_action.h"
++#include "extensions/browser/extension_action_manager.h"
++#include "extensions/browser/extension_registry.h"
++#include "extensions/common/constants.h"
++#include "extensions/common/extension.h"
++#include "extensions/common/manifest_handlers/icons_handler.h"
++#include "extensions/common/permissions/permissions_data.h"
+ #include "mojo/public/cpp/bindings/clone_traits.h"
+ #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+ #include "ui/views/widget/widget.h"
+@@ -65,7 +82,117 @@
+ namespace cbf {
+ namespace {
+ 
+-std::vector<std::string> BuildPermissionNames(const extensions::Extension* extension) {
++constexpr base::TimeDelta kExtensionPopupPollInterval = base::Milliseconds(100);
++constexpr int kMaxExtensionPopupPollAttempts = 50;
++constexpr gfx::Size kExtensionPopupMinSize(25, 25);
++constexpr gfx::Size kExtensionPopupMaxSize(800, 600);
++std::atomic_uint64_t g_next_extension_popup_id{1};
++
++content::RenderWidgetHost* ResolveInputRenderWidgetHost(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return nullptr;
++  }
++
++  if (content::RenderFrameHost* focused_frame =
++          web_contents->GetFocusedFrame()) {
++    if (content::RenderWidgetHost* widget_host =
++            focused_frame->GetRenderWidgetHost()) {
++      return widget_host;
++    }
++  }
++
++  if (content::RenderFrameHost* primary_frame =
++          web_contents->GetPrimaryMainFrame()) {
++    if (content::RenderWidgetHost* widget_host =
++            primary_frame->GetRenderWidgetHost()) {
++      return widget_host;
++    }
++  }
++
++  content::RenderWidgetHostView* view = web_contents->GetRenderWidgetHostView();
++  return view ? view->GetRenderWidgetHost() : nullptr;
++}
++
++void SetWebContentsFocus(content::WebContents* web_contents, bool focused) {
++  if (!web_contents) {
++    return;
++  }
++
++  auto* widget_impl = content::RenderWidgetHostImpl::From(
++      ResolveInputRenderWidgetHost(web_contents));
++
++  if (focused) {
++    if (widget_impl) {
++      widget_impl->SetPageFocus(true);
++    }
++    web_contents->Focus();
++    web_contents->RestoreFocus();
++    return;
++  }
++
++  web_contents->StoreFocus();
++  if (widget_impl) {
++    widget_impl->SetPageFocus(false);
++  }
++}
++
++gfx::Size ClampExtensionPopupBounds(gfx::Size size) {
++  size.SetToMax(kExtensionPopupMinSize);
++  size.SetToMin(kExtensionPopupMaxSize);
++  return size;
++}
++
++class CbfExtensionPopupHostView final : public extensions::ExtensionView {
++ public:
++  using LoadedCallback = base::RepeatingClosure;
++  using AutoResizeCallback = base::RepeatingCallback<void(const gfx::Size&)>;
++
++  CbfExtensionPopupHostView(LoadedCallback loaded_callback,
++                            AutoResizeCallback auto_resize_callback)
++      : loaded_callback_(std::move(loaded_callback)),
++        auto_resize_callback_(std::move(auto_resize_callback)) {}
++
++  CbfExtensionPopupHostView(const CbfExtensionPopupHostView&) = delete;
++  CbfExtensionPopupHostView& operator=(const CbfExtensionPopupHostView&) =
++      delete;
++  ~CbfExtensionPopupHostView() override = default;
++
++  gfx::NativeView GetNativeView() override { return gfx::NativeView(); }
++
++  void ResizeDueToAutoResize(content::WebContents* web_contents,
++                             const gfx::Size& new_size) override {
++    if (!auto_resize_callback_.is_null()) {
++      auto_resize_callback_.Run(new_size);
++    }
++  }
++
++  void RenderFrameCreated(
++      content::RenderFrameHost* render_frame_host) override {
++    (void)render_frame_host;
++  }
++
++  bool HandleKeyboardEvent(
++      content::WebContents* source,
++      const input::NativeWebKeyboardEvent& event) override {
++    (void)source;
++    (void)event;
++    return false;
++  }
++
++  void OnLoaded() override {
++    if (!loaded_callback_.is_null()) {
++      loaded_callback_.Run();
++    }
++  }
++
++ private:
++  LoadedCallback loaded_callback_;
++  AutoResizeCallback auto_resize_callback_;
++};
++
++std::vector<std::string> BuildPermissionNames(
++    const extensions::Extension* extension) {
+   std::vector<std::string> names;
+   if (!extension || !extension->permissions_data()) {
+     return names;
+@@ -91,7 +218,8 @@ std::optional<base::FilePath> ResolveExtensionIconPath(
+     return std::nullopt;
+   }
+ 
+-  base::FilePath icon_path = extension->path().Append(icon_resource.relative_path());
++  base::FilePath icon_path =
++      extension->path().Append(icon_resource.relative_path());
+   if (!icon_path.MatchesExtension(FILE_PATH_LITERAL(".png"))) {
+     return std::nullopt;
+   }
+@@ -233,10 +361,248 @@ mojom::CbfDownloadOutcome ToCbfDownloadOutcome(download::DownloadItem* item) {
+ 
+ }  // namespace
+ 
+-CbfProfileService::PendingExtensionInstallPrompt::PendingExtensionInstallPrompt() =
+-    default;
+-CbfProfileService::PendingExtensionInstallPrompt::~PendingExtensionInstallPrompt() =
+-    default;
++class CbfProfileService::ActiveExtensionPopup
++    : public content::WebContentsObserver {
++ public:
++  ActiveExtensionPopup(base::WeakPtr<CbfProfileService> service,
++                       uint64_t popup_id,
++                       TabId tab_id,
++                       extensions::ExtensionId extension_id,
++                       std::unique_ptr<extensions::ExtensionViewHost> host)
++      : content::WebContentsObserver(host ? host->host_contents() : nullptr),
++        service_(std::move(service)),
++        popup_id_(popup_id),
++        tab_id_(tab_id),
++        extension_id_(std::move(extension_id)),
++        host_(std::move(host)),
++        host_view_(base::BindRepeating(&ActiveExtensionPopup::OnHostLoaded,
++                                       base::Unretained(this)),
++                   base::BindRepeating(&ActiveExtensionPopup::OnAutoResize,
++                                       base::Unretained(this))) {
++    CHECK(host_);
++    host_->set_view(&host_view_);
++    host_->SetCloseHandler(
++        base::BindOnce(&ActiveExtensionPopup::HandleCloseRequested,
++                       weak_factory_.GetWeakPtr()));
++  }
++
++  ~ActiveExtensionPopup() override { CloseFromService(); }
++
++  void Start() {
++    LOG(INFO) << "CBF extension popup starting: tab_id=" << tab_id_
++              << " popup_id=" << popup_id_ << " extension_id=" << extension_id_;
++    if (host_ && host_->host_contents()) {
++      host_->host_contents()->WasShown();
++      if (content::RenderFrameHost* frame_host =
++              host_->host_contents()->GetPrimaryMainFrame();
++          frame_host && frame_host->IsRenderFrameLive()) {
++        EnableAutoResize(frame_host);
++      }
++    }
++    UpdateEffectiveSize(kExtensionPopupMinSize, "startup-default");
++    if (service_) {
++      service_->NotifyExtensionPopupOpened(
++          tab_id_, popup_id_, extension_id_,
++          base::UTF16ToUTF8(host_->host_contents()->GetTitle()));
++    }
++    host_->CreateRendererSoon();
++    StartPollingIfNeeded();
++  }
++
++  TabId tab_id() const { return tab_id_; }
++  content::WebContents* contents() const {
++    return host_ ? host_->host_contents() : nullptr;
++  }
++
++  void CloseFromService() {
++    closing_ = true;
++    poll_timer_.Stop();
++    Observe(nullptr);
++    if (host_) {
++      host_->set_view(nullptr);
++      host_.reset();
++    }
++    LOG(INFO) << "CBF extension popup closed from service: tab_id=" << tab_id_
++              << " popup_id=" << popup_id_;
++  }
++
++  void DidFirstVisuallyNonEmptyPaint() override {
++    StartPollingIfNeeded();
++    MaybeNotifyPreferredSizeChanged("first-paint");
++  }
++
++  void DidStopLoading() override {
++    StartPollingIfNeeded();
++    MaybeNotifyPreferredSizeChanged("stop-loading");
++  }
++
++  void DocumentOnLoadCompletedInPrimaryMainFrame() override {
++    StartPollingIfNeeded();
++    MaybeNotifyPreferredSizeChanged("document-load-complete");
++  }
++
++  void RenderFrameCreated(content::RenderFrameHost* frame_host) override {
++    if (!contents() || frame_host != contents()->GetPrimaryMainFrame()) {
++      return;
++    }
++    EnableAutoResize(frame_host);
++  }
++
++  void RenderFrameHostChanged(content::RenderFrameHost* old_host,
++                              content::RenderFrameHost* new_host) override {
++    (void)old_host;
++    if (!contents() || new_host != contents()->GetPrimaryMainFrame()) {
++      return;
++    }
++    EnableAutoResize(new_host);
++  }
++
++  void WebContentsDestroyed() override {
++    poll_timer_.Stop();
++    if (!closing_ && service_) {
++      LOG(INFO) << "CBF extension popup web contents destroyed: tab_id="
++                << tab_id_ << " popup_id=" << popup_id_;
++      service_->CloseExtensionPopupById(popup_id_);
++    }
++  }
++
++  void SetSize(uint32_t width, uint32_t height) {
++    UpdateEffectiveSize(gfx::Size(width, height), "host-size");
++  }
++
++  void SetFocus(bool focused) { SetWebContentsFocus(contents(), focused); }
++
++ private:
++  void OnHostLoaded() {
++    LOG(INFO) << "CBF extension popup host loaded: tab_id=" << tab_id_
++              << " popup_id=" << popup_id_;
++    MaybeNotifyPreferredSizeChanged("host-loaded");
++  }
++
++  void OnAutoResize(const gfx::Size& preferred_size) {
++    LOG(INFO) << "CBF extension popup auto resize: tab_id=" << tab_id_
++              << " popup_id=" << popup_id_
++              << " width=" << preferred_size.width()
++              << " height=" << preferred_size.height();
++    UpdateEffectiveSize(preferred_size, "auto-resize");
++  }
++
++  void EnableAutoResize(content::RenderFrameHost* frame_host) {
++    if (!frame_host || !frame_host->IsRenderFrameLive()) {
++      return;
++    }
++
++    if (content::RenderViewHost* render_view_host =
++            frame_host->GetRenderViewHost()) {
++      render_view_host->EnablePreferredSizeMode();
++    }
++
++    content::RenderWidgetHostView* view = frame_host->GetView();
++    if (!view) {
++      return;
++    }
++
++    view->EnableAutoResize(kExtensionPopupMinSize, kExtensionPopupMaxSize);
++    LOG(INFO) << "CBF extension popup auto resize enabled: tab_id=" << tab_id_
++              << " popup_id=" << popup_id_;
++  }
++
++  void MaybeNotifyPreferredSizeChanged(const char* reason) {
++    if (!contents()) {
++      return;
++    }
++    const gfx::Size preferred_size = contents()->GetPreferredSize();
++    if (preferred_size.IsEmpty()) {
++      return;
++    }
++    UpdateEffectiveSize(preferred_size, reason);
++  }
++
++  void UpdateEffectiveSize(gfx::Size requested_size, const char* reason) {
++    const gfx::Size effective_size = ClampExtensionPopupBounds(requested_size);
++    if (effective_size == effective_size_) {
++      return;
++    }
++
++    effective_size_ = effective_size;
++    if (contents()) {
++      contents()->Resize(gfx::Rect(gfx::Point(), effective_size_));
++    }
++    if (service_) {
++      LOG(INFO) << "CBF extension popup preferred size updated: tab_id="
++                << tab_id_ << " popup_id=" << popup_id_
++                << " width=" << effective_size_.width()
++                << " height=" << effective_size_.height()
++                << " reason=" << reason;
++      service_->NotifyExtensionPopupPreferredSizeChanged(
++          tab_id_, popup_id_, effective_size_.width(),
++          effective_size_.height());
++    }
++  }
++
++  void HandleCloseRequested(extensions::ExtensionHost* host) {
++    (void)host;
++    if (service_) {
++      LOG(INFO) << "CBF extension popup close requested: tab_id=" << tab_id_
++                << " popup_id=" << popup_id_;
++      service_->CloseExtensionPopupById(popup_id_);
++    }
++  }
++
++  void StartPollingIfNeeded() {
++    if (poll_timer_.IsRunning()) {
++      return;
++    }
++    poll_attempts_ = 0;
++    poll_timer_.Start(FROM_HERE, kExtensionPopupPollInterval, this,
++                      &ActiveExtensionPopup::PollOnce);
++  }
++
++  void PollOnce() {
++    if (!web_contents()) {
++      poll_timer_.Stop();
++      return;
++    }
++    if (poll_attempts_++ >= kMaxExtensionPopupPollAttempts) {
++      poll_timer_.Stop();
++      return;
++    }
++    uint32_t context_id = 0;
++    if (!TryGetWebContentsCaContextId(web_contents(), &context_id)) {
++      return;
++    }
++    if (context_id == 0 || context_id == last_context_id_) {
++      return;
++    }
++    last_context_id_ = context_id;
++    if (service_) {
++      LOG(INFO) << "CBF extension popup surface handle updated: tab_id="
++                << tab_id_ << " popup_id=" << popup_id_
++                << " ca_context_id=" << context_id;
++      service_->NotifyExtensionPopupSurfaceHandleUpdated(tab_id_, popup_id_,
++                                                         context_id);
++    }
++    poll_timer_.Stop();
++  }
++
++  base::WeakPtr<CbfProfileService> service_;
++  const uint64_t popup_id_;
++  const TabId tab_id_;
++  const extensions::ExtensionId extension_id_;
++  std::unique_ptr<extensions::ExtensionViewHost> host_;
++  CbfExtensionPopupHostView host_view_;
++  base::RepeatingTimer poll_timer_;
++  int poll_attempts_ = 0;
++  uint32_t last_context_id_ = 0;
++  gfx::Size effective_size_;
++  bool closing_ = false;
++  base::WeakPtrFactory<ActiveExtensionPopup> weak_factory_{this};
++};
++
++CbfProfileService::PendingExtensionInstallPrompt::
++    PendingExtensionInstallPrompt() = default;
++CbfProfileService::PendingExtensionInstallPrompt::
++    ~PendingExtensionInstallPrompt() = default;
+ CbfProfileService::PendingExtensionInstallPrompt::PendingExtensionInstallPrompt(
+     PendingExtensionInstallPrompt&&) = default;
+ CbfProfileService::PendingExtensionInstallPrompt&
+@@ -244,12 +610,13 @@ CbfProfileService::PendingExtensionInstallPrompt::operator=(
+     PendingExtensionInstallPrompt&&) = default;
+ 
+ CbfProfileService::PendingPermissionPrompt::PendingPermissionPrompt() = default;
+-CbfProfileService::PendingPermissionPrompt::~PendingPermissionPrompt() = default;
++CbfProfileService::PendingPermissionPrompt::~PendingPermissionPrompt() =
++    default;
+ CbfProfileService::PendingPermissionPrompt::PendingPermissionPrompt(
+     PendingPermissionPrompt&&) = default;
+ CbfProfileService::PendingPermissionPrompt&
+-CbfProfileService::PendingPermissionPrompt::operator=(PendingPermissionPrompt&&) =
+-    default;
++CbfProfileService::PendingPermissionPrompt::operator=(
++    PendingPermissionPrompt&&) = default;
+ 
+ CbfProfileService::PendingDownloadPrompt::PendingDownloadPrompt() = default;
+ CbfProfileService::PendingDownloadPrompt::~PendingDownloadPrompt() = default;
+@@ -266,32 +633,33 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+       dialog_manager_(this),
+       web_contents_delegate_(this, &dialog_manager_),
+       tab_manager_(profile, this),
+-      service_context_(std::make_unique<CbfProfileServiceContext>(
+-          &tab_manager_,
+-          &dialog_manager_,
+-          &observer_)),
+-      page_controller_(std::make_unique<CbfProfilePageController>(
+-          service_context_.get())),
++      service_context_(
++          std::make_unique<CbfProfileServiceContext>(&tab_manager_,
++                                                     &dialog_manager_,
++                                                     &observer_)),
++      page_controller_(
++          std::make_unique<CbfProfilePageController>(service_context_.get())),
+       navigation_controller_(std::make_unique<CbfProfileNavigationController>(
+           service_context_.get())),
+-      popup_controller_(std::make_unique<CbfProfilePopupController>(
+-          service_context_.get())),
++      popup_controller_(
++          std::make_unique<CbfProfilePopupController>(service_context_.get())),
+       context_menu_controller_(
+           std::make_unique<CbfProfileContextMenuController>(
+               service_context_.get())),
+-      input_controller_(std::make_unique<CbfProfileInputController>(
+-          service_context_.get())),
+-      ime_controller_(std::make_unique<CbfProfileImeController>(
+-          service_context_.get())),
+-      drag_controller_(std::make_unique<CbfProfileDragController>(
+-          service_context_.get())),
++      input_controller_(
++          std::make_unique<CbfProfileInputController>(service_context_.get())),
++      ime_controller_(
++          std::make_unique<CbfProfileImeController>(service_context_.get())),
++      drag_controller_(
++          std::make_unique<CbfProfileDragController>(service_context_.get())),
+       devtools_controller_(std::make_unique<CbfProfileDevToolsController>(
+           service_context_.get())),
+       print_preview_web_contents_collection_(this) {
+   if (profile_) {
+     profile_observation_.Observe(profile_);
+     PrefService* prefs = profile_->GetPrefs();
+-    if (prefs && !prefs->FindPreference(prefs::kPromptForDownload)->IsManaged()) {
++    if (prefs &&
++        !prefs->FindPreference(prefs::kPromptForDownload)->IsManaged()) {
+       saved_prompt_for_download_pref_ =
+           prefs->GetBoolean(prefs::kPromptForDownload);
+       prefs->SetBoolean(prefs::kPromptForDownload, false);
+@@ -302,8 +670,9 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+       download_core_service->SetDownloadManagerDelegate(
+           std::make_unique<CbfDownloadManagerDelegate>(
+               profile_, weak_factory_.GetWeakPtr()));
+-      download_coordinator_ = SimpleDownloadManagerCoordinatorFactory::GetForKey(
+-          profile_->GetProfileKey());
++      download_coordinator_ =
++          SimpleDownloadManagerCoordinatorFactory::GetForKey(
++              profile_->GetProfileKey());
+       if (download_coordinator_ && download_coordinator_->GetNotifier()) {
+         download_coordinator_->GetNotifier()->AddObserver(this);
+       }
+@@ -329,22 +698,21 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+           return;
+         }
+         if (frame_id) {
+-          self->devtools_controller_->InspectElementForFrame(tab_id,
+-                                                             frame_id, x, y);
++          self->devtools_controller_->InspectElementForFrame(tab_id, frame_id,
++                                                             x, y);
+           return;
+         }
+         self->InspectElement(tab_id, x, y);
+       },
+       weak_factory_.GetWeakPtr()));
+-  context_menu_controller_->SetPrintPreviewRequestedHandler(
+-      base::BindRepeating(
+-          [](base::WeakPtr<CbfProfileService> self, TabId tab_id) {
+-            if (!self) {
+-              return;
+-            }
+-            self->PrintPreview(tab_id);
+-          },
+-          weak_factory_.GetWeakPtr()));
++  context_menu_controller_->SetPrintPreviewRequestedHandler(base::BindRepeating(
++      [](base::WeakPtr<CbfProfileService> self, TabId tab_id) {
++        if (!self) {
++          return;
++        }
++        self->PrintPreview(tab_id);
++      },
++      weak_factory_.GetWeakPtr()));
+   devtools_controller_->SetRegisterImeHandler(base::BindRepeating(
+       [](base::WeakPtr<CbfProfileService> self, TabId tab_id,
+          content::WebContents* web_contents) {
+@@ -399,11 +767,11 @@ void CbfProfileService::SetObserver(
+ }
+ 
+ void CbfProfileService::CreateTab(const std::string& initial_url,
+-                                      uint64_t request_id,
+-                                      CreateTabCallback callback) {
++                                  uint64_t request_id,
++                                  CreateTabCallback callback) {
+   const TabId tab_id = page_controller_->CreateTab(initial_url);
+-  ime_controller_->RegisterWebContents(
+-      tab_id, tab_manager_.GetWebContents(tab_id));
++  ime_controller_->RegisterWebContents(tab_id,
++                                       tab_manager_.GetWebContents(tab_id));
+   if (observer_ && tab_id != kInvalidTabId) {
+     observer_->OnTabCreated(tab_id, request_id);
+   }
+@@ -420,9 +788,9 @@ void CbfProfileService::RequestCloseTab(TabId tab_id) {
+ }
+ 
+ void CbfProfileService::SetTabSize(const TabId tab_id,
+-                                       std::uint32_t width,
+-                                       std::uint32_t height,
+-                                       SetTabSizeCallback callback) {
++                                   std::uint32_t width,
++                                   std::uint32_t height,
++                                   SetTabSizeCallback callback) {
+   tab_manager_.SetTabSize(
+       tab_id, width, height,
+       base::BindOnce(
+@@ -520,19 +888,20 @@ void CbfProfileService::PrintPreview(uint64_t tab_id) {
+   // WebContents-modal preview on macOS requires a parent NSWindow for kChild
+   // modal widgets. CBF pages can run without one, so fall back safely.
+   views::Widget* top_level_widget =
+-      views::Widget::GetTopLevelWidgetForNativeView(web_contents->GetNativeView());
++      views::Widget::GetTopLevelWidgetForNativeView(
++          web_contents->GetNativeView());
+   if (!top_level_widget || !top_level_widget->GetNativeWindow()) {
+     print_preview_disabled = true;
+   }
+ #endif
+ 
+-  const bool started = printing::StartPrint(
+-      web_contents,
++  const bool started =
++      printing::StartPrint(web_contents,
+ #if BUILDFLAG(IS_CHROMEOS)
+-      /*print_renderer=*/mojo::NullAssociatedRemote(),
++                           /*print_renderer=*/mojo::NullAssociatedRemote(),
+ #endif
+-      /*print_preview_disabled=*/print_preview_disabled,
+-      /*has_selection=*/false);
++                           /*print_preview_disabled=*/print_preview_disabled,
++                           /*has_selection=*/false);
+   if (!started) {
+     return;
+   }
+@@ -565,13 +934,101 @@ void CbfProfileService::SetTabFocus(uint64_t tab_id, bool focused) {
+     }
+   }
+   for (uint64_t request_id : cancel_request_ids) {
+-    ResolveAndClosePlatformPrompt(request_id,
+-                                  mojom::CbfAuxiliaryWindowCloseReason::kHostForced);
++    ResolveAndClosePlatformPrompt(
++        request_id, mojom::CbfAuxiliaryWindowCloseReason::kHostForced);
++  }
++}
++
++void CbfProfileService::CloseExtensionPopup(uint64_t popup_id) {
++  CloseExtensionPopupById(popup_id);
++}
++
++void CbfProfileService::SetExtensionPopupSize(
++    uint64_t popup_id,
++    uint32_t width,
++    uint32_t height,
++    SetExtensionPopupSizeCallback callback) {
++  if (ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id)) {
++    popup->SetSize(width, height);
++  }
++  std::move(callback).Run();
++}
++
++void CbfProfileService::SetExtensionPopupFocus(uint64_t popup_id,
++                                               bool focused) {
++  if (ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id)) {
++    popup->SetFocus(focused);
+   }
+ }
+ 
+-void CbfProfileService::GetTabDomHtml(uint64_t tab_id,
+-                                          uint64_t request_id) {
++void CbfProfileService::SendExtensionPopupKeyEvent(
++    uint64_t popup_id,
++    mojom::CbfKeyEventPtr event,
++    const std::optional<std::vector<std::string>>& commands) {
++  ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id);
++  if (!popup) {
++    return;
++  }
++  input_controller_->SendKeyEventToWebContents(popup->contents(),
++                                               std::move(event), commands);
++}
++
++void CbfProfileService::SendExtensionPopupMouseEvent(
++    uint64_t popup_id,
++    mojom::CbfMouseEventPtr event) {
++  ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id);
++  if (!popup) {
++    return;
++  }
++  input_controller_->SendMouseEventToWebContents(popup->contents(),
++                                                 std::move(event));
++}
++
++void CbfProfileService::SendExtensionPopupMouseWheelEvent(
++    uint64_t popup_id,
++    mojom::CbfMouseWheelEventPtr event) {
++  ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id);
++  if (!popup) {
++    return;
++  }
++  input_controller_->SendMouseWheelEventToWebContents(popup->contents(),
++                                                      std::move(event));
++}
++
++void CbfProfileService::SetExtensionPopupComposition(
++    uint64_t popup_id,
++    mojom::CbfImeCompositionPtr composition) {
++  ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id);
++  if (!popup) {
++    return;
++  }
++  ime_controller_->SetCompositionForWebContents(popup->contents(),
++                                                std::move(composition));
++}
++
++void CbfProfileService::CommitExtensionPopupText(
++    uint64_t popup_id,
++    mojom::CbfImeCommitTextPtr commit) {
++  ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id);
++  if (!popup) {
++    return;
++  }
++  ime_controller_->CommitTextForWebContents(popup->contents(),
++                                            std::move(commit));
++}
++
++void CbfProfileService::FinishExtensionPopupComposingText(
++    uint64_t popup_id,
++    mojom::CbfConfirmCompositionBehavior behavior) {
++  ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id);
++  if (!popup) {
++    return;
++  }
++  ime_controller_->FinishComposingTextForWebContents(popup->contents(),
++                                                     behavior);
++}
++
++void CbfProfileService::GetTabDomHtml(uint64_t tab_id, uint64_t request_id) {
+   content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
+   if (!web_contents || !observer_) {
+     return;
+@@ -596,8 +1053,7 @@ void CbfProfileService::GetTabDomHtml(uint64_t tab_id,
+             if (value.is_string()) {
+               html = value.GetString();
+             }
+-            self->observer_->OnTabDomHtmlRead(tab_id, request_id,
+-                                                   html);
++            self->observer_->OnTabDomHtmlRead(tab_id, request_id, html);
+           },
+           weak_factory_.GetWeakPtr(), tab_id, request_id),
+       content::ISOLATED_WORLD_ID_CONTENT_END);
+@@ -643,7 +1099,8 @@ void CbfProfileService::ListExtensions(const std::string& profile_id,
+   }
+ 
+   auto on_icon_read = base::BindRepeating(
+-      [](base::RepeatingCallback<void(std::shared_ptr<PendingRequest>)> finalize,
++      [](base::RepeatingCallback<void(std::shared_ptr<PendingRequest>)>
++             finalize,
+          std::shared_ptr<PendingRequest> request, size_t index,
+          mojom::CbfIconDataPtr icon) {
+         if (index < request->result.size() && request->result[index]) {
+@@ -694,6 +1151,81 @@ void CbfProfileService::ListExtensions(const std::string& profile_id,
+   }
+ }
+ 
++void CbfProfileService::ActivateExtensionAction(
++    uint64_t tab_id,
++    const std::string& extension_id) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
++  if (!web_contents || !profile_) {
++    return;
++  }
++
++  BrowserWindowInterface* browser_window_interface =
++      webui::GetBrowserWindowInterface(web_contents);
++  if (!browser_window_interface) {
++    return;
++  }
++
++  const extensions::Extension* extension =
++      extensions::ExtensionRegistry::Get(profile_.get())
++          ->enabled_extensions()
++          .GetByID(extension_id);
++  if (!extension) {
++    return;
++  }
++
++  auto* action_runner =
++      extensions::ExtensionActionRunner::GetForWebContents(web_contents);
++  if (!action_runner) {
++    return;
++  }
++
++  constexpr bool kGrantTabPermissions = true;
++  const auto action = action_runner->RunAction(extension, kGrantTabPermissions);
++  if (action != extensions::ExtensionAction::ShowAction::kShowPopup) {
++    return;
++  }
++
++  auto* extension_action =
++      extensions::ExtensionActionManager::Get(profile_.get())
++          ->GetExtensionAction(*extension);
++  if (!extension_action) {
++    return;
++  }
++
++  const int session_tab_id =
++      sessions::SessionTabHelper::IdForTab(web_contents).id();
++  if (!extension_action->GetIsVisible(session_tab_id) ||
++      !extension_action->HasPopup(session_tab_id)) {
++    return;
++  }
++
++  auto host = extensions::ExtensionViewHostFactory::CreatePopupHost(
++      *extension, extension_action->GetPopupUrl(session_tab_id),
++      browser_window_interface);
++  if (!host) {
++    return;
++  }
++
++  std::vector<uint64_t> popup_ids_to_close;
++  for (const auto& [popup_id, popup] : active_extension_popups_) {
++    if (popup && popup->tab_id() == tab_id) {
++      popup_ids_to_close.push_back(popup_id);
++    }
++  }
++  for (uint64_t popup_id : popup_ids_to_close) {
++    CloseExtensionPopupById(popup_id);
++  }
++
++  const uint64_t popup_id =
++      g_next_extension_popup_id.fetch_add(1, std::memory_order_relaxed);
++  auto popup = std::make_unique<ActiveExtensionPopup>(
++      weak_factory_.GetWeakPtr(), popup_id, tab_id, extension->id(),
++      std::move(host));
++  ActiveExtensionPopup* popup_ptr = popup.get();
++  active_extension_popups_.emplace(popup_id, std::move(popup));
++  popup_ptr->Start();
++}
++
+ bool CbfProfileService::RequestAuxiliaryInstallPromptForWebstore(
+     content::WebContents* web_contents,
+     const extensions::Extension* extension,
+@@ -720,8 +1252,9 @@ bool CbfProfileService::RequestAuxiliaryInstallPromptForWebstore(
+   pending.done_callback = std::move(done_callback);
+   pending_extension_prompts_[request_id] = std::move(pending);
+   NotifyAuxiliaryWindowOpenRequested(
+-      tab_id, request_id, mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt,
+-      extension->id(), extension->name(), BuildPermissionNames(extension));
++      tab_id, request_id,
++      mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt, extension->id(),
++      extension->name(), BuildPermissionNames(extension));
+   return true;
+ }
+ 
+@@ -749,8 +1282,8 @@ bool CbfProfileService::RequestPermissionPromptForWebContents(
+   pending_permission_prompts_[request_id] = std::move(pending);
+ 
+   NotifyPromptUiRequested(tab_id, request_id,
+-                          mojom::CbfPromptUiKind::kPermissionPrompt,
+-                          permission, permission_key);
++                          mojom::CbfPromptUiKind::kPermissionPrompt, permission,
++                          permission_key);
+   return true;
+ }
+ 
+@@ -835,9 +1368,10 @@ void CbfProfileService::RespondAuxiliaryWindow(
+   RespondAuxiliaryWindowImpl(request_id, std::move(response));
+ }
+ 
+-void CbfProfileService::RespondPromptUi(uint64_t tab_id,
+-                                        uint64_t request_id,
+-                                        mojom::CbfPromptUiResponsePtr response) {
++void CbfProfileService::RespondPromptUi(
++    uint64_t tab_id,
++    uint64_t request_id,
++    mojom::CbfPromptUiResponsePtr response) {
+   if (!response) {
+     return;
+   }
+@@ -858,8 +1392,8 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
+     base::FilePath selected_path = pending.suggested_path;
+     if (response->destination_path.has_value() &&
+         !response->destination_path->empty()) {
+-      selected_path = base::FilePath::FromUTF8Unsafe(
+-          response->destination_path.value());
++      selected_path =
++          base::FilePath::FromUTF8Unsafe(response->destination_path.value());
+     }
+ 
+     if (response->allow) {
+@@ -870,8 +1404,7 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
+     } else {
+       ResolvePendingDownloadPrompt(
+           std::move(pending), DownloadConfirmationResult::CANCELED,
+-          ui::SelectedFileInfo(),
+-          mojom::CbfPromptUiResolutionResult::kDenied);
++          ui::SelectedFileInfo(), mojom::CbfPromptUiResolutionResult::kDenied);
+     }
+     return;
+   }
+@@ -956,12 +1489,11 @@ void CbfProfileService::CloseAuxiliaryWindow(uint64_t tab_id,
+       prompt_it->second.tab_id != tab_id) {
+     return;
+   }
+-  ResolveAndClosePlatformPrompt(request_it->second,
+-                                mojom::CbfAuxiliaryWindowCloseReason::kHostForced);
++  ResolveAndClosePlatformPrompt(
++      request_it->second, mojom::CbfAuxiliaryWindowCloseReason::kHostForced);
+ }
+ 
+-void CbfProfileService::RespondTabOpen(
+-    mojom::CbfTabOpenResponsePtr response) {
++void CbfProfileService::RespondTabOpen(mojom::CbfTabOpenResponsePtr response) {
+   popup_controller_->RespondTabOpen(std::move(response));
+ }
+ 
+@@ -999,27 +1531,25 @@ void CbfProfileService::CloseAllTabs() {
+ 
+ void CbfProfileService::CloseWebContents(content::WebContents* web_contents) {
+   popup_controller_->ClearBeforeUnloadReason(web_contents);
+-  const TabId tab_id = page_controller_->GetTabIdForWebContents(
+-      web_contents);
++  const TabId tab_id = page_controller_->GetTabIdForWebContents(web_contents);
+ 
+   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+-      FROM_HERE,
+-      base::BindOnce(
+-          [](base::WeakPtr<CbfProfileService> self, TabId tab_id) {
+-            if (!self) {
+-              return;
+-            }
+-            if (tab_id != kInvalidTabId) {
+-              self->page_controller_->CloseTab(tab_id);
+-            }
+-            if (self->browser_service_) {
+-              self->browser_service_->NotifyTabClosed();
+-            }
+-            if (tab_id != kInvalidTabId) {
+-              self->NotifyTabClosed(tab_id);
+-            }
+-          },
+-          weak_factory_.GetWeakPtr(), tab_id));
++      FROM_HERE, base::BindOnce(
++                     [](base::WeakPtr<CbfProfileService> self, TabId tab_id) {
++                       if (!self) {
++                         return;
++                       }
++                       if (tab_id != kInvalidTabId) {
++                         self->page_controller_->CloseTab(tab_id);
++                       }
++                       if (self->browser_service_) {
++                         self->browser_service_->NotifyTabClosed();
++                       }
++                       if (tab_id != kInvalidTabId) {
++                         self->NotifyTabClosed(tab_id);
++                       }
++                     },
++                     weak_factory_.GetWeakPtr(), tab_id));
+ }
+ 
+ content::WebContentsDelegate* CbfProfileService::GetWebContentsDelegate() {
+@@ -1042,17 +1572,25 @@ bool CbfProfileService::HandleContextMenu(
+   return context_menu_controller_->HandleContextMenu(render_frame_host, params);
+ }
+ 
+-void CbfProfileService::NotifyNewTabRequested(
+-    content::WebContents* source,
+-    const GURL& target_url,
+-    WindowOpenDisposition disposition,
+-    bool user_gesture) {
++void CbfProfileService::NotifyNewTabRequested(content::WebContents* source,
++                                              const GURL& target_url,
++                                              WindowOpenDisposition disposition,
++                                              bool user_gesture) {
+   popup_controller_->RequestTabOpen(source, target_url, disposition,
+-                                                user_gesture);
++                                    user_gesture);
+ }
+ 
+ void CbfProfileService::NotifyTabClosed(TabId tab_id) {
+   if (tab_id != kInvalidTabId) {
++    std::vector<uint64_t> popup_ids_to_close;
++    for (const auto& [popup_id, popup] : active_extension_popups_) {
++      if (popup && popup->tab_id() == tab_id) {
++        popup_ids_to_close.push_back(popup_id);
++      }
++    }
++    for (uint64_t popup_id : popup_ids_to_close) {
++      CloseExtensionPopupById(popup_id);
++    }
+     ResolvePendingPermissionPromptsForTab(
+         tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
+     ResolvePendingDownloadPromptsForTab(
+@@ -1075,22 +1613,19 @@ void CbfProfileService::OnBeforeUnloadDialogRequested(
+   if (!browser_service_ || !web_contents) {
+     return;
+   }
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+   if (tab_id == kInvalidTabId) {
+     return;
+   }
+   browser_service_->NotifyBeforeUnloadDialogRequested(tab_id);
+ }
+ 
+-void CbfProfileService::OnBeforeUnloadFired(
+-    content::WebContents* web_contents,
+-    bool proceed) {
++void CbfProfileService::OnBeforeUnloadFired(content::WebContents* web_contents,
++                                            bool proceed) {
+   if (!browser_service_ || !web_contents) {
+     return;
+   }
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+   if (tab_id == kInvalidTabId) {
+     return;
+   }
+@@ -1103,8 +1638,7 @@ void CbfProfileService::OnBeforeUnloadFired(
+   if (proceed && is_close_request) {
+     base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+         FROM_HERE, base::BindOnce(
+-                       [](base::WeakPtr<CbfProfileService> self,
+-                          TabId tab_id) {
++                       [](base::WeakPtr<CbfProfileService> self, TabId tab_id) {
+                          if (!self) {
+                            return;
+                          }
+@@ -1126,8 +1660,7 @@ void CbfProfileService::NotifyBeforeUnloadDialogRequested(
+   if (!observer_ || !web_contents) {
+     return;
+   }
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+   if (tab_id == kInvalidTabId) {
+     return;
+   }
+@@ -1143,29 +1676,68 @@ mojom::CbfBeforeUnloadReason CbfProfileService::ResolveBeforeUnloadReason(
+ void CbfProfileService::NotifySurfaceHandleUpdated(
+     content::WebContents* web_contents,
+     std::uint32_t ca_context_id) {
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+   if (tab_id == kInvalidTabId || !observer_) {
+     return;
+   }
+   observer_->OnSurfaceHandleUpdated(tab_id, ca_context_id);
+ }
+ 
+-void CbfProfileService::NotifyCursorChanged(
+-    content::WebContents* web_contents,
+-    ui::mojom::CursorType cursor_type) {
++void CbfProfileService::NotifyExtensionPopupOpened(
++    TabId tab_id,
++    uint64_t popup_id,
++    const extensions::ExtensionId& extension_id,
++    const std::string& title) {
++  if (!observer_) {
++    return;
++  }
++  observer_->OnExtensionPopupOpened(tab_id, popup_id, extension_id, title);
++}
++
++void CbfProfileService::NotifyExtensionPopupSurfaceHandleUpdated(
++    TabId tab_id,
++    uint64_t popup_id,
++    std::uint32_t ca_context_id) {
++  if (!observer_) {
++    return;
++  }
++  observer_->OnExtensionPopupSurfaceHandleUpdated(tab_id, popup_id,
++                                                  ca_context_id);
++}
++
++void CbfProfileService::NotifyExtensionPopupPreferredSizeChanged(
++    TabId tab_id,
++    uint64_t popup_id,
++    std::uint32_t width,
++    std::uint32_t height) {
++  if (!observer_) {
++    return;
++  }
++  observer_->OnExtensionPopupPreferredSizeChanged(tab_id, popup_id, width,
++                                                  height);
++}
++
++void CbfProfileService::NotifyExtensionPopupClosed(TabId tab_id,
++                                                   uint64_t popup_id) {
++  if (!observer_) {
++    return;
++  }
++  observer_->OnExtensionPopupClosed(tab_id, popup_id);
++}
++
++void CbfProfileService::NotifyCursorChanged(content::WebContents* web_contents,
++                                            ui::mojom::CursorType cursor_type) {
+   if (!web_contents || !observer_) {
+     return;
+   }
+ 
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+   if (tab_id == kInvalidTabId) {
+     return;
+   }
+ 
+-  observer_->OnCursorChanged(
+-      tab_id, mojo_converters::ToCbfCursorType(cursor_type));
++  observer_->OnCursorChanged(tab_id,
++                             mojo_converters::ToCbfCursorType(cursor_type));
+ }
+ 
+ void CbfProfileService::NotifyNavigationStateChanged(
+@@ -1175,15 +1747,15 @@ void CbfProfileService::NotifyNavigationStateChanged(
+     return;
+   }
+ 
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+   if (tab_id == kInvalidTabId) {
+     return;
+   }
+ 
+   content::NavigationController& controller = web_contents->GetController();
+-  observer_->OnNavigationStateChanged(tab_id, web_contents->GetVisibleURL().spec(), controller.CanGoBack(),
+-                                      controller.CanGoForward(), is_loading);
++  observer_->OnNavigationStateChanged(
++      tab_id, web_contents->GetVisibleURL().spec(), controller.CanGoBack(),
++      controller.CanGoForward(), is_loading);
+ }
+ 
+ void CbfProfileService::NotifyTitleUpdated(content::WebContents* web_contents) {
+@@ -1191,8 +1763,7 @@ void CbfProfileService::NotifyTitleUpdated(content::WebContents* web_contents) {
+     return;
+   }
+ 
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+   if (tab_id == kInvalidTabId) {
+     return;
+   }
+@@ -1208,8 +1779,7 @@ void CbfProfileService::NotifyFaviconUrlUpdated(
+     return;
+   }
+ 
+-  const TabId tab_id =
+-      tab_manager_.GetTabIdForWebContents(web_contents);
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+   if (tab_id == kInvalidTabId) {
+     return;
+   }
+@@ -1241,13 +1811,13 @@ void CbfProfileService::ResolveExtensionInstallPrompt(
+         close_reason_override.value_or(ToAuxiliaryWindowCloseReason(result)));
+   }
+   NotifyAuxiliaryWindowResolved(
+-      tab_id, request_id, mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt,
+-      extension_id, result, detail);
++      tab_id, request_id,
++      mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt, extension_id,
++      result, detail);
+   if (done_callback) {
+-    std::move(done_callback).Run(
+-        extensions::ExtensionInstallPromptClient::DoneCallbackPayload(
+-            ToExtensionInstallResult(result),
+-            detail));
++    std::move(done_callback)
++        .Run(extensions::ExtensionInstallPromptClient::DoneCallbackPayload(
++            ToExtensionInstallResult(result), detail));
+   }
+ }
+ 
+@@ -1257,10 +1827,12 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
+     return false;
+   }
+   auto& pending = it->second;
+-  content::WebContents* web_contents = tab_manager_.GetWebContents(pending.tab_id);
++  content::WebContents* web_contents =
++      tab_manager_.GetWebContents(pending.tab_id);
+   if (!web_contents || !pending.extension.get()) {
+     ResolveExtensionInstallPrompt(
+-        request_id, mojom::CbfExtensionInstallPromptResult::kAborted, "missing_web_contents");
++        request_id, mojom::CbfExtensionInstallPromptResult::kAborted,
++        "missing_web_contents");
+     return false;
+   }
+   if (pending.prompt) {
+@@ -1274,7 +1846,8 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
+   pending.prompt->ShowDialog(
+       base::BindOnce(
+           [](base::WeakPtr<CbfProfileService> self, uint64_t prompt_request_id,
+-             extensions::ExtensionInstallPromptClient::DoneCallbackPayload payload) {
++             extensions::ExtensionInstallPromptClient::DoneCallbackPayload
++                 payload) {
+             if (!self) {
+               return;
+             }
+@@ -1291,9 +1864,11 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
+              ExtensionInstallPrompt::DoneCallback done_callback,
+              std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt) {
+             if (!self) {
+-              std::move(done_callback).Run(
+-                  extensions::ExtensionInstallPromptClient::DoneCallbackPayload(
+-                      extensions::ExtensionInstallPromptClient::Result::ABORTED));
++              std::move(done_callback)
++                  .Run(extensions::ExtensionInstallPromptClient::
++                           DoneCallbackPayload(
++                               extensions::ExtensionInstallPromptClient::
++                                   Result::ABORTED));
+               return;
+             }
+             self->NotifyAuxiliaryWindowOpened(
+@@ -1301,9 +1876,11 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
+                 mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt,
+                 extension_name, true);
+             ExtensionInstallPrompt::GetDefaultShowDialogCallback().Run(
+-                std::move(show_params), std::move(done_callback), std::move(prompt));
++                std::move(show_params), std::move(done_callback),
++                std::move(prompt));
+           },
+-          weak_factory_.GetWeakPtr(), tab_id, auxiliary_window_id, pending.extension_name));
++          weak_factory_.GetWeakPtr(), tab_id, auxiliary_window_id,
++          pending.extension_name));
+   auxiliary_window_to_prompt_request_[auxiliary_window_id] = request_id;
+   return true;
+ }
+@@ -1314,7 +1891,8 @@ bool CbfProfileService::RespondAuxiliaryWindowImpl(
+   if (!response) {
+     return false;
+   }
+-  if (response->kind != mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt) {
++  if (response->kind !=
++      mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt) {
+     return false;
+   }
+   ResolveExtensionInstallPrompt(
+@@ -1328,9 +1906,9 @@ bool CbfProfileService::RespondAuxiliaryWindowImpl(
+ void CbfProfileService::ResolveAndClosePlatformPrompt(
+     uint64_t request_id,
+     mojom::CbfAuxiliaryWindowCloseReason reason) {
+-  ResolveExtensionInstallPrompt(request_id,
+-                                mojom::CbfExtensionInstallPromptResult::kUserCanceled,
+-                                std::string(), reason);
++  ResolveExtensionInstallPrompt(
++      request_id, mojom::CbfExtensionInstallPromptResult::kUserCanceled,
++      std::string(), reason);
+ }
+ 
+ void CbfProfileService::NotifyAuxiliaryWindowOpenRequested(
+@@ -1394,6 +1972,30 @@ void CbfProfileService::NotifyAuxiliaryWindowClosed(
+   observer_->OnAuxiliaryWindowClosed(tab_id, window_id, kind, reason);
+ }
+ 
++CbfProfileService::ActiveExtensionPopup*
++CbfProfileService::GetActiveExtensionPopup(uint64_t popup_id) {
++  auto it = active_extension_popups_.find(popup_id);
++  if (it == active_extension_popups_.end()) {
++    return nullptr;
++  }
++  return it->second.get();
++}
++
++void CbfProfileService::CloseExtensionPopupById(uint64_t popup_id) {
++  auto it = active_extension_popups_.find(popup_id);
++  if (it == active_extension_popups_.end()) {
++    return;
++  }
++  const TabId tab_id = it->second ? it->second->tab_id() : kInvalidTabId;
++  if (it->second) {
++    it->second->CloseFromService();
++  }
++  active_extension_popups_.erase(it);
++  if (tab_id != kInvalidTabId) {
++    NotifyExtensionPopupClosed(tab_id, popup_id);
++  }
++}
++
+ void CbfProfileService::NotifyPromptUiRequested(
+     uint64_t tab_id,
+     uint64_t request_id,
+@@ -1511,8 +2113,7 @@ bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
+   if (!pending.delegate) {
+     ResolvePendingDownloadPrompt(
+         std::move(pending), DownloadConfirmationResult::FAILED,
+-        ui::SelectedFileInfo(),
+-        mojom::CbfPromptUiResolutionResult::kAborted);
++        ui::SelectedFileInfo(), mojom::CbfPromptUiResolutionResult::kAborted);
+     return false;
+   }
+ 
+@@ -1530,14 +2131,15 @@ bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
+               [](base::WeakPtr<CbfProfileService> self, TabId tab_id,
+                  uint64_t request_id, uint64_t download_id,
+                  std::string download_guid,
+-                 DownloadTargetDeterminerDelegate::ConfirmationCallback callback,
++                 DownloadTargetDeterminerDelegate::ConfirmationCallback
++                     callback,
+                  DownloadConfirmationResult result,
+                  const ui::SelectedFileInfo& selected_file_info) mutable {
+                 mojom::CbfPromptUiResolutionResult resolution =
+                     mojom::CbfPromptUiResolutionResult::kAborted;
+                 if (result == DownloadConfirmationResult::CONFIRMED ||
+-                    result ==
+-                        DownloadConfirmationResult::CONTINUE_WITHOUT_CONFIRMATION) {
++                    result == DownloadConfirmationResult::
++                                  CONTINUE_WITHOUT_CONFIRMATION) {
+                   resolution = mojom::CbfPromptUiResolutionResult::kAllowed;
+                 } else if (result == DownloadConfirmationResult::CANCELED) {
+                   resolution = mojom::CbfPromptUiResolutionResult::kDenied;
+@@ -1558,12 +2160,11 @@ bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
+ 
+                 std::move(callback).Run(result, selected_file_info);
+               },
+-              weak_self, tab_id, response_request_id, download_id, download_guid,
+-              std::move(callback)))) {
++              weak_self, tab_id, response_request_id, download_id,
++              download_guid, std::move(callback)))) {
+     ResolvePendingDownloadPrompt(
+         std::move(pending), DownloadConfirmationResult::FAILED,
+-        ui::SelectedFileInfo(),
+-        mojom::CbfPromptUiResolutionResult::kAborted);
++        ui::SelectedFileInfo(), mojom::CbfPromptUiResolutionResult::kAborted);
+     return false;
+   }
+   return true;
+@@ -1588,10 +2189,11 @@ void CbfProfileService::ResolvePendingDownloadPrompt(
+     std::move(pending.callback).Run(confirmation_result, selected_file_info);
+   }
+ 
+-  NotifyPromptUiResolved(
+-      pending.tab_id, pending.request_id, mojom::CbfPromptUiKind::kDownloadPrompt,
+-      mojom::CbfPromptUiPermissionType::kUnknown, std::string(), result,
+-      pending.download_id, destination_path);
++  NotifyPromptUiResolved(pending.tab_id, pending.request_id,
++                         mojom::CbfPromptUiKind::kDownloadPrompt,
++                         mojom::CbfPromptUiPermissionType::kUnknown,
++                         std::string(), result, pending.download_id,
++                         destination_path);
+ }
+ 
+ void CbfProfileService::ResolvePendingDownloadPromptsForTab(
+@@ -1729,7 +2331,8 @@ void CbfProfileService::TryAttachPrintPreviewDialog(TabId tab_id,
+     return;
+   }
+ 
+-  auto* dialog_controller = printing::PrintPreviewDialogController::GetInstance();
++  auto* dialog_controller =
++      printing::PrintPreviewDialogController::GetInstance();
+   if (!dialog_controller) {
+     return;
+   }
+@@ -1768,9 +2371,9 @@ void CbfProfileService::RegisterPrintPreviewDialog(
+   print_preview_dialog_to_window_[preview_dialog] = window_id;
+   print_preview_window_to_web_page_[window_id] = tab_id;
+   print_preview_web_contents_collection_.StartObserving(preview_dialog);
+-  NotifyAuxiliaryWindowOpened(tab_id, window_id,
+-                              mojom::CbfAuxiliaryWindowKind::kPrintPreviewDialog,
+-                              "Print Preview", true);
++  NotifyAuxiliaryWindowOpened(
++      tab_id, window_id, mojom::CbfAuxiliaryWindowKind::kPrintPreviewDialog,
++      "Print Preview", true);
+ }
+ 
+ void CbfProfileService::ResolvePrintPreviewWindowClosed(
+@@ -1820,7 +2423,8 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
+   CloseAllTabs();
+ }
+ 
+-void CbfProfileService::WebContentsDestroyed(content::WebContents* web_contents) {
++void CbfProfileService::WebContentsDestroyed(
++    content::WebContents* web_contents) {
+   auto it = print_preview_dialog_to_window_.find(web_contents);
+   if (it == print_preview_dialog_to_window_.end()) {
+     return;
+-- 
+2.50.1 (Apple Git-155)
+

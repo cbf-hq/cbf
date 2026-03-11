@@ -39,6 +39,18 @@ pub const CBF_EVENT_PROMPT_UI_RESOLVED: u8 = 28;
 pub const CBF_EVENT_DOWNLOAD_CREATED: u8 = 29;
 pub const CBF_EVENT_DOWNLOAD_UPDATED: u8 = 30;
 pub const CBF_EVENT_DOWNLOAD_COMPLETED: u8 = 31;
+pub const CBF_EVENT_EXTENSION_POPUP_OPENED: u8 = 32;
+pub const CBF_EVENT_EXTENSION_POPUP_SURFACE_HANDLE_UPDATED: u8 = 33;
+pub const CBF_EVENT_EXTENSION_POPUP_PREFERRED_SIZE_CHANGED: u8 = 34;
+pub const CBF_EVENT_EXTENSION_POPUP_CLOSED: u8 = 35;
+pub const CBF_EVENT_EXTENSION_POPUP_IME_BOUNDS_UPDATED: u8 = 36;
+pub const CBF_EVENT_EXTENSION_POPUP_CONTEXT_MENU_REQUESTED: u8 = 37;
+pub const CBF_EVENT_EXTENSION_POPUP_CURSOR_CHANGED: u8 = 38;
+pub const CBF_EVENT_EXTENSION_POPUP_TITLE_UPDATED: u8 = 39;
+pub const CBF_EVENT_EXTENSION_POPUP_JAVASCRIPT_DIALOG_REQUESTED: u8 = 40;
+pub const CBF_EVENT_EXTENSION_POPUP_CLOSE_REQUESTED: u8 = 41;
+pub const CBF_EVENT_EXTENSION_POPUP_RENDER_PROCESS_GONE: u8 = 42;
+pub const CBF_EVENT_JAVASCRIPT_DIALOG_REQUESTED: u8 = 43;
 
 pub const CBF_EVENT_PROMPT_UI_OPEN_REQUESTED: u8 = CBF_EVENT_PROMPT_UI_REQUESTED;
 pub const CBF_EVENT_PROMPT_UI_OPENED: u8 = CBF_EVENT_AUXILIARY_WINDOW_OPENED;
@@ -210,6 +222,11 @@ pub const CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE: u8 = 1;
 pub const CBF_BEFOREUNLOAD_REASON_NAVIGATE: u8 = 2;
 pub const CBF_BEFOREUNLOAD_REASON_RELOAD: u8 = 3;
 pub const CBF_BEFOREUNLOAD_REASON_WINDOW_CLOSE: u8 = 4;
+
+pub const CBF_JAVASCRIPT_DIALOG_ALERT: u8 = 0;
+pub const CBF_JAVASCRIPT_DIALOG_CONFIRM: u8 = 1;
+pub const CBF_JAVASCRIPT_DIALOG_PROMPT: u8 = 2;
+pub const CBF_JAVASCRIPT_DIALOG_BEFOREUNLOAD: u8 = 3;
 pub const CBF_BEFOREUNLOAD_REASON_CLOSE_TAB: u8 = CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE;
 
 pub const CBF_CURSOR_DEFAULT: u8 = 0;
@@ -272,7 +289,11 @@ pub struct CbfBridgeEvent {
     pub tab_id: u64,
     pub inspected_tab_id: u64,
     pub request_id: u64,
+    pub extension_popup_id: u64,
+    pub width: u32,
+    pub height: u32,
     pub beforeunload_reason: u8,
+    pub javascript_dialog_type: u8,
     pub cursor_type: u8,
     pub profile_id: *mut c_char,
     pub surface_handle: CbfSurfaceHandle,
@@ -286,8 +307,11 @@ pub struct CbfBridgeEvent {
     pub can_go_forward: bool,
     pub is_loading: bool,
     pub dom_html: *mut c_char,
+    pub message: *mut c_char,
+    pub default_prompt_text: *mut c_char,
     pub title: *mut c_char,
     pub favicon_url: *mut c_char,
+    pub crashed: bool,
     pub drag_start_request: CbfDragStartRequest,
     pub extensions: CbfExtensionInfoList,
     pub extension_id: *mut c_char,
@@ -736,6 +760,12 @@ unsafe extern "C" {
         width: u32,
         height: u32,
     ) -> bool;
+    pub fn cbf_bridge_client_set_extension_popup_size(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
+        width: u32,
+        height: u32,
+    ) -> bool;
     pub fn cbf_bridge_client_set_web_page_focus(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
@@ -746,8 +776,19 @@ unsafe extern "C" {
         tab_id: u64,
         focused: bool,
     ) -> bool;
+    pub fn cbf_bridge_client_set_extension_popup_focus(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
+        focused: bool,
+    ) -> bool;
     pub fn cbf_bridge_client_send_key_event(
         client: *mut CbfBridgeClientHandle,
+        event: *const CbfKeyEvent,
+        commands: *const CbfCommandList,
+    ) -> bool;
+    pub fn cbf_bridge_client_send_extension_popup_key_event(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
         event: *const CbfKeyEvent,
         commands: *const CbfCommandList,
     ) -> bool;
@@ -755,8 +796,18 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         event: *const CbfMouseEvent,
     ) -> bool;
+    pub fn cbf_bridge_client_send_extension_popup_mouse_event(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
+        event: *const CbfMouseEvent,
+    ) -> bool;
     pub fn cbf_bridge_client_send_mouse_wheel_event(
         client: *mut CbfBridgeClientHandle,
+        event: *const CbfMouseWheelEvent,
+    ) -> bool;
+    pub fn cbf_bridge_client_send_extension_popup_mouse_wheel_event(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
         event: *const CbfMouseWheelEvent,
     ) -> bool;
     pub fn cbf_bridge_client_send_drag_update(
@@ -801,13 +852,28 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         composition: *const CbfImeComposition,
     ) -> bool;
+    pub fn cbf_bridge_client_set_extension_popup_composition(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
+        composition: *const CbfImeComposition,
+    ) -> bool;
     pub fn cbf_bridge_client_commit_text(
         client: *mut CbfBridgeClientHandle,
+        commit: *const CbfImeCommitText,
+    ) -> bool;
+    pub fn cbf_bridge_client_commit_extension_popup_text(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
         commit: *const CbfImeCommitText,
     ) -> bool;
     pub fn cbf_bridge_client_finish_composing_text(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
+        behavior: u8,
+    ) -> bool;
+    pub fn cbf_bridge_client_finish_extension_popup_composing_text(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
         behavior: u8,
     ) -> bool;
     pub fn cbf_bridge_client_execute_context_menu_command(
@@ -826,6 +892,20 @@ unsafe extern "C" {
         request_id: u64,
         proceed: bool,
     ) -> bool;
+    pub fn cbf_bridge_client_respond_javascript_dialog(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        request_id: u64,
+        accept: bool,
+        prompt_text: *const c_char,
+    ) -> bool;
+    pub fn cbf_bridge_client_respond_extension_popup_javascript_dialog(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
+        request_id: u64,
+        accept: bool,
+        prompt_text: *const c_char,
+    ) -> bool;
     pub fn cbf_bridge_client_navigate(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
@@ -840,6 +920,15 @@ unsafe extern "C" {
     ) -> bool;
     pub fn cbf_bridge_client_print_preview(client: *mut CbfBridgeClientHandle, tab_id: u64)
     -> bool;
+    pub fn cbf_bridge_client_activate_extension_action(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        extension_id: *const c_char,
+    ) -> bool;
+    pub fn cbf_bridge_client_close_extension_popup(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
+    ) -> bool;
     pub fn cbf_bridge_client_open_dev_tools(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
