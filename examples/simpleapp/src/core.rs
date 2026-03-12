@@ -1398,13 +1398,19 @@ impl CoreState {
                 Vec::new()
             }
             TransientBrowsingContextEvent::TitleUpdated { title } => {
-                if let Some(state) = self.transient_popups.get_mut(&transient_browsing_context_id) {
+                if let Some(state) = self
+                    .transient_popups
+                    .get_mut(&transient_browsing_context_id)
+                {
                     state.title = title.clone();
                 }
-                window_id_for_transient_browsing_context(&self.shared, transient_browsing_context_id)
-                    .map(|window_id| CoreAction::UpdateWindowTitle { window_id, title })
-                    .into_iter()
-                    .collect()
+                window_id_for_transient_browsing_context(
+                    &self.shared,
+                    transient_browsing_context_id,
+                )
+                .map(|window_id| CoreAction::UpdateWindowTitle { window_id, title })
+                .into_iter()
+                .collect()
             }
             TransientBrowsingContextEvent::CloseRequested => {
                 if let Err(err) = self
@@ -1505,7 +1511,9 @@ fn show_javascript_dialog(
 
 fn beforeunload_reason_description(reason: &BeforeUnloadReason) -> &'static str {
     match reason {
-        BeforeUnloadReason::CloseBrowsingContext => "Closing this page may discard unsaved changes.",
+        BeforeUnloadReason::CloseBrowsingContext => {
+            "Closing this page may discard unsaved changes."
+        }
         BeforeUnloadReason::Navigate => "Navigating away may discard unsaved changes.",
         BeforeUnloadReason::Reload => "Reloading may discard unsaved changes.",
         BeforeUnloadReason::WindowClose => "Closing the window may discard unsaved changes.",
@@ -1516,9 +1524,7 @@ fn beforeunload_reason_description(reason: &BeforeUnloadReason) -> &'static str 
 #[cfg(target_os = "macos")]
 fn show_prompt_dialog(message: &str, default_prompt_text: Option<&str>) -> DialogResponse {
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{
-        NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSTextField,
-    };
+    use objc2_app_kit::{NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSTextField};
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
     use objc2_foundation::NSString;
 
@@ -1540,7 +1546,10 @@ fn show_prompt_dialog(message: &str, default_prompt_text: Option<&str>) -> Dialo
     alert.addButtonWithTitle(&cancel);
 
     let input = NSTextField::textFieldWithString(&initial, mtm);
-    input.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(320.0, 24.0)));
+    input.setFrame(CGRect::new(
+        CGPoint::new(0.0, 0.0),
+        CGSize::new(320.0, 24.0),
+    ));
     alert.setAccessoryView(Some(&input));
 
     if alert.runModal() == NSAlertFirstButtonReturn {
