@@ -80,7 +80,7 @@ Chromium-side — use exactly one of:
 
 Do not use `ninja` directly, as it will break the cached build state.
 
-Common targets: `chrome`, `cbf_bridge`, `cbf_tests`, `browser_tests`, `unit_tests`.
+Common targets: `chrome`, `cbf_bridge`, `cbf_tests`, `cbf_browser_tests` `browser_tests`, `unit_tests`.
 
 Tooling helpers (from repo root):
 - `uv run tool build -t chrome -t cbf_bridge`
