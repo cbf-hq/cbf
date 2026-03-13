@@ -52,6 +52,11 @@ pub const CBF_EVENT_EXTENSION_POPUP_CLOSE_REQUESTED: u8 = 41;
 pub const CBF_EVENT_EXTENSION_POPUP_RENDER_PROCESS_GONE: u8 = 42;
 pub const CBF_EVENT_JAVASCRIPT_DIALOG_REQUESTED: u8 = 43;
 
+pub const CBF_BRIDGE_EVENT_WAIT_STATUS_EVENT_AVAILABLE: i32 = 0;
+pub const CBF_BRIDGE_EVENT_WAIT_STATUS_TIMED_OUT: i32 = 1;
+pub const CBF_BRIDGE_EVENT_WAIT_STATUS_DISCONNECTED: i32 = 2;
+pub const CBF_BRIDGE_EVENT_WAIT_STATUS_CLOSED: i32 = 3;
+
 pub const CBF_EVENT_PROMPT_UI_OPEN_REQUESTED: u8 = CBF_EVENT_PROMPT_UI_REQUESTED;
 pub const CBF_EVENT_PROMPT_UI_OPENED: u8 = CBF_EVENT_AUXILIARY_WINDOW_OPENED;
 pub const CBF_EVENT_PROMPT_UI_CLOSED: u8 = CBF_EVENT_AUXILIARY_WINDOW_CLOSED;
@@ -712,6 +717,10 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         token: *const c_char,
     ) -> bool;
+    pub fn cbf_bridge_client_wait_for_event(
+        client: *mut CbfBridgeClientHandle,
+        timeout_ms: i64,
+    ) -> i32;
     pub fn cbf_bridge_client_poll_event(
         client: *mut CbfBridgeClientHandle,
         out_event: *mut CbfBridgeEvent,

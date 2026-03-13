@@ -86,6 +86,12 @@ impl AutoDialogResponder {
     fn clear_browsing_context(&mut self, browsing_context_id: BrowsingContextId) {
         self.pending.retain(|(id, _), _| *id != browsing_context_id);
     }
+
+    fn request_next_deadline(&self, ctx: &mut DelegateContext) {
+        if let Some(deadline) = self.pending.values().copied().min() {
+            ctx.request_wake_at(deadline);
+        }
+    }
 }
 
 impl BackendDelegate for AutoDialogResponder {
@@ -119,10 +125,10 @@ impl BackendDelegate for AutoDialogResponder {
                 && *r#type == DialogType::BeforeUnload
                 && let Some(timeout) = self.timeout
             {
-                self.pending.insert(
-                    (*browsing_context_id, *request_id),
-                    Instant::now() + timeout,
-                );
+                let deadline = Instant::now() + timeout;
+                self.pending
+                    .insert((*browsing_context_id, *request_id), deadline);
+                ctx.request_wake_at(deadline);
             }
             if matches!(event.as_ref(), BrowsingContextEvent::Closed) {
                 self.clear_browsing_context(*browsing_context_id);
@@ -132,7 +138,7 @@ impl BackendDelegate for AutoDialogResponder {
         self.inner.on_event(ctx, event)
     }
 
-    fn on_idle(&mut self, ctx: &mut DelegateContext) {
+    fn on_wake(&mut self, ctx: &mut DelegateContext) {
         if self.timeout.is_some() {
             let now = Instant::now();
             let expired: Vec<(BrowsingContextId, u64)> = self
@@ -151,6 +157,85 @@ impl BackendDelegate for AutoDialogResponder {
             }
         }
 
-        self.inner.on_idle(ctx)
+        self.request_next_deadline(ctx);
+        self.inner.on_wake(ctx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::delegate::NoopDelegate;
+
+    fn beforeunload_requested(browsing_context_id: u64, request_id: u64) -> BrowserEvent {
+        BrowserEvent::BrowsingContext {
+            profile_id: "default".to_string(),
+            browsing_context_id: BrowsingContextId::new(browsing_context_id),
+            event: Box::new(BrowsingContextEvent::JavaScriptDialogRequested {
+                request_id,
+                r#type: DialogType::BeforeUnload,
+                message: "leave?".to_string(),
+                default_prompt_text: None,
+                beforeunload_reason: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn timeout_event_requests_wake_deadline() {
+        let layer = AutoDialogResponderLayer::new()
+            .timeout(Duration::from_secs(1))
+            .proceed_on_timeout(true);
+        let mut delegate = Box::new(layer).wrap(Box::new(NoopDelegate));
+        let mut ctx = DelegateContext::default();
+
+        let decision = delegate.on_event(&mut ctx, &beforeunload_requested(1, 7));
+
+        assert!(matches!(decision, EventDecision::Forward));
+        assert!(ctx.requested_wake_deadline().is_some());
+        assert!(ctx.pop_command().is_none());
+    }
+
+    #[test]
+    fn wake_before_timeout_re_registers_without_enqueuing_response() {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut delegate: Box<dyn BackendDelegate> = Box::new(AutoDialogResponder {
+            inner: Box::new(NoopDelegate),
+            timeout: Some(Duration::from_secs(1)),
+            proceed: true,
+            pending: HashMap::from([((BrowsingContextId::new(1), 7), deadline)]),
+        });
+        let mut ctx = DelegateContext::default();
+
+        delegate.on_wake(&mut ctx);
+
+        assert!(ctx.pop_command().is_none());
+        assert_eq!(ctx.requested_wake_deadline(), Some(deadline));
+    }
+
+    #[test]
+    fn wake_after_timeout_enqueues_confirm_beforeunload() {
+        let mut delegate: Box<dyn BackendDelegate> = Box::new(AutoDialogResponder {
+            inner: Box::new(NoopDelegate),
+            timeout: Some(Duration::from_secs(1)),
+            proceed: false,
+            pending: HashMap::from([(
+                (BrowsingContextId::new(3), 11),
+                Instant::now() - Duration::from_millis(1),
+            )]),
+        });
+        let mut ctx = DelegateContext::default();
+
+        delegate.on_wake(&mut ctx);
+
+        assert!(matches!(
+            ctx.pop_command(),
+            Some(BrowserCommand::ConfirmBeforeUnload {
+                browsing_context_id,
+                request_id: 11,
+                proceed: false,
+            }) if browsing_context_id == BrowsingContextId::new(3)
+        ));
+        assert!(ctx.requested_wake_deadline().is_none());
     }
 }

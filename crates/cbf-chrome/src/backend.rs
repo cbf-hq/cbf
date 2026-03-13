@@ -1,7 +1,16 @@
-use std::{thread, time::Duration};
+use std::{
+    collections::VecDeque,
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
+};
 
-use async_channel::{Receiver, Sender, TryRecvError};
+use async_channel::{Receiver, Sender};
 use cbf::{
+    backend_event_loop::{BackendEventLoop, BackendWake},
     browser::{Backend, CommandEnvelope, CommandSender, EventStream},
     command::{BrowserCommand, BrowserOperation},
     data::dialog::DialogResponse,
@@ -14,7 +23,7 @@ use crate::{
     command::ChromeCommand,
     data::prompt_ui::PromptUiResponse,
     event::{ChromeEvent, to_generic_event},
-    ffi::{Error as IpcError, IpcClient, IpcEvent},
+    ffi::{Error as IpcError, EventWaitResult, IpcClient, IpcEvent, IpcEventWaitHandle},
 };
 
 /// Backend implementation that speaks the Chromium IPC protocol.
@@ -114,6 +123,282 @@ struct NoopRawDelegate;
 
 impl ChromeRawDelegate for NoopRawDelegate {}
 
+trait BackendInputWaiter: Send + 'static {
+    fn wait_for_input(&self, timeout: Option<Duration>) -> Result<EventWaitResult, IpcError>;
+}
+
+impl BackendInputWaiter for IpcEventWaitHandle {
+    fn wait_for_input(&self, timeout: Option<Duration>) -> Result<EventWaitResult, IpcError> {
+        self.wait_for_event(timeout)
+    }
+}
+
+#[derive(Default)]
+struct WakeStateInner {
+    pending_commands: VecDeque<CommandEnvelope<ChromiumBackend>>,
+    command_channel_closed: bool,
+    backend_input_ready: bool,
+    backend_terminal: Option<EventWaitResult>,
+    wait_error: Option<IpcError>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeadlineStatus {
+    None,
+    Pending,
+    Reached,
+}
+
+fn classify_deadline(now: Instant, deadline: Option<Instant>) -> DeadlineStatus {
+    match deadline {
+        None => DeadlineStatus::None,
+        Some(deadline) if now >= deadline => DeadlineStatus::Reached,
+        Some(_) => DeadlineStatus::Pending,
+    }
+}
+
+fn classify_ready_wake(inner: &WakeStateInner) -> Option<BackendWake> {
+    if !inner.pending_commands.is_empty() {
+        return Some(BackendWake::CommandReady);
+    }
+    if inner.backend_input_ready || inner.wait_error.is_some() {
+        return Some(BackendWake::BackendInputReady);
+    }
+    if inner.command_channel_closed || inner.backend_terminal.is_some() {
+        return Some(BackendWake::Stopped);
+    }
+
+    None
+}
+
+fn classify_timeout_wake(inner: &WakeStateInner) -> BackendWake {
+    classify_ready_wake(inner).unwrap_or(BackendWake::DeadlineReached)
+}
+
+fn stop_reason_from_wake_state(inner: &WakeStateInner) -> Option<BackendStopReason> {
+    if !inner.pending_commands.is_empty() || inner.backend_input_ready || inner.wait_error.is_some()
+    {
+        return None;
+    }
+
+    if inner.command_channel_closed {
+        return Some(BackendStopReason::Disconnected);
+    }
+
+    match inner.backend_terminal {
+        Some(EventWaitResult::Disconnected | EventWaitResult::Closed) => {
+            Some(BackendStopReason::Disconnected)
+        }
+        Some(EventWaitResult::EventAvailable | EventWaitResult::TimedOut) | None => None,
+    }
+}
+
+#[derive(Default)]
+struct WakeState {
+    inner: Mutex<WakeStateInner>,
+    cv: Condvar,
+    stop_requested: AtomicBool,
+}
+
+impl WakeState {
+    fn push_command(&self, envelope: CommandEnvelope<ChromiumBackend>) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.pending_commands.push_back(envelope);
+        self.cv.notify_all();
+    }
+
+    fn mark_command_channel_closed(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.command_channel_closed = true;
+        self.cv.notify_all();
+    }
+
+    fn mark_backend_input_ready(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.backend_input_ready = true;
+        self.cv.notify_all();
+    }
+
+    fn mark_backend_terminal(&self, wait_result: EventWaitResult) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.backend_terminal = Some(wait_result);
+        self.cv.notify_all();
+    }
+
+    fn mark_wait_error(&self, err: IpcError) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.wait_error = Some(err);
+        inner.backend_input_ready = true;
+        self.cv.notify_all();
+    }
+
+    fn wait_for_backend_input_release(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        while !self.stop_requested.load(Ordering::Acquire)
+            && (inner.backend_input_ready || inner.wait_error.is_some())
+        {
+            inner = self.cv.wait(inner).unwrap();
+        }
+    }
+
+    fn take_pending_commands(&self) -> Vec<CommandEnvelope<ChromiumBackend>> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.pending_commands.drain(..).collect()
+    }
+
+    fn take_wait_error(&self) -> Option<IpcError> {
+        let mut inner = self.inner.lock().unwrap();
+        let err = inner.wait_error.take();
+        if inner.wait_error.is_none() && !inner.backend_input_ready {
+            self.cv.notify_all();
+        }
+        err
+    }
+
+    fn acknowledge_backend_input(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.backend_input_ready = false;
+        self.cv.notify_all();
+    }
+
+    fn stop_reason(&self) -> Option<BackendStopReason> {
+        let inner = self.inner.lock().unwrap();
+        stop_reason_from_wake_state(&inner)
+    }
+}
+
+struct ChromiumBackendEventLoop<W: BackendInputWaiter = IpcEventWaitHandle> {
+    wake_state: Arc<WakeState>,
+    command_rx: Receiver<CommandEnvelope<ChromiumBackend>>,
+    command_thread: Option<JoinHandle<()>>,
+    ipc_thread: Option<JoinHandle<()>>,
+    _backend_input_waiter: std::marker::PhantomData<W>,
+}
+
+impl<W: BackendInputWaiter> ChromiumBackendEventLoop<W> {
+    const IPC_WATCH_STOP_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+    fn new(
+        command_rx: Receiver<CommandEnvelope<ChromiumBackend>>,
+        backend_input_waiter: W,
+    ) -> Self {
+        let wake_state = Arc::new(WakeState::default());
+
+        let command_thread = {
+            let wake_state = Arc::clone(&wake_state);
+            let command_rx = command_rx.clone();
+            thread::spawn(move || {
+                loop {
+                    match command_rx.recv_blocking() {
+                        Ok(envelope) => wake_state.push_command(envelope),
+                        Err(_) => {
+                            wake_state.mark_command_channel_closed();
+                            break;
+                        }
+                    }
+                }
+            })
+        };
+
+        let ipc_thread = {
+            let wake_state = Arc::clone(&wake_state);
+            thread::spawn(move || {
+                while !wake_state.stop_requested.load(Ordering::Acquire) {
+                    match backend_input_waiter
+                        .wait_for_input(Some(Self::IPC_WATCH_STOP_POLL_INTERVAL))
+                    {
+                        Ok(EventWaitResult::EventAvailable) => {
+                            wake_state.mark_backend_input_ready();
+                            wake_state.wait_for_backend_input_release();
+                        }
+                        Ok(EventWaitResult::TimedOut) => {}
+                        Ok(wait_result @ EventWaitResult::Disconnected)
+                        | Ok(wait_result @ EventWaitResult::Closed) => {
+                            wake_state.mark_backend_terminal(wait_result);
+                            break;
+                        }
+                        Err(err) => {
+                            wake_state.mark_wait_error(err);
+                            wake_state.wait_for_backend_input_release();
+                        }
+                    }
+                }
+            })
+        };
+
+        Self {
+            wake_state,
+            command_rx,
+            command_thread: Some(command_thread),
+            ipc_thread: Some(ipc_thread),
+            _backend_input_waiter: std::marker::PhantomData,
+        }
+    }
+
+    fn take_pending_commands(&self) -> Vec<CommandEnvelope<ChromiumBackend>> {
+        self.wake_state.take_pending_commands()
+    }
+
+    fn take_wait_error(&self) -> Option<IpcError> {
+        self.wake_state.take_wait_error()
+    }
+
+    fn acknowledge_backend_input(&self) {
+        self.wake_state.acknowledge_backend_input();
+    }
+
+    fn stop_reason(&self) -> Option<BackendStopReason> {
+        self.wake_state.stop_reason()
+    }
+}
+
+impl<W: BackendInputWaiter> BackendEventLoop for ChromiumBackendEventLoop<W> {
+    fn wait_until(&self, deadline: Option<Instant>) -> BackendWake {
+        let mut inner = self.wake_state.inner.lock().unwrap();
+
+        loop {
+            if let Some(wake) = classify_ready_wake(&inner) {
+                return wake;
+            }
+
+            match classify_deadline(Instant::now(), deadline) {
+                DeadlineStatus::None => {
+                    inner = self.wake_state.cv.wait(inner).unwrap();
+                }
+                DeadlineStatus::Reached => return BackendWake::DeadlineReached,
+                DeadlineStatus::Pending => {
+                    let deadline = deadline.expect("pending deadline must exist");
+                    let timeout = deadline.saturating_duration_since(Instant::now());
+                    let (next_inner, timeout_result) =
+                        self.wake_state.cv.wait_timeout(inner, timeout).unwrap();
+                    inner = next_inner;
+
+                    if timeout_result.timed_out() {
+                        return classify_timeout_wake(&inner);
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<W: BackendInputWaiter> Drop for ChromiumBackendEventLoop<W> {
+    fn drop(&mut self) {
+        self.wake_state
+            .stop_requested
+            .store(true, Ordering::Release);
+        _ = self.command_rx.close();
+        self.wake_state.cv.notify_all();
+
+        if let Some(handle) = self.command_thread.take() {
+            handle.join().ok();
+        }
+        if let Some(handle) = self.ipc_thread.take() {
+            handle.join().ok();
+        }
+    }
+}
+
 impl Backend for ChromiumBackend {
     type RawCommand = ChromeCommand;
     type RawEvent = ChromeEvent;
@@ -173,18 +458,15 @@ impl ChromiumBackend {
         let Some(mut client) = Self::start_connection(client, &event_tx, &mut dispatcher) else {
             return;
         };
+        let event_loop = ChromiumBackendEventLoop::new(command_rx, client.event_wait_handle());
 
-        const POLL_INTERVAL: Duration = Duration::from_millis(16);
-
-        while Self::poll_event(
-            &command_rx,
+        while Self::run_iteration(
+            &event_loop,
             &mut client,
             &event_tx,
             &mut dispatcher,
             raw_delegate.as_mut(),
-        ) {
-            thread::sleep(POLL_INTERVAL);
-        }
+        ) {}
     }
 
     fn start_connection(
@@ -205,38 +487,37 @@ impl ChromiumBackend {
         Some(client)
     }
 
-    fn poll_event(
-        command_rx: &Receiver<CommandEnvelope<Self>>,
+    fn run_iteration(
+        event_loop: &ChromiumBackendEventLoop,
         client: &mut IpcClient,
         event_tx: &Sender<ChromeEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
         raw_delegate: &mut dyn ChromeRawDelegate,
     ) -> bool {
-        dispatcher.on_idle();
-
-        let queued_commands = dispatcher.flush();
         if let Some(stop_reason) =
-            Self::drain_delegate_queue(dispatcher, client, event_tx, queued_commands)
+            Self::drain_ready_sources(event_loop, client, event_tx, dispatcher, raw_delegate)
         {
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
         }
 
+        let wake = event_loop.wait_until(dispatcher.next_wake_deadline());
+        if matches!(
+            wake,
+            BackendWake::CommandReady | BackendWake::BackendInputReady | BackendWake::DeadlineReached
+        ) {
+            dispatcher.on_wake();
+        }
+
         if let Some(stop_reason) =
-            Self::process_next_command(command_rx, client, event_tx, dispatcher, raw_delegate)
+            Self::drain_ready_sources(event_loop, client, event_tx, dispatcher, raw_delegate)
         {
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
-        };
+        }
 
-        if let Some(stop_reason) = Self::process_event_queue(client, event_tx, dispatcher) {
-            Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
-            return false;
-        };
-
-        let queued_commands = dispatcher.flush();
-        if let Some(stop_reason) =
-            Self::drain_delegate_queue(dispatcher, client, event_tx, queued_commands)
+        if matches!(wake, BackendWake::Stopped)
+            && let Some(stop_reason) = event_loop.stop_reason()
         {
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
@@ -440,20 +721,92 @@ impl ChromiumBackend {
         )
     }
 
-    fn process_next_command(
-        command_rx: &Receiver<CommandEnvelope<Self>>,
+    fn drain_pending_command_queue(
+        event_loop: &ChromiumBackendEventLoop,
         client: &mut IpcClient,
         event_tx: &Sender<ChromeEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
         raw_delegate: &mut dyn ChromeRawDelegate,
     ) -> Option<BackendStopReason> {
-        let envelope = match command_rx.try_recv() {
-            Ok(envelope) => envelope,
-            Err(TryRecvError::Empty) => return None,
-            Err(TryRecvError::Closed) => return Some(BackendStopReason::Disconnected),
-        };
+        for envelope in event_loop.take_pending_commands() {
+            if let Some(reason) = Self::dispatch_command_envelope(
+                envelope,
+                client,
+                event_tx,
+                dispatcher,
+                raw_delegate,
+            ) {
+                return Some(reason);
+            }
+        }
 
-        Self::dispatch_command_envelope(envelope, client, event_tx, dispatcher, raw_delegate)
+        None
+    }
+
+    fn handle_wait_error(
+        event_loop: &ChromiumBackendEventLoop,
+        event_tx: &Sender<ChromeEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+    ) -> Option<BackendStopReason> {
+        if let Some(err) = event_loop.take_wait_error() {
+            let info = backend_error_event(err);
+            let terminal_hint = backend_error_terminal_hint(info.kind);
+            return Self::handle_raw_event_with_delegate_gate(
+                dispatcher,
+                event_tx,
+                ChromeEvent::BackendError {
+                    info,
+                    terminal_hint,
+                },
+            );
+        }
+
+        None
+    }
+
+    fn drain_ready_sources(
+        event_loop: &ChromiumBackendEventLoop,
+        client: &mut IpcClient,
+        event_tx: &Sender<ChromeEvent>,
+        dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
+        raw_delegate: &mut dyn ChromeRawDelegate,
+    ) -> Option<BackendStopReason> {
+        let queued_commands = dispatcher.flush();
+        if let Some(stop_reason) =
+            Self::drain_delegate_queue(dispatcher, client, event_tx, queued_commands)
+        {
+            return Some(stop_reason);
+        }
+
+        if let Some(stop_reason) = Self::drain_pending_command_queue(
+            event_loop,
+            client,
+            event_tx,
+            dispatcher,
+            raw_delegate,
+        ) {
+            return Some(stop_reason);
+        }
+
+        if let Some(stop_reason) = Self::handle_wait_error(event_loop, event_tx, dispatcher) {
+            event_loop.acknowledge_backend_input();
+            return Some(stop_reason);
+        }
+
+        if let Some(stop_reason) = Self::process_event_queue(client, event_tx, dispatcher) {
+            event_loop.acknowledge_backend_input();
+            return Some(stop_reason);
+        }
+        event_loop.acknowledge_backend_input();
+
+        let queued_commands = dispatcher.flush();
+        if let Some(stop_reason) =
+            Self::drain_delegate_queue(dispatcher, client, event_tx, queued_commands)
+        {
+            return Some(stop_reason);
+        }
+
+        event_loop.stop_reason()
     }
 
     fn execute_raw_command(
@@ -787,20 +1140,56 @@ fn dialog_response_parts(response: &DialogResponse) -> (bool, Option<String>) {
 
 #[cfg(test)]
 mod tests {
-    use std::{mem::MaybeUninit, sync::mpsc, thread, time::Duration};
+    use std::{
+        mem::MaybeUninit,
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
 
+    use async_channel::unbounded;
     use cbf::{
+        backend_event_loop::{BackendEventLoop, BackendWake},
         browser::{Backend, EventStream, RawOpaqueEventExt},
         delegate::NoopDelegate,
         event::BackendStopReason,
     };
 
-    use super::{ChromeEvent, ChromiumBackend, ChromiumBackendOptions, IpcClient};
+    use super::{
+        BackendInputWaiter, ChromeCommand, ChromeEvent, ChromiumBackend, ChromiumBackendEventLoop,
+        ChromiumBackendOptions, DeadlineStatus, EventWaitResult, IpcClient, WakeStateInner,
+        classify_deadline, classify_ready_wake, classify_timeout_wake, stop_reason_from_wake_state,
+    };
+
+    struct StubWaiter {
+        rx: std::sync::mpsc::Receiver<Result<EventWaitResult, super::IpcError>>,
+    }
+
+    impl BackendInputWaiter for StubWaiter {
+        fn wait_for_input(
+            &self,
+            timeout: Option<Duration>,
+        ) -> Result<EventWaitResult, super::IpcError> {
+            match timeout {
+                Some(timeout) => self
+                    .rx
+                    .recv_timeout(timeout)
+                    .unwrap_or(Ok(EventWaitResult::TimedOut)),
+                None => self.rx.recv().unwrap_or(Ok(EventWaitResult::Closed)),
+            }
+        }
+    }
 
     fn null_ipc_client() -> IpcClient {
         // SAFETY: `IpcClient` is a raw pointer wrapper. A null pointer is a valid
         // inert state for this test path because `poll_event`/`drop` both handle null.
         unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+
+    fn sample_pending_command() -> cbf::browser::CommandEnvelope<ChromiumBackend> {
+        cbf::browser::CommandEnvelope::RawOnly {
+            raw: ChromeCommand::ForceShutdown,
+        }
     }
 
     fn recv_raw_event_with_timeout(
@@ -811,7 +1200,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let event = events.recv_blocking().map(|opaque| opaque.as_raw().clone());
-            let _ = tx.send(event);
+            tx.send(event).ok();
         });
 
         rx.recv_timeout(timeout)
@@ -835,5 +1224,189 @@ mod tests {
                 reason: BackendStopReason::Disconnected
             }
         ));
+    }
+
+    #[test]
+    fn command_wake_beats_long_deadline() {
+        let (command_tx, command_rx) =
+            unbounded::<cbf::browser::CommandEnvelope<ChromiumBackend>>();
+        let (_wait_tx, wait_rx) = std::sync::mpsc::channel();
+        let event_loop = ChromiumBackendEventLoop::new(command_rx, StubWaiter { rx: wait_rx });
+        let (wake_tx, wake_rx) = mpsc::channel();
+        let waiter_thread = thread::spawn(move || {
+            let wake = event_loop.wait_until(Some(Instant::now() + Duration::from_secs(1)));
+            wake_tx.send(wake).unwrap();
+        });
+
+        thread::sleep(Duration::from_millis(20));
+        command_tx
+            .send_blocking(cbf::browser::CommandEnvelope::RawOnly {
+                raw: ChromeCommand::ForceShutdown,
+            })
+            .unwrap();
+
+        let wake = wake_rx.recv_timeout(Duration::from_millis(250)).unwrap();
+        assert_eq!(wake, BackendWake::CommandReady);
+        waiter_thread.join().unwrap();
+    }
+
+    #[test]
+    fn backend_input_and_terminal_wait_results_map_to_wakes() {
+        let (_command_tx, command_rx) =
+            unbounded::<cbf::browser::CommandEnvelope<ChromiumBackend>>();
+        let (wait_tx, wait_rx) = std::sync::mpsc::channel();
+        let event_loop = ChromiumBackendEventLoop::new(command_rx, StubWaiter { rx: wait_rx });
+
+        wait_tx.send(Ok(EventWaitResult::EventAvailable)).unwrap();
+        assert_eq!(
+            event_loop.wait_until(Some(Instant::now() + Duration::from_secs(1))),
+            BackendWake::BackendInputReady
+        );
+        event_loop.acknowledge_backend_input();
+
+        wait_tx.send(Ok(EventWaitResult::Disconnected)).unwrap();
+        assert_eq!(
+            event_loop.wait_until(Some(Instant::now() + Duration::from_secs(1))),
+            BackendWake::Stopped
+        );
+        assert_eq!(
+            event_loop.stop_reason(),
+            Some(BackendStopReason::Disconnected)
+        );
+    }
+
+    #[test]
+    fn ready_wake_classification_prefers_pending_command() {
+        let mut inner = WakeStateInner {
+            command_channel_closed: true,
+            backend_input_ready: true,
+            backend_terminal: Some(EventWaitResult::Disconnected),
+            wait_error: Some(super::IpcError::ConnectionFailed),
+            ..WakeStateInner::default()
+        };
+        inner.pending_commands.push_back(sample_pending_command());
+
+        assert_eq!(classify_ready_wake(&inner), Some(BackendWake::CommandReady));
+    }
+
+    #[test]
+    fn ready_wake_classification_prefers_backend_input_over_stop() {
+        let inner = WakeStateInner {
+            command_channel_closed: true,
+            backend_input_ready: true,
+            backend_terminal: Some(EventWaitResult::Closed),
+            ..WakeStateInner::default()
+        };
+
+        assert_eq!(
+            classify_ready_wake(&inner),
+            Some(BackendWake::BackendInputReady)
+        );
+    }
+
+    #[test]
+    fn ready_wake_classification_returns_stopped_only_after_work_is_drained() {
+        let stopped = WakeStateInner {
+            command_channel_closed: true,
+            ..WakeStateInner::default()
+        };
+        let idle = WakeStateInner::default();
+
+        assert_eq!(classify_ready_wake(&stopped), Some(BackendWake::Stopped));
+        assert_eq!(classify_ready_wake(&idle), None);
+    }
+
+    #[test]
+    fn deadline_classification_handles_none_due_and_future() {
+        let now = Instant::now();
+
+        assert_eq!(classify_deadline(now, None), DeadlineStatus::None);
+        assert_eq!(
+            classify_deadline(now, Some(now - Duration::from_millis(1))),
+            DeadlineStatus::Reached
+        );
+        assert_eq!(
+            classify_deadline(now, Some(now + Duration::from_secs(1))),
+            DeadlineStatus::Pending
+        );
+    }
+
+    #[test]
+    fn timeout_wake_classification_falls_back_to_deadline_when_idle() {
+        let idle = WakeStateInner::default();
+        let mut command_ready = WakeStateInner::default();
+        command_ready
+            .pending_commands
+            .push_back(sample_pending_command());
+
+        assert_eq!(classify_timeout_wake(&idle), BackendWake::DeadlineReached);
+        assert_eq!(
+            classify_timeout_wake(&command_ready),
+            BackendWake::CommandReady
+        );
+    }
+
+    #[test]
+    fn stop_reason_classification_requires_pending_work_to_be_drained() {
+        let mut pending_command = WakeStateInner {
+            command_channel_closed: true,
+            ..WakeStateInner::default()
+        };
+        pending_command
+            .pending_commands
+            .push_back(sample_pending_command());
+        let backend_input = WakeStateInner {
+            command_channel_closed: true,
+            backend_input_ready: true,
+            ..WakeStateInner::default()
+        };
+        let wait_error = WakeStateInner {
+            command_channel_closed: true,
+            wait_error: Some(super::IpcError::ConnectionFailed),
+            ..WakeStateInner::default()
+        };
+
+        assert_eq!(stop_reason_from_wake_state(&pending_command), None);
+        assert_eq!(stop_reason_from_wake_state(&backend_input), None);
+        assert_eq!(stop_reason_from_wake_state(&wait_error), None);
+    }
+
+    #[test]
+    fn stop_reason_classification_maps_only_terminal_states() {
+        let command_closed = WakeStateInner {
+            command_channel_closed: true,
+            ..WakeStateInner::default()
+        };
+        let disconnected = WakeStateInner {
+            backend_terminal: Some(EventWaitResult::Disconnected),
+            ..WakeStateInner::default()
+        };
+        let closed = WakeStateInner {
+            backend_terminal: Some(EventWaitResult::Closed),
+            ..WakeStateInner::default()
+        };
+        let event_available = WakeStateInner {
+            backend_terminal: Some(EventWaitResult::EventAvailable),
+            ..WakeStateInner::default()
+        };
+        let timed_out = WakeStateInner {
+            backend_terminal: Some(EventWaitResult::TimedOut),
+            ..WakeStateInner::default()
+        };
+
+        assert_eq!(
+            stop_reason_from_wake_state(&command_closed),
+            Some(BackendStopReason::Disconnected)
+        );
+        assert_eq!(
+            stop_reason_from_wake_state(&disconnected),
+            Some(BackendStopReason::Disconnected)
+        );
+        assert_eq!(
+            stop_reason_from_wake_state(&closed),
+            Some(BackendStopReason::Disconnected)
+        );
+        assert_eq!(stop_reason_from_wake_state(&event_available), None);
+        assert_eq!(stop_reason_from_wake_state(&timed_out), None);
     }
 }

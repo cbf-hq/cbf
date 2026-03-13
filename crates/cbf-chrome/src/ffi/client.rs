@@ -1,6 +1,7 @@
 use std::{
     ffi::{CStr, CString},
     ptr,
+    time::Duration,
 };
 
 use cbf::data::window_open::WindowOpenResponse;
@@ -35,11 +36,31 @@ pub struct IpcClient {
     inner: *mut CbfBridgeClientHandle,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct IpcEventWaitHandle {
+    inner: *mut CbfBridgeClientHandle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventWaitResult {
+    EventAvailable,
+    TimedOut,
+    Disconnected,
+    Closed,
+}
+
 // SAFETY: IpcClient owns the bridge client handle and its methods
 // serialize access through the Mojo thread internally. The handle
 // is not shared, only moved across the process::start_chromium →
 // backend thread boundary exactly once.
 unsafe impl Send for IpcClient {}
+// SAFETY: `cbf_bridge_client_wait_for_event` synchronizes through the bridge's
+// internal event wait state. This handle is non-owning and only used while the
+// owning `IpcClient` remains alive.
+unsafe impl Send for IpcEventWaitHandle {}
+// SAFETY: The bridge wait path is internally synchronized; this wrapper only
+// exposes `wait_for_event` and does not own the underlying handle.
+unsafe impl Sync for IpcEventWaitHandle {}
 
 impl std::fmt::Debug for IpcClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -125,6 +146,15 @@ impl IpcClient {
         } else {
             Err(Error::ConnectionFailed)
         }
+    }
+
+    /// Wait until an event is available or the bridge closes.
+    pub fn wait_for_event(&self, timeout: Option<Duration>) -> Result<EventWaitResult, Error> {
+        wait_for_event_inner(self.inner, timeout)
+    }
+
+    pub(crate) fn event_wait_handle(&self) -> IpcEventWaitHandle {
+        IpcEventWaitHandle { inner: self.inner }
     }
 
     /// Poll the next IPC event, if any, from the backend.
@@ -1394,6 +1424,37 @@ impl IpcClient {
         if !self.inner.is_null() {
             unsafe { cbf_bridge_client_shutdown(self.inner) };
         }
+    }
+}
+
+impl IpcEventWaitHandle {
+    pub(crate) fn wait_for_event(
+        &self,
+        timeout: Option<Duration>,
+    ) -> Result<EventWaitResult, Error> {
+        wait_for_event_inner(self.inner, timeout)
+    }
+}
+
+fn wait_for_event_inner(
+    inner: *mut CbfBridgeClientHandle,
+    timeout: Option<Duration>,
+) -> Result<EventWaitResult, Error> {
+    if inner.is_null() {
+        return Ok(EventWaitResult::Closed);
+    }
+
+    let timeout_ms = timeout
+        .map(|value| value.as_millis().min(i64::MAX as u128) as i64)
+        .unwrap_or(-1);
+    let status = unsafe { cbf_bridge_client_wait_for_event(inner, timeout_ms) };
+
+    match status {
+        CBF_BRIDGE_EVENT_WAIT_STATUS_EVENT_AVAILABLE => Ok(EventWaitResult::EventAvailable),
+        CBF_BRIDGE_EVENT_WAIT_STATUS_TIMED_OUT => Ok(EventWaitResult::TimedOut),
+        CBF_BRIDGE_EVENT_WAIT_STATUS_DISCONNECTED => Ok(EventWaitResult::Disconnected),
+        CBF_BRIDGE_EVENT_WAIT_STATUS_CLOSED => Ok(EventWaitResult::Closed),
+        _ => Err(Error::InvalidEvent),
     }
 }
 

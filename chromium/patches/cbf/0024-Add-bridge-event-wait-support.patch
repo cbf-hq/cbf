@@ -1,0 +1,924 @@
+From 23c64a414bf45323c28e8870688d79af61b7dc53 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Fri, 13 Mar 2026 10:18:40 +0900
+Subject: [PATCH 24/24] Add bridge event wait support
+
+---
+ chrome/browser/cbf/BUILD.gn                   |   6 +
+ chrome/browser/cbf/bridge/cbf_bridge.cc       |  10 ++
+ chrome/browser/cbf/bridge/cbf_bridge_auth.cc  |   9 +-
+ .../browser/cbf/bridge/cbf_bridge_client.cc   |  11 ++
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |   1 +
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |  97 +++++++----
+ .../cbf/bridge/cbf_bridge_client_impl.h       | 137 ++++-----------
+ .../cbf/bridge/cbf_bridge_event_wait_state.cc | 139 +++++++++++++++
+ .../cbf/bridge/cbf_bridge_event_wait_state.h  | 163 ++++++++++++++++++
+ .../cbf_bridge_event_wait_state_unittest.cc   | 129 ++++++++++++++
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |   2 +-
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  10 ++
+ 12 files changed, 571 insertions(+), 143 deletions(-)
+ create mode 100644 chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.cc
+ create mode 100644 chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+ create mode 100644 chrome/browser/cbf/bridge/cbf_bridge_event_wait_state_unittest.cc
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index 8efc84eaf3689..7eb1042ad2b8e 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -105,6 +105,8 @@ shared_library("cbf_bridge") {
+     "bridge/cbf_bridge.cc",
+     "bridge/cbf_bridge_client.cc",
+     "bridge/cbf_bridge_client.h",
++    "bridge/cbf_bridge_event_wait_state.cc",
++    "bridge/cbf_bridge_event_wait_state.h",
+     "bridge/cbf_bridge_client_impl.h",
+     "bridge/cbf_bridge_client_impl.cc",
+     "bridge/cbf_bridge_context_menu.cc",
+@@ -152,6 +154,10 @@ source_set("cbf_tests") {
+   testonly = true
+ 
+   sources = [
++    "bridge/cbf_bridge_event_wait_state.cc",
++    "bridge/cbf_bridge_event_wait_state.h",
++    "bridge/cbf_bridge_ffi.h",
++    "bridge/cbf_bridge_event_wait_state_unittest.cc",
+     "cbf_browser_service_unittest.cc",
+     "profile/cbf_profile_devtools_controller_unittest.cc",
+     "profile/cbf_profile_drag_controller_unittest.cc",
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.cc b/chrome/browser/cbf/bridge/cbf_bridge.cc
+index f191535261186..55796ccd14769 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge.cc
+@@ -93,3 +93,13 @@ extern "C" bool cbf_bridge_client_poll_event(CbfBridgeClientHandle* client,
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+       ->PollEvent(out_event);
+ }
++
++extern "C" enum CbfBridgeEventWaitStatus cbf_bridge_client_wait_for_event(
++    CbfBridgeClientHandle* client,
++    int64_t timeout_ms) {
++  if (!client) {
++    return kCbfBridgeEventWaitStatusClosed;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->WaitForEvent(timeout_ms);
++}
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_auth.cc b/chrome/browser/cbf/bridge/cbf_bridge_auth.cc
+index 989a8c1694eba..38d2638591bb6 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_auth.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_auth.cc
+@@ -36,10 +36,14 @@ bool CbfBridgeClient::Authenticate(const std::string& token) {
+             // Signal done on disconnect so done.Wait() never blocks forever.
+             impl->browser_remote.set_disconnect_handler(
+                 base::BindOnce([](bool* auth_ok,
+-                                  base::WaitableEvent* done) {
++                                  base::WaitableEvent* done,
++                                  CbfBridgeClientImpl* impl) {
+                   *auth_ok = false;
++                  if (impl) {
++                    impl->MarkDisconnected();
++                  }
+                   done->Signal();
+-                }, auth_ok, done));
++                }, auth_ok, done, impl));
+             impl->browser_remote->Authenticate(
+                 token,
+                 base::BindOnce(
+@@ -60,6 +64,7 @@ bool CbfBridgeClient::Authenticate(const std::string& token) {
+                             observer_remote.InitWithNewPipeAndPassReceiver());
+                         impl->browser_remote->SetObserver(
+                             std::move(observer_remote));
++                        impl->InstallDisconnectHandler();
+                       }
+                       *auth_ok = ok;
+                       done->Signal();
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.cc b/chrome/browser/cbf/bridge/cbf_bridge_client.cc
+index ccf1584779c1c..f75aeaeaf9a5c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.cc
+@@ -62,8 +62,16 @@ bool CbfBridgeClient::ConnectInherited() {
+   return true;
+ }
+ 
++CbfBridgeEventWaitStatus CbfBridgeClient::WaitForEvent(int64_t timeout_ms) {
++  if (!impl_) {
++    return kCbfBridgeEventWaitStatusClosed;
++  }
++  return impl_->WaitForEvent(timeout_ms);
++}
++
+ void CbfBridgeClient::Shutdown() {
+   if (impl_) {
++    impl_->NotifyShutdown();
+     auto task_runner = GetMojoTaskRunner();
+     if (task_runner) {
+       base::WaitableEvent done(base::WaitableEvent::ResetPolicy::MANUAL,
+@@ -88,6 +96,9 @@ void CbfBridgeClient::Shutdown() {
+       return;
+     }
+   }
++  if (impl_) {
++    impl_->NotifyShutdown();
++  }
+   impl_.reset();
+ }
+ 
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index d836ad17bd3c8..dd3ef350ebe9d 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -19,6 +19,7 @@ class CbfBridgeClient {
+ 
+   bool ConnectInherited();
+   bool Authenticate(const std::string& token);
++  CbfBridgeEventWaitStatus WaitForEvent(int64_t timeout_ms);
+   bool PollEvent(CbfBridgeEvent* out_event);
+   bool GetProfiles(CbfProfileList* out_list);
+   bool ListExtensions(const std::string& profile_id, CbfExtensionInfoList* out_list);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index 45e47ee3fc807..4a15d4278ae22 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -1,44 +1,73 @@
+ #include "chrome/browser/cbf/bridge/cbf_bridge_client_impl.h"
+ 
+-#include <utility>
++#include "base/functional/bind.h"
+ 
+ namespace cbf_bridge::internal {
+ 
+-CbfBridgeEventData::CbfBridgeEventData() = default;
+-CbfBridgeEventData::CbfBridgeEventData(CbfBridgeEventData&&) = default;
+-CbfBridgeEventData& CbfBridgeEventData::operator=(CbfBridgeEventData&&) =
+-    default;
+-CbfBridgeEventData::~CbfBridgeEventData() = default;
+-
+-CbfBridgeEventData::ImeCompositionBoundsData::ImeCompositionBoundsData() = default;
+-CbfBridgeEventData::ImeCompositionBoundsData::ImeCompositionBoundsData(
+-    const ImeCompositionBoundsData&) = default;
+-CbfBridgeEventData::ImeCompositionBoundsData&
+-CbfBridgeEventData::ImeCompositionBoundsData::operator=(
+-    const ImeCompositionBoundsData&) = default;
+-CbfBridgeEventData::ImeCompositionBoundsData::ImeCompositionBoundsData(
+-    ImeCompositionBoundsData&&) = default;
+-CbfBridgeEventData::ImeCompositionBoundsData&
+-CbfBridgeEventData::ImeCompositionBoundsData::operator=(
+-    ImeCompositionBoundsData&&) = default;
+-CbfBridgeEventData::ImeCompositionBoundsData::~ImeCompositionBoundsData() = default;
+-
+-CbfBridgeEventData::TextSelectionBoundsData::TextSelectionBoundsData() = default;
+-CbfBridgeEventData::TextSelectionBoundsData::TextSelectionBoundsData(
+-    const TextSelectionBoundsData&) = default;
+-CbfBridgeEventData::TextSelectionBoundsData&
+-CbfBridgeEventData::TextSelectionBoundsData::operator=(
+-    const TextSelectionBoundsData&) = default;
+-CbfBridgeEventData::TextSelectionBoundsData::TextSelectionBoundsData(
+-    TextSelectionBoundsData&&) = default;
+-CbfBridgeEventData::TextSelectionBoundsData&
+-CbfBridgeEventData::TextSelectionBoundsData::operator=(
+-    TextSelectionBoundsData&&) = default;
+-CbfBridgeEventData::TextSelectionBoundsData::~TextSelectionBoundsData() = default;
+-
+-CbfBridgeClientImpl::CbfBridgeClientImpl() = default;
++CbfBridgeClientImpl::EventQueueAccessor::EventQueueAccessor(
++    CbfBridgeEventWaitState* state)
++    : state_(state) {}
++
++CbfBridgeClientImpl::EventQueueAccessor::~EventQueueAccessor() = default;
++
++bool CbfBridgeClientImpl::EventQueueAccessor::empty() const {
++  return state_->events().empty();
++}
++
++CbfBridgeEventData& CbfBridgeClientImpl::EventQueueAccessor::front() {
++  return state_->events().front();
++}
++
++void CbfBridgeClientImpl::EventQueueAccessor::pop() {
++  state_->events().pop();
++}
++
++void CbfBridgeClientImpl::EventQueueAccessor::push(CbfBridgeEventData event) {
++  state_->events().push(std::move(event));
++}
++
++CbfBridgeClientImpl::EventsMutexAccessor::EventsMutexAccessor(
++    CbfBridgeEventWaitState* state)
++    : state_(state) {}
++
++CbfBridgeClientImpl::EventsMutexAccessor::~EventsMutexAccessor() = default;
++
++CbfBridgeClientImpl::EventsMutexAccessor::operator std::mutex&() const {
++  return state_->mutex();
++}
++
++CbfBridgeClientImpl::CbfBridgeClientImpl()
++    : events(&event_wait_state), events_mutex(&event_wait_state) {
++}
+ CbfBridgeClientImpl::~CbfBridgeClientImpl() = default;
+ 
++CbfBridgeEventWaitStatus CbfBridgeClientImpl::WaitForEvent(int64_t timeout_ms) {
++  return event_wait_state.WaitForEvent(timeout_ms);
++}
++
++void CbfBridgeClientImpl::MarkDisconnected() {
++  event_wait_state.MarkDisconnected();
++}
++
++void CbfBridgeClientImpl::MarkClosed() {
++  event_wait_state.MarkClosed();
++}
++
++void CbfBridgeClientImpl::NotifyShutdown() {
++  event_wait_state.NotifyShutdown();
++}
++
++void CbfBridgeClientImpl::InstallDisconnectHandler() {
++  browser_remote.set_disconnect_handler(base::BindOnce(
++      [](base::WeakPtr<CbfBridgeClientImpl> impl) {
++        if (!impl) {
++          return;
++        }
++        impl->MarkDisconnected();
++      },
++      weak_factory_.GetWeakPtr()));
++}
++
+ CbfBridgeClientImpl::BrowserObserver::BrowserObserver(CbfBridgeClientImpl* impl)
+     : impl_(impl) {}
+ 
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+index 17073619e2456..d3fbfbb5268cc 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+@@ -3,132 +3,56 @@
+ 
+ #include <map>
+ #include <memory>
+-#include <mutex>
+-#include <optional>
+-#include <queue>
+ #include <string>
+ #include <utility>
+-#include <vector>
+ 
+ #include "base/memory/raw_ptr.h"
+-#include "chrome/browser/cbf/bridge/cbf_bridge_ffi.h"
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h"
+ #include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
+ #include "mojo/public/cpp/bindings/receiver.h"
+ #include "mojo/public/cpp/bindings/remote.h"
+-#include "ui/gfx/geometry/rect.h"
+ 
+ namespace cbf_bridge::internal {
+ 
+-struct CbfBridgeEventData {
+-  CbfBridgeEventData();
+-  CbfBridgeEventData(const CbfBridgeEventData&) = delete;
+-  CbfBridgeEventData& operator=(const CbfBridgeEventData&) = delete;
+-  CbfBridgeEventData(CbfBridgeEventData&&);
+-  CbfBridgeEventData& operator=(CbfBridgeEventData&&);
+-  ~CbfBridgeEventData();
+-
+-  uint8_t kind = kEventNone;
+-  uint64_t tab_id = 0;
+-  uint64_t inspected_tab_id = 0;
+-  uint64_t request_id = 0;
+-  uint64_t extension_popup_id = 0;
+-  uint32_t width = 0;
+-  uint32_t height = 0;
+-  uint8_t beforeunload_reason = kCbfBeforeUnloadReasonUnknown;
+-  uint8_t javascript_dialog_type = kCbfJavaScriptDialogAlert;
+-  CbfSurfaceHandle surface_handle = {};
+-  std::string profile_id;
+-  std::string target_url;
+-  std::string url;
+-  std::string message;
+-  std::string default_prompt_text;
+-  bool user_gesture = false;
+-  bool can_go_back = false;
+-  bool can_go_forward = false;
+-  bool is_loading = false;
+-  std::string dom_html;
+-  std::string title;
+-  std::string favicon_url;
+-  uint8_t cursor_type = 0;
+-  std::vector<uint64_t> dirty_tab_ids;
+-  std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions;
+-  cbf::mojom::CbfContextMenuPtr context_menu;
+-  cbf::mojom::CbfDragStartRequestPtr drag_start_request;
+-  std::string extension_id;
+-  std::string extension_name;
+-  std::vector<std::string> permission_names;
+-  uint8_t extension_install_prompt_result = 0;
+-  std::string extension_install_prompt_detail;
+-  std::string extension_runtime_warning;
+-  uint64_t auxiliary_window_id = 0;
+-  uint8_t auxiliary_window_kind = kCbfAuxiliaryWindowKindUnknown;
+-  uint8_t auxiliary_window_close_reason = kCbfAuxiliaryWindowCloseReasonUnknown;
+-  std::string auxiliary_window_title;
+-  bool auxiliary_window_modal = false;
+-  uint8_t prompt_ui_kind = kCbfPromptUiKindUnknown;
+-  uint8_t prompt_ui_permission = kCbfPromptUiPermissionTypeUnknown;
+-  uint8_t prompt_ui_result = kCbfPromptUiResolutionResultUnknown;
+-  std::string prompt_ui_permission_key;
+-  uint8_t download_reason = kCbfDownloadPromptReasonUnknown;
+-  uint64_t download_id = 0;
+-  bool download_has_source_tab_id = false;
+-  uint64_t download_source_tab_id = 0;
+-  std::string download_file_name;
+-  std::string download_target_path;
+-  std::string download_suggested_path;
+-  std::string download_destination_path;
+-  uint64_t download_total_bytes = 0;
+-  bool download_has_total_bytes = false;
+-  uint64_t download_received_bytes = 0;
+-  bool download_can_resume = false;
+-  bool download_is_paused = false;
+-  uint8_t download_state = kCbfDownloadStateUnknown;
+-  uint8_t download_outcome = kCbfDownloadOutcomeUnknown;
+-  bool crashed = false;
+-  bool has_source_tab_id = false;
+-  uint64_t source_tab_id = 0;
+-  uint8_t tab_open_hint = kCbfTabOpenHintUnknown;
+-  bool has_target_tab_id = false;
+-  uint64_t target_tab_id = 0;
+-  uint8_t tab_open_result = kCbfTabOpenResultAborted;
++struct CbfBridgeClientImpl {
++  class EventQueueAccessor {
++   public:
++    explicit EventQueueAccessor(CbfBridgeEventWaitState* state);
++    ~EventQueueAccessor();
+ 
+-  struct ImeCompositionBoundsData {
+-    ImeCompositionBoundsData();
+-    ImeCompositionBoundsData(const ImeCompositionBoundsData&);
+-    ImeCompositionBoundsData& operator=(const ImeCompositionBoundsData&);
+-    ImeCompositionBoundsData(ImeCompositionBoundsData&&);
+-    ImeCompositionBoundsData& operator=(ImeCompositionBoundsData&&);
+-    ~ImeCompositionBoundsData();
++    bool empty() const;
++    CbfBridgeEventData& front();
++    void pop();
++    void push(CbfBridgeEventData event);
+ 
+-    int32_t range_start = -1;
+-    int32_t range_end = -1;
+-    std::vector<gfx::Rect> character_bounds;
++   private:
++    raw_ptr<CbfBridgeEventWaitState> state_;
+   };
+ 
+-  struct TextSelectionBoundsData {
+-    TextSelectionBoundsData();
+-    TextSelectionBoundsData(const TextSelectionBoundsData&);
+-    TextSelectionBoundsData& operator=(const TextSelectionBoundsData&);
+-    TextSelectionBoundsData(TextSelectionBoundsData&&);
+-    TextSelectionBoundsData& operator=(TextSelectionBoundsData&&);
+-    ~TextSelectionBoundsData();
++  class EventsMutexAccessor {
++   public:
++    explicit EventsMutexAccessor(CbfBridgeEventWaitState* state);
++    ~EventsMutexAccessor();
+ 
+-    int32_t range_start = -1;
+-    int32_t range_end = -1;
+-    gfx::Rect caret_rect;
+-    gfx::Rect first_selection_rect;
+-  };
++    operator std::mutex&() const;
+ 
+-  std::optional<ImeCompositionBoundsData> composition_bounds;
+-  std::optional<TextSelectionBoundsData> selection_bounds;
+-};
++   private:
++    raw_ptr<CbfBridgeEventWaitState> state_;
++  };
+ 
+-struct CbfBridgeClientImpl {
+   CbfBridgeClientImpl();
+   ~CbfBridgeClientImpl();
+ 
+-  std::queue<CbfBridgeEventData> events;
+-  std::mutex events_mutex;
++  CbfBridgeEventWaitStatus WaitForEvent(int64_t timeout_ms);
++  void MarkDisconnected();
++  void MarkClosed();
++  void NotifyShutdown();
++  void InstallDisconnectHandler();
++
++  CbfBridgeEventWaitState event_wait_state;
++  EventQueueAccessor events;
++  EventsMutexAccessor events_mutex;
+ 
+   class BrowserObserver : public cbf::mojom::CbfBrowserObserver {
+    public:
+@@ -283,6 +207,7 @@ struct CbfBridgeClientImpl {
+   std::map<uint64_t, std::string> context_menu_profiles;
+   std::map<uint64_t, std::string> tab_open_request_profiles;
+   std::map<uint64_t, std::string> download_profiles;
++  base::WeakPtrFactory<CbfBridgeClientImpl> weak_factory_{this};
+ };
+ 
+ }  // namespace cbf_bridge::internal
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.cc b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.cc
+new file mode 100644
+index 0000000000000..eca3b0578022c
+--- /dev/null
++++ b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.cc
+@@ -0,0 +1,139 @@
++#include "chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h"
++
++#include <chrono>
++
++namespace cbf_bridge::internal {
++
++CbfBridgeEventData::CbfBridgeEventData() = default;
++CbfBridgeEventData::CbfBridgeEventData(CbfBridgeEventData&&) = default;
++CbfBridgeEventData& CbfBridgeEventData::operator=(CbfBridgeEventData&&) =
++    default;
++CbfBridgeEventData::~CbfBridgeEventData() = default;
++
++CbfBridgeEventData::ImeCompositionBoundsData::ImeCompositionBoundsData() =
++    default;
++CbfBridgeEventData::ImeCompositionBoundsData::ImeCompositionBoundsData(
++    const ImeCompositionBoundsData&) = default;
++CbfBridgeEventData::ImeCompositionBoundsData&
++CbfBridgeEventData::ImeCompositionBoundsData::operator=(
++    const ImeCompositionBoundsData&) = default;
++CbfBridgeEventData::ImeCompositionBoundsData::ImeCompositionBoundsData(
++    ImeCompositionBoundsData&&) = default;
++CbfBridgeEventData::ImeCompositionBoundsData&
++CbfBridgeEventData::ImeCompositionBoundsData::operator=(
++    ImeCompositionBoundsData&&) = default;
++CbfBridgeEventData::ImeCompositionBoundsData::~ImeCompositionBoundsData() =
++    default;
++
++CbfBridgeEventData::TextSelectionBoundsData::TextSelectionBoundsData() =
++    default;
++CbfBridgeEventData::TextSelectionBoundsData::TextSelectionBoundsData(
++    const TextSelectionBoundsData&) = default;
++CbfBridgeEventData::TextSelectionBoundsData&
++CbfBridgeEventData::TextSelectionBoundsData::operator=(
++    const TextSelectionBoundsData&) = default;
++CbfBridgeEventData::TextSelectionBoundsData::TextSelectionBoundsData(
++    TextSelectionBoundsData&&) = default;
++CbfBridgeEventData::TextSelectionBoundsData&
++CbfBridgeEventData::TextSelectionBoundsData::operator=(
++    TextSelectionBoundsData&&) = default;
++CbfBridgeEventData::TextSelectionBoundsData::~TextSelectionBoundsData() =
++    default;
++
++CbfBridgeEventWaitState::EventQueue::EventQueue(CbfBridgeEventWaitState* owner)
++    : owner_(owner) {}
++
++CbfBridgeEventWaitState::EventQueue::~EventQueue() = default;
++
++bool CbfBridgeEventWaitState::EventQueue::empty() const {
++  return queue_.empty();
++}
++
++CbfBridgeEventData& CbfBridgeEventWaitState::EventQueue::front() {
++  return queue_.front();
++}
++
++void CbfBridgeEventWaitState::EventQueue::pop() {
++  queue_.pop();
++}
++
++void CbfBridgeEventWaitState::EventQueue::push(CbfBridgeEventData event) {
++  queue_.push(std::move(event));
++  owner_->events_cv_.notify_all();
++}
++
++CbfBridgeEventWaitState::CbfBridgeEventWaitState() : events_(this) {}
++CbfBridgeEventWaitState::~CbfBridgeEventWaitState() = default;
++
++CbfBridgeEventWaitStatus CbfBridgeEventWaitState::WaitForEvent(
++    int64_t timeout_ms) {
++  std::unique_lock<std::mutex> lock(mutex_);
++
++  auto has_signal = [this]() {
++    return !events_.empty() || is_closed_ || is_disconnected_;
++  };
++
++  if (timeout_ms < 0) {
++    events_cv_.wait(lock, has_signal);
++  } else if (timeout_ms == 0) {
++    if (!has_signal()) {
++      return kCbfBridgeEventWaitStatusTimedOut;
++    }
++  } else {
++    const auto timeout = std::chrono::milliseconds(timeout_ms);
++    if (!events_cv_.wait_for(lock, timeout, has_signal)) {
++      return kCbfBridgeEventWaitStatusTimedOut;
++    }
++  }
++
++  if (!events_.empty()) {
++    return kCbfBridgeEventWaitStatusEventAvailable;
++  }
++  if (is_closed_) {
++    return kCbfBridgeEventWaitStatusClosed;
++  }
++  if (is_disconnected_) {
++    return kCbfBridgeEventWaitStatusDisconnected;
++  }
++
++  return kCbfBridgeEventWaitStatusTimedOut;
++}
++
++void CbfBridgeEventWaitState::PushEvent(CbfBridgeEventData event) {
++  std::lock_guard<std::mutex> lock(mutex_);
++  events_.push(std::move(event));
++}
++
++std::optional<CbfBridgeEventData> CbfBridgeEventWaitState::PopEvent() {
++  std::lock_guard<std::mutex> lock(mutex_);
++  if (events_.empty()) {
++    return std::nullopt;
++  }
++  CbfBridgeEventData event = std::move(events_.front());
++  events_.pop();
++  return event;
++}
++
++void CbfBridgeEventWaitState::MarkDisconnected() {
++  std::lock_guard<std::mutex> lock(mutex_);
++  if (is_closed_ || is_disconnected_) {
++    return;
++  }
++  is_disconnected_ = true;
++  events_cv_.notify_all();
++}
++
++void CbfBridgeEventWaitState::MarkClosed() {
++  std::lock_guard<std::mutex> lock(mutex_);
++  if (is_closed_) {
++    return;
++  }
++  is_closed_ = true;
++  events_cv_.notify_all();
++}
++
++void CbfBridgeEventWaitState::NotifyShutdown() {
++  MarkClosed();
++}
++
++}  // namespace cbf_bridge::internal
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+new file mode 100644
+index 0000000000000..0e08993438a12
+--- /dev/null
++++ b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+@@ -0,0 +1,163 @@
++#ifndef CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_EVENT_WAIT_STATE_H_
++#define CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_EVENT_WAIT_STATE_H_
++
++#include <condition_variable>
++#include <mutex>
++#include <optional>
++#include <queue>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/cbf/bridge/cbf_bridge_ffi.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "ui/gfx/geometry/rect.h"
++
++namespace cbf_bridge::internal {
++
++struct CbfBridgeEventData {
++  CbfBridgeEventData();
++  CbfBridgeEventData(const CbfBridgeEventData&) = delete;
++  CbfBridgeEventData& operator=(const CbfBridgeEventData&) = delete;
++  CbfBridgeEventData(CbfBridgeEventData&&);
++  CbfBridgeEventData& operator=(CbfBridgeEventData&&);
++  ~CbfBridgeEventData();
++
++  uint8_t kind = kEventNone;
++  uint64_t tab_id = 0;
++  uint64_t inspected_tab_id = 0;
++  uint64_t request_id = 0;
++  uint64_t extension_popup_id = 0;
++  uint32_t width = 0;
++  uint32_t height = 0;
++  uint8_t beforeunload_reason = kCbfBeforeUnloadReasonUnknown;
++  uint8_t javascript_dialog_type = kCbfJavaScriptDialogAlert;
++  CbfSurfaceHandle surface_handle = {};
++  std::string profile_id;
++  std::string target_url;
++  std::string url;
++  std::string message;
++  std::string default_prompt_text;
++  bool user_gesture = false;
++  bool can_go_back = false;
++  bool can_go_forward = false;
++  bool is_loading = false;
++  std::string dom_html;
++  std::string title;
++  std::string favicon_url;
++  uint8_t cursor_type = 0;
++  std::vector<uint64_t> dirty_tab_ids;
++  std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions;
++  cbf::mojom::CbfContextMenuPtr context_menu;
++  cbf::mojom::CbfDragStartRequestPtr drag_start_request;
++  std::string extension_id;
++  std::string extension_name;
++  std::vector<std::string> permission_names;
++  uint8_t extension_install_prompt_result = 0;
++  std::string extension_install_prompt_detail;
++  std::string extension_runtime_warning;
++  uint64_t auxiliary_window_id = 0;
++  uint8_t auxiliary_window_kind = kCbfAuxiliaryWindowKindUnknown;
++  uint8_t auxiliary_window_close_reason = kCbfAuxiliaryWindowCloseReasonUnknown;
++  std::string auxiliary_window_title;
++  bool auxiliary_window_modal = false;
++  uint8_t prompt_ui_kind = kCbfPromptUiKindUnknown;
++  uint8_t prompt_ui_permission = kCbfPromptUiPermissionTypeUnknown;
++  uint8_t prompt_ui_result = kCbfPromptUiResolutionResultUnknown;
++  std::string prompt_ui_permission_key;
++  uint8_t download_reason = kCbfDownloadPromptReasonUnknown;
++  uint64_t download_id = 0;
++  bool download_has_source_tab_id = false;
++  uint64_t download_source_tab_id = 0;
++  std::string download_file_name;
++  std::string download_target_path;
++  std::string download_suggested_path;
++  std::string download_destination_path;
++  uint64_t download_total_bytes = 0;
++  bool download_has_total_bytes = false;
++  uint64_t download_received_bytes = 0;
++  bool download_can_resume = false;
++  bool download_is_paused = false;
++  uint8_t download_state = kCbfDownloadStateUnknown;
++  uint8_t download_outcome = kCbfDownloadOutcomeUnknown;
++  bool crashed = false;
++  bool has_source_tab_id = false;
++  uint64_t source_tab_id = 0;
++  uint8_t tab_open_hint = kCbfTabOpenHintUnknown;
++  bool has_target_tab_id = false;
++  uint64_t target_tab_id = 0;
++  uint8_t tab_open_result = kCbfTabOpenResultAborted;
++
++  struct ImeCompositionBoundsData {
++    ImeCompositionBoundsData();
++    ImeCompositionBoundsData(const ImeCompositionBoundsData&);
++    ImeCompositionBoundsData& operator=(const ImeCompositionBoundsData&);
++    ImeCompositionBoundsData(ImeCompositionBoundsData&&);
++    ImeCompositionBoundsData& operator=(ImeCompositionBoundsData&&);
++    ~ImeCompositionBoundsData();
++
++    int32_t range_start = -1;
++    int32_t range_end = -1;
++    std::vector<gfx::Rect> character_bounds;
++  };
++
++  struct TextSelectionBoundsData {
++    TextSelectionBoundsData();
++    TextSelectionBoundsData(const TextSelectionBoundsData&);
++    TextSelectionBoundsData& operator=(const TextSelectionBoundsData&);
++    TextSelectionBoundsData(TextSelectionBoundsData&&);
++    TextSelectionBoundsData& operator=(TextSelectionBoundsData&&);
++    ~TextSelectionBoundsData();
++
++    int32_t range_start = -1;
++    int32_t range_end = -1;
++    gfx::Rect caret_rect;
++    gfx::Rect first_selection_rect;
++  };
++
++  std::optional<ImeCompositionBoundsData> composition_bounds;
++  std::optional<TextSelectionBoundsData> selection_bounds;
++};
++
++class CbfBridgeEventWaitState {
++ public:
++  class EventQueue {
++   public:
++    explicit EventQueue(CbfBridgeEventWaitState* owner);
++    ~EventQueue();
++
++    bool empty() const;
++    CbfBridgeEventData& front();
++    void pop();
++    void push(CbfBridgeEventData event);
++
++   private:
++    std::queue<CbfBridgeEventData> queue_;
++    raw_ptr<CbfBridgeEventWaitState> owner_;
++  };
++
++  CbfBridgeEventWaitState();
++  ~CbfBridgeEventWaitState();
++
++  CbfBridgeEventWaitStatus WaitForEvent(int64_t timeout_ms);
++  void PushEvent(CbfBridgeEventData event);
++  std::optional<CbfBridgeEventData> PopEvent();
++  void MarkDisconnected();
++  void MarkClosed();
++  void NotifyShutdown();
++
++  EventQueue& events() { return events_; }
++  std::mutex& mutex() { return mutex_; }
++
++ private:
++  EventQueue events_;
++  std::mutex mutex_;
++  std::condition_variable events_cv_;
++  bool is_closed_ = false;
++  bool is_disconnected_ = false;
++};
++
++}  // namespace cbf_bridge::internal
++
++#endif  // CHROME_BROWSER_CBF_BRIDGE_CBF_BRIDGE_EVENT_WAIT_STATE_H_
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state_unittest.cc b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state_unittest.cc
+new file mode 100644
+index 0000000000000..7be753541d67c
+--- /dev/null
++++ b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state_unittest.cc
+@@ -0,0 +1,129 @@
++#include "chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h"
++
++#include <optional>
++#include <thread>
++
++#include "base/synchronization/waitable_event.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace cbf_bridge::internal {
++namespace {
++
++TEST(CbfBridgeEventWaitStateTest, WaitForEventTimesOutWhenQueueIsEmpty) {
++  CbfBridgeEventWaitState state;
++
++  EXPECT_EQ(kCbfBridgeEventWaitStatusTimedOut, state.WaitForEvent(5));
++}
++
++TEST(CbfBridgeEventWaitStateTest, EnqueueEventWakesWaitingThread) {
++  CbfBridgeEventWaitState state;
++  base::WaitableEvent waiter_started(
++      base::WaitableEvent::ResetPolicy::MANUAL,
++      base::WaitableEvent::InitialState::NOT_SIGNALED);
++  std::optional<CbfBridgeEventWaitStatus> status;
++
++  std::thread waiter([&]() {
++    waiter_started.Signal();
++    status = state.WaitForEvent(-1);
++  });
++
++  waiter_started.Wait();
++
++  CbfBridgeEventData event;
++  event.kind = kEventShutdownCancelled;
++  event.request_id = 17u;
++  state.PushEvent(std::move(event));
++
++  waiter.join();
++
++  ASSERT_TRUE(status.has_value());
++  EXPECT_EQ(kCbfBridgeEventWaitStatusEventAvailable, *status);
++
++  auto popped = state.PopEvent();
++  ASSERT_TRUE(popped.has_value());
++  EXPECT_EQ(kEventShutdownCancelled, popped->kind);
++  EXPECT_EQ(17u, popped->request_id);
++}
++
++TEST(CbfBridgeEventWaitStateTest, MarkClosedWakesWaitingThread) {
++  CbfBridgeEventWaitState state;
++  base::WaitableEvent waiter_started(
++      base::WaitableEvent::ResetPolicy::MANUAL,
++      base::WaitableEvent::InitialState::NOT_SIGNALED);
++  std::optional<CbfBridgeEventWaitStatus> status;
++
++  std::thread waiter([&]() {
++    waiter_started.Signal();
++    status = state.WaitForEvent(-1);
++  });
++
++  waiter_started.Wait();
++  state.MarkClosed();
++  waiter.join();
++
++  ASSERT_TRUE(status.has_value());
++  EXPECT_EQ(kCbfBridgeEventWaitStatusClosed, *status);
++  EXPECT_EQ(kCbfBridgeEventWaitStatusClosed, state.WaitForEvent(0));
++}
++
++TEST(CbfBridgeEventWaitStateTest, MarkDisconnectedWakesWaitingThread) {
++  CbfBridgeEventWaitState state;
++  base::WaitableEvent waiter_started(
++      base::WaitableEvent::ResetPolicy::MANUAL,
++      base::WaitableEvent::InitialState::NOT_SIGNALED);
++  std::optional<CbfBridgeEventWaitStatus> status;
++
++  std::thread waiter([&]() {
++    waiter_started.Signal();
++    status = state.WaitForEvent(-1);
++  });
++
++  waiter_started.Wait();
++  state.MarkDisconnected();
++  waiter.join();
++
++  ASSERT_TRUE(status.has_value());
++  EXPECT_EQ(kCbfBridgeEventWaitStatusDisconnected, *status);
++  EXPECT_EQ(kCbfBridgeEventWaitStatusDisconnected, state.WaitForEvent(0));
++}
++
++TEST(CbfBridgeEventWaitStateTest, PendingEventCanBePoppedWithoutWaiting) {
++  CbfBridgeEventWaitState state;
++  CbfBridgeEventData event;
++  event.kind = kEventShutdownProceeding;
++  event.request_id = 33u;
++
++  state.PushEvent(std::move(event));
++
++  EXPECT_EQ(kCbfBridgeEventWaitStatusEventAvailable, state.WaitForEvent(0));
++
++  auto popped = state.PopEvent();
++  ASSERT_TRUE(popped.has_value());
++  EXPECT_EQ(kEventShutdownProceeding, popped->kind);
++  EXPECT_EQ(33u, popped->request_id);
++  EXPECT_EQ(kCbfBridgeEventWaitStatusTimedOut, state.WaitForEvent(0));
++}
++
++TEST(CbfBridgeEventWaitStateTest, NotifyShutdownWakesWaitingThread) {
++  CbfBridgeEventWaitState state;
++  base::WaitableEvent waiter_started(
++      base::WaitableEvent::ResetPolicy::MANUAL,
++      base::WaitableEvent::InitialState::NOT_SIGNALED);
++  std::optional<CbfBridgeEventWaitStatus> status;
++
++  std::thread waiter([&]() {
++    waiter_started.Signal();
++    status = state.WaitForEvent(-1);
++  });
++
++  waiter_started.Wait();
++  state.NotifyShutdown();
++  waiter.join();
++
++  ASSERT_TRUE(status.has_value());
++  EXPECT_EQ(kCbfBridgeEventWaitStatusClosed, *status);
++  EXPECT_EQ(kCbfBridgeEventWaitStatusClosed, state.WaitForEvent(0));
++}
++
++}  // namespace
++}  // namespace cbf_bridge::internal
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index 38f203feb1850..c3094ae5b8899 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -250,6 +250,7 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     return false;
+   }
+   CbfBridgeEventData event = std::move(impl_->events.front());
++  impl_->events.pop();
+   out_event->kind = event.kind;
+   out_event->tab_id = event.tab_id;
+   out_event->inspected_tab_id = event.inspected_tab_id;
+@@ -565,7 +566,6 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     out_event->tab_open_target_tab_id =
+         event.target_tab_id;
+   }
+-  impl_->events.pop();
+   return true;
+ }
+ 
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index eeda906459d2e..282020608c862 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -68,6 +68,13 @@ enum CbfEventKind {
+   kEventTabDomHtmlRead = kEventWebPageDomHtmlRead,
+ };
+ 
++enum CbfBridgeEventWaitStatus {
++  kCbfBridgeEventWaitStatusEventAvailable = 0,
++  kCbfBridgeEventWaitStatusTimedOut = 1,
++  kCbfBridgeEventWaitStatusDisconnected = 2,
++  kCbfBridgeEventWaitStatusClosed = 3,
++};
++
+ enum CbfExtensionInstallPromptResult {
+   kCbfExtensionInstallPromptResultAccepted = 0,
+   kCbfExtensionInstallPromptResultAcceptedWithWithheldPermissions = 1,
+@@ -702,6 +709,9 @@ void cbf_bridge_convert_nspasteboard_to_drag_data(
+     void* nspasteboard,
+     CbfDragData* out_data);
+ void cbf_bridge_free_converted_drag_data(CbfDragData* data);
++enum CbfBridgeEventWaitStatus cbf_bridge_client_wait_for_event(
++    CbfBridgeClientHandle* client,
++    int64_t timeout_ms);
+ bool cbf_bridge_client_execute_context_menu_command(
+     CbfBridgeClientHandle* client,
+     uint64_t menu_id,
+-- 
+2.50.1 (Apple Git-155)
+

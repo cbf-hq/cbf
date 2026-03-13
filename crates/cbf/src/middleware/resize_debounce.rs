@@ -70,6 +70,12 @@ struct PendingResize {
 }
 
 impl ResizeDebounce {
+    fn request_next_deadline(&self, ctx: &mut DelegateContext) {
+        if let Some(deadline) = self.pending.values().map(|pending| pending.deadline).min() {
+            ctx.request_wake_at(deadline);
+        }
+    }
+
     fn flush_expired(&mut self, ctx: &mut DelegateContext) {
         let now = Instant::now();
         let expired: Vec<(BrowsingContextId, PendingResize)> = self
@@ -86,6 +92,8 @@ impl ResizeDebounce {
                 height: pending.height,
             });
         }
+
+        self.request_next_deadline(ctx);
     }
 }
 
@@ -101,14 +109,16 @@ impl BackendDelegate for ResizeDebounce {
                 width,
                 height,
             } => {
+                let deadline = Instant::now() + self.window;
                 self.pending.insert(
                     *browsing_context_id,
                     PendingResize {
                         width: *width,
                         height: *height,
-                        deadline: Instant::now() + self.window,
+                        deadline,
                     },
                 );
+                ctx.request_wake_at(deadline);
                 CommandDecision::Drop
             }
             _ => {
@@ -132,9 +142,9 @@ impl BackendDelegate for ResizeDebounce {
         self.inner.on_event(ctx, event)
     }
 
-    fn on_idle(&mut self, ctx: &mut DelegateContext) {
+    fn on_wake(&mut self, ctx: &mut DelegateContext) {
         self.flush_expired(ctx);
-        self.inner.on_idle(ctx);
+        self.inner.on_wake(ctx);
     }
 
     fn on_teardown(&mut self, ctx: &mut DelegateContext, reason: BackendStopReason) {
@@ -157,16 +167,17 @@ mod tests {
     }
 
     #[test]
-    fn resize_command_is_debounced_and_emitted_on_idle() {
+    fn resize_command_requests_deadline_and_emits_on_wake() {
         let layer = ResizeDebounceLayer::new().window(Duration::ZERO);
         let mut delegate = Box::new(layer).wrap(Box::new(NoopDelegate));
         let mut ctx = DelegateContext::default();
 
         let decision = delegate.on_command(&mut ctx, &resize(1, 800, 600));
         assert!(matches!(decision, CommandDecision::Drop));
+        assert!(ctx.requested_wake_deadline().is_some());
         assert!(ctx.pop_command().is_none());
 
-        delegate.on_idle(&mut ctx);
+        delegate.on_wake(&mut ctx);
         let queued = ctx.pop_command();
         assert!(matches!(
             queued,
@@ -189,8 +200,9 @@ mod tests {
         let second = delegate.on_command(&mut ctx, &resize(7, 1024, 768));
         assert!(matches!(first, CommandDecision::Drop));
         assert!(matches!(second, CommandDecision::Drop));
+        assert!(ctx.requested_wake_deadline().is_some());
 
-        delegate.on_idle(&mut ctx);
+        delegate.on_wake(&mut ctx);
         let queued = ctx.pop_command();
         assert!(matches!(
             queued,
@@ -201,6 +213,26 @@ mod tests {
             }) if browsing_context_id == BrowsingContextId::new(7)
         ));
         assert!(ctx.pop_command().is_none());
+    }
+
+    #[test]
+    fn wake_before_deadline_re_registers_without_emitting_resize() {
+        let pending = PendingResize {
+            width: 800,
+            height: 600,
+            deadline: Instant::now() + Duration::from_secs(60),
+        };
+        let mut delegate: Box<dyn BackendDelegate> = Box::new(ResizeDebounce {
+            inner: Box::new(NoopDelegate),
+            window: Duration::from_millis(16),
+            pending: HashMap::from([(BrowsingContextId::new(9), pending)]),
+        });
+        let mut ctx = DelegateContext::default();
+
+        delegate.on_wake(&mut ctx);
+
+        assert!(ctx.pop_command().is_none());
+        assert_eq!(ctx.requested_wake_deadline(), Some(pending.deadline));
     }
 
     #[test]
@@ -219,7 +251,7 @@ mod tests {
             },
         );
 
-        delegate.on_idle(&mut ctx);
+        delegate.on_wake(&mut ctx);
         assert!(ctx.pop_command().is_none());
     }
 }

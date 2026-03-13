@@ -7,6 +7,7 @@
 //! For setup, architecture, and implementation details, see the repository
 //! documentation under `docs/`.
 
+pub mod backend_event_loop;
 pub mod browser;
 pub mod command;
 pub mod data;

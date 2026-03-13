@@ -118,8 +118,8 @@ impl BackendDelegate for MiddlewareDelegate {
         self.inner.on_event(ctx, event)
     }
 
-    fn on_idle(&mut self, ctx: &mut DelegateContext) {
-        self.inner.on_idle(ctx)
+    fn on_wake(&mut self, ctx: &mut DelegateContext) {
+        self.inner.on_wake(ctx)
     }
 
     fn on_teardown(&mut self, ctx: &mut DelegateContext, reason: BackendStopReason) {

@@ -8,7 +8,8 @@ mod event;
 mod map;
 mod utils;
 
-pub use client::IpcClient;
+pub(crate) use client::IpcEventWaitHandle;
+pub use client::{EventWaitResult, IpcClient};
 pub use event::IpcEvent;
 
 /// Convert native NSEvent input to CBF input events on macOS.

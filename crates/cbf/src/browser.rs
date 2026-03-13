@@ -721,11 +721,13 @@ impl<B: Backend> BrowserHandle<B> {
         request_id: u64,
         response: crate::data::dialog::DialogResponse,
     ) -> Result<(), Error> {
-        self.send(BrowserCommand::RespondJavaScriptDialogInTransientBrowsingContext {
-            transient_browsing_context_id,
-            request_id,
-            response,
-        })
+        self.send(
+            BrowserCommand::RespondJavaScriptDialogInTransientBrowsingContext {
+                transient_browsing_context_id,
+                request_id,
+                response,
+            },
+        )
     }
 
     /// Respond to a permission request for a page.

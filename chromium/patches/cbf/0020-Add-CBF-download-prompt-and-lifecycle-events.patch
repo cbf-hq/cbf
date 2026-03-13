@@ -1,7 +1,7 @@
 From 66d8c0d353eddf23aa7a67456c68828bc791cccd Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 7 Mar 2026 10:51:45 +0900
-Subject: [PATCH 20/23] Add CBF download prompt and lifecycle events
+Subject: [PATCH 20/24] Add CBF download prompt and lifecycle events
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   2 +

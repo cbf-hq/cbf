@@ -4,6 +4,7 @@ use crate::{
 };
 
 use super::{BackendDelegate, CommandDecision, DelegateContext, EventDecision};
+use std::time::Instant;
 
 /// Drives a [`BackendDelegate`] and applies its decisions to runtime flow.
 ///
@@ -25,9 +26,15 @@ impl<D: BackendDelegate> DelegateDispatcher<D> {
         }
     }
 
-    /// Runs the delegate idle hook once.
-    pub fn on_idle(&mut self) {
-        self.delegate.on_idle(&mut self.ctx);
+    /// Runs the delegate wake hook once.
+    pub fn on_wake(&mut self) {
+        self.ctx.clear_requested_wake_deadline();
+        self.delegate.on_wake(&mut self.ctx);
+    }
+
+    /// Returns the currently requested earliest wake deadline, if any.
+    pub fn next_wake_deadline(&self) -> Option<Instant> {
+        self.ctx.requested_wake_deadline()
     }
 
     /// Dispatches one command through the delegate pipeline and returns the decision.
@@ -69,6 +76,7 @@ mod tests {
         error::{ApiErrorKind, BackendErrorInfo},
         event::{BackendStopReason, BrowserEvent},
     };
+    use std::time::{Duration, Instant};
 
     use super::{
         BackendDelegate, CommandDecision, DelegateContext, DelegateDispatcher, EventDecision,
@@ -115,6 +123,28 @@ mod tests {
         }
     }
 
+    struct WakeDeadlineDelegate {
+        wake_deadline: Instant,
+        next_wake_deadline: Instant,
+    }
+
+    impl BackendDelegate for WakeDeadlineDelegate {
+        fn on_command(
+            &mut self,
+            ctx: &mut DelegateContext,
+            command: &BrowserCommand,
+        ) -> CommandDecision {
+            if matches!(command, BrowserCommand::ForceShutdown) {
+                ctx.request_wake_at(self.wake_deadline);
+            }
+            CommandDecision::Forward
+        }
+
+        fn on_wake(&mut self, ctx: &mut DelegateContext) {
+            ctx.request_wake_at(self.next_wake_deadline);
+        }
+    }
+
     #[test]
     fn dispatch_methods_return_decisions_and_flush_returns_queued_commands() {
         let mut dispatcher = DelegateDispatcher::new(EnqueueListProfilesDelegate);
@@ -138,5 +168,37 @@ mod tests {
         assert!(matches!(reason, BackendStopReason::Disconnected));
         assert_eq!(queued.len(), 1);
         assert!(matches!(queued[0], BrowserCommand::ListProfiles));
+    }
+
+    #[test]
+    fn next_wake_deadline_reflects_requested_deadline() {
+        let now = Instant::now();
+        let wake_deadline = now + Duration::from_millis(20);
+        let next_wake_deadline = now + Duration::from_millis(40);
+        let mut dispatcher = DelegateDispatcher::new(WakeDeadlineDelegate {
+            wake_deadline,
+            next_wake_deadline,
+        });
+
+        let decision = dispatcher.dispatch_command(&BrowserCommand::ForceShutdown);
+        assert!(matches!(decision, CommandDecision::Forward));
+        assert_eq!(dispatcher.next_wake_deadline(), Some(wake_deadline));
+    }
+
+    #[test]
+    fn on_wake_clears_previous_deadline_before_delegate_re_registers() {
+        let now = Instant::now();
+        let wake_deadline = now + Duration::from_millis(20);
+        let next_wake_deadline = now + Duration::from_millis(40);
+        let mut dispatcher = DelegateDispatcher::new(WakeDeadlineDelegate {
+            wake_deadline,
+            next_wake_deadline,
+        });
+
+        _ = dispatcher.dispatch_command(&BrowserCommand::ForceShutdown);
+        assert_eq!(dispatcher.next_wake_deadline(), Some(wake_deadline));
+
+        dispatcher.on_wake();
+        assert_eq!(dispatcher.next_wake_deadline(), Some(next_wake_deadline));
     }
 }

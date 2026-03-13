@@ -217,9 +217,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             profile_id: profile_id.clone(),
             transient_browsing_context_id: popup_id.to_transient_browsing_context_id(),
             parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
-            event: Box::new(TransientBrowsingContextEvent::RenderProcessGone {
-                crashed: *crashed,
-            }),
+            event: Box::new(TransientBrowsingContextEvent::RenderProcessGone { crashed: *crashed }),
         }),
         IpcEvent::ExtensionPopupClosed {
             profile_id,
