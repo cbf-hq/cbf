@@ -4,11 +4,11 @@
 //! control browser lifecycle, navigation, and input handling.
 
 use crate::data::{
+    auxiliary_window::{AuxiliaryWindowId, AuxiliaryWindowResponse},
     browsing_context_open::BrowsingContextOpenResponse,
     dialog::DialogResponse,
     download::DownloadId,
     drag::{DragDrop, DragUpdate},
-    extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
     ids::{BrowsingContextId, TransientBrowsingContextId},
     ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
     key::KeyEvent,
@@ -233,10 +233,7 @@ pub enum BrowserCommand {
     CancelDownload { download_id: DownloadId },
 
     /// Ask backend to open Chromium's default UI for a pending auxiliary request.
-    OpenDefaultAuxiliaryWindow {
-        profile_id: String,
-        request_id: u64,
-    },
+    OpenDefaultAuxiliaryWindow { profile_id: String, request_id: u64 },
 
     /// Respond to a pending auxiliary request with host-provided decision.
     RespondAuxiliaryWindow {

@@ -8,10 +8,10 @@ use tracing::info;
 use crate::{
     command::BrowserCommand,
     data::{
+        auxiliary_window::{AuxiliaryWindowId, AuxiliaryWindowResponse},
         browsing_context_open::BrowsingContextOpenResponse,
         download::DownloadId,
         drag::{DragDrop, DragUpdate},
-        extension::{AuxiliaryWindowId, AuxiliaryWindowResponse},
         ids::{BrowsingContextId, TransientBrowsingContextId},
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         key::KeyEvent,
@@ -603,8 +603,7 @@ impl<B: Backend> BrowserHandle<B> {
         let profile_id = profile_id.into();
         info!(
             profile_id,
-            request_id,
-            "dispatch open_default_auxiliary_window"
+            request_id, "dispatch open_default_auxiliary_window"
         );
         self.send(BrowserCommand::OpenDefaultAuxiliaryWindow {
             profile_id,
@@ -654,11 +653,7 @@ impl<B: Backend> BrowserHandle<B> {
         window_id: AuxiliaryWindowId,
     ) -> Result<(), Error> {
         let profile_id = profile_id.into();
-        info!(
-            profile_id,
-            ?window_id,
-            "dispatch close_auxiliary_window"
-        );
+        info!(profile_id, ?window_id, "dispatch close_auxiliary_window");
         self.send(BrowserCommand::CloseAuxiliaryWindow {
             profile_id,
             window_id,

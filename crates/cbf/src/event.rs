@@ -6,15 +6,16 @@
 use cursor_icon::CursorIcon;
 
 use crate::data::{
+    auxiliary_window::{
+        AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
+        AuxiliaryWindowResolution,
+    },
     browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResult},
     context_menu::ContextMenu,
     dialog::{BeforeUnloadReason, DialogType},
     download::{DownloadId, DownloadOutcome, DownloadState},
     drag::DragStartRequest,
-    extension::{
-        AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
-        AuxiliaryWindowResolution, ExtensionInfo,
-    },
+    extension::ExtensionInfo,
     ids::{BrowsingContextId, TransientBrowsingContextId},
     ime::ImeBoundsUpdate,
     permission::PermissionType,
