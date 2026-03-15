@@ -24,8 +24,11 @@ REQUIRED_GN_ARGS = {
     "dcheck_always_on": "false",
     "is_component_build": "false",
     "is_official_build": "true",
+    "proprietary_codecs": "false",
+    "ffmpeg_branding": '"Chromium"',
 }
-OPTIONAL_GN_ARGS = ("target_os", "target_cpu")
+OPTIONAL_GN_ARGS = ("target_os",)
+REQUIRED_PRESENT_GN_ARGS = ("target_cpu",)
 
 
 @dataclass(frozen=True)
@@ -163,6 +166,12 @@ def validate_release_gn_args(parsed_args: dict[str, str]) -> dict[str, str]:
             raise ConfigError(
                 f"Release GN arg mismatch for {key}: expected {expected}, found {actual}"
             )
+        selected[key] = actual
+
+    for key in REQUIRED_PRESENT_GN_ARGS:
+        actual = parsed_args.get(key)
+        if actual is None:
+            raise ConfigError(f"Required GN arg is missing from out/Release/args.gn: {key}")
         selected[key] = actual
 
     for key in OPTIONAL_GN_ARGS:
