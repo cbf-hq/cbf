@@ -60,17 +60,17 @@ pub enum BrowserCommand {
     /// Create a new web page (tab).
     ///
     /// - `initial_url`: If `None`, the backend may create an empty page.
-    /// - `profile_id`: An optional profile identifier (backend-specific).
+    /// - `profile_id`: A canonical backend-issued profile identifier from `ListProfiles`.
     CreateBrowsingContext {
         request_id: u64,
         initial_url: Option<String>,
-        profile_id: Option<String>,
+        profile_id: String,
     },
 
     /// Fetch the list of available profiles from the backend.
     ListProfiles,
     /// Fetch the list of available extensions from the backend.
-    ListExtensions { profile_id: Option<String> },
+    ListExtensions { profile_id: String },
 
     /// Request to close a web page.
     RequestCloseBrowsingContext {
@@ -480,7 +480,7 @@ mod tests {
         let command = BrowserCommand::CreateBrowsingContext {
             request_id: 42,
             initial_url: None,
-            profile_id: Some("default".to_string()),
+            profile_id: "profile-default".to_string(),
         };
 
         assert_eq!(

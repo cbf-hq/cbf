@@ -15,6 +15,7 @@ use cbf::{
         extension::{AuxiliaryWindowKind, AuxiliaryWindowResponse, ExtensionInfo},
         ids::{BrowsingContextId, TransientBrowsingContextId, WindowId},
         ime::ImeBoundsUpdate,
+        profile::ProfileInfo,
         transient_browsing_context::TransientBrowsingContextKind,
         window_open::{
             WindowBounds, WindowDescriptor, WindowKind, WindowOpenResponse, WindowOpenResult,
@@ -276,6 +277,8 @@ pub(crate) struct CoreState {
     pending_transient_popup_sizes: HashMap<TransientBrowsingContextId, (u32, u32)>,
     /// Popup blur-close activates only after the popup was focused once.
     blur_close_armed_transients: HashSet<TransientBrowsingContextId>,
+    /// Canonical profile id selected from `ProfilesListed`.
+    resolved_profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -392,6 +395,7 @@ impl CoreState {
             transient_popups: HashMap::new(),
             pending_transient_popup_sizes: HashMap::new(),
             blur_close_armed_transients: HashSet::new(),
+            resolved_profile_id: None,
         }
     }
 
@@ -402,7 +406,11 @@ impl CoreState {
     pub(crate) fn handle_menu_command(&mut self, command: MenuCommand) -> Vec<CoreAction> {
         match command {
             MenuCommand::ReloadExtensions => {
-                if let Err(err) = self.browser_handle().request_list_extensions(None) {
+                let Some(profile_id) = self.resolved_profile_id.as_deref() else {
+                    warn!("ignoring extension reload before a canonical profile is resolved");
+                    return Vec::new();
+                };
+                if let Err(err) = self.browser_handle().request_list_extensions(profile_id) {
                     warn!("failed to request extension list: {err}");
                     return Vec::new();
                 }
@@ -497,6 +505,14 @@ impl CoreState {
             })
             .into_iter()
             .collect()
+    }
+
+    fn resolve_startup_profile_id(profiles: &[ProfileInfo]) -> Option<String> {
+        profiles
+            .iter()
+            .find(|profile| profile.is_default)
+            .or_else(|| profiles.first())
+            .map(|profile| profile.profile_id.clone())
     }
 
     pub(crate) fn browsing_context_id_for_target(
@@ -682,26 +698,11 @@ impl CoreState {
         match event {
             BrowserEvent::BackendReady => {
                 info!("backend ready");
-                let mut actions = vec![CoreAction::SetExtensionsMenuLoading];
-
-                if !self.page_create_requested {
-                    self.page_create_requested = true;
-                    if let Err(err) = self.browser_handle().create_browsing_context(
-                        1,
-                        Some(self.cli.url.clone()),
-                        None,
-                    ) {
-                        error!("failed to create browsing context: {err}");
-                        return vec![CoreAction::ExitEventLoop];
-                    }
+                if let Err(err) = self.browser_handle().request_list_profiles() {
+                    error!("failed to request profile list on startup: {err}");
+                    return vec![CoreAction::ExitEventLoop];
                 }
-
-                if let Err(err) = self.browser_handle().request_list_extensions(None) {
-                    warn!("failed to request extension list on startup: {err}");
-                    actions.clear();
-                }
-
-                actions
+                vec![CoreAction::SetExtensionsMenuLoading]
             }
             BrowserEvent::BackendStopped { reason } => {
                 match reason {
@@ -957,7 +958,47 @@ impl CoreState {
                 );
                 Vec::new()
             }
-            BrowserEvent::ProfilesListed { .. } => Vec::new(),
+            BrowserEvent::ProfilesListed { profiles } => {
+                let Some(profile_id) = Self::resolve_startup_profile_id(&profiles) else {
+                    error!("backend returned no profiles; exiting without issuing profile-scoped commands");
+                    return vec![CoreAction::ExitEventLoop];
+                };
+
+                if let Some(default_profile) = profiles.iter().find(|profile| profile.is_default) {
+                    info!(
+                        profile_id = default_profile.profile_id,
+                        display_name = default_profile.display_name,
+                        "resolved default startup profile"
+                    );
+                } else if let Some(first_profile) = profiles.first() {
+                    warn!(
+                        profile_id = first_profile.profile_id,
+                        display_name = first_profile.display_name,
+                        "backend did not mark a default profile; falling back to the first listed profile"
+                    );
+                }
+
+                self.resolved_profile_id = Some(profile_id.clone());
+
+                if !self.page_create_requested {
+                    self.page_create_requested = true;
+                    if let Err(err) = self.browser_handle().create_browsing_context(
+                        1,
+                        Some(self.cli.url.clone()),
+                        profile_id.clone(),
+                    ) {
+                        error!("failed to create browsing context: {err}");
+                        return vec![CoreAction::ExitEventLoop];
+                    }
+                }
+
+                if let Err(err) = self.browser_handle().request_list_extensions(profile_id) {
+                    warn!("failed to request extension list on startup: {err}");
+                    return Vec::new();
+                }
+
+                Vec::new()
+            }
             BrowserEvent::ShutdownBlocked {
                 request_id,
                 dirty_browsing_context_ids,

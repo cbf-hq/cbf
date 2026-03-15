@@ -64,6 +64,7 @@ pub struct FrameSpec {
     pub id: FrameId,
     pub kind: FrameKind,
     pub url: String,
+    pub profile_id: String,
     pub bounds: FrameBounds,
     pub ipc: IpcPolicy,
     pub transparency: TransparencyPolicy,

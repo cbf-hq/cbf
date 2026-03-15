@@ -419,6 +419,7 @@ pub struct CbfProfileInfo {
     pub profile_id: *mut c_char,
     pub profile_path: *mut c_char,
     pub display_name: *mut c_char,
+    pub is_default: bool,
 }
 
 #[repr(C)]

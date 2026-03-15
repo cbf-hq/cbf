@@ -332,7 +332,11 @@ where
         emit(BrowserCommand::CreateBrowsingContext {
             request_id,
             initial_url: Some(initial_url),
-            profile_id: None,
+            profile_id: self
+                .frames
+                .get(&frame_id)
+                .map(|state| state.spec.profile_id.clone())
+                .ok_or(CompositorError::UnknownFrame)?,
         });
         Ok(())
     }

@@ -963,10 +963,9 @@ impl ChromiumBackend {
                 let url = initial_url
                     .clone()
                     .unwrap_or_else(|| "about:blank".to_string());
-                let profile = profile_id.clone().unwrap_or_default();
 
                 client
-                    .create_tab(*request_id, &url, &profile)
+                    .create_tab(*request_id, &url, profile_id)
                     .map(|_| (None, Vec::new()))
             }
             ChromeCommand::SetTabSize {
@@ -984,7 +983,7 @@ impl ChromiumBackend {
                     (
                         None,
                         vec![ChromeEvent::Ipc(Box::new(IpcEvent::ExtensionsListed {
-                            profile_id: profile_id.clone().unwrap_or_default(),
+                            profile_id: profile_id.clone(),
                             extensions,
                         }))],
                     )

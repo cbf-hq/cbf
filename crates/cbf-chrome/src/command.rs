@@ -56,7 +56,7 @@ pub enum ChromeCommand {
     CreateTab {
         request_id: u64,
         initial_url: Option<String>,
-        profile_id: Option<String>,
+        profile_id: String,
     },
     ListProfiles,
     RequestCloseTab {
@@ -158,7 +158,7 @@ pub enum ChromeCommand {
         download_id: ChromeDownloadId,
     },
     ListExtensions {
-        profile_id: Option<String>,
+        profile_id: String,
     },
     ActivateExtensionAction {
         browsing_context_id: TabId,

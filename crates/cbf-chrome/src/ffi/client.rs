@@ -206,6 +206,7 @@ impl IpcClient {
                 profile_id: c_string_to_string(profile.profile_id),
                 profile_path: c_string_to_string(profile.profile_path),
                 display_name: c_string_to_string(profile.display_name),
+                is_default: profile.is_default,
             });
         }
 
@@ -215,19 +216,15 @@ impl IpcClient {
     }
 
     /// Retrieve the list of extensions from the backend.
-    pub fn list_extensions(
-        &mut self,
-        profile_id: &Option<String>,
-    ) -> Result<Vec<ChromeExtensionInfo>, Error> {
+    pub fn list_extensions(&mut self, profile_id: &str) -> Result<Vec<ChromeExtensionInfo>, Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
 
-        let profile = to_optional_cstring(profile_id).map_err(|_| Error::InvalidInput)?;
-        let profile_ptr = profile.as_ref().map_or(ptr::null(), |v| v.as_ptr());
+        let profile = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
 
         let mut list = CbfExtensionInfoList::default();
-        if !unsafe { cbf_bridge_client_list_extensions(self.inner, profile_ptr, &mut list) } {
+        if !unsafe { cbf_bridge_client_list_extensions(self.inner, profile.as_ptr(), &mut list) } {
             return Err(Error::ConnectionFailed);
         }
 

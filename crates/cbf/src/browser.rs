@@ -241,17 +241,17 @@ impl<B: Backend> BrowserHandle<B> {
         self.command_tx.send_raw(raw)
     }
 
-    /// Create a new web page (tab) with an optional initial URL and profile.
+    /// Create a new web page (tab) with an optional initial URL and a canonical profile id.
     pub fn create_browsing_context(
         &self,
         request_id: u64,
         initial_url: Option<String>,
-        profile_id: Option<String>,
+        profile_id: impl Into<String>,
     ) -> Result<(), Error> {
         self.send(BrowserCommand::CreateBrowsingContext {
             request_id,
             initial_url,
-            profile_id,
+            profile_id: profile_id.into(),
         })
     }
 
@@ -387,9 +387,11 @@ impl<B: Backend> BrowserHandle<B> {
         self.send(BrowserCommand::ListProfiles)
     }
 
-    /// Request the list of available extensions from the backend.
-    pub fn request_list_extensions(&self, profile_id: Option<String>) -> Result<(), Error> {
-        self.send(BrowserCommand::ListExtensions { profile_id })
+    /// Request the list of available extensions for a canonical profile id.
+    pub fn request_list_extensions(&self, profile_id: impl Into<String>) -> Result<(), Error> {
+        self.send(BrowserCommand::ListExtensions {
+            profile_id: profile_id.into(),
+        })
     }
 
     /// Send a keyboard input event to the web page.

@@ -1,0 +1,457 @@
+From 29cfe128619f9ffd9ac336dffd44c4f4cd28ff50 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Sun, 15 Mar 2026 15:04:23 +0900
+Subject: [PATCH 27/27] Canonicalize profile IDs and expose default profile
+
+---
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  1 +
+ .../browser/cbf/bridge/cbf_bridge_profiles.cc |  8 +--
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc | 18 +++---
+ chrome/browser/cbf/cbf_browser_service.cc     | 22 +++----
+ .../cbf/cbf_browser_service_unittest.cc       | 20 +++++++
+ chrome/browser/cbf/cbf_profile_service.cc     | 22 +++++--
+ .../cbf/cbf_profile_service_browsertest.cc    | 59 +++++++++++++++++--
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  1 +
+ 8 files changed, 115 insertions(+), 36 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index b81a6a30c271c..4f1ee9d77a2e3 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -341,6 +341,7 @@ typedef struct CbfProfileInfo {
+   char* profile_id;
+   char* profile_path;
+   char* display_name;
++  bool is_default;
+ } CbfProfileInfo;
+ 
+ typedef struct CbfProfileList {
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc b/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc
+index bb9396997f16c..b18994a9e4a9a 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_profiles.cc
+@@ -94,13 +94,14 @@ bool CbfBridgeClient::GetProfiles(CbfProfileList* out_list) {
+     entry.profile_id = CopyCString(profile->profile_id);
+     entry.profile_path = CopyCString(profile->profile_path);
+     entry.display_name = CopyCString(profile->display_name);
++    entry.is_default = profile->is_default;
+   }
+   return true;
+ }
+ 
+ bool CbfBridgeClient::ListExtensions(const std::string& profile_id,
+                                      CbfExtensionInfoList* out_list) {
+-  if (!impl_ || !out_list) {
++  if (!impl_ || !out_list || profile_id.empty()) {
+     return false;
+   }
+   auto task_runner = GetMojoTaskRunner();
+@@ -218,12 +219,11 @@ extern "C" void cbf_bridge_profile_list_free(CbfProfileList* list) {
+ extern "C" bool cbf_bridge_client_list_extensions(CbfBridgeClientHandle* client,
+                                                   const char* profile_id,
+                                                   CbfExtensionInfoList* out_list) {
+-  if (!client || !out_list) {
++  if (!client || !profile_id || profile_id[0] == '\0' || !out_list) {
+     return false;
+   }
+-  const std::string resolved_profile_id = profile_id ? profile_id : std::string();
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->ListExtensions(resolved_profile_id, out_list);
++      ->ListExtensions(profile_id, out_list);
+ }
+ 
+ extern "C" void cbf_bridge_extension_list_free(CbfExtensionInfoList* list) {
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index ea0d2ca361492..bc5dbd2473e4c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -12,7 +12,7 @@ namespace cbf_bridge::internal {
+ bool CbfBridgeClient::CreateTab(const uint64_t request_id,
+                                     const std::string& initial_url,
+                                     const std::string& profile_id) {
+-  if (!impl_) {
++  if (!impl_ || profile_id.empty()) {
+     return false;
+   }
+   auto task_runner = GetMojoTaskRunner();
+@@ -623,7 +623,7 @@ bool CbfBridgeClient::GetTabDomHtml(uint64_t tab_id, uint64_t request_id) {
+ bool CbfBridgeClient::OpenDefaultAuxiliaryWindow(
+     const std::string& profile_id,
+     uint64_t request_id) {
+-  if (!impl_) {
++  if (!impl_ || profile_id.empty()) {
+     return false;
+   }
+   auto task_runner = GetMojoTaskRunner();
+@@ -650,7 +650,7 @@ bool CbfBridgeClient::OpenDefaultAuxiliaryWindow(
+ bool CbfBridgeClient::RespondAuxiliaryWindow(const std::string& profile_id,
+                                              uint64_t request_id,
+                                              bool proceed) {
+-  if (!impl_) {
++  if (!impl_ || profile_id.empty()) {
+     return false;
+   }
+   auto task_runner = GetMojoTaskRunner();
+@@ -682,7 +682,7 @@ bool CbfBridgeClient::RespondPromptUi(const std::string& profile_id,
+                                       uint8_t prompt_ui_kind,
+                                       bool allow,
+                                       const std::string& destination_path) {
+-  if (!impl_) {
++  if (!impl_ || profile_id.empty()) {
+     return false;
+   }
+   auto task_runner = GetMojoTaskRunner();
+@@ -876,7 +876,7 @@ bool CbfBridgeClient::CancelDownload(uint64_t download_id) {
+ 
+ bool CbfBridgeClient::CloseAuxiliaryWindow(const std::string& profile_id,
+                                            uint64_t window_id) {
+-  if (!impl_) {
++  if (!impl_ || profile_id.empty()) {
+     return false;
+   }
+   auto task_runner = GetMojoTaskRunner();
+@@ -959,7 +959,7 @@ extern "C" bool cbf_bridge_client_create_web_page(CbfBridgeClientHandle* client,
+                                                   uint64_t request_id,
+                                                   const char* initial_url,
+                                                   const char* profile_id) {
+-  if (!client || !initial_url || !profile_id) {
++  if (!client || !initial_url || !profile_id || profile_id[0] == '\0') {
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+@@ -1203,7 +1203,7 @@ extern "C" bool cbf_bridge_client_open_default_prompt_ui(
+     CbfBridgeClientHandle* client,
+     const char* profile_id,
+     uint64_t request_id) {
+-  if (!client || !profile_id) {
++  if (!client || !profile_id || profile_id[0] == '\0') {
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+@@ -1217,7 +1217,7 @@ extern "C" bool cbf_bridge_client_respond_prompt_ui(
+     uint8_t prompt_ui_kind,
+     bool proceed,
+     const char* destination_path) {
+-  if (!client || !profile_id) {
++  if (!client || !profile_id || profile_id[0] == '\0') {
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+@@ -1274,7 +1274,7 @@ extern "C" bool cbf_bridge_client_close_prompt_ui(
+     CbfBridgeClientHandle* client,
+     const char* profile_id,
+     uint64_t prompt_ui_id) {
+-  if (!client || !profile_id) {
++  if (!client || !profile_id || profile_id[0] == '\0') {
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+diff --git a/chrome/browser/cbf/cbf_browser_service.cc b/chrome/browser/cbf/cbf_browser_service.cc
+index 2c1b1248beec1..dabd3afefd63f 100644
+--- a/chrome/browser/cbf/cbf_browser_service.cc
++++ b/chrome/browser/cbf/cbf_browser_service.cc
+@@ -49,8 +49,12 @@ void CbfBrowserService::GetProfiles(GetProfilesCallback callback) {
+   ProfileAttributesStorage& storage =
+       profile_manager->GetProfileAttributesStorage();
+   auto entries = storage.GetAllProfilesAttributes();
+-
+   profile_paths_.clear();
++  std::optional<std::string> default_profile_id;
++  if (::Profile* default_profile = ProfileManager::GetLastUsedProfile()) {
++    default_profile_id =
++        storage.StorageKeyFromProfilePath(default_profile->GetPath());
++  }
+   profiles.reserve(entries.size());
+   for (auto* entry : entries) {
+     const base::FilePath path = entry->GetPath();
+@@ -61,6 +65,8 @@ void CbfBrowserService::GetProfiles(GetProfilesCallback callback) {
+     info->profile_id = profile_id;
+     info->profile_path = path.AsUTF8Unsafe();
+     info->display_name = base::UTF16ToUTF8(entry->GetName());
++    info->is_default =
++        default_profile_id.has_value() && default_profile_id.value() == profile_id;
+     profiles.push_back(std::move(info));
+   }
+ 
+@@ -322,20 +328,8 @@ void CbfBrowserService::RebuildProfileCache() {
+   if (!profile_manager) {
+     return nullptr;
+   }
+-
+   if (profile_id.empty()) {
+-    ::Profile* profile = ProfileManager::GetLastUsedProfile();
+-    if (!profile) {
+-      return nullptr;
+-    }
+-    ProfileAttributesStorage& storage =
+-        profile_manager->GetProfileAttributesStorage();
+-    const std::string id = storage.StorageKeyFromProfilePath(profile->GetPath());
+-    profile_paths_[id] = profile->GetPath();
+-    if (resolved_id) {
+-      *resolved_id = id;
+-    }
+-    return profile;
++    return nullptr;
+   }
+ 
+   auto it = profile_paths_.find(profile_id);
+diff --git a/chrome/browser/cbf/cbf_browser_service_unittest.cc b/chrome/browser/cbf/cbf_browser_service_unittest.cc
+index 72508c0c8276e..32ab24bf5e41f 100644
+--- a/chrome/browser/cbf/cbf_browser_service_unittest.cc
++++ b/chrome/browser/cbf/cbf_browser_service_unittest.cc
+@@ -1,5 +1,7 @@
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+ 
++#include <vector>
++
+ #include "base/functional/bind.h"
+ #include "base/test/task_environment.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+@@ -51,6 +53,24 @@ TEST_F(CbfBrowserServiceTest, AcceptsMatchingToken) {
+   EXPECT_TRUE(authenticated);
+ }
+ 
++TEST_F(CbfBrowserServiceTest, UnauthenticatedGetProfilesReturnsEmptyList) {
++  CbfBrowserService service("expected-token");
++
++  bool callback_called = false;
++  std::vector<mojom::CbfProfileInfoPtr> profiles;
++  service.GetProfiles(base::BindOnce(
++      [](bool* callback_called,
++         std::vector<mojom::CbfProfileInfoPtr>* out_profiles,
++         std::vector<mojom::CbfProfileInfoPtr> in_profiles) {
++        *callback_called = true;
++        *out_profiles = std::move(in_profiles);
++      },
++      &callback_called, &profiles));
++
++  EXPECT_TRUE(callback_called);
++  EXPECT_TRUE(profiles.empty());
++}
++
+ TEST_F(CbfBrowserServiceTest,
+        ShutdownWithoutManagedTabsTransitionsToProceedingAndNotRequested) {
+   CbfBrowserService service("expected-token");
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 49773397b5360..00765fd8745c9 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -20,6 +20,7 @@
+ #include "base/values.h"
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
++#include "chrome/browser/browser_process.h"
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+ #include "chrome/browser/cbf/cbf_download_manager_delegate.h"
+ #include "chrome/browser/cbf/cbf_surface_provider_mac.h"
+@@ -47,7 +48,9 @@
+ #include "chrome/browser/extensions/extension_view_host_factory.h"
+ #include "chrome/browser/printing/print_preview_dialog_controller.h"
+ #include "chrome/browser/printing/print_view_manager_common.h"
++#include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_manager.h"
+ #include "chrome/browser/profiles/profile_key.h"
+ #include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "chrome/common/pref_names.h"
+@@ -140,6 +143,15 @@ void SetWebContentsFocus(content::WebContents* web_contents, bool focused) {
+   }
+ }
+ 
++std::string GetCanonicalProfileId(::Profile* profile) {
++  if (!profile || !g_browser_process || !g_browser_process->profile_manager()) {
++    return std::string();
++  }
++  return g_browser_process->profile_manager()
++      ->GetProfileAttributesStorage()
++      .StorageKeyFromProfilePath(profile->GetPath());
++}
++
+ gfx::Size ClampExtensionPopupBounds(gfx::Size size) {
+   size.SetToMax(kExtensionPopupMinSize);
+   size.SetToMin(kExtensionPopupMaxSize);
+@@ -1140,7 +1152,7 @@ void CbfProfileService::ListExtensions(const std::string& profile_id,
+       },
+       weak_factory_.GetWeakPtr());
+ 
+-  if (!profile_) {
++  if (!profile_ || profile_id != GetCanonicalProfileId(profile_.get())) {
+     finalize.Run(request);
+     return;
+   }
+@@ -1388,7 +1400,7 @@ bool CbfProfileService::RequestDownloadPrompt(
+ 
+ void CbfProfileService::OpenDefaultAuxiliaryWindow(const std::string& profile_id,
+                                                    uint64_t request_id) {
+-  if (!profile_id.empty() && profile_id != profile_->UniqueId()) {
++  if (profile_id != GetCanonicalProfileId(profile_.get())) {
+     return;
+   }
+   auto it = pending_extension_prompts_.find(request_id);
+@@ -1408,7 +1420,7 @@ void CbfProfileService::RespondAuxiliaryWindow(
+     const std::string& profile_id,
+     uint64_t request_id,
+     mojom::CbfAuxiliaryWindowResponsePtr response) {
+-  if (!profile_id.empty() && profile_id != profile_->UniqueId()) {
++  if (profile_id != GetCanonicalProfileId(profile_.get())) {
+     return;
+   }
+   auto it = pending_extension_prompts_.find(request_id);
+@@ -1422,7 +1434,7 @@ void CbfProfileService::RespondPromptUi(
+     const std::string& profile_id,
+     uint64_t request_id,
+     mojom::CbfPromptUiResponsePtr response) {
+-  if (!profile_id.empty() && profile_id != profile_->UniqueId()) {
++  if (profile_id != GetCanonicalProfileId(profile_.get())) {
+     return;
+   }
+   if (!response) {
+@@ -1521,7 +1533,7 @@ void CbfProfileService::CancelDownload(uint64_t download_id) {
+ 
+ void CbfProfileService::CloseAuxiliaryWindow(const std::string& profile_id,
+                                              uint64_t window_id) {
+-  if (!profile_id.empty() && profile_id != profile_->UniqueId()) {
++  if (profile_id != GetCanonicalProfileId(profile_.get())) {
+     return;
+   }
+   auto print_it = print_preview_window_to_dialog_.find(window_id);
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index b5e07b2ec12e7..9bd64f7994434 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -17,12 +17,16 @@
+ #include "base/strings/string_number_conversions.h"
+ #include "base/task/cancelable_task_tracker.h"
+ #include "base/threading/thread_restrictions.h"
++#include "chrome/browser/browser_process.h"
+ #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
++#include "chrome/browser/cbf/cbf_browser_service.h"
+ #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
+ #include "chrome/browser/history/history_service_factory.h"
+ #include "chrome/browser/extensions/chrome_test_extension_loader.h"
+ #include "chrome/browser/extensions/extension_install_prompt.h"
++#include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_manager.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+@@ -118,6 +122,12 @@ class TestPopupMenuClient final : public blink::mojom::PopupMenuClient {
+ 
+ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+  protected:
++  std::string CanonicalProfileId() const {
++    return g_browser_process->profile_manager()
++        ->GetProfileAttributesStorage()
++        .StorageKeyFromProfilePath(browser()->profile()->GetPath());
++  }
++
+   void SetUpOnMainThread() override {
+     InProcessBrowserTest::SetUpOnMainThread();
+     ASSERT_TRUE(download_temp_dir_.CreateUniqueTempDir());
+@@ -312,7 +322,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     if (destination_path.has_value()) {
+       response->destination_path = destination_path->AsUTF8Unsafe();
+     }
+-    profile_service_->RespondPromptUi(browser()->profile()->UniqueId(),
++    profile_service_->RespondPromptUi(CanonicalProfileId(),
+                                       request_id, std::move(response));
+   }
+ 
+@@ -320,7 +330,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     std::vector<mojom::CbfExtensionInfoPtr> extensions;
+     base::RunLoop run_loop;
+     profile_service_->ListExtensions(
+-        "default",
++        CanonicalProfileId(),
+         base::BindOnce(
+             [](std::vector<mojom::CbfExtensionInfoPtr>* out_extensions,
+                base::RunLoop* run_loop,
+@@ -951,7 +961,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   auto response = mojom::CbfPromptUiResponse::New();
+   response->kind = mojom::CbfPromptUiKind::kExtensionInstallPrompt;
+   response->allow = true;
+-  profile_service_->RespondPromptUi(browser()->profile()->UniqueId(),
++  profile_service_->RespondPromptUi(CanonicalProfileId(),
+                                     request.request_id,
+                                     std::move(response));
+ 
+@@ -974,7 +984,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+ 
+ IN_PROC_BROWSER_TEST_F(
+     CbfProfileServiceBrowserTest,
+-    RespondPromptUiAcceptsExtensionInstallPromptForDefaultProfileAlias) {
++    RespondPromptUiRejectsExtensionInstallPromptForEmptyProfileId) {
+   const TabId tab_id = CreatePage();
+   ASSERT_NE(tab_id, kInvalidTabId);
+   WaitForLoad(tab_id);
+@@ -1016,6 +1026,16 @@ IN_PROC_BROWSER_TEST_F(
+   profile_service_->RespondPromptUi(std::string(), request.request_id,
+                                     std::move(response));
+ 
++  base::RunLoop().RunUntilIdle();
++  EXPECT_EQ(prompt_result, ExtensionInstallPrompt::Result::ABORTED);
++
++  auto accepted_response = mojom::CbfPromptUiResponse::New();
++  accepted_response->kind = mojom::CbfPromptUiKind::kExtensionInstallPrompt;
++  accepted_response->allow = true;
++  profile_service_->RespondPromptUi(CanonicalProfileId(),
++                                    request.request_id,
++                                    std::move(accepted_response));
++
+   prompt_done.Run();
+   EXPECT_EQ(prompt_result, ExtensionInstallPrompt::Result::ACCEPTED);
+   EXPECT_TRUE(prompt_detail.empty());
+@@ -1033,6 +1053,37 @@ IN_PROC_BROWSER_TEST_F(
+   EXPECT_TRUE(resolution.detail.empty());
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       BrowserServiceListsCanonicalProfilesWithDefaultFlag) {
++  CbfBrowserService browser_service{std::string()};
++
++  std::vector<mojom::CbfProfileInfoPtr> profiles;
++  base::RunLoop run_loop;
++  browser_service.GetProfiles(base::BindOnce(
++      [](std::vector<mojom::CbfProfileInfoPtr>* out_profiles,
++         base::RunLoop* run_loop,
++         std::vector<mojom::CbfProfileInfoPtr> in_profiles) {
++        *out_profiles = std::move(in_profiles);
++        run_loop->Quit();
++      },
++      &profiles, &run_loop));
++  run_loop.Run();
++
++  ASSERT_FALSE(profiles.empty());
++
++  size_t default_count = 0;
++  for (const auto& profile : profiles) {
++    ASSERT_TRUE(profile);
++    EXPECT_FALSE(profile->profile_id.empty());
++    if (profile->is_default) {
++      default_count++;
++      EXPECT_EQ(profile->profile_id, CanonicalProfileId());
++    }
++  }
++
++  EXPECT_EQ(default_count, 1u);
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        DownloadPromptAllowStoresFileAtDestinationPath) {
+   EnsureDownloadServerStarted();
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 98ced3caa6713..565e67f985dba 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -7,6 +7,7 @@ struct CbfProfileInfo {
+   string profile_id;
+   string profile_path;
+   string display_name;
++  bool is_default;
+ };
+ 
+ struct CbfExtensionInfo {
+-- 
+2.50.1 (Apple Git-155)
+
