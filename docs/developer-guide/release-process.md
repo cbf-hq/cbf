@@ -42,7 +42,44 @@ is_component_build = false
 is_official_build = true
 ```
 
-`target_os` and `target_cpu` are recorded in `SOURCE_INFO.txt` when present.
+For the MVP OSS browser distribution, the release helper also expects the
+architecture and codec policy to be pinned explicitly:
+
+```gn
+# Pin the release architecture explicitly for deterministic packaging.
+target_cpu = "arm64"  # or "x64"
+
+# Keep the MVP distribution within the Chromium codec/license surface.
+proprietary_codecs = false
+ffmpeg_branding = "Chromium"
+```
+
+Recommended complete `out/Release/args.gn` example for the MVP stage:
+
+```gn
+is_debug = false
+dcheck_always_on = false
+is_component_build = false
+is_official_build = true
+
+target_cpu = "arm64"  # or "x64"
+
+proprietary_codecs = false
+ffmpeg_branding = "Chromium"
+```
+
+Notes:
+
+- `dcheck_always_on = false` is required for release stability; do not reuse the
+  development-only `out/Default` setting here.
+- `proprietary_codecs = false` keeps the MVP bundle out of the additional
+  proprietary codec licensing path.
+- `ffmpeg_branding = "Chromium"` makes that policy explicit even though it is
+  already the default for non-Chrome-branded builds.
+
+`target_os` is recorded in `SOURCE_INFO.txt` when present. `target_cpu`,
+`proprietary_codecs`, and `ffmpeg_branding` are always captured by the release
+helper.
 
 ## 3. Required tools
 
@@ -134,6 +171,27 @@ After `task release` completes:
 2. Inspect `SOURCE_INFO.txt` and confirm the recorded revisions and GN args.
 3. Upload `dist/release/cbf-chrome-macos-<git-tag>.tar.gz` to the matching
    runtime bundle GitHub Release.
+
+## 7. Release legal checklist
+
+Before publishing a binary release, confirm at least the following:
+
+- `out/Release/args.gn` pins `proprietary_codecs = false`.
+- `out/Release/args.gn` pins `ffmpeg_branding = "Chromium"`.
+- `task release:licenses` was run from the exact source revision used for the
+  release archive.
+- `THIRD_PARTY_LICENSES.txt` is included in the final archive and was generated
+  from the exact Chromium revision being distributed.
+- `CBF_LICENSE.txt` is included in the final archive and matches the repository
+  `LICENSE`.
+- `SOURCE_INFO.txt` records the exact CBF commit, Chromium commit, patch queue
+  state, and selected GN args used for the release.
+- The release notes or download page state that CBF includes Chromium and other
+  third-party components under their own licenses.
+- FFmpeg remains within the Chromium/LGPL distribution path for the shipped
+  build; do not enable GPL or nonfree FFmpeg options for the MVP release.
+- If the release changes media/codec policy, packaging terms, or bundled
+  third-party binaries, request legal review before publication.
 
 No GitHub Actions workflow, Jenkins job, or scheduled release automation is part
 of this MVP process.
