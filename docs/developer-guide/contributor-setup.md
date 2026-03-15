@@ -61,6 +61,10 @@ autoninja -C out/Default cbf_bridge
 
 This builds the main Chromium target and the CBF bridge library, which is required for `cbf-chrome-sys` to link successfully.
 
+Release packaging uses a separate `chromium/src/out/Release` directory and a
+different `args.gn` policy. See [Release Process](./release-process.md) for the
+release-specific flow.
+
 > [!WARNING]
 > Chromium builds can take several hours or longer, and CPU usage may stay high during the entire build, which can keep sustained load on your machine.
 > Because builds are long-running, you can mitigate sleep-related build interruption by using tools such as `caffeinate` of macOS.
@@ -97,4 +101,5 @@ cargo test -p cbf-chrome-sys
 - Integration invariants: [Chromium Integration Rules](./chromium-integration-rules.md)
 - Implementation details: [Chromium Implementation Guide](./chromium-implementation-guide.md)
 - Fork operations and patch queue: [Chromium Fork Workflow](./chromium-fork-workflow.md)
+- Local release packaging: [Release Process](./release-process.md)
 - Decision history: [Decisions](./decisions.md)

@@ -25,6 +25,10 @@ Available commands:
 - `uv run tool clean`
 - `uv run tool commit`
 - `uv run tool git`
+- `uv run tool release check`
+- `uv run tool release licenses`
+- `uv run tool release source-info`
+- `uv run tool release package`
 - `uv run tool verify`
 - `uv run tool build`
 - `uv run tool run`
@@ -38,6 +42,20 @@ the selected base commit before applying patches.
 ```bash
 uv run tool build -t chrome --out-dir out/Release
 ```
+
+## Release Packaging
+
+The release helper commands support the local MVP release pipeline:
+
+```bash
+uv run tool release check
+uv run tool release licenses
+uv run tool release source-info
+uv run tool release package
+```
+
+These commands are normally orchestrated from the repository root via
+`Taskfile.yml`.
 
 ## Common Options
 

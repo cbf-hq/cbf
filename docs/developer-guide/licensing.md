@@ -45,23 +45,43 @@ For example apps (Tauri/GPUI etc.):
 
 - Track app-specific dependency licenses separately from core CBF notices.
 
-## 5. Required Files in Repository
+## 5. Release Bundle Files
 
-Recommended minimum:
+For the current MVP pre-built macOS distribution, include:
 
-- `LICENSE` (BSD 3-Clause for CBF-authored code)
-- `NOTICE` (short distribution notice)
-- `THIRD_PARTY_NOTICES/` (generated or curated notices)
-- `docs/licensing.md` (this policy)
+- `Chromium.app`
+- `libcbf_bridge.dylib`
+- `CBF_LICENSE.txt`
+- `THIRD_PARTY_LICENSES.txt`
+- `SOURCE_INFO.txt`
 
-## 6. CI and Release Policy
+Optional supplemental artifact:
+
+- `CHROMIUM_THIRD_PARTY_NOTICES.html`
+
+`CBF_LICENSE.txt` is copied from the repository `LICENSE`.
+
+`THIRD_PARTY_LICENSES.txt` should be generated from Chromium with:
+
+```bash
+python tools/licenses.py license_file --format txt
+```
+
+`CHROMIUM_THIRD_PARTY_NOTICES.html` is human-readable supplemental attribution.
+It does not replace the required bundled license text.
+
+## 6. Release Process Policy
+
+The current release flow is local and manually invoked.
 
 Recommended process:
 
-1. Maintain an automated or semi-automated notice generation flow.
-2. Regenerate/update `THIRD_PARTY_NOTICES` when Chromium revision changes.
-3. Gate release on license artifact checks.
-4. Verify release package actually includes required notice files.
+1. Regenerate `THIRD_PARTY_LICENSES.txt` from the exact Chromium revision used for the build.
+2. Generate `SOURCE_INFO.txt` from the exact tagged source state used for the bundle.
+3. Verify the release archive includes all required files.
+4. Manually upload the final archive after inspection.
+
+See [Release Process](./release-process.md) for the concrete MVP workflow.
 
 ## 7. Contributor/Consumer Clarity
 
@@ -75,10 +95,10 @@ README should state clearly:
 
 Before release:
 
-- [ ] `LICENSE` is present and current (BSD 3-Clause)
-- [ ] `NOTICE` is present and current
-- [ ] `THIRD_PARTY_NOTICES` is generated/updated
-- [ ] Release artifacts include notice files
+- [ ] `CBF_LICENSE.txt` is present and matches the repository `LICENSE`
+- [ ] `THIRD_PARTY_LICENSES.txt` is generated for the exact Chromium revision being distributed
+- [ ] `SOURCE_INFO.txt` is generated for the exact tagged source state being distributed
+- [ ] Release artifacts include the required bundled license files
 - [ ] README licensing section matches actual distribution behavior
 
 ## 9. References

@@ -1,0 +1,46 @@
+version: "3"
+
+vars:
+  ALLOW_DIRTY: '{{default "false" .ALLOW_DIRTY}}'
+  ALLOW_DIRTY_FLAG:
+    sh: |
+      if [ "{{.ALLOW_DIRTY}}" = "true" ]; then
+        printf '%s' '--allow-dirty'
+      fi
+
+tasks:
+  release:check:
+    desc: Validate local MVP release prerequisites.
+    cmds:
+      - uv run tool release check {{.ALLOW_DIRTY_FLAG}}
+
+  release:build:
+    desc: Build Chromium release artifacts into chromium/src/out/Release.
+    cmds:
+      - uv run tool build -t chrome -t cbf_bridge --out-dir out/Release
+
+  release:licenses:
+    desc: Generate CBF and Chromium license bundle files for the release.
+    cmds:
+      - uv run tool release licenses
+
+  release:source-info:
+    desc: Generate SOURCE_INFO.txt for the current release tag.
+    cmds:
+      - uv run tool release source-info {{.ALLOW_DIRTY_FLAG}}
+
+  release:package:
+    desc: Assemble the release archive under dist/release.
+    cmds:
+      - task: release:licenses
+      - task: release:source-info
+      - uv run tool release package {{.ALLOW_DIRTY_FLAG}}
+
+  release:
+    desc: Run the full local MVP release flow.
+    cmds:
+      - task: release:check
+      - task: release:build
+      - task: release:licenses
+      - task: release:source-info
+      - task: release:package

@@ -19,6 +19,12 @@ from tool.chromium_patches import (
     run_git_in_chromium_src,
     tool_env_with_depot_tools,
 )
+from tool.release import (
+    create_release_archive,
+    release_check,
+    write_release_licenses,
+    write_source_info,
+)
 
 type CommandFunc = Callable[..., int]
 
@@ -183,6 +189,11 @@ def cli() -> None:
     return None
 
 
+@cli.group("release", help="Release packaging helpers.")
+def release_group() -> None:
+    return None
+
+
 @cli.command("apply", help="Apply patch series via git am.")
 @_common_series_options
 @click.option(
@@ -337,6 +348,49 @@ def run(
         depot_tools=depot_tools,
         args=args,
     )
+
+
+@release_group.command("check", help="Validate release prerequisites.")
+@_common_series_options
+@click.option(
+    "--allow-dirty",
+    is_flag=True,
+    help="Allow packaging from a dirty worktree.",
+)
+def release_check_command(*, series: str, allow_dirty: bool) -> None:
+    paths = release_check(allow_dirty=allow_dirty, series=series)
+    click.echo(f"Release prerequisites OK: {paths.out_dir}")
+
+
+@release_group.command("licenses", help="Generate release license files.")
+@_common_series_options
+def release_licenses_command(*, series: str) -> None:
+    paths = write_release_licenses(series=series)
+    click.echo(f"Wrote release licenses under {paths.version_dir}")
+
+
+@release_group.command("source-info", help="Generate SOURCE_INFO.txt.")
+@_common_series_options
+@click.option(
+    "--allow-dirty",
+    is_flag=True,
+    help="Allow metadata generation from a dirty worktree.",
+)
+def release_source_info_command(*, series: str, allow_dirty: bool) -> None:
+    paths = write_source_info(allow_dirty=allow_dirty, series=series)
+    click.echo(f"Wrote source info: {paths.source_info}")
+
+
+@release_group.command("package", help="Assemble the release tar.gz archive.")
+@_common_series_options
+@click.option(
+    "--allow-dirty",
+    is_flag=True,
+    help="Allow packaging from a dirty worktree.",
+)
+def release_package_command(*, series: str, allow_dirty: bool) -> None:
+    paths = create_release_archive(allow_dirty=allow_dirty, series=series)
+    click.echo(f"Created release archive: {paths.archive_path}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -11,6 +11,7 @@
 # Developer Guide
 
 - [Contributor Setup](./developer-guide/contributor-setup.md)
+- [Release Process](./developer-guide/release-process.md)
 - [Chromium Integration Rules](./developer-guide/chromium-integration-rules.md)
 - [Chromium Implementation Guide](./developer-guide/chromium-implementation-guide.md)
 - [Chromium Fork Workflow](./developer-guide/chromium-fork-workflow.md)
