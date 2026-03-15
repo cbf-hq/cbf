@@ -527,8 +527,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
         } => Some(BrowserEvent::AuxiliaryWindowOpenRequested {
             profile_id: profile_id.clone(),
             request_id: *request_id,
-            source_browsing_context_id: source_tab_id
-                .map(|tab_id| tab_id.to_browsing_context_id()),
+            source_browsing_context_id: source_tab_id.map(|tab_id| tab_id.to_browsing_context_id()),
             kind: prompt_ui_kind_to_auxiliary_window_kind(kind),
         }),
         IpcEvent::PromptUiResolved {
@@ -539,8 +538,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
         } => Some(BrowserEvent::AuxiliaryWindowResolved {
             profile_id: profile_id.clone(),
             request_id: *request_id,
-            source_browsing_context_id: source_tab_id
-                .map(|tab_id| tab_id.to_browsing_context_id()),
+            source_browsing_context_id: source_tab_id.map(|tab_id| tab_id.to_browsing_context_id()),
             resolution: prompt_ui_resolution_to_auxiliary_window_resolution(resolution),
         }),
         IpcEvent::ExtensionRuntimeWarning {
@@ -563,8 +561,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             modal,
         } => Some(BrowserEvent::AuxiliaryWindowOpened {
             profile_id: profile_id.clone(),
-            source_browsing_context_id: source_tab_id
-                .map(|tab_id| tab_id.to_browsing_context_id()),
+            source_browsing_context_id: source_tab_id.map(|tab_id| tab_id.to_browsing_context_id()),
             window_id: prompt_ui_id_to_auxiliary_window_id(*prompt_ui_id),
             kind: prompt_ui_kind_to_auxiliary_window_kind(kind),
             title: title.clone(),
@@ -578,8 +575,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             reason,
         } => Some(BrowserEvent::AuxiliaryWindowClosed {
             profile_id: profile_id.clone(),
-            source_browsing_context_id: source_tab_id
-                .map(|tab_id| tab_id.to_browsing_context_id()),
+            source_browsing_context_id: source_tab_id.map(|tab_id| tab_id.to_browsing_context_id()),
             window_id: prompt_ui_id_to_auxiliary_window_id(*prompt_ui_id),
             kind: prompt_ui_kind_to_auxiliary_window_kind(kind),
             reason: prompt_ui_close_reason_to_auxiliary_window_close_reason(reason),
@@ -787,9 +783,7 @@ fn prompt_ui_resolution_to_auxiliary_window_resolution(
                 PromptUiExtensionUninstallResult::Aborted => {
                     ExtensionUninstallPromptResult::Aborted
                 }
-                PromptUiExtensionUninstallResult::Failed => {
-                    ExtensionUninstallPromptResult::Failed
-                }
+                PromptUiExtensionUninstallResult::Failed => ExtensionUninstallPromptResult::Failed,
             },
             detail: detail.clone(),
             report_abuse: *report_abuse,

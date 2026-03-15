@@ -550,15 +550,10 @@ impl IpcClient {
         let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
         debug!(
             profile_id = profile_id.to_string_lossy().as_ref(),
-            request_id,
-            "ffi open_default_prompt_ui"
+            request_id, "ffi open_default_prompt_ui"
         );
         if unsafe {
-            cbf_bridge_client_open_default_prompt_ui(
-                self.inner,
-                profile_id.as_ptr(),
-                request_id,
-            )
+            cbf_bridge_client_open_default_prompt_ui(self.inner, profile_id.as_ptr(), request_id)
         } {
             Ok(())
         } else {
@@ -590,14 +585,12 @@ impl IpcClient {
                 to_optional_cstring(destination_path)?,
                 false,
             ),
-            PromptUiResponse::ExtensionInstallPrompt { proceed } => {
-                (
-                    CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT,
-                    *proceed,
-                    None,
-                    false,
-                )
-            }
+            PromptUiResponse::ExtensionInstallPrompt { proceed } => (
+                CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT,
+                *proceed,
+                None,
+                false,
+            ),
             PromptUiResponse::ExtensionUninstallPrompt {
                 proceed,
                 report_abuse,
@@ -607,9 +600,12 @@ impl IpcClient {
                 None,
                 *report_abuse,
             ),
-            PromptUiResponse::PrintPreviewDialog { proceed } => {
-                (CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG, *proceed, None, false)
-            }
+            PromptUiResponse::PrintPreviewDialog { proceed } => (
+                CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG,
+                *proceed,
+                None,
+                false,
+            ),
             PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None, false),
         };
         debug!(
@@ -663,14 +659,12 @@ impl IpcClient {
                 to_optional_cstring(destination_path)?,
                 false,
             ),
-            PromptUiResponse::ExtensionInstallPrompt { proceed } => {
-                (
-                    CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT,
-                    *proceed,
-                    None,
-                    false,
-                )
-            }
+            PromptUiResponse::ExtensionInstallPrompt { proceed } => (
+                CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT,
+                *proceed,
+                None,
+                false,
+            ),
             PromptUiResponse::ExtensionUninstallPrompt {
                 proceed,
                 report_abuse,
@@ -680,9 +674,12 @@ impl IpcClient {
                 None,
                 *report_abuse,
             ),
-            PromptUiResponse::PrintPreviewDialog { proceed } => {
-                (CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG, *proceed, None, false)
-            }
+            PromptUiResponse::PrintPreviewDialog { proceed } => (
+                CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG,
+                *proceed,
+                None,
+                false,
+            ),
             PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None, false),
         };
         if unsafe {
@@ -720,11 +717,7 @@ impl IpcClient {
             "ffi close_prompt_ui"
         );
         if unsafe {
-            cbf_bridge_client_close_prompt_ui(
-                self.inner,
-                profile_id.as_ptr(),
-                prompt_ui_id.get(),
-            )
+            cbf_bridge_client_close_prompt_ui(self.inner, profile_id.as_ptr(), prompt_ui_id.get())
         } {
             Ok(())
         } else {

@@ -816,9 +816,7 @@ fn prompt_ui_extension_uninstall_result_from_ffi(value: u8) -> PromptUiExtension
         CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_ABORTED => {
             PromptUiExtensionUninstallResult::Aborted
         }
-        CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_FAILED => {
-            PromptUiExtensionUninstallResult::Failed
-        }
+        CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_FAILED => PromptUiExtensionUninstallResult::Failed,
         _ => PromptUiExtensionUninstallResult::Aborted,
     }
 }
@@ -864,14 +862,12 @@ fn prompt_ui_kind_from_ffi(
             extension_name: c_string_to_string(extension_name),
             permission_names: parse_string_list(permission_names),
         },
-        CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT => {
-            PromptUiKind::ExtensionUninstallPrompt {
-                extension_id: c_string_to_string(extension_id),
-                extension_name: c_string_to_string(extension_name),
-                triggering_extension_name: optional_string_from_ffi(triggering_extension_name),
-                can_report_abuse,
-            }
-        }
+        CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT => PromptUiKind::ExtensionUninstallPrompt {
+            extension_id: c_string_to_string(extension_id),
+            extension_name: c_string_to_string(extension_name),
+            triggering_extension_name: optional_string_from_ffi(triggering_extension_name),
+            can_report_abuse,
+        },
         CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG => PromptUiKind::PrintPreviewDialog,
         _ => PromptUiKind::Unknown,
     }
@@ -958,9 +954,7 @@ fn prompt_ui_resolution_from_ffi(
         CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT => {
             PromptUiResolution::ExtensionUninstallPrompt {
                 extension_id: c_string_to_string(extension_id),
-                result: prompt_ui_extension_uninstall_result_from_ffi(
-                    extension_uninstall_result,
-                ),
+                result: prompt_ui_extension_uninstall_result_from_ffi(extension_uninstall_result),
                 detail: {
                     let value = c_string_to_string(detail);
                     if value.is_empty() { None } else { Some(value) }
@@ -997,9 +991,7 @@ fn prompt_ui_resolution_from_auxiliary_window_ffi(
         CBF_AUXILIARY_WINDOW_KIND_EXTENSION_UNINSTALL_PROMPT => {
             PromptUiResolution::ExtensionUninstallPrompt {
                 extension_id: c_string_to_string(extension_id),
-                result: prompt_ui_extension_uninstall_result_from_ffi(
-                    extension_uninstall_result,
-                ),
+                result: prompt_ui_extension_uninstall_result_from_ffi(extension_uninstall_result),
                 detail: {
                     let value = c_string_to_string(detail);
                     if value.is_empty() { None } else { Some(value) }
