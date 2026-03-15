@@ -1,11 +1,18 @@
 //! Chrome-specific extension info and auxiliary window response types.
 
-use cbf::data::extension::{AuxiliaryWindowResponse, ExtensionInfo, IconData};
+use cbf::data::{
+    auxiliary_window::AuxiliaryWindowResponse,
+    extension::{ExtensionInfo, IconData},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChromeAuxiliaryWindowResponse {
     ExtensionInstallPrompt {
         proceed: bool,
+    },
+    ExtensionUninstallPrompt {
+        proceed: bool,
+        report_abuse: bool,
     },
     PermissionPrompt {
         allow: bool,
@@ -23,6 +30,13 @@ impl From<AuxiliaryWindowResponse> for ChromeAuxiliaryWindowResponse {
             AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed } => {
                 Self::ExtensionInstallPrompt { proceed }
             }
+            AuxiliaryWindowResponse::ExtensionUninstallPrompt {
+                proceed,
+                report_abuse,
+            } => Self::ExtensionUninstallPrompt {
+                proceed,
+                report_abuse,
+            },
             AuxiliaryWindowResponse::PermissionPrompt { allow } => Self::PermissionPrompt { allow },
             AuxiliaryWindowResponse::DownloadPrompt {
                 allow,

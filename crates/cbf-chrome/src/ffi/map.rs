@@ -42,8 +42,9 @@ use crate::data::{
     lifecycle::ChromeBeforeUnloadReason,
     mouse::{ChromeMouseButton, ChromeMouseEvent, ChromeMouseEventType, ChromePointerType},
     prompt_ui::{
-        PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult, PromptUiId,
-        PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
+        PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult,
+        PromptUiExtensionUninstallResult, PromptUiId, PromptUiKind, PromptUiPermissionType,
+        PromptUiResolution, PromptUiResolutionResult,
     },
     surface::SurfaceHandle,
     tab_open::{TabOpenHint, TabOpenResult},
@@ -297,6 +298,8 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.auxiliary_window_kind,
                 event.extension_id,
                 event.extension_name,
+                event.triggering_extension_name,
+                event.prompt_ui_can_report_abuse,
                 event.permission_names,
             ),
         }),
@@ -310,7 +313,9 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.auxiliary_window_kind,
                 event.extension_id,
                 event.prompt_ui_extension_install_result,
+                event.prompt_ui_extension_uninstall_result,
                 event.prompt_ui_extension_install_detail,
+                event.prompt_ui_report_abuse,
             ),
         }),
         CBF_EVENT_PROMPT_UI_REQUESTED => Ok(IpcEvent::PromptUiOpenRequested {
@@ -331,6 +336,8 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.download_suggested_path,
                 event.extension_id,
                 event.extension_name,
+                event.triggering_extension_name,
+                event.prompt_ui_can_report_abuse,
                 event.permission_names,
             ),
         }),
@@ -349,7 +356,9 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.download_destination_path,
                 event.extension_id,
                 event.prompt_ui_extension_install_result,
+                event.prompt_ui_extension_uninstall_result,
                 event.prompt_ui_extension_install_detail,
+                event.prompt_ui_report_abuse,
             ),
         }),
         CBF_EVENT_EXTENSION_RUNTIME_WARNING => Ok(IpcEvent::ExtensionRuntimeWarning {
@@ -367,6 +376,8 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.auxiliary_window_kind,
                 event.extension_id,
                 event.extension_name,
+                event.triggering_extension_name,
+                event.prompt_ui_can_report_abuse,
                 event.permission_names,
             ),
             title: {
@@ -385,6 +396,8 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.auxiliary_window_kind,
                 event.extension_id,
                 event.extension_name,
+                event.triggering_extension_name,
+                event.prompt_ui_can_report_abuse,
                 event.permission_names,
             ),
             reason: prompt_ui_close_reason_from_ffi(event.auxiliary_window_close_reason),
@@ -792,6 +805,24 @@ fn prompt_ui_extension_install_result_from_ffi(value: u8) -> PromptUiExtensionIn
     }
 }
 
+fn prompt_ui_extension_uninstall_result_from_ffi(value: u8) -> PromptUiExtensionUninstallResult {
+    match value {
+        CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_ACCEPTED => {
+            PromptUiExtensionUninstallResult::Accepted
+        }
+        CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_USER_CANCELED => {
+            PromptUiExtensionUninstallResult::UserCanceled
+        }
+        CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_ABORTED => {
+            PromptUiExtensionUninstallResult::Aborted
+        }
+        CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_FAILED => {
+            PromptUiExtensionUninstallResult::Failed
+        }
+        _ => PromptUiExtensionUninstallResult::Aborted,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn prompt_ui_kind_from_ffi(
     kind: u8,
@@ -805,6 +836,8 @@ fn prompt_ui_kind_from_ffi(
     download_suggested_path: *mut std::ffi::c_char,
     extension_id: *mut std::ffi::c_char,
     extension_name: *mut std::ffi::c_char,
+    triggering_extension_name: *mut std::ffi::c_char,
+    can_report_abuse: bool,
     permission_names: CbfStringList,
 ) -> PromptUiKind {
     let permission_key = {
@@ -831,6 +864,14 @@ fn prompt_ui_kind_from_ffi(
             extension_name: c_string_to_string(extension_name),
             permission_names: parse_string_list(permission_names),
         },
+        CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT => {
+            PromptUiKind::ExtensionUninstallPrompt {
+                extension_id: c_string_to_string(extension_id),
+                extension_name: c_string_to_string(extension_name),
+                triggering_extension_name: optional_string_from_ffi(triggering_extension_name),
+                can_report_abuse,
+            }
+        }
         CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG => PromptUiKind::PrintPreviewDialog,
         _ => PromptUiKind::Unknown,
     }
@@ -840,6 +881,8 @@ fn prompt_ui_kind_from_auxiliary_window_ffi(
     kind: u8,
     extension_id: *mut std::ffi::c_char,
     extension_name: *mut std::ffi::c_char,
+    triggering_extension_name: *mut std::ffi::c_char,
+    can_report_abuse: bool,
     permission_names: CbfStringList,
 ) -> PromptUiKind {
     match kind {
@@ -848,6 +891,14 @@ fn prompt_ui_kind_from_auxiliary_window_ffi(
                 extension_id: c_string_to_string(extension_id),
                 extension_name: c_string_to_string(extension_name),
                 permission_names: parse_string_list(permission_names),
+            }
+        }
+        CBF_AUXILIARY_WINDOW_KIND_EXTENSION_UNINSTALL_PROMPT => {
+            PromptUiKind::ExtensionUninstallPrompt {
+                extension_id: c_string_to_string(extension_id),
+                extension_name: c_string_to_string(extension_name),
+                triggering_extension_name: optional_string_from_ffi(triggering_extension_name),
+                can_report_abuse,
             }
         }
         CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG => PromptUiKind::PrintPreviewDialog,
@@ -874,7 +925,9 @@ fn prompt_ui_resolution_from_ffi(
     download_destination_path: *mut std::ffi::c_char,
     extension_id: *mut std::ffi::c_char,
     extension_install_result: u8,
+    extension_uninstall_result: u8,
     detail: *mut std::ffi::c_char,
+    report_abuse: bool,
 ) -> PromptUiResolution {
     let permission_key = {
         let value = c_string_to_string(permission_key);
@@ -902,6 +955,19 @@ fn prompt_ui_resolution_from_ffi(
                 if value.is_empty() { None } else { Some(value) }
             },
         },
+        CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT => {
+            PromptUiResolution::ExtensionUninstallPrompt {
+                extension_id: c_string_to_string(extension_id),
+                result: prompt_ui_extension_uninstall_result_from_ffi(
+                    extension_uninstall_result,
+                ),
+                detail: {
+                    let value = c_string_to_string(detail);
+                    if value.is_empty() { None } else { Some(value) }
+                },
+                report_abuse,
+            }
+        }
         CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG => PromptUiResolution::PrintPreviewDialog {
             result: prompt_ui_dialog_result_from_ffi(permission_result),
         },
@@ -913,7 +979,9 @@ fn prompt_ui_resolution_from_auxiliary_window_ffi(
     kind: u8,
     extension_id: *mut std::ffi::c_char,
     extension_install_result: u8,
+    extension_uninstall_result: u8,
     detail: *mut std::ffi::c_char,
+    report_abuse: bool,
 ) -> PromptUiResolution {
     match kind {
         CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT => {
@@ -924,6 +992,19 @@ fn prompt_ui_resolution_from_auxiliary_window_ffi(
                     let value = c_string_to_string(detail);
                     if value.is_empty() { None } else { Some(value) }
                 },
+            }
+        }
+        CBF_AUXILIARY_WINDOW_KIND_EXTENSION_UNINSTALL_PROMPT => {
+            PromptUiResolution::ExtensionUninstallPrompt {
+                extension_id: c_string_to_string(extension_id),
+                result: prompt_ui_extension_uninstall_result_from_ffi(
+                    extension_uninstall_result,
+                ),
+                detail: {
+                    let value = c_string_to_string(detail);
+                    if value.is_empty() { None } else { Some(value) }
+                },
+                report_abuse,
             }
         }
         _ => PromptUiResolution::Unknown,

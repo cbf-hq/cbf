@@ -75,5 +75,5 @@ cargo run -p simpleapp -- \
 ## Notes
 
 - `simpleapp` is intentionally small and focuses on runtime integration (window, surface, events, and process startup/shutdown).
-- Extension install confirmation is handled by a host-side `rfd` dialog instead of Chromium's default prompt UI.
+- Extension install and uninstall confirmation are handled by host-side `rfd` dialogs instead of Chromium's default prompt UI.
 - For framework-level setup details, see the repository root `README.md`.

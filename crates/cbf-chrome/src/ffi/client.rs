@@ -577,9 +577,9 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
         let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
-        let (prompt_ui_kind, proceed, destination_path) = match response {
+        let (prompt_ui_kind, proceed, destination_path, report_abuse) = match response {
             PromptUiResponse::PermissionPrompt { allow } => {
-                (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow, None)
+                (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow, None, false)
             }
             PromptUiResponse::DownloadPrompt {
                 allow,
@@ -588,20 +588,36 @@ impl IpcClient {
                 CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT,
                 *allow,
                 to_optional_cstring(destination_path)?,
+                false,
             ),
             PromptUiResponse::ExtensionInstallPrompt { proceed } => {
-                (CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT, *proceed, None)
+                (
+                    CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT,
+                    *proceed,
+                    None,
+                    false,
+                )
             }
+            PromptUiResponse::ExtensionUninstallPrompt {
+                proceed,
+                report_abuse,
+            } => (
+                CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT,
+                *proceed,
+                None,
+                *report_abuse,
+            ),
             PromptUiResponse::PrintPreviewDialog { proceed } => {
-                (CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG, *proceed, None)
+                (CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG, *proceed, None, false)
             }
-            PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None),
+            PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None, false),
         };
         debug!(
             profile_id = profile_id.to_string_lossy().as_ref(),
             request_id,
             prompt_ui_kind,
             proceed,
+            report_abuse,
             ?response,
             "ffi respond_prompt_ui"
         );
@@ -612,6 +628,7 @@ impl IpcClient {
                 request_id,
                 prompt_ui_kind,
                 proceed,
+                report_abuse,
                 destination_path
                     .as_ref()
                     .map_or(ptr::null(), |path| path.as_ptr()),
@@ -633,9 +650,9 @@ impl IpcClient {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
-        let (prompt_ui_kind, proceed, destination_path) = match response {
+        let (prompt_ui_kind, proceed, destination_path, report_abuse) = match response {
             PromptUiResponse::PermissionPrompt { allow } => {
-                (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow, None)
+                (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow, None, false)
             }
             PromptUiResponse::DownloadPrompt {
                 allow,
@@ -644,14 +661,29 @@ impl IpcClient {
                 CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT,
                 *allow,
                 to_optional_cstring(destination_path)?,
+                false,
             ),
             PromptUiResponse::ExtensionInstallPrompt { proceed } => {
-                (CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT, *proceed, None)
+                (
+                    CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT,
+                    *proceed,
+                    None,
+                    false,
+                )
             }
+            PromptUiResponse::ExtensionUninstallPrompt {
+                proceed,
+                report_abuse,
+            } => (
+                CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT,
+                *proceed,
+                None,
+                *report_abuse,
+            ),
             PromptUiResponse::PrintPreviewDialog { proceed } => {
-                (CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG, *proceed, None)
+                (CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG, *proceed, None, false)
             }
-            PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None),
+            PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None, false),
         };
         if unsafe {
             cbf_bridge_client_respond_prompt_ui_for_tab(
@@ -660,6 +692,7 @@ impl IpcClient {
                 request_id,
                 prompt_ui_kind,
                 proceed,
+                report_abuse,
                 destination_path
                     .as_ref()
                     .map_or(ptr::null(), |path| path.as_ptr()),

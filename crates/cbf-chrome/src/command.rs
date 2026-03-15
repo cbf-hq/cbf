@@ -513,6 +513,17 @@ impl From<BrowserCommand> for ChromeCommand {
                         response: PromptUiResponse::ExtensionInstallPrompt { proceed },
                     }
                 }
+                ChromeAuxiliaryWindowResponse::ExtensionUninstallPrompt {
+                    proceed,
+                    report_abuse,
+                } => Self::RespondPromptUi {
+                    profile_id,
+                    request_id,
+                    response: PromptUiResponse::ExtensionUninstallPrompt {
+                        proceed,
+                        report_abuse,
+                    },
+                },
                 ChromeAuxiliaryWindowResponse::Unknown => Self::RespondPromptUi {
                     profile_id,
                     request_id,
@@ -549,7 +560,7 @@ mod tests {
     use cbf::{
         command::BrowserCommand,
         data::{
-            extension::AuxiliaryWindowResponse,
+            auxiliary_window::{AuxiliaryWindowId, AuxiliaryWindowResponse},
             ids::{BrowsingContextId, TransientBrowsingContextId},
         },
     };
@@ -633,10 +644,35 @@ mod tests {
     }
 
     #[test]
+    fn uninstall_auxiliary_response_maps_to_prompt_ui_response() {
+        let command = BrowserCommand::RespondAuxiliaryWindow {
+            profile_id: "profile-b".to_string(),
+            request_id: 83,
+            response: AuxiliaryWindowResponse::ExtensionUninstallPrompt {
+                proceed: true,
+                report_abuse: true,
+            },
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::RespondPromptUi {
+                profile_id,
+                request_id,
+                response: PromptUiResponse::ExtensionUninstallPrompt {
+                    proceed: true,
+                    report_abuse: true,
+                },
+            } if profile_id == "profile-b" && request_id == 83
+        ));
+    }
+
+    #[test]
     fn close_auxiliary_window_maps_to_prompt_ui_close() {
         let command = BrowserCommand::CloseAuxiliaryWindow {
             profile_id: "profile-c".to_string(),
-            window_id: cbf::data::extension::AuxiliaryWindowId::new(33),
+            window_id: AuxiliaryWindowId::new(33),
         };
 
         let raw: ChromeCommand = command.into();

@@ -1,7 +1,7 @@
 //! Auxiliary window data models for backend-managed dialogs and prompt flows.
 
 use crate::data::download::{DownloadId, DownloadPromptActionHint, DownloadPromptResult};
-use crate::data::extension::ExtensionInstallPromptResult;
+use crate::data::extension::{ExtensionInstallPromptResult, ExtensionUninstallPromptResult};
 
 /// Browser-generic permission categories used by permission prompt UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +45,12 @@ pub enum AuxiliaryWindowKind {
         extension_name: String,
         permission_names: Vec<String>,
     },
+    ExtensionUninstallPrompt {
+        extension_id: String,
+        extension_name: String,
+        triggering_extension_name: Option<String>,
+        can_report_abuse: bool,
+    },
     PermissionPrompt {
         permission: PermissionPromptType,
     },
@@ -70,6 +76,10 @@ pub enum AuxiliaryWindowResponse {
     ExtensionInstallPrompt {
         proceed: bool,
     },
+    ExtensionUninstallPrompt {
+        proceed: bool,
+        report_abuse: bool,
+    },
     PermissionPrompt {
         allow: bool,
     },
@@ -87,6 +97,12 @@ pub enum AuxiliaryWindowResolution {
         extension_id: String,
         result: ExtensionInstallPromptResult,
         detail: Option<String>,
+    },
+    ExtensionUninstallPrompt {
+        extension_id: String,
+        result: ExtensionUninstallPromptResult,
+        detail: Option<String>,
+        report_abuse: bool,
     },
     PermissionPrompt {
         permission: PermissionPromptType,

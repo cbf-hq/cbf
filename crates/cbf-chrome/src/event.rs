@@ -17,13 +17,13 @@
 //! `None` and are intended to be consumed only by Chrome-aware code.
 
 use cbf::data::{
+    auxiliary_window::{
+        AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
+        AuxiliaryWindowResolution, PermissionPromptResult, PermissionPromptType,
+    },
     dialog::DialogType,
     download::DownloadPromptResult,
-    extension::{
-        AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
-        AuxiliaryWindowResolution, ExtensionInstallPromptResult, PermissionPromptResult,
-        PermissionPromptType,
-    },
+    extension::{ExtensionInstallPromptResult, ExtensionUninstallPromptResult},
     ids::WindowId,
     transient_browsing_context::{
         TransientBrowsingContextCloseReason, TransientBrowsingContextKind,
@@ -43,8 +43,9 @@ use crate::data::{
     lifecycle::{ChromeBackendErrorInfo, ChromeBackendStopReason},
     profile::ChromeProfileInfo,
     prompt_ui::{
-        PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult, PromptUiId,
-        PromptUiKind, PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
+        PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult,
+        PromptUiExtensionUninstallResult, PromptUiId, PromptUiKind, PromptUiPermissionType,
+        PromptUiResolution, PromptUiResolutionResult,
     },
     tab_open::{TabOpenHint, TabOpenResult},
 };
@@ -702,6 +703,17 @@ fn prompt_ui_kind_to_auxiliary_window_kind(kind: &PromptUiKind) -> AuxiliaryWind
             extension_name: extension_name.clone(),
             permission_names: permission_names.clone(),
         },
+        PromptUiKind::ExtensionUninstallPrompt {
+            extension_id,
+            extension_name,
+            triggering_extension_name,
+            can_report_abuse,
+        } => AuxiliaryWindowKind::ExtensionUninstallPrompt {
+            extension_id: extension_id.clone(),
+            extension_name: extension_name.clone(),
+            triggering_extension_name: triggering_extension_name.clone(),
+            can_report_abuse: *can_report_abuse,
+        },
         PromptUiKind::PrintPreviewDialog => AuxiliaryWindowKind::PrintPreviewDialog,
         PromptUiKind::Unknown => AuxiliaryWindowKind::Unknown,
     }
@@ -758,6 +770,30 @@ fn prompt_ui_resolution_to_auxiliary_window_resolution(
             },
             detail: detail.clone(),
         },
+        PromptUiResolution::ExtensionUninstallPrompt {
+            extension_id,
+            result,
+            detail,
+            report_abuse,
+        } => AuxiliaryWindowResolution::ExtensionUninstallPrompt {
+            extension_id: extension_id.clone(),
+            result: match result {
+                PromptUiExtensionUninstallResult::Accepted => {
+                    ExtensionUninstallPromptResult::Accepted
+                }
+                PromptUiExtensionUninstallResult::UserCanceled => {
+                    ExtensionUninstallPromptResult::UserCanceled
+                }
+                PromptUiExtensionUninstallResult::Aborted => {
+                    ExtensionUninstallPromptResult::Aborted
+                }
+                PromptUiExtensionUninstallResult::Failed => {
+                    ExtensionUninstallPromptResult::Failed
+                }
+            },
+            detail: detail.clone(),
+            report_abuse: *report_abuse,
+        },
         PromptUiResolution::PrintPreviewDialog { result } => match result {
             PromptUiDialogResult::Proceeded => AuxiliaryWindowResolution::Unknown,
             PromptUiDialogResult::Canceled => AuxiliaryWindowResolution::Unknown,
@@ -787,12 +823,12 @@ fn prompt_ui_close_reason_to_auxiliary_window_close_reason(
 mod tests {
     use cbf::{
         data::{
-            download::DownloadPromptActionHint,
-            extension::{
+            auxiliary_window::{
                 AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
-                AuxiliaryWindowResolution, ExtensionInstallPromptResult, PermissionPromptResult,
-                PermissionPromptType,
+                AuxiliaryWindowResolution, PermissionPromptResult, PermissionPromptType,
             },
+            download::DownloadPromptActionHint,
+            extension::{ExtensionInstallPromptResult, ExtensionUninstallPromptResult},
             ids::{BrowsingContextId, TransientBrowsingContextId},
             transient_browsing_context::{
                 TransientBrowsingContextCloseReason, TransientBrowsingContextKind,
@@ -807,8 +843,8 @@ mod tests {
             download::ChromeDownloadPromptReason,
             ids::{PopupId, TabId},
             prompt_ui::{
-                PromptUiCloseReason, PromptUiExtensionInstallResult, PromptUiId, PromptUiKind,
-                PromptUiResolution,
+                PromptUiCloseReason, PromptUiExtensionInstallResult,
+                PromptUiExtensionUninstallResult, PromptUiId, PromptUiKind, PromptUiResolution,
             },
         },
         ffi::IpcEvent,
@@ -1156,6 +1192,70 @@ mod tests {
             } if source_browsing_context_id == BrowsingContextId::new(9)
                 && extension_id == "ext"
                 && detail == "user dismissed"
+        ));
+    }
+
+    #[test]
+    fn prompt_ui_open_requested_maps_extension_uninstall_kind() {
+        let event = IpcEvent::PromptUiOpenRequested {
+            profile_id: "default".to_string(),
+            source_tab_id: None,
+            request_id: 6,
+            kind: PromptUiKind::ExtensionUninstallPrompt {
+                extension_id: "ext".to_string(),
+                extension_name: "ExtName".to_string(),
+                triggering_extension_name: Some("Trigger".to_string()),
+                can_report_abuse: true,
+            },
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::AuxiliaryWindowOpenRequested {
+                request_id: 6,
+                source_browsing_context_id: None,
+                kind: AuxiliaryWindowKind::ExtensionUninstallPrompt {
+                    ref extension_id,
+                    ref extension_name,
+                    ref triggering_extension_name,
+                    can_report_abuse: true,
+                },
+                ..
+            } if extension_id == "ext"
+                && extension_name == "ExtName"
+                && triggering_extension_name.as_deref() == Some("Trigger")
+        ));
+    }
+
+    #[test]
+    fn prompt_ui_resolved_maps_extension_uninstall_resolution() {
+        let event = IpcEvent::PromptUiResolved {
+            profile_id: "default".to_string(),
+            source_tab_id: None,
+            request_id: 7,
+            resolution: PromptUiResolution::ExtensionUninstallPrompt {
+                extension_id: "ext".to_string(),
+                result: PromptUiExtensionUninstallResult::Failed,
+                detail: Some("uninstall_failed".to_string()),
+                report_abuse: true,
+            },
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::AuxiliaryWindowResolved {
+                request_id: 7,
+                source_browsing_context_id: None,
+                resolution: AuxiliaryWindowResolution::ExtensionUninstallPrompt {
+                    ref extension_id,
+                    result: ExtensionUninstallPromptResult::Failed,
+                    detail: Some(ref detail),
+                    report_abuse: true,
+                },
+                ..
+            } if extension_id == "ext" && detail == "uninstall_failed"
         ));
     }
 

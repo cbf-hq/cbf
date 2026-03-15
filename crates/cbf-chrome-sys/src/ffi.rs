@@ -75,6 +75,10 @@ pub const CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED: u8 = 0;
 pub const CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS: u8 = 1;
 pub const CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_USER_CANCELED: u8 = 2;
 pub const CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ABORTED: u8 = 3;
+pub const CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_ACCEPTED: u8 = 0;
+pub const CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_USER_CANCELED: u8 = 1;
+pub const CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_ABORTED: u8 = 2;
+pub const CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_FAILED: u8 = 3;
 pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED: u8 =
     CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED;
 pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS: u8 =
@@ -83,17 +87,27 @@ pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_USER_CANCELED: u8 =
     CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_USER_CANCELED;
 pub const CBF_EXTENSION_INSTALL_PROMPT_RESULT_ABORTED: u8 =
     CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ABORTED;
+pub const CBF_EXTENSION_UNINSTALL_PROMPT_RESULT_ACCEPTED: u8 =
+    CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_ACCEPTED;
+pub const CBF_EXTENSION_UNINSTALL_PROMPT_RESULT_USER_CANCELED: u8 =
+    CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_USER_CANCELED;
+pub const CBF_EXTENSION_UNINSTALL_PROMPT_RESULT_ABORTED: u8 =
+    CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_ABORTED;
+pub const CBF_EXTENSION_UNINSTALL_PROMPT_RESULT_FAILED: u8 =
+    CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_FAILED;
 
 pub const CBF_AUXILIARY_WINDOW_KIND_UNKNOWN: u8 = 0;
 pub const CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT: u8 = 1;
-pub const CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG: u8 = 2;
+pub const CBF_AUXILIARY_WINDOW_KIND_EXTENSION_UNINSTALL_PROMPT: u8 = 2;
+pub const CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG: u8 = 3;
 
 pub const CBF_PROMPT_UI_KIND_UNKNOWN: u8 = 0;
 pub const CBF_PROMPT_UI_KIND_PERMISSION_PROMPT: u8 = 1;
 pub const CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT: u8 = 2;
 // Legacy prompt-ui kind values kept for compatibility with older bridge events.
 pub const CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT: u8 = 3;
-pub const CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG: u8 = 4;
+pub const CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT: u8 = 4;
+pub const CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG: u8 = 5;
 
 pub const CBF_PROMPT_UI_CLOSE_REASON_UNKNOWN: u8 = 0;
 pub const CBF_PROMPT_UI_CLOSE_REASON_USER_CANCELED: u8 = 1;
@@ -331,9 +345,12 @@ pub struct CbfBridgeEvent {
     pub extensions: CbfExtensionInfoList,
     pub extension_id: *mut c_char,
     pub extension_name: *mut c_char,
+    pub triggering_extension_name: *mut c_char,
     pub permission_names: CbfStringList,
     pub prompt_ui_extension_install_result: u8,
     pub prompt_ui_extension_install_detail: *mut c_char,
+    pub prompt_ui_extension_uninstall_result: u8,
+    pub prompt_ui_extension_uninstall_detail: *mut c_char,
     pub extension_runtime_warning: *mut c_char,
     pub auxiliary_window_id: u64,
     pub auxiliary_window_kind: u8,
@@ -343,6 +360,8 @@ pub struct CbfBridgeEvent {
     pub prompt_ui_kind: u8,
     pub prompt_ui_has_source_tab_id: bool,
     pub prompt_ui_source_tab_id: u64,
+    pub prompt_ui_can_report_abuse: bool,
+    pub prompt_ui_report_abuse: bool,
     pub prompt_ui_permission: u8,
     pub prompt_ui_result: u8,
     pub prompt_ui_permission_key: *mut c_char,
@@ -1034,6 +1053,7 @@ unsafe extern "C" {
         request_id: u64,
         prompt_ui_kind: u8,
         proceed: bool,
+        report_abuse: bool,
         destination_path: *const c_char,
     ) -> bool;
     pub fn cbf_bridge_client_respond_prompt_ui_for_tab(
@@ -1042,6 +1062,7 @@ unsafe extern "C" {
         request_id: u64,
         prompt_ui_kind: u8,
         proceed: bool,
+        report_abuse: bool,
         destination_path: *const c_char,
     ) -> bool;
     pub fn cbf_bridge_client_pause_download(

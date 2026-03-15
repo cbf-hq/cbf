@@ -47,6 +47,12 @@ pub enum PromptUiKind {
         extension_name: String,
         permission_names: Vec<String>,
     },
+    ExtensionUninstallPrompt {
+        extension_id: String,
+        extension_name: String,
+        triggering_extension_name: Option<String>,
+        can_report_abuse: bool,
+    },
     PrintPreviewDialog,
     Unknown,
 }
@@ -64,6 +70,10 @@ pub enum PromptUiResponse {
     ExtensionInstallPrompt {
         proceed: bool,
     },
+    ExtensionUninstallPrompt {
+        proceed: bool,
+        report_abuse: bool,
+    },
     PrintPreviewDialog {
         proceed: bool,
     },
@@ -77,6 +87,15 @@ pub enum PromptUiExtensionInstallResult {
     AcceptedWithWithheldPermissions,
     UserCanceled,
     Aborted,
+}
+
+/// Chrome-specific result for extension uninstall prompt resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptUiExtensionUninstallResult {
+    Accepted,
+    UserCanceled,
+    Aborted,
+    Failed,
 }
 
 /// Chrome-specific prompt UI resolution result.
@@ -114,6 +133,12 @@ pub enum PromptUiResolution {
         extension_id: String,
         result: PromptUiExtensionInstallResult,
         detail: Option<String>,
+    },
+    ExtensionUninstallPrompt {
+        extension_id: String,
+        result: PromptUiExtensionUninstallResult,
+        detail: Option<String>,
+        report_abuse: bool,
     },
     PrintPreviewDialog {
         result: PromptUiDialogResult,

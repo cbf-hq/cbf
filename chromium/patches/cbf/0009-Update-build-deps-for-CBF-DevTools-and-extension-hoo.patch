@@ -1,7 +1,7 @@
 From 6669a0efb65403cd017abcbf9c18df5a042ec5b5 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 3 Mar 2026 08:10:00 +0900
-Subject: [PATCH 09/27] Update build deps for CBF DevTools and extension hooks
+Subject: [PATCH 09/28] Update build deps for CBF DevTools and extension hooks
 
 ---
  chrome/browser/cbf/BUILD.gn                    | 4 ++++

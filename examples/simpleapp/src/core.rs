@@ -6,13 +6,14 @@ use std::{
 use cbf::{
     browser::{BrowserHandle, BrowserSession},
     data::{
+        auxiliary_window::{AuxiliaryWindowKind, AuxiliaryWindowResponse, PermissionPromptType},
         browsing_context_open::BrowsingContextOpenHint,
         browsing_context_open::BrowsingContextOpenResponse,
         context_menu::ContextMenu,
         dialog::{BeforeUnloadReason, DialogResponse, DialogType},
         download::{DownloadId, DownloadOutcome, DownloadPromptActionHint, DownloadState},
         drag::{DragOperations, DragStartRequest},
-        extension::{AuxiliaryWindowKind, AuxiliaryWindowResponse, ExtensionInfo},
+        extension::ExtensionInfo,
         ids::{BrowsingContextId, TransientBrowsingContextId, WindowId},
         ime::ImeBoundsUpdate,
         profile::ProfileInfo,
@@ -920,6 +921,30 @@ impl CoreState {
                     return Vec::new();
                 }
 
+                if let AuxiliaryWindowKind::ExtensionUninstallPrompt {
+                    extension_name,
+                    triggering_extension_name,
+                    can_report_abuse,
+                    ..
+                } = &kind
+                {
+                    let response = show_extension_uninstall_prompt_dialog(
+                        extension_name,
+                        triggering_extension_name.as_deref(),
+                        *can_report_abuse,
+                    );
+                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
+                        profile_id,
+                        request_id,
+                        response,
+                    ) {
+                        warn!(
+                            "failed to respond extension uninstall prompt request_id={request_id}: {err}"
+                        );
+                    }
+                    return Vec::new();
+                }
+
                 Vec::new()
             }
             BrowserEvent::AuxiliaryWindowResolved {
@@ -1647,7 +1672,7 @@ fn show_prompt_dialog(message: &str, default_prompt_text: Option<&str>) -> Dialo
     }
 }
 
-fn show_permission_prompt_dialog(permission: &cbf::data::extension::PermissionPromptType) -> bool {
+fn show_permission_prompt_dialog(permission: &PermissionPromptType) -> bool {
     let message = format!(
         "{}\n\nAllow this request?",
         permission_prompt_description(permission)
@@ -1698,6 +1723,67 @@ fn show_extension_install_prompt_dialog(
         .show();
 
     matches!(result, MessageDialogResult::Yes)
+}
+
+fn build_extension_uninstall_prompt_message(
+    extension_name: &str,
+    triggering_extension_name: Option<&str>,
+) -> String {
+    let trimmed_name = extension_name.trim();
+    let display_name = if trimmed_name.is_empty() {
+        "This extension".to_string()
+    } else {
+        format!("\"{trimmed_name}\"")
+    };
+
+    match triggering_extension_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(trigger) => format!(
+            "{display_name} wants to be uninstalled.\n\nRequested by \"{trigger}\".\n\nAllow this extension to be removed?"
+        ),
+        None => format!(
+            "{display_name} wants to be uninstalled.\n\nAllow this extension to be removed?"
+        ),
+    }
+}
+
+fn show_extension_uninstall_prompt_dialog(
+    extension_name: &str,
+    triggering_extension_name: Option<&str>,
+    can_report_abuse: bool,
+) -> AuxiliaryWindowResponse {
+    let message =
+        build_extension_uninstall_prompt_message(extension_name, triggering_extension_name);
+
+    let proceed = matches!(
+        MessageDialog::new()
+            .set_level(MessageLevel::Warning)
+            .set_title("Extension Uninstall Request")
+            .set_description(&message)
+            .set_buttons(MessageButtons::YesNo)
+            .show(),
+        MessageDialogResult::Yes
+    );
+    let report_abuse = proceed
+        && can_report_abuse
+        && matches!(
+            MessageDialog::new()
+                .set_level(MessageLevel::Info)
+                .set_title("Report Abuse")
+                .set_description(
+                    "Do you also want to open the report abuse page after uninstalling this extension?"
+                )
+                .set_buttons(MessageButtons::YesNo)
+                .show(),
+            MessageDialogResult::Yes
+        );
+
+    AuxiliaryWindowResponse::ExtensionUninstallPrompt {
+        proceed,
+        report_abuse,
+    }
 }
 
 fn show_download_save_as_dialog(
@@ -1811,11 +1897,7 @@ fn download_prompt_handling(action_hint: DownloadPromptActionHint) -> DownloadPr
     }
 }
 
-fn permission_prompt_description(
-    permission: &cbf::data::extension::PermissionPromptType,
-) -> String {
-    use cbf::data::extension::PermissionPromptType;
-
+fn permission_prompt_description(permission: &PermissionPromptType) -> String {
     match permission {
         PermissionPromptType::Geolocation => "This site wants to access your location.".to_string(),
         PermissionPromptType::Notifications => "This site wants to show notifications.".to_string(),
@@ -1850,6 +1932,25 @@ mod tests {
         assert!(message.contains("Requested permissions:"));
         assert!(message.contains("- tabs"));
         assert!(message.contains("- storage"));
+    }
+
+    #[test]
+    fn build_extension_uninstall_prompt_message_includes_trigger() {
+        let message = build_extension_uninstall_prompt_message(
+            "Example Extension",
+            Some("Trigger Extension"),
+        );
+
+        assert!(message.contains("\"Example Extension\" wants to be uninstalled."));
+        assert!(message.contains("Requested by \"Trigger Extension\"."));
+    }
+
+    #[test]
+    fn build_extension_uninstall_prompt_message_handles_missing_trigger() {
+        let message = build_extension_uninstall_prompt_message("Example Extension", None);
+
+        assert!(message.contains("\"Example Extension\" wants to be uninstalled."));
+        assert!(!message.contains("Requested by"));
     }
 
     #[test]

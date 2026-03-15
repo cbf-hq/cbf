@@ -1,4 +1,4 @@
-//! Data models for browser extension metadata and install prompt results.
+//! Data models for browser extension metadata and prompt results.
 
 /// Browser-generic icon payload exposed by backends.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +29,15 @@ pub enum ExtensionInstallPromptResult {
     AcceptedWithWithheldPermissions,
     UserCanceled,
     Aborted,
+}
+
+/// Result for extension uninstall prompt lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtensionUninstallPromptResult {
+    Accepted,
+    UserCanceled,
+    Aborted,
+    Failed,
 }
 
 #[cfg(test)]
