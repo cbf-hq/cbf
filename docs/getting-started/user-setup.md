@@ -13,7 +13,7 @@ The CBF Chromium fork is a patched Chromium build required as the browser backen
 **Do not use stock Chromium** — it does not include the CBF bridge patches.
 
 You can obtain it from:
-- GitHub Releases: download the prebuilt artifact for your platform
+- GitHub Releases (planned): download the prebuilt artifact for your platform
 - Local build: build from the `chromium/` directory (this can take considerable time, see [../developer-guide/contributor-setup.md])
 
 Platform-specific artifact names and `executable_path` values:
@@ -29,7 +29,7 @@ On macOS, `executable_path` must point to the binary inside the `.app` bundle, n
 ## 3. Configure bridge library path
 
 You can obtain the bridge library from:
-- GitHub Releases: download the prebuilt artifact for your platform
+- GitHub Releases (planned): download the prebuilt artifact for your platform
 - Local build: use the output directory from your Chromium build (this can take considerable time, see [../developer-guide/contributor-setup.md])
 
 Platform-specific library names:
@@ -66,7 +66,7 @@ cargo check -p cbf-chrome-sys
 ### Try it with simpleapp first
 
 If you want to verify your setup before writing your own app,
-[`examples/simpleapp`](https://github.com/tasuren/cbf/tree/main/examples/simpleapp)
+[`examples/simpleapp`](https://github.com/cbf-hq/cbf/tree/main/examples/simpleapp)
 is a working single-window reference app
 that demonstrates the full integration. It also serves as a concrete example of the patterns
 described below.
