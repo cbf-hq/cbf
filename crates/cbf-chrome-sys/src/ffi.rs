@@ -341,6 +341,8 @@ pub struct CbfBridgeEvent {
     pub auxiliary_window_title: *mut c_char,
     pub auxiliary_window_modal: bool,
     pub prompt_ui_kind: u8,
+    pub prompt_ui_has_source_tab_id: bool,
+    pub prompt_ui_source_tab_id: u64,
     pub prompt_ui_permission: u8,
     pub prompt_ui_result: u8,
     pub prompt_ui_permission_key: *mut c_char,
@@ -1022,10 +1024,18 @@ unsafe extern "C" {
     ) -> bool;
     pub fn cbf_bridge_client_open_default_prompt_ui(
         client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
+        profile_id: *const c_char,
         request_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_respond_prompt_ui(
+        client: *mut CbfBridgeClientHandle,
+        profile_id: *const c_char,
+        request_id: u64,
+        prompt_ui_kind: u8,
+        proceed: bool,
+        destination_path: *const c_char,
+    ) -> bool;
+    pub fn cbf_bridge_client_respond_prompt_ui_for_tab(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
         request_id: u64,
@@ -1047,7 +1057,7 @@ unsafe extern "C" {
     ) -> bool;
     pub fn cbf_bridge_client_close_prompt_ui(
         client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
+        profile_id: *const c_char,
         prompt_ui_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_respond_tab_open(

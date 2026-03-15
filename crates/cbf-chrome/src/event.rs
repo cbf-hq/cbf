@@ -520,29 +520,27 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
         }),
         IpcEvent::PromptUiOpenRequested {
             profile_id,
-            browsing_context_id,
+            source_tab_id,
             request_id,
             kind,
-        } => Some(BrowserEvent::BrowsingContext {
+        } => Some(BrowserEvent::AuxiliaryWindowOpenRequested {
             profile_id: profile_id.clone(),
-            browsing_context_id: browsing_context_id.to_browsing_context_id(),
-            event: Box::new(BrowsingContextEvent::AuxiliaryWindowOpenRequested {
-                request_id: *request_id,
-                kind: prompt_ui_kind_to_auxiliary_window_kind(kind),
-            }),
+            request_id: *request_id,
+            source_browsing_context_id: source_tab_id
+                .map(|tab_id| tab_id.to_browsing_context_id()),
+            kind: prompt_ui_kind_to_auxiliary_window_kind(kind),
         }),
         IpcEvent::PromptUiResolved {
             profile_id,
-            browsing_context_id,
+            source_tab_id,
             request_id,
             resolution,
-        } => Some(BrowserEvent::BrowsingContext {
+        } => Some(BrowserEvent::AuxiliaryWindowResolved {
             profile_id: profile_id.clone(),
-            browsing_context_id: browsing_context_id.to_browsing_context_id(),
-            event: Box::new(BrowsingContextEvent::AuxiliaryWindowResolved {
-                request_id: *request_id,
-                resolution: prompt_ui_resolution_to_auxiliary_window_resolution(resolution),
-            }),
+            request_id: *request_id,
+            source_browsing_context_id: source_tab_id
+                .map(|tab_id| tab_id.to_browsing_context_id()),
+            resolution: prompt_ui_resolution_to_auxiliary_window_resolution(resolution),
         }),
         IpcEvent::ExtensionRuntimeWarning {
             profile_id,
@@ -557,35 +555,33 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
         }),
         IpcEvent::PromptUiOpened {
             profile_id,
-            browsing_context_id,
+            source_tab_id,
             prompt_ui_id,
             kind,
             title,
             modal,
-        } => Some(BrowserEvent::BrowsingContext {
+        } => Some(BrowserEvent::AuxiliaryWindowOpened {
             profile_id: profile_id.clone(),
-            browsing_context_id: browsing_context_id.to_browsing_context_id(),
-            event: Box::new(BrowsingContextEvent::AuxiliaryWindowOpened {
-                window_id: prompt_ui_id_to_auxiliary_window_id(*prompt_ui_id),
-                kind: prompt_ui_kind_to_auxiliary_window_kind(kind),
-                title: title.clone(),
-                modal: *modal,
-            }),
+            source_browsing_context_id: source_tab_id
+                .map(|tab_id| tab_id.to_browsing_context_id()),
+            window_id: prompt_ui_id_to_auxiliary_window_id(*prompt_ui_id),
+            kind: prompt_ui_kind_to_auxiliary_window_kind(kind),
+            title: title.clone(),
+            modal: *modal,
         }),
         IpcEvent::PromptUiClosed {
             profile_id,
-            browsing_context_id,
+            source_tab_id,
             prompt_ui_id,
             kind,
             reason,
-        } => Some(BrowserEvent::BrowsingContext {
+        } => Some(BrowserEvent::AuxiliaryWindowClosed {
             profile_id: profile_id.clone(),
-            browsing_context_id: browsing_context_id.to_browsing_context_id(),
-            event: Box::new(BrowsingContextEvent::AuxiliaryWindowClosed {
-                window_id: prompt_ui_id_to_auxiliary_window_id(*prompt_ui_id),
-                kind: prompt_ui_kind_to_auxiliary_window_kind(kind),
-                reason: prompt_ui_close_reason_to_auxiliary_window_close_reason(reason),
-            }),
+            source_browsing_context_id: source_tab_id
+                .map(|tab_id| tab_id.to_browsing_context_id()),
+            window_id: prompt_ui_id_to_auxiliary_window_id(*prompt_ui_id),
+            kind: prompt_ui_kind_to_auxiliary_window_kind(kind),
+            reason: prompt_ui_close_reason_to_auxiliary_window_close_reason(reason),
         }),
         IpcEvent::DownloadCreated {
             profile_id,
@@ -962,7 +958,7 @@ mod tests {
     fn prompt_ui_requested_maps_into_permission_auxiliary_window() {
         let event = IpcEvent::PromptUiOpenRequested {
             profile_id: "default".to_string(),
-            browsing_context_id: TabId::new(44),
+            source_tab_id: Some(TabId::new(44)),
             request_id: 12,
             kind: PromptUiKind::PermissionPrompt {
                 permission: crate::data::prompt_ui::PromptUiPermissionType::Geolocation,
@@ -973,20 +969,15 @@ mod tests {
         let mapped = map_ipc_event_to_generic(&event).unwrap();
         assert!(matches!(
             mapped,
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event,
-                ..
-            } if browsing_context_id == BrowsingContextId::new(44)
-                && matches!(
-                    *event,
-                    BrowsingContextEvent::AuxiliaryWindowOpenRequested {
-                        request_id: 12,
-                        kind: AuxiliaryWindowKind::PermissionPrompt {
-                            permission: PermissionPromptType::Geolocation
-                        }
-                    }
-                )
+            BrowserEvent::AuxiliaryWindowOpenRequested {
+                profile_id,
+                request_id: 12,
+                source_browsing_context_id: Some(source_browsing_context_id),
+                kind: AuxiliaryWindowKind::PermissionPrompt {
+                    permission: PermissionPromptType::Geolocation
+                },
+            } if profile_id == "default"
+                && source_browsing_context_id == BrowsingContextId::new(44)
         ));
     }
 
@@ -994,7 +985,7 @@ mod tests {
     fn prompt_ui_resolved_maps_into_permission_auxiliary_resolution() {
         let event = IpcEvent::PromptUiResolved {
             profile_id: "default".to_string(),
-            browsing_context_id: TabId::new(44),
+            source_tab_id: Some(TabId::new(44)),
             request_id: 12,
             resolution: crate::data::prompt_ui::PromptUiResolution::PermissionPrompt {
                 permission: crate::data::prompt_ui::PromptUiPermissionType::Geolocation,
@@ -1006,21 +997,16 @@ mod tests {
         let mapped = map_ipc_event_to_generic(&event).unwrap();
         assert!(matches!(
             mapped,
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event,
-                ..
-            } if browsing_context_id == BrowsingContextId::new(44)
-                && matches!(
-                    *event,
-                    BrowsingContextEvent::AuxiliaryWindowResolved {
-                        request_id: 12,
-                        resolution: AuxiliaryWindowResolution::PermissionPrompt {
-                            permission: PermissionPromptType::Geolocation,
-                            result: PermissionPromptResult::Denied
-                        }
-                    }
-                )
+            BrowserEvent::AuxiliaryWindowResolved {
+                profile_id,
+                request_id: 12,
+                source_browsing_context_id: Some(source_browsing_context_id),
+                resolution: AuxiliaryWindowResolution::PermissionPrompt {
+                    permission: PermissionPromptType::Geolocation,
+                    result: PermissionPromptResult::Denied
+                },
+            } if profile_id == "default"
+                && source_browsing_context_id == BrowsingContextId::new(44)
         ));
     }
 
@@ -1028,7 +1014,7 @@ mod tests {
     fn prompt_ui_requested_maps_unknown_with_key_to_other_permission_prompt() {
         let event = IpcEvent::PromptUiOpenRequested {
             profile_id: "default".to_string(),
-            browsing_context_id: TabId::new(44),
+            source_tab_id: Some(TabId::new(44)),
             request_id: 12,
             kind: PromptUiKind::PermissionPrompt {
                 permission: crate::data::prompt_ui::PromptUiPermissionType::Unknown,
@@ -1039,20 +1025,14 @@ mod tests {
         let mapped = map_ipc_event_to_generic(&event).unwrap();
         assert!(matches!(
             mapped,
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event,
+            BrowserEvent::AuxiliaryWindowOpenRequested {
+                source_browsing_context_id: Some(source_browsing_context_id),
+                kind: AuxiliaryWindowKind::PermissionPrompt {
+                    permission: PermissionPromptType::Other(ref key)
+                },
                 ..
-            } if browsing_context_id == BrowsingContextId::new(44)
-                && matches!(
-                    *event,
-                    BrowsingContextEvent::AuxiliaryWindowOpenRequested {
-                        request_id: 12,
-                        kind: AuxiliaryWindowKind::PermissionPrompt {
-                            permission: PermissionPromptType::Other(ref key)
-                        }
-                    } if key == "window_management"
-                )
+            } if source_browsing_context_id == BrowsingContextId::new(44)
+                && key == "window_management"
         ));
     }
 
@@ -1060,7 +1040,7 @@ mod tests {
     fn prompt_ui_requested_maps_download_reason_into_auxiliary_window() {
         let event = IpcEvent::PromptUiOpenRequested {
             profile_id: "default".to_string(),
-            browsing_context_id: TabId::new(12),
+            source_tab_id: Some(TabId::new(12)),
             request_id: 71,
             kind: PromptUiKind::DownloadPrompt {
                 download_id: crate::data::download::ChromeDownloadId::new(55),
@@ -1074,21 +1054,15 @@ mod tests {
         let mapped = map_ipc_event_to_generic(&event).unwrap();
         assert!(matches!(
             mapped,
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event,
+            BrowserEvent::AuxiliaryWindowOpenRequested {
+                request_id: 71,
+                source_browsing_context_id: Some(source_browsing_context_id),
+                kind: AuxiliaryWindowKind::DownloadPrompt {
+                    action_hint: DownloadPromptActionHint::SelectDestination,
+                    ..
+                },
                 ..
-            } if browsing_context_id == BrowsingContextId::new(12)
-                && matches!(
-                    *event,
-                    BrowsingContextEvent::AuxiliaryWindowOpenRequested {
-                        request_id: 71,
-                        kind: AuxiliaryWindowKind::DownloadPrompt {
-                            action_hint: DownloadPromptActionHint::SelectDestination,
-                            ..
-                        }
-                    }
-                )
+            } if source_browsing_context_id == BrowsingContextId::new(12)
         ));
     }
 
@@ -1096,7 +1070,7 @@ mod tests {
     fn prompt_ui_requested_maps_dlp_reason_into_deny_action_hint() {
         let event = IpcEvent::PromptUiOpenRequested {
             profile_id: "default".to_string(),
-            browsing_context_id: TabId::new(12),
+            source_tab_id: Some(TabId::new(12)),
             request_id: 72,
             kind: PromptUiKind::DownloadPrompt {
                 download_id: crate::data::download::ChromeDownloadId::new(56),
@@ -1110,21 +1084,15 @@ mod tests {
         let mapped = map_ipc_event_to_generic(&event).unwrap();
         assert!(matches!(
             mapped,
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event,
+            BrowserEvent::AuxiliaryWindowOpenRequested {
+                request_id: 72,
+                source_browsing_context_id: Some(source_browsing_context_id),
+                kind: AuxiliaryWindowKind::DownloadPrompt {
+                    action_hint: DownloadPromptActionHint::Deny,
+                    ..
+                },
                 ..
-            } if browsing_context_id == BrowsingContextId::new(12)
-                && matches!(
-                    *event,
-                    BrowsingContextEvent::AuxiliaryWindowOpenRequested {
-                        request_id: 72,
-                        kind: AuxiliaryWindowKind::DownloadPrompt {
-                            action_hint: DownloadPromptActionHint::Deny,
-                            ..
-                        }
-                    }
-                )
+            } if source_browsing_context_id == BrowsingContextId::new(12)
         ));
     }
 
@@ -1132,7 +1100,7 @@ mod tests {
     fn prompt_ui_open_requested_maps_extension_install_kind() {
         let event = IpcEvent::PromptUiOpenRequested {
             profile_id: "default".to_string(),
-            browsing_context_id: TabId::new(9),
+            source_tab_id: Some(TabId::new(9)),
             request_id: 2,
             kind: PromptUiKind::ExtensionInstallPrompt {
                 extension_id: "ext".to_string(),
@@ -1144,24 +1112,19 @@ mod tests {
         let mapped = map_ipc_event_to_generic(&event).unwrap();
         assert!(matches!(
             mapped,
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event,
+            BrowserEvent::AuxiliaryWindowOpenRequested {
+                request_id: 2,
+                source_browsing_context_id: Some(source_browsing_context_id),
+                kind: AuxiliaryWindowKind::ExtensionInstallPrompt {
+                    ref extension_id,
+                    ref extension_name,
+                    ref permission_names,
+                },
                 ..
-            } if browsing_context_id == BrowsingContextId::new(9)
-                && matches!(
-                    *event,
-                    BrowsingContextEvent::AuxiliaryWindowOpenRequested {
-                        request_id: 2,
-                        kind: AuxiliaryWindowKind::ExtensionInstallPrompt {
-                            ref extension_id,
-                            ref extension_name,
-                            ref permission_names,
-                        }
-                    } if extension_id == "ext"
-                        && extension_name == "ExtName"
-                        && permission_names == &vec!["tabs".to_string()]
-                )
+            } if source_browsing_context_id == BrowsingContextId::new(9)
+                && extension_id == "ext"
+                && extension_name == "ExtName"
+                && permission_names == &vec!["tabs".to_string()]
         ));
     }
 
@@ -1169,7 +1132,7 @@ mod tests {
     fn prompt_ui_resolved_maps_extension_install_resolution() {
         let event = IpcEvent::PromptUiResolved {
             profile_id: "default".to_string(),
-            browsing_context_id: TabId::new(9),
+            source_tab_id: Some(TabId::new(9)),
             request_id: 5,
             resolution: PromptUiResolution::ExtensionInstallPrompt {
                 extension_id: "ext".to_string(),
@@ -1181,22 +1144,18 @@ mod tests {
         let mapped = map_ipc_event_to_generic(&event).unwrap();
         assert!(matches!(
             mapped,
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event,
+            BrowserEvent::AuxiliaryWindowResolved {
+                request_id: 5,
+                source_browsing_context_id: Some(source_browsing_context_id),
+                resolution: AuxiliaryWindowResolution::ExtensionInstallPrompt {
+                    ref extension_id,
+                    result: ExtensionInstallPromptResult::UserCanceled,
+                    detail: Some(ref detail),
+                },
                 ..
-            } if browsing_context_id == BrowsingContextId::new(9)
-                && matches!(
-                    *event,
-                    BrowsingContextEvent::AuxiliaryWindowResolved {
-                        request_id: 5,
-                        resolution: AuxiliaryWindowResolution::ExtensionInstallPrompt {
-                            ref extension_id,
-                            result: ExtensionInstallPromptResult::UserCanceled,
-                            detail: Some(ref detail),
-                        }
-                    } if extension_id == "ext" && detail == "user dismissed"
-                )
+            } if source_browsing_context_id == BrowsingContextId::new(9)
+                && extension_id == "ext"
+                && detail == "user dismissed"
         ));
     }
 
@@ -1204,7 +1163,7 @@ mod tests {
     fn prompt_ui_opened_maps_into_auxiliary_window_opened() {
         let event = IpcEvent::PromptUiOpened {
             profile_id: "default".to_string(),
-            browsing_context_id: TabId::new(11),
+            source_tab_id: Some(TabId::new(11)),
             prompt_ui_id: PromptUiId::new(88),
             kind: PromptUiKind::PrintPreviewDialog,
             title: Some("Print".to_string()),
@@ -1214,20 +1173,16 @@ mod tests {
         let mapped = map_ipc_event_to_generic(&event).unwrap();
         assert!(matches!(
             mapped,
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event,
+            BrowserEvent::AuxiliaryWindowOpened {
+                source_browsing_context_id: Some(source_browsing_context_id),
+                window_id,
+                kind: AuxiliaryWindowKind::PrintPreviewDialog,
+                title: Some(ref title),
+                modal: true,
                 ..
-            } if browsing_context_id == BrowsingContextId::new(11)
-                && matches!(
-                    *event,
-                    BrowsingContextEvent::AuxiliaryWindowOpened {
-                        window_id,
-                        kind: AuxiliaryWindowKind::PrintPreviewDialog,
-                        title: Some(ref title),
-                        modal: true,
-                    } if window_id == AuxiliaryWindowId::new(88) && title == "Print"
-                )
+            } if source_browsing_context_id == BrowsingContextId::new(11)
+                && window_id == AuxiliaryWindowId::new(88)
+                && title == "Print"
         ));
     }
 
@@ -1235,7 +1190,7 @@ mod tests {
     fn prompt_ui_closed_maps_into_auxiliary_window_closed() {
         let event = IpcEvent::PromptUiClosed {
             profile_id: "default".to_string(),
-            browsing_context_id: TabId::new(11),
+            source_tab_id: Some(TabId::new(11)),
             prompt_ui_id: PromptUiId::new(88),
             kind: PromptUiKind::PrintPreviewDialog,
             reason: PromptUiCloseReason::SystemDismissed,
@@ -1244,19 +1199,14 @@ mod tests {
         let mapped = map_ipc_event_to_generic(&event).unwrap();
         assert!(matches!(
             mapped,
-            BrowserEvent::BrowsingContext {
-                browsing_context_id,
-                event,
+            BrowserEvent::AuxiliaryWindowClosed {
+                source_browsing_context_id: Some(source_browsing_context_id),
+                window_id,
+                kind: AuxiliaryWindowKind::PrintPreviewDialog,
+                reason: AuxiliaryWindowCloseReason::SystemDismissed,
                 ..
-            } if browsing_context_id == BrowsingContextId::new(11)
-                && matches!(
-                    *event,
-                    BrowsingContextEvent::AuxiliaryWindowClosed {
-                        window_id,
-                        kind: AuxiliaryWindowKind::PrintPreviewDialog,
-                        reason: AuxiliaryWindowCloseReason::SystemDismissed,
-                    } if window_id == AuxiliaryWindowId::new(88)
-                )
+            } if source_browsing_context_id == BrowsingContextId::new(11)
+                && window_id == AuxiliaryWindowId::new(88)
         ));
     }
 }

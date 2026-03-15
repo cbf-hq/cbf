@@ -595,16 +595,17 @@ impl<B: Backend> BrowserHandle<B> {
     /// Ask backend to open Chromium default UI for a pending auxiliary request.
     pub fn open_default_auxiliary_window(
         &self,
-        browsing_context_id: BrowsingContextId,
+        profile_id: impl Into<String>,
         request_id: u64,
     ) -> Result<(), Error> {
+        let profile_id = profile_id.into();
         info!(
-            %browsing_context_id,
+            profile_id,
             request_id,
             "dispatch open_default_auxiliary_window"
         );
         self.send(BrowserCommand::OpenDefaultAuxiliaryWindow {
-            browsing_context_id,
+            profile_id,
             request_id,
         })
     }
@@ -612,18 +613,19 @@ impl<B: Backend> BrowserHandle<B> {
     /// Respond to a pending auxiliary request with host-side decision.
     pub fn respond_auxiliary_window(
         &self,
-        browsing_context_id: BrowsingContextId,
+        profile_id: impl Into<String>,
         request_id: u64,
         response: AuxiliaryWindowResponse,
     ) -> Result<(), Error> {
+        let profile_id = profile_id.into();
         info!(
-            %browsing_context_id,
+            profile_id,
             request_id,
             ?response,
             "dispatch respond_auxiliary_window"
         );
         self.send(BrowserCommand::RespondAuxiliaryWindow {
-            browsing_context_id,
+            profile_id,
             request_id,
             response,
         })
@@ -632,12 +634,12 @@ impl<B: Backend> BrowserHandle<B> {
     /// Respond to a permission prompt via the browser-generic auxiliary window API.
     pub fn respond_permission_prompt(
         &self,
-        browsing_context_id: BrowsingContextId,
+        profile_id: impl Into<String>,
         request_id: u64,
         allow: bool,
     ) -> Result<(), Error> {
         self.respond_auxiliary_window(
-            browsing_context_id,
+            profile_id,
             request_id,
             AuxiliaryWindowResponse::PermissionPrompt { allow },
         )
@@ -646,16 +648,17 @@ impl<B: Backend> BrowserHandle<B> {
     /// Close a backend-managed auxiliary window/dialog.
     pub fn close_auxiliary_window(
         &self,
-        browsing_context_id: BrowsingContextId,
+        profile_id: impl Into<String>,
         window_id: AuxiliaryWindowId,
     ) -> Result<(), Error> {
+        let profile_id = profile_id.into();
         info!(
-            %browsing_context_id,
+            profile_id,
             ?window_id,
             "dispatch close_auxiliary_window"
         );
         self.send(BrowserCommand::CloseAuxiliaryWindow {
-            browsing_context_id,
+            profile_id,
             window_id,
         })
     }
@@ -754,7 +757,11 @@ impl<B: Backend> BrowserHandle<B> {
         request_id: u64,
         allow: bool,
     ) -> Result<(), Error> {
-        self.respond_permission_prompt(browsing_context_id, request_id, allow)
+        self.send(BrowserCommand::ConfirmPermission {
+            browsing_context_id,
+            request_id,
+            allow,
+        })
     }
 
     /// Force shutdown without waiting for confirmations.

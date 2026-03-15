@@ -107,6 +107,41 @@ pub enum BrowserEvent {
         extensions: Vec<ExtensionInfo>,
     },
 
+    /// Auxiliary window open was requested and host must choose flow.
+    AuxiliaryWindowOpenRequested {
+        profile_id: String,
+        request_id: u64,
+        source_browsing_context_id: Option<BrowsingContextId>,
+        kind: AuxiliaryWindowKind,
+    },
+
+    /// Auxiliary window request was resolved.
+    AuxiliaryWindowResolved {
+        profile_id: String,
+        request_id: u64,
+        source_browsing_context_id: Option<BrowsingContextId>,
+        resolution: AuxiliaryWindowResolution,
+    },
+
+    /// Backend-managed auxiliary window/dialog was opened.
+    AuxiliaryWindowOpened {
+        profile_id: String,
+        source_browsing_context_id: Option<BrowsingContextId>,
+        window_id: AuxiliaryWindowId,
+        kind: AuxiliaryWindowKind,
+        title: Option<String>,
+        modal: bool,
+    },
+
+    /// Backend-managed auxiliary window/dialog was closed.
+    AuxiliaryWindowClosed {
+        profile_id: String,
+        source_browsing_context_id: Option<BrowsingContextId>,
+        window_id: AuxiliaryWindowId,
+        kind: AuxiliaryWindowKind,
+        reason: AuxiliaryWindowCloseReason,
+    },
+
     /// A download became visible to the host lifecycle.
     DownloadCreated {
         profile_id: String,
@@ -257,33 +292,6 @@ pub enum BrowsingContextEvent {
     ///
     /// Carries browser-generic drag payload only.
     DragStartRequested { request: DragStartRequest },
-
-    /// Auxiliary window open was requested and host must choose flow.
-    AuxiliaryWindowOpenRequested {
-        request_id: u64,
-        kind: AuxiliaryWindowKind,
-    },
-
-    /// Auxiliary window request was resolved.
-    AuxiliaryWindowResolved {
-        request_id: u64,
-        resolution: AuxiliaryWindowResolution,
-    },
-
-    /// Backend-managed auxiliary window/dialog was opened.
-    AuxiliaryWindowOpened {
-        window_id: AuxiliaryWindowId,
-        kind: AuxiliaryWindowKind,
-        title: Option<String>,
-        modal: bool,
-    },
-
-    /// Backend-managed auxiliary window/dialog was closed.
-    AuxiliaryWindowClosed {
-        window_id: AuxiliaryWindowId,
-        kind: AuxiliaryWindowKind,
-        reason: AuxiliaryWindowCloseReason,
-    },
 
     /// Non-fatal extension runtime warning.
     ExtensionRuntimeWarning { detail: String },

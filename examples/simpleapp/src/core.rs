@@ -851,6 +851,112 @@ impl CoreState {
                 info!("window closed: {window_id}");
                 Vec::new()
             }
+            BrowserEvent::AuxiliaryWindowOpenRequested {
+                profile_id,
+                request_id,
+                source_browsing_context_id,
+                kind,
+            } => {
+                info!(
+                    "auxiliary open requested: profile_id={profile_id}, request_id={request_id}, source={source_browsing_context_id:?}, kind={kind:?}"
+                );
+
+                if let AuxiliaryWindowKind::PermissionPrompt { permission } = &kind {
+                    let allow = show_permission_prompt_dialog(permission);
+                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
+                        profile_id,
+                        request_id,
+                        AuxiliaryWindowResponse::PermissionPrompt { allow },
+                    ) {
+                        warn!("failed to respond permission prompt request_id={request_id}: {err}");
+                    }
+                    return Vec::new();
+                }
+
+                if let AuxiliaryWindowKind::DownloadPrompt {
+                    download_id,
+                    file_name,
+                    total_bytes: _,
+                    suggested_path,
+                    action_hint,
+                } = &kind
+                {
+                    let response = download_prompt_response_for_simpleapp(
+                        *action_hint,
+                        file_name,
+                        suggested_path,
+                        self.cli.download_dir.as_deref(),
+                    );
+                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
+                        profile_id,
+                        request_id,
+                        response,
+                    ) {
+                        warn!(
+                            "failed to respond download prompt request_id={request_id}, download_id={download_id:?}: {err}"
+                        );
+                    }
+                    return Vec::new();
+                }
+
+                if let AuxiliaryWindowKind::ExtensionInstallPrompt {
+                    extension_name,
+                    permission_names,
+                    ..
+                } = &kind
+                {
+                    let proceed =
+                        show_extension_install_prompt_dialog(extension_name, permission_names);
+                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
+                        profile_id,
+                        request_id,
+                        AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed },
+                    ) {
+                        warn!(
+                            "failed to respond extension install prompt request_id={request_id}: {err}"
+                        );
+                    }
+                    return Vec::new();
+                }
+
+                Vec::new()
+            }
+            BrowserEvent::AuxiliaryWindowResolved {
+                profile_id,
+                request_id,
+                source_browsing_context_id,
+                resolution,
+            } => {
+                info!(
+                    "auxiliary resolved: profile_id={profile_id}, request_id={request_id}, source={source_browsing_context_id:?}, resolution={resolution:?}"
+                );
+                Vec::new()
+            }
+            BrowserEvent::AuxiliaryWindowOpened {
+                profile_id,
+                source_browsing_context_id,
+                window_id,
+                kind,
+                title,
+                modal,
+            } => {
+                info!(
+                    "auxiliary opened: profile_id={profile_id}, source={source_browsing_context_id:?}, window_id={window_id:?}, kind={kind:?}, title={title:?}, modal={modal}"
+                );
+                Vec::new()
+            }
+            BrowserEvent::AuxiliaryWindowClosed {
+                profile_id,
+                source_browsing_context_id,
+                window_id,
+                kind,
+                reason,
+            } => {
+                info!(
+                    "auxiliary closed: profile_id={profile_id}, source={source_browsing_context_id:?}, window_id={window_id:?}, kind={kind:?}, reason={reason:?}"
+                );
+                Vec::new()
+            }
             BrowserEvent::ProfilesListed { .. } => Vec::new(),
             BrowserEvent::ShutdownBlocked {
                 request_id,
@@ -1208,97 +1314,6 @@ impl CoreState {
                     actions.push(CoreAction::ExitEventLoop);
                 }
                 actions
-            }
-            BrowsingContextEvent::AuxiliaryWindowOpenRequested { request_id, kind } => {
-                info!("auxiliary open requested: request_id={request_id}, kind={kind:?}");
-
-                if let AuxiliaryWindowKind::PermissionPrompt { permission } = &kind {
-                    let allow = show_permission_prompt_dialog(permission);
-                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
-                        browsing_context_id,
-                        request_id,
-                        AuxiliaryWindowResponse::PermissionPrompt { allow },
-                    ) {
-                        warn!("failed to respond permission prompt request_id={request_id}: {err}");
-                    }
-                    return Vec::new();
-                }
-
-                if let AuxiliaryWindowKind::DownloadPrompt {
-                    download_id,
-                    file_name,
-                    total_bytes: _,
-                    suggested_path,
-                    action_hint,
-                } = &kind
-                {
-                    let response = download_prompt_response_for_simpleapp(
-                        *action_hint,
-                        file_name,
-                        suggested_path,
-                        self.cli.download_dir.as_deref(),
-                    );
-                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
-                        browsing_context_id,
-                        request_id,
-                        response,
-                    ) {
-                        warn!(
-                            "failed to respond download prompt request_id={request_id}, download_id={download_id:?}: {err}"
-                        );
-                    }
-                    return Vec::new();
-                }
-
-                if let AuxiliaryWindowKind::ExtensionInstallPrompt {
-                    extension_name,
-                    permission_names,
-                    ..
-                } = &kind
-                {
-                    let proceed =
-                        show_extension_install_prompt_dialog(extension_name, permission_names);
-                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
-                        browsing_context_id,
-                        request_id,
-                        AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed },
-                    ) {
-                        warn!(
-                            "failed to respond extension install prompt request_id={request_id}: {err}"
-                        );
-                    }
-                    return Vec::new();
-                }
-
-                Vec::new()
-            }
-            BrowsingContextEvent::AuxiliaryWindowResolved {
-                request_id,
-                resolution,
-            } => {
-                info!("auxiliary resolved: request_id={request_id}, resolution={resolution:?}");
-                Vec::new()
-            }
-            BrowsingContextEvent::AuxiliaryWindowOpened {
-                window_id,
-                kind,
-                title,
-                modal,
-            } => {
-                info!(
-                    "auxiliary opened: window_id={window_id:?}, kind={kind:?}, title={title:?}, modal={modal}"
-                );
-                Vec::new()
-            }
-            BrowsingContextEvent::AuxiliaryWindowClosed {
-                window_id,
-                kind,
-                reason,
-            } => {
-                info!(
-                    "auxiliary closed: window_id={window_id:?}, kind={kind:?}, reason={reason:?}"
-                );
-                Vec::new()
             }
             BrowsingContextEvent::SelectionChanged { .. }
             | BrowsingContextEvent::ScrollPositionChanged { .. }

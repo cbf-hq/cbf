@@ -949,7 +949,7 @@ impl ChromiumBackend {
                 request_id,
                 allow,
             } => client
-                .respond_prompt_ui(
+                .respond_prompt_ui_for_tab(
                     *browsing_context_id,
                     *request_id,
                     &PromptUiResponse::PermissionPrompt { allow: *allow },
@@ -1159,23 +1159,23 @@ impl ChromiumBackend {
                 .set_tab_focus(*browsing_context_id, *focused)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::OpenDefaultPromptUi {
-                browsing_context_id,
+                profile_id,
                 request_id,
             } => client
-                .open_default_prompt_ui(*browsing_context_id, *request_id)
+                .open_default_prompt_ui(profile_id, *request_id)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::RespondPromptUi {
-                browsing_context_id,
+                profile_id,
                 request_id,
                 response,
             } => client
-                .respond_prompt_ui(*browsing_context_id, *request_id, response)
+                .respond_prompt_ui(profile_id, *request_id, response)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::ClosePromptUi {
-                browsing_context_id,
+                profile_id,
                 prompt_ui_id,
             } => client
-                .close_prompt_ui(*browsing_context_id, *prompt_ui_id)
+                .close_prompt_ui(profile_id, *prompt_ui_id)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::RespondTabOpen {
                 request_id,

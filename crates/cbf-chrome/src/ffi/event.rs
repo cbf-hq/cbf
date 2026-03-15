@@ -292,14 +292,14 @@ pub enum IpcEvent {
     /// Prompt UI open was requested and host must choose flow.
     PromptUiOpenRequested {
         profile_id: String,
-        browsing_context_id: TabId,
+        source_tab_id: Option<TabId>,
         request_id: u64,
         kind: PromptUiKind,
     },
     /// Prompt UI request was resolved.
     PromptUiResolved {
         profile_id: String,
-        browsing_context_id: TabId,
+        source_tab_id: Option<TabId>,
         request_id: u64,
         resolution: PromptUiResolution,
     },
@@ -314,7 +314,7 @@ pub enum IpcEvent {
     /// Backend-managed prompt UI surface was opened.
     PromptUiOpened {
         profile_id: String,
-        browsing_context_id: TabId,
+        source_tab_id: Option<TabId>,
         prompt_ui_id: PromptUiId,
         kind: PromptUiKind,
         title: Option<String>,
@@ -323,7 +323,7 @@ pub enum IpcEvent {
     /// Backend-managed prompt UI surface was closed.
     PromptUiClosed {
         profile_id: String,
-        browsing_context_id: TabId,
+        source_tab_id: Option<TabId>,
         prompt_ui_id: PromptUiId,
         kind: PromptUiKind,
         reason: PromptUiCloseReason,

@@ -1,7 +1,7 @@
 From dede5dceb9b68c8d3c339f1a1f25b8507303dfb1 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 5 Mar 2026 12:21:24 +0900
-Subject: [PATCH 16/25] Rename browsing-context-open bridge vocabulary to
+Subject: [PATCH 16/26] Rename browsing-context-open bridge vocabulary to
  tab-open
 
 ---

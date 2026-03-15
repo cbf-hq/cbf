@@ -289,7 +289,9 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_AUXILIARY_WINDOW_OPEN_REQUESTED => Ok(IpcEvent::PromptUiOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: TabId::new(event.tab_id),
+            source_tab_id: event
+                .prompt_ui_has_source_tab_id
+                .then(|| TabId::new(event.prompt_ui_source_tab_id)),
             request_id: event.request_id,
             kind: prompt_ui_kind_from_auxiliary_window_ffi(
                 event.auxiliary_window_kind,
@@ -300,7 +302,9 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_AUXILIARY_WINDOW_RESOLVED => Ok(IpcEvent::PromptUiResolved {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: TabId::new(event.tab_id),
+            source_tab_id: event
+                .prompt_ui_has_source_tab_id
+                .then(|| TabId::new(event.prompt_ui_source_tab_id)),
             request_id: event.request_id,
             resolution: prompt_ui_resolution_from_auxiliary_window_ffi(
                 event.auxiliary_window_kind,
@@ -311,7 +315,9 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_PROMPT_UI_REQUESTED => Ok(IpcEvent::PromptUiOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: TabId::new(event.tab_id),
+            source_tab_id: event
+                .prompt_ui_has_source_tab_id
+                .then(|| TabId::new(event.prompt_ui_source_tab_id)),
             request_id: event.request_id,
             kind: prompt_ui_kind_from_ffi(
                 event.prompt_ui_kind,
@@ -330,7 +336,9 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_PROMPT_UI_RESOLVED => Ok(IpcEvent::PromptUiResolved {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: TabId::new(event.tab_id),
+            source_tab_id: event
+                .prompt_ui_has_source_tab_id
+                .then(|| TabId::new(event.prompt_ui_source_tab_id)),
             request_id: event.request_id,
             resolution: prompt_ui_resolution_from_ffi(
                 event.prompt_ui_kind,
@@ -351,7 +359,9 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_PROMPT_UI_OPENED => Ok(IpcEvent::PromptUiOpened {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: TabId::new(event.tab_id),
+            source_tab_id: event
+                .prompt_ui_has_source_tab_id
+                .then(|| TabId::new(event.prompt_ui_source_tab_id)),
             prompt_ui_id: PromptUiId::new(event.auxiliary_window_id),
             kind: prompt_ui_kind_from_auxiliary_window_ffi(
                 event.auxiliary_window_kind,
@@ -367,7 +377,9 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
         }),
         CBF_EVENT_PROMPT_UI_CLOSED => Ok(IpcEvent::PromptUiClosed {
             profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: TabId::new(event.tab_id),
+            source_tab_id: event
+                .prompt_ui_has_source_tab_id
+                .then(|| TabId::new(event.prompt_ui_source_tab_id)),
             prompt_ui_id: PromptUiId::new(event.auxiliary_window_id),
             kind: prompt_ui_kind_from_auxiliary_window_ffi(
                 event.auxiliary_window_kind,
@@ -1576,7 +1588,8 @@ mod tests {
     #[test]
     fn parse_event_prompt_ui_open_requested_maps_permission_kind() {
         let mut event = make_event(CBF_EVENT_PROMPT_UI_OPEN_REQUESTED);
-        event.tab_id = 21;
+        event.prompt_ui_has_source_tab_id = true;
+        event.prompt_ui_source_tab_id = 21;
         event.request_id = 99;
         event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PERMISSION_PROMPT;
         event.prompt_ui_permission = CBF_PROMPT_UI_PERMISSION_TYPE_GEOLOCATION;
@@ -1587,14 +1600,14 @@ mod tests {
         assert!(matches!(
             parsed,
             IpcEvent::PromptUiOpenRequested {
-                browsing_context_id,
+                source_tab_id: Some(source_tab_id),
                 request_id,
                 kind: PromptUiKind::PermissionPrompt {
                     permission: PromptUiPermissionType::Geolocation,
                     permission_key: Some(ref permission_key),
                 },
                 ..
-            } if browsing_context_id == TabId::new(21)
+            } if source_tab_id == TabId::new(21)
                 && request_id == 99
                 && permission_key == "geolocation"
         ));
@@ -1603,7 +1616,8 @@ mod tests {
     #[test]
     fn parse_event_prompt_ui_open_requested_maps_download_kind() {
         let mut event = make_event(CBF_EVENT_PROMPT_UI_OPEN_REQUESTED);
-        event.tab_id = 31;
+        event.prompt_ui_has_source_tab_id = true;
+        event.prompt_ui_source_tab_id = 31;
         event.request_id = 109;
         event.prompt_ui_kind = CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT;
         event.download_reason = CBF_DOWNLOAD_PROMPT_REASON_SAVE_AS;
@@ -1619,7 +1633,7 @@ mod tests {
         assert!(matches!(
             parsed,
             IpcEvent::PromptUiOpenRequested {
-                browsing_context_id,
+                source_tab_id: Some(source_tab_id),
                 request_id,
                 kind: PromptUiKind::DownloadPrompt {
                     download_id,
@@ -1629,7 +1643,7 @@ mod tests {
                     reason: crate::data::download::ChromeDownloadPromptReason::SaveAs,
                 },
                 ..
-            } if browsing_context_id == TabId::new(31)
+            } if source_tab_id == TabId::new(31)
                 && request_id == 109
                 && download_id == crate::data::download::ChromeDownloadId::new(55)
                 && file_name == "sample.zip"
@@ -1664,7 +1678,8 @@ mod tests {
     #[test]
     fn parse_event_prompt_ui_resolved_maps_result() {
         let mut event = make_event(CBF_EVENT_PROMPT_UI_RESOLVED);
-        event.tab_id = 18;
+        event.prompt_ui_has_source_tab_id = true;
+        event.prompt_ui_source_tab_id = 18;
         event.request_id = 77;
         event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PERMISSION_PROMPT;
         event.prompt_ui_permission = CBF_PROMPT_UI_PERMISSION_TYPE_NOTIFICATIONS;
@@ -1676,7 +1691,7 @@ mod tests {
         assert!(matches!(
             parsed,
             IpcEvent::PromptUiResolved {
-                browsing_context_id,
+                source_tab_id: Some(source_tab_id),
                 request_id,
                 resolution: PromptUiResolution::PermissionPrompt {
                     permission: PromptUiPermissionType::Notifications,
@@ -1684,7 +1699,7 @@ mod tests {
                     result: PromptUiResolutionResult::Denied
                 },
                 ..
-            } if browsing_context_id == TabId::new(18)
+            } if source_tab_id == TabId::new(18)
                 && request_id == 77
                 && permission_key == "notifications"
         ));
@@ -1693,7 +1708,8 @@ mod tests {
     #[test]
     fn parse_event_prompt_ui_opened_maps_extension_kind_and_metadata() {
         let mut event = make_event(CBF_EVENT_PROMPT_UI_OPENED);
-        event.tab_id = 12;
+        event.prompt_ui_has_source_tab_id = true;
+        event.prompt_ui_source_tab_id = 12;
         event.auxiliary_window_id = 44;
         event.auxiliary_window_kind = CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT;
         event.auxiliary_window_title = CString::new("Install extension").unwrap().into_raw();
@@ -1718,13 +1734,13 @@ mod tests {
         assert!(matches!(
             parsed,
             IpcEvent::PromptUiOpened {
-                browsing_context_id,
+                source_tab_id: Some(source_tab_id),
                 prompt_ui_id,
                 kind: PromptUiKind::ExtensionInstallPrompt { extension_id, extension_name, permission_names },
                 title: Some(ref title),
                 modal,
                 ..
-            } if browsing_context_id == TabId::new(12)
+            } if source_tab_id == TabId::new(12)
                 && prompt_ui_id == PromptUiId::new(44)
                 && extension_id == "ext-id"
                 && extension_name == "Ext"
@@ -1842,7 +1858,8 @@ mod tests {
     #[test]
     fn parse_event_prompt_ui_closed_maps_reason() {
         let mut event = make_event(CBF_EVENT_PROMPT_UI_CLOSED);
-        event.tab_id = 8;
+        event.prompt_ui_has_source_tab_id = true;
+        event.prompt_ui_source_tab_id = 8;
         event.auxiliary_window_id = 19;
         event.auxiliary_window_kind = CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG;
         event.auxiliary_window_close_reason = CBF_PROMPT_UI_CLOSE_REASON_HOST_FORCED;
@@ -1851,12 +1868,12 @@ mod tests {
         assert!(matches!(
             parsed,
             IpcEvent::PromptUiClosed {
-                browsing_context_id,
+                source_tab_id: Some(source_tab_id),
                 prompt_ui_id,
                 kind: PromptUiKind::PrintPreviewDialog,
                 reason: PromptUiCloseReason::HostForced,
                 ..
-            } if browsing_context_id == TabId::new(8)
+            } if source_tab_id == TabId::new(8)
                 && prompt_ui_id == PromptUiId::new(19)
         ));
     }
@@ -1864,7 +1881,8 @@ mod tests {
     #[test]
     fn parse_event_prompt_ui_resolved_maps_extension_install_result() {
         let mut event = make_event(CBF_EVENT_PROMPT_UI_RESOLVED);
-        event.tab_id = 99;
+        event.prompt_ui_has_source_tab_id = true;
+        event.prompt_ui_source_tab_id = 99;
         event.request_id = 101;
         event.prompt_ui_kind = CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT;
         event.extension_id = CString::new("abc").unwrap().into_raw();
@@ -1876,7 +1894,7 @@ mod tests {
         assert!(matches!(
             parsed,
             IpcEvent::PromptUiResolved {
-                browsing_context_id,
+                source_tab_id: Some(source_tab_id),
                 request_id,
                 resolution: PromptUiResolution::ExtensionInstallPrompt {
                     extension_id,
@@ -1884,7 +1902,7 @@ mod tests {
                     detail: Some(ref detail),
                 },
                 ..
-            } if browsing_context_id == TabId::new(99)
+            } if source_tab_id == TabId::new(99)
                 && request_id == 101
                 && extension_id == "abc"
                 && detail == "withheld"
@@ -1894,7 +1912,8 @@ mod tests {
     #[test]
     fn parse_event_prompt_ui_resolved_maps_print_preview_result() {
         let mut event = make_event(CBF_EVENT_PROMPT_UI_RESOLVED);
-        event.tab_id = 41;
+        event.prompt_ui_has_source_tab_id = true;
+        event.prompt_ui_source_tab_id = 41;
         event.request_id = 51;
         event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG;
         event.prompt_ui_result = CBF_PROMPT_UI_DIALOG_RESULT_CANCELED;
@@ -1903,13 +1922,13 @@ mod tests {
         assert!(matches!(
             parsed,
             IpcEvent::PromptUiResolved {
-                browsing_context_id,
+                source_tab_id: Some(source_tab_id),
                 request_id,
                 resolution: PromptUiResolution::PrintPreviewDialog {
                     result: PromptUiDialogResult::Canceled,
                 },
                 ..
-            } if browsing_context_id == TabId::new(41)
+            } if source_tab_id == TabId::new(41)
                 && request_id == 51
         ));
     }
@@ -1917,7 +1936,8 @@ mod tests {
     #[test]
     fn parse_event_auxiliary_window_open_requested_maps_extension_kind() {
         let mut event = make_event(CBF_EVENT_AUXILIARY_WINDOW_OPEN_REQUESTED);
-        event.tab_id = 64;
+        event.prompt_ui_has_source_tab_id = true;
+        event.prompt_ui_source_tab_id = 64;
         event.request_id = 808;
         event.auxiliary_window_kind = CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT;
         event.extension_id = CString::new("ext-aux").unwrap().into_raw();
@@ -1927,11 +1947,11 @@ mod tests {
         assert!(matches!(
             parsed,
             IpcEvent::PromptUiOpenRequested {
-                browsing_context_id,
+                source_tab_id: Some(source_tab_id),
                 request_id,
                 kind: PromptUiKind::ExtensionInstallPrompt { extension_id, extension_name, .. },
                 ..
-            } if browsing_context_id == TabId::new(64)
+            } if source_tab_id == TabId::new(64)
                 && request_id == 808
                 && extension_id == "ext-aux"
                 && extension_name == "AuxExt"

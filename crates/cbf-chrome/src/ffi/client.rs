@@ -544,21 +544,22 @@ impl IpcClient {
     /// Open Chromium default PromptUi for pending request.
     pub fn open_default_prompt_ui(
         &mut self,
-        browsing_context_id: TabId,
+        profile_id: &str,
         request_id: u64,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
+        let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
         debug!(
-            %browsing_context_id,
+            profile_id = profile_id.to_string_lossy().as_ref(),
             request_id,
             "ffi open_default_prompt_ui"
         );
         if unsafe {
             cbf_bridge_client_open_default_prompt_ui(
                 self.inner,
-                browsing_context_id.get(),
+                profile_id.as_ptr(),
                 request_id,
             )
         } {
@@ -570,6 +571,63 @@ impl IpcClient {
 
     /// Respond to a pending chrome-specific PromptUi request.
     pub fn respond_prompt_ui(
+        &mut self,
+        profile_id: &str,
+        request_id: u64,
+        response: &PromptUiResponse,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+        let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
+        let (prompt_ui_kind, proceed, destination_path) = match response {
+            PromptUiResponse::PermissionPrompt { allow } => {
+                (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow, None)
+            }
+            PromptUiResponse::DownloadPrompt {
+                allow,
+                destination_path,
+            } => (
+                CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT,
+                *allow,
+                to_optional_cstring(destination_path)?,
+            ),
+            PromptUiResponse::ExtensionInstallPrompt { proceed } => {
+                (CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT, *proceed, None)
+            }
+            PromptUiResponse::PrintPreviewDialog { proceed } => {
+                (CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG, *proceed, None)
+            }
+            PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None),
+        };
+        debug!(
+            profile_id = profile_id.to_string_lossy().as_ref(),
+            request_id,
+            prompt_ui_kind,
+            proceed,
+            ?response,
+            "ffi respond_prompt_ui"
+        );
+        if unsafe {
+            cbf_bridge_client_respond_prompt_ui(
+                self.inner,
+                profile_id.as_ptr(),
+                request_id,
+                prompt_ui_kind,
+                proceed,
+                destination_path
+                    .as_ref()
+                    .map_or(ptr::null(), |path| path.as_ptr()),
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Respond to a page-originated prompt by resolving profile on the bridge side.
+    pub fn respond_prompt_ui_for_tab(
         &mut self,
         browsing_context_id: TabId,
         request_id: u64,
@@ -598,16 +656,8 @@ impl IpcClient {
             }
             PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None),
         };
-        debug!(
-            %browsing_context_id,
-            request_id,
-            prompt_ui_kind,
-            proceed,
-            ?response,
-            "ffi respond_prompt_ui"
-        );
         if unsafe {
-            cbf_bridge_client_respond_prompt_ui(
+            cbf_bridge_client_respond_prompt_ui_for_tab(
                 self.inner,
                 browsing_context_id.get(),
                 request_id,
@@ -627,21 +677,22 @@ impl IpcClient {
     /// Close a backend-managed PromptUi surface.
     pub fn close_prompt_ui(
         &mut self,
-        browsing_context_id: TabId,
+        profile_id: &str,
         prompt_ui_id: PromptUiId,
     ) -> Result<(), Error> {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
+        let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
         debug!(
-            %browsing_context_id,
+            profile_id = profile_id.to_string_lossy().as_ref(),
             ?prompt_ui_id,
             "ffi close_prompt_ui"
         );
         if unsafe {
             cbf_bridge_client_close_prompt_ui(
                 self.inner,
-                browsing_context_id.get(),
+                profile_id.as_ptr(),
                 prompt_ui_id.get(),
             )
         } {

@@ -234,20 +234,20 @@ pub enum BrowserCommand {
 
     /// Ask backend to open Chromium's default UI for a pending auxiliary request.
     OpenDefaultAuxiliaryWindow {
-        browsing_context_id: BrowsingContextId,
+        profile_id: String,
         request_id: u64,
     },
 
     /// Respond to a pending auxiliary request with host-provided decision.
     RespondAuxiliaryWindow {
-        browsing_context_id: BrowsingContextId,
+        profile_id: String,
         request_id: u64,
         response: AuxiliaryWindowResponse,
     },
 
     /// Request backend to close an auxiliary window/dialog.
     CloseAuxiliaryWindow {
-        browsing_context_id: BrowsingContextId,
+        profile_id: String,
         window_id: AuxiliaryWindowId,
     },
 

@@ -200,16 +200,16 @@ pub enum ChromeCommand {
         behavior: ChromeConfirmCompositionBehavior,
     },
     OpenDefaultPromptUi {
-        browsing_context_id: TabId,
+        profile_id: String,
         request_id: u64,
     },
     RespondPromptUi {
-        browsing_context_id: TabId,
+        profile_id: String,
         request_id: u64,
         response: PromptUiResponse,
     },
     ClosePromptUi {
-        browsing_context_id: TabId,
+        profile_id: String,
         prompt_ui_id: PromptUiId,
     },
     RespondTabOpen {
@@ -268,10 +268,10 @@ impl From<BrowserCommand> for ChromeCommand {
                 browsing_context_id,
                 request_id,
                 allow,
-            } => Self::RespondPromptUi {
+            } => Self::ConfirmPermission {
                 browsing_context_id: browsing_context_id.into(),
                 request_id,
-                response: PromptUiResponse::PermissionPrompt { allow },
+                allow,
             },
             BrowserCommand::CreateBrowsingContext {
                 request_id,
@@ -477,20 +477,20 @@ impl From<BrowserCommand> for ChromeCommand {
             },
             BrowserCommand::ListExtensions { profile_id } => Self::ListExtensions { profile_id },
             BrowserCommand::OpenDefaultAuxiliaryWindow {
-                browsing_context_id,
+                profile_id,
                 request_id,
             } => Self::OpenDefaultPromptUi {
-                browsing_context_id: browsing_context_id.into(),
+                profile_id,
                 request_id,
             },
             BrowserCommand::RespondAuxiliaryWindow {
-                browsing_context_id,
+                profile_id,
                 request_id,
                 response,
             } => match ChromeAuxiliaryWindowResponse::from(response) {
                 ChromeAuxiliaryWindowResponse::PermissionPrompt { allow } => {
                     Self::RespondPromptUi {
-                        browsing_context_id: browsing_context_id.into(),
+                        profile_id,
                         request_id,
                         response: PromptUiResponse::PermissionPrompt { allow },
                     }
@@ -499,7 +499,7 @@ impl From<BrowserCommand> for ChromeCommand {
                     allow,
                     destination_path,
                 } => Self::RespondPromptUi {
-                    browsing_context_id: browsing_context_id.into(),
+                    profile_id,
                     request_id,
                     response: PromptUiResponse::DownloadPrompt {
                         allow,
@@ -508,22 +508,22 @@ impl From<BrowserCommand> for ChromeCommand {
                 },
                 ChromeAuxiliaryWindowResponse::ExtensionInstallPrompt { proceed } => {
                     Self::RespondPromptUi {
-                        browsing_context_id: browsing_context_id.into(),
+                        profile_id,
                         request_id,
                         response: PromptUiResponse::ExtensionInstallPrompt { proceed },
                     }
                 }
                 ChromeAuxiliaryWindowResponse::Unknown => Self::RespondPromptUi {
-                    browsing_context_id: browsing_context_id.into(),
+                    profile_id,
                     request_id,
                     response: PromptUiResponse::Unknown,
                 },
             },
             BrowserCommand::CloseAuxiliaryWindow {
-                browsing_context_id,
+                profile_id,
                 window_id,
             } => Self::ClosePromptUi {
-                browsing_context_id: browsing_context_id.into(),
+                profile_id,
                 prompt_ui_id: PromptUiId::new(window_id.get()),
             },
             BrowserCommand::RespondBrowsingContextOpen {
@@ -586,10 +586,10 @@ mod tests {
         let raw: ChromeCommand = command.into();
         assert!(matches!(
             raw,
-            ChromeCommand::RespondPromptUi {
+            ChromeCommand::ConfirmPermission {
                 browsing_context_id,
                 request_id,
-                response: PromptUiResponse::PermissionPrompt { allow: true },
+                allow: true,
             } if browsing_context_id == TabId::new(9) && request_id == 77
         ));
     }
@@ -597,7 +597,7 @@ mod tests {
     #[test]
     fn permission_auxiliary_response_maps_to_prompt_ui_response() {
         let command = BrowserCommand::RespondAuxiliaryWindow {
-            browsing_context_id: BrowsingContextId::new(13),
+            profile_id: "profile-a".to_string(),
             request_id: 81,
             response: AuxiliaryWindowResponse::PermissionPrompt { allow: false },
         };
@@ -606,17 +606,17 @@ mod tests {
         assert!(matches!(
             raw,
             ChromeCommand::RespondPromptUi {
-                browsing_context_id,
+                profile_id,
                 request_id,
                 response: PromptUiResponse::PermissionPrompt { allow: false },
-            } if browsing_context_id == TabId::new(13) && request_id == 81
+            } if profile_id == "profile-a" && request_id == 81
         ));
     }
 
     #[test]
     fn extension_auxiliary_response_maps_to_prompt_ui_response() {
         let command = BrowserCommand::RespondAuxiliaryWindow {
-            browsing_context_id: BrowsingContextId::new(14),
+            profile_id: "profile-b".to_string(),
             request_id: 82,
             response: AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed: true },
         };
@@ -625,17 +625,17 @@ mod tests {
         assert!(matches!(
             raw,
             ChromeCommand::RespondPromptUi {
-                browsing_context_id,
+                profile_id,
                 request_id,
                 response: PromptUiResponse::ExtensionInstallPrompt { proceed: true },
-            } if browsing_context_id == TabId::new(14) && request_id == 82
+            } if profile_id == "profile-b" && request_id == 82
         ));
     }
 
     #[test]
     fn close_auxiliary_window_maps_to_prompt_ui_close() {
         let command = BrowserCommand::CloseAuxiliaryWindow {
-            browsing_context_id: BrowsingContextId::new(15),
+            profile_id: "profile-c".to_string(),
             window_id: cbf::data::extension::AuxiliaryWindowId::new(33),
         };
 
@@ -643,9 +643,9 @@ mod tests {
         assert!(matches!(
             raw,
             ChromeCommand::ClosePromptUi {
-                browsing_context_id,
+                profile_id,
                 prompt_ui_id,
-            } if browsing_context_id == TabId::new(15) && prompt_ui_id == PromptUiId::new(33)
+            } if profile_id == "profile-c" && prompt_ui_id == PromptUiId::new(33)
         ));
     }
 
