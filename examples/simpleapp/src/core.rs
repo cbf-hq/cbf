@@ -1250,24 +1250,25 @@ impl CoreState {
                     return Vec::new();
                 }
 
-                // Extension install prompts
-                if matches!(kind, AuxiliaryWindowKind::ExtensionInstallPrompt { .. })
-                    && self
-                        .browser_handle()
-                        .open_default_auxiliary_window(browsing_context_id, request_id)
-                        .is_err()
+                if let AuxiliaryWindowKind::ExtensionInstallPrompt {
+                    extension_name,
+                    permission_names,
+                    ..
+                } = &kind
                 {
-                    // Best-effort
-                    warn!("failed to open default auxiliary window for request_id={request_id}");
-
-                    self.browser_handle()
-                        .respond_auxiliary_window(
-                            browsing_context_id,
-                            request_id,
-                            AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed: false },
-                        )
-                        .ok();
-                };
+                    let proceed =
+                        show_extension_install_prompt_dialog(extension_name, permission_names);
+                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
+                        browsing_context_id,
+                        request_id,
+                        AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed },
+                    ) {
+                        warn!(
+                            "failed to respond extension install prompt request_id={request_id}: {err}"
+                        );
+                    }
+                    return Vec::new();
+                }
 
                 Vec::new()
             }
@@ -1606,6 +1607,43 @@ fn show_permission_prompt_dialog(permission: &cbf::data::extension::PermissionPr
     matches!(result, MessageDialogResult::Yes)
 }
 
+fn build_extension_install_prompt_message(
+    extension_name: &str,
+    permission_names: &[String],
+) -> String {
+    let trimmed_name = extension_name.trim();
+    let display_name = if trimmed_name.is_empty() {
+        "This extension".to_string()
+    } else {
+        format!("\"{trimmed_name}\"")
+    };
+
+    if permission_names.is_empty() {
+        return format!("{display_name} wants to be installed.\n\nAllow this extension?");
+    }
+
+    let permissions = permission_names.join("\n- ");
+    format!(
+        "{display_name} wants to be installed.\n\nRequested permissions:\n- {permissions}\n\nAllow this extension?"
+    )
+}
+
+fn show_extension_install_prompt_dialog(
+    extension_name: &str,
+    permission_names: &[String],
+) -> bool {
+    let message = build_extension_install_prompt_message(extension_name, permission_names);
+
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Info)
+        .set_title("Extension Install Request")
+        .set_description(&message)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+
+    matches!(result, MessageDialogResult::Yes)
+}
+
 fn show_download_save_as_dialog(
     file_name: &str,
     suggested_path: &Option<String>,
@@ -1737,6 +1775,26 @@ fn permission_prompt_description(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_extension_install_prompt_message_includes_extension_name() {
+        let message = build_extension_install_prompt_message("Example Extension", &[]);
+
+        assert!(message.contains("\"Example Extension\" wants to be installed."));
+        assert!(message.contains("Allow this extension?"));
+    }
+
+    #[test]
+    fn build_extension_install_prompt_message_lists_permissions() {
+        let message = build_extension_install_prompt_message(
+            "Example Extension",
+            &["tabs".to_string(), "storage".to_string()],
+        );
+
+        assert!(message.contains("Requested permissions:"));
+        assert!(message.contains("- tabs"));
+        assert!(message.contains("- storage"));
+    }
 
     #[test]
     fn build_default_download_destination_path_joins_file_name() {
