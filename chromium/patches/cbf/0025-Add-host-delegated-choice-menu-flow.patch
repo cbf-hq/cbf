@@ -1,4 +1,4 @@
-From d128a0eb923dad80856e9b983da030c405b77c55 Mon Sep 17 00:00:00 2001
+From d25e65aa95e2ba51ed8d822ff54e4ef9d6484270 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 15 Mar 2026 10:28:59 +0900
 Subject: [PATCH 25/25] Add host-delegated choice menu flow
@@ -6,26 +6,25 @@ Subject: [PATCH 25/25] Add host-delegated choice menu flow
 ---
  chrome/browser/cbf/BUILD.gn                   |  10 +
  chrome/browser/cbf/bridge/cbf_bridge_client.h |   4 +
- .../cbf/bridge/cbf_bridge_client_impl.cc      |  38 +++
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |  38 ++++
  .../cbf/bridge/cbf_bridge_client_impl.h       |   9 +
- .../cbf/bridge/cbf_bridge_context_menu.cc     |  99 ++++++++
+ .../cbf/bridge/cbf_bridge_context_menu.cc     |  99 +++++++++
  .../cbf/bridge/cbf_bridge_event_wait_state.h  |   1 +
- .../browser/cbf/bridge/cbf_bridge_events.cc   |  90 +++++++
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  90 ++++++++
  chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  57 +++++
  chrome/browser/cbf/cbf_profile_service.cc     |  68 ++++++
  chrome/browser/cbf/cbf_profile_service.h      |  23 ++
- .../cbf/cbf_profile_service_browsertest.cc    | 220 ++++++++++++++++++
  .../browser/cbf/cbf_web_contents_delegate.cc  |  21 ++
- .../browser/cbf/cbf_web_contents_delegate.h   |  12 +
+ .../browser/cbf/cbf_web_contents_delegate.h   |  12 ++
  chrome/browser/cbf/mojom/cbf_browser.mojom    |  41 ++++
- .../cbf_profile_choice_menu_controller.cc     | 202 ++++++++++++++++
+ .../cbf_profile_choice_menu_controller.cc     | 202 ++++++++++++++++++
  .../cbf_profile_choice_menu_controller.h      |  81 +++++++
  .../cbf/test/cbf_test_profile_observer.cc     |  71 ++++++
- .../cbf/test/cbf_test_profile_observer.h      |  36 +++
+ .../cbf/test/cbf_test_profile_observer.h      |  36 ++++
  .../renderer_host/render_frame_host_impl.cc   |  26 ++-
  .../public/browser/web_contents_delegate.cc   |  13 ++
  .../public/browser/web_contents_delegate.h    |  17 ++
- 21 files changed, 1133 insertions(+), 6 deletions(-)
+ 20 files changed, 913 insertions(+), 6 deletions(-)
  create mode 100644 chrome/browser/cbf/profile/cbf_profile_choice_menu_controller.cc
  create mode 100644 chrome/browser/cbf/profile/cbf_profile_choice_menu_controller.h
 
@@ -438,7 +437,7 @@ index c3094ae5b8899..d85db20b73c64 100644
      delete[] event->drag_start_request.source_origin;
      event->drag_start_request.source_origin = nullptr;
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
-index 282020608c862..99acc2378a4ba 100644
+index c6c0a00cded63..5971279e598d6 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 @@ -61,6 +61,8 @@ enum CbfEventKind {
@@ -450,7 +449,7 @@ index 282020608c862..99acc2378a4ba 100644
    kEventTabCreated = kEventWebPageCreated,
    kEventNewTabRequested = kEventNewWebPageRequested,
    kEventTabClosed = kEventWebPageClosed,
-@@ -314,6 +316,19 @@ enum CbfContextMenuItemType {
+@@ -316,6 +318,19 @@ enum CbfContextMenuItemType {
    kCbfMenuItemTitle = 8,
  };
  
@@ -470,7 +469,7 @@ index 282020608c862..99acc2378a4ba 100644
  typedef struct CbfSurfaceHandle {
    uint8_t kind;
    uint32_t ca_context_id;
-@@ -578,6 +593,41 @@ typedef struct CbfContextMenu {
+@@ -580,6 +595,41 @@ typedef struct CbfContextMenu {
    CbfContextMenuItemList items;
  } CbfContextMenu;
  
@@ -512,7 +511,7 @@ index 282020608c862..99acc2378a4ba 100644
  typedef struct CbfBridgeEvent {
    uint8_t kind;
    uint64_t tab_id;
-@@ -594,6 +644,7 @@ typedef struct CbfBridgeEvent {
+@@ -596,6 +646,7 @@ typedef struct CbfBridgeEvent {
    CbfImeBoundsUpdate ime_bounds;
    CbfTabIdList dirty_tab_ids;
    CbfContextMenu context_menu;
@@ -520,7 +519,7 @@ index 282020608c862..99acc2378a4ba 100644
    char* target_url;
    char* url;
    bool is_popup;
-@@ -719,6 +770,12 @@ bool cbf_bridge_client_execute_context_menu_command(
+@@ -721,6 +772,12 @@ bool cbf_bridge_client_execute_context_menu_command(
      int32_t event_flags);
  bool cbf_bridge_client_dismiss_context_menu(CbfBridgeClientHandle* client,
                                              uint64_t menu_id);
@@ -534,7 +533,7 @@ index 282020608c862..99acc2378a4ba 100644
                                              uint64_t tab_id,
                                              uint64_t request_id,
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
-index e5829293272f7..401a7d7ef816e 100644
+index 93fd1cad7a914..e7c857153d4b5 100644
 --- a/chrome/browser/cbf/cbf_profile_service.cc
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
 @@ -24,6 +24,7 @@
@@ -588,7 +587,7 @@ index e5829293272f7..401a7d7ef816e 100644
  void CbfProfileService::DismissContextMenu(uint64_t menu_id) {
    context_menu_controller_->DismissContextMenu(menu_id);
  }
-@@ -1627,6 +1643,30 @@ bool CbfProfileService::HandleContextMenu(
+@@ -1645,6 +1661,30 @@ bool CbfProfileService::HandleContextMenu(
    return context_menu_controller_->HandleContextMenu(render_frame_host, params);
  }
  
@@ -619,7 +618,7 @@ index e5829293272f7..401a7d7ef816e 100644
  void CbfProfileService::NotifyNewTabRequested(content::WebContents* source,
                                                const GURL& target_url,
                                                WindowOpenDisposition disposition,
-@@ -1651,6 +1691,7 @@ void CbfProfileService::NotifyTabClosed(TabId tab_id) {
+@@ -1669,6 +1709,7 @@ void CbfProfileService::NotifyTabClosed(TabId tab_id) {
      ResolvePendingDownloadPromptsForTab(
          tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
      context_menu_controller_->OnTabClosed(tab_id);
@@ -627,7 +626,7 @@ index e5829293272f7..401a7d7ef816e 100644
      input_controller_->OnTabClosed(tab_id);
      ime_controller_->OnTabClosed(tab_id);
      drag_controller_->OnTabClosed(tab_id);
-@@ -1816,6 +1857,18 @@ void CbfProfileService::NotifyExtensionPopupContextMenuRequested(
+@@ -1834,6 +1875,18 @@ void CbfProfileService::NotifyExtensionPopupContextMenuRequested(
                                                    std::move(menu));
  }
  
@@ -646,7 +645,7 @@ index e5829293272f7..401a7d7ef816e 100644
  void CbfProfileService::NotifyExtensionPopupCursorChanged(
      TabId tab_id,
      uint64_t popup_id,
-@@ -1837,6 +1890,20 @@ void CbfProfileService::NotifyExtensionPopupTitleUpdated(
+@@ -1855,6 +1908,20 @@ void CbfProfileService::NotifyExtensionPopupTitleUpdated(
    observer_->OnExtensionPopupTitleUpdated(tab_id, popup_id, title);
  }
  
@@ -667,7 +666,7 @@ index e5829293272f7..401a7d7ef816e 100644
  void CbfProfileService::NotifyExtensionPopupJavaScriptDialogRequested(
      TabId tab_id,
      uint64_t popup_id,
-@@ -2160,6 +2227,7 @@ void CbfProfileService::CloseExtensionPopupById(uint64_t popup_id) {
+@@ -2178,6 +2245,7 @@ void CbfProfileService::CloseExtensionPopupById(uint64_t popup_id) {
      it->second->CloseFromService();
    }
    active_extension_popups_.erase(it);
@@ -744,268 +743,6 @@ index 5d6e1ea3e30d2..a5c820fe1a5f7 100644
    std::unique_ptr<CbfProfileContextMenuController> context_menu_controller_;
    std::unique_ptr<CbfProfileInputController> input_controller_;
    std::unique_ptr<CbfProfileImeController> ime_controller_;
-diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index a2d5f9819bae8..2fbbbe981b6d3 100644
---- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-+++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-@@ -42,9 +42,11 @@
- #include "extensions/common/manifest.h"
- #include "extensions/common/constants.h"
- #include "extensions/common/extension_builder.h"
-+#include "mojo/public/cpp/bindings/receiver.h"
- #include "net/http/http_status_code.h"
- #include "net/test/embedded_test_server/http_request.h"
- #include "net/test/embedded_test_server/http_response.h"
-+#include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
- #include "third_party/skia/include/core/SkBitmap.h"
- #include "testing/gtest/include/gtest/gtest.h"
- #include "ui/gfx/codec/png_codec.h"
-@@ -53,6 +55,66 @@
- namespace cbf {
- namespace {
- 
-+class TestPopupMenuClient final : public blink::mojom::PopupMenuClient {
-+ public:
-+  TestPopupMenuClient() = default;
-+  TestPopupMenuClient(const TestPopupMenuClient&) = delete;
-+  TestPopupMenuClient& operator=(const TestPopupMenuClient&) = delete;
-+  ~TestPopupMenuClient() override = default;
-+
-+  mojo::PendingRemote<blink::mojom::PopupMenuClient> BindNewPipeAndPassRemote() {
-+    receiver_.reset();
-+    return receiver_.BindNewPipeAndPassRemote();
-+  }
-+
-+  const std::vector<int32_t>& accepted_indices() const {
-+    return accepted_indices_;
-+  }
-+
-+  bool was_cancelled() const { return was_cancelled_; }
-+
-+  void WaitForAccept() {
-+    if (!accepted_indices_.empty()) {
-+      return;
-+    }
-+    base::RunLoop loop;
-+    quit_closure_ = loop.QuitClosure();
-+    loop.Run();
-+    quit_closure_.Reset();
-+  }
-+
-+  void WaitForCancel() {
-+    if (was_cancelled_) {
-+      return;
-+    }
-+    base::RunLoop loop;
-+    quit_closure_ = loop.QuitClosure();
-+    loop.Run();
-+    quit_closure_.Reset();
-+  }
-+
-+  void DidAcceptIndices(const std::vector<int32_t>& indices) override {
-+    accepted_indices_ = indices;
-+    was_cancelled_ = false;
-+    if (quit_closure_) {
-+      std::move(quit_closure_).Run();
-+    }
-+  }
-+
-+  void DidCancel() override {
-+    was_cancelled_ = true;
-+    if (quit_closure_) {
-+      std::move(quit_closure_).Run();
-+    }
-+  }
-+
-+ private:
-+  mojo::Receiver<blink::mojom::PopupMenuClient> receiver_{this};
-+  std::vector<int32_t> accepted_indices_;
-+  bool was_cancelled_ = false;
-+  base::OnceClosure quit_closure_;
-+};
-+
- class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
-  protected:
-   void SetUpOnMainThread() override {
-@@ -125,6 +187,66 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
-     ASSERT_TRUE(content::WaitForLoadStop(web_contents));
-   }
- 
-+  void InstallSelectMenuPage(content::WebContents* web_contents) {
-+    ASSERT_NE(web_contents, nullptr);
-+    web_contents->UpdateWebContentsVisibility(content::Visibility::VISIBLE);
-+    ASSERT_TRUE(ExecJs(web_contents, R"(
-+      document.body.innerHTML = `
-+        <select id="color" name="color">
-+          <option value="">好きな色を選択</option>
-+          <option value="red">赤</option>
-+          <option value="blue">青</option>
-+          <option value="yellow">黄</option>
-+        </select>`;
-+    )"));
-+    content::SimulateEndOfPaintHoldingOnPrimaryMainFrame(web_contents);
-+  }
-+
-+  void OpenSelectMenu(content::WebContents* web_contents) {
-+    ASSERT_NE(web_contents, nullptr);
-+    ASSERT_TRUE(ExecJs(web_contents, R"(
-+      const select = document.getElementById('color');
-+      select.focus();
-+      select.showPicker();
-+    )"));
-+  }
-+
-+  std::vector<blink::mojom::MenuItemPtr> BuildTestChoiceMenuItems() {
-+    std::vector<blink::mojom::MenuItemPtr> items;
-+
-+    auto add_item = [&items](const char* label, uint32_t action) {
-+      auto item = blink::mojom::MenuItem::New();
-+      item->label = label;
-+      item->tool_tip = std::nullopt;
-+      item->type = blink::mojom::MenuItem::Type::kOption;
-+      item->action = action;
-+      item->enabled = true;
-+      item->checked = false;
-+      items.push_back(std::move(item));
-+    };
-+
-+    add_item("", 0);
-+    add_item("red", 1);
-+    add_item("blue", 2);
-+    add_item("yellow", 3);
-+    return items;
-+  }
-+
-+  void DispatchChoiceMenuForTesting(content::WebContents* web_contents,
-+                                    TestPopupMenuClient* popup_client) {
-+    ASSERT_NE(web_contents, nullptr);
-+    ASSERT_NE(popup_client, nullptr);
-+    web_contents->UpdateWebContentsVisibility(content::Visibility::VISIBLE);
-+
-+    const bool handled = profile_service_->HandleChoiceMenu(
-+        web_contents, *web_contents->GetPrimaryMainFrame(),
-+        popup_client->BindNewPipeAndPassRemote(), gfx::Rect(10, 10, 120, 24),
-+        /*item_font_size=*/13.0, /*selected_item=*/0,
-+        BuildTestChoiceMenuItems(), /*right_aligned=*/false,
-+        /*allow_multiple_selection=*/false);
-+    ASSERT_TRUE(handled);
-+  }
-+
-   void EnsureDownloadServerStarted() {
-     if (download_server_started_) {
-       return;
-@@ -567,6 +689,53 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
-   observer_.WaitForExtensionPopupClosedCount(1);
- }
- 
-+IN_PROC_BROWSER_TEST_F(
-+    CbfProfileServiceBrowserTest,
-+    ActivateExtensionActionEmitsPopupChoiceMenuRequestedAndAcceptUpdatesValue) {
-+  auto extension = LoadActionPopupExtensionWithHtml(
-+      "Popup Choice Menu Extension",
-+      "<!doctype html><body>"
-+      "<select id='color' name='color'>"
-+      "<option value=''>好きな色を選択</option>"
-+      "<option value='red'>赤</option>"
-+      "<option value='blue'>青</option>"
-+      "<option value='yellow'>黄</option>"
-+      "</select></body>");
-+  ASSERT_TRUE(extension);
-+
-+  const TabId tab_id = CreatePage("about:blank");
-+  ASSERT_NE(tab_id, kInvalidTabId);
-+  WaitForLoad(tab_id);
-+
-+  profile_service_->ActivateExtensionAction(tab_id, extension->id());
-+  observer_.WaitForExtensionPopupOpenedCount(1);
-+
-+  const uint64_t popup_id = observer_.extension_popup_opened_events()[0].popup_id;
-+  content::WebContents* popup_contents = GetPopupContents(popup_id);
-+  ASSERT_NE(popup_contents, nullptr);
-+  ASSERT_TRUE(content::WaitForLoadStop(popup_contents));
-+  popup_contents->UpdateWebContentsVisibility(content::Visibility::VISIBLE);
-+  content::SimulateEndOfPaintHoldingOnPrimaryMainFrame(popup_contents);
-+
-+  OpenSelectMenu(popup_contents);
-+
-+  observer_.WaitForExtensionPopupChoiceMenuCount(1);
-+  ASSERT_EQ(observer_.extension_popup_choice_menu_events().size(), 1u);
-+  const auto& event = observer_.extension_popup_choice_menu_events()[0];
-+  EXPECT_EQ(event.tab_id, tab_id);
-+  EXPECT_EQ(event.popup_id, popup_id);
-+  EXPECT_NE(event.request_id, 0u);
-+  EXPECT_EQ(event.item_count, 4u);
-+  EXPECT_EQ(event.selected_item, 0);
-+
-+  profile_service_->AcceptChoiceMenuSelection(event.request_id, {2});
-+  EXPECT_EQ(2, content::EvalJs(popup_contents,
-+                               "document.getElementById('color').selectedIndex"));
-+
-+  profile_service_->CloseExtensionPopup(popup_id);
-+  observer_.WaitForExtensionPopupClosedCount(1);
-+}
-+
- IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
-                        ActivateExtensionActionEmitsPopupConfirmDialogRequested) {
-   auto extension = LoadActionPopupExtensionWithScript(
-@@ -594,6 +763,57 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
-   observer_.WaitForExtensionPopupClosedCount(1);
- }
- 
-+IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
-+                       ManagedTabChoiceMenuAcceptUpdatesSelectedIndex) {
-+  const TabId tab_id = CreatePage("about:blank");
-+  ASSERT_NE(tab_id, kInvalidTabId);
-+  WaitForLoad(tab_id);
-+
-+  content::WebContents* web_contents =
-+      profile_service_->GetWebContentsForTesting(tab_id);
-+  ASSERT_NE(web_contents, nullptr);
-+  InstallSelectMenuPage(web_contents);
-+  TestPopupMenuClient popup_client;
-+  DispatchChoiceMenuForTesting(web_contents, &popup_client);
-+
-+  observer_.WaitForChoiceMenuCount(1);
-+  ASSERT_EQ(observer_.choice_menu_events().size(), 1u);
-+  const auto& event = observer_.choice_menu_events()[0];
-+  EXPECT_EQ(event.tab_id, tab_id);
-+  EXPECT_NE(event.request_id, 0u);
-+  EXPECT_EQ(event.item_count, 4u);
-+  EXPECT_EQ(event.selected_item, 0);
-+
-+  profile_service_->AcceptChoiceMenuSelection(event.request_id, {2});
-+  popup_client.WaitForAccept();
-+  EXPECT_EQ(std::vector<int32_t>({2}), popup_client.accepted_indices());
-+  EXPECT_FALSE(popup_client.was_cancelled());
-+}
-+
-+IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
-+                       ManagedTabChoiceMenuDismissKeepsSelectedIndex) {
-+  const TabId tab_id = CreatePage("about:blank");
-+  ASSERT_NE(tab_id, kInvalidTabId);
-+  WaitForLoad(tab_id);
-+
-+  content::WebContents* web_contents =
-+      profile_service_->GetWebContentsForTesting(tab_id);
-+  ASSERT_NE(web_contents, nullptr);
-+  InstallSelectMenuPage(web_contents);
-+  TestPopupMenuClient popup_client;
-+  DispatchChoiceMenuForTesting(web_contents, &popup_client);
-+
-+  observer_.WaitForChoiceMenuCount(1);
-+  ASSERT_EQ(observer_.choice_menu_events().size(), 1u);
-+  const auto& event = observer_.choice_menu_events()[0];
-+  EXPECT_EQ(event.selected_item, 0);
-+
-+  profile_service_->DismissChoiceMenu(event.request_id);
-+  popup_client.WaitForCancel();
-+  EXPECT_TRUE(popup_client.was_cancelled());
-+  EXPECT_TRUE(popup_client.accepted_indices().empty());
-+}
-+
- IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
-                        ActivateExtensionActionEmitsPopupPromptDialogRequested) {
-   auto extension = LoadActionPopupExtensionWithScript(
 diff --git a/chrome/browser/cbf/cbf_web_contents_delegate.cc b/chrome/browser/cbf/cbf_web_contents_delegate.cc
 index 167a8ac314019..18bb4e0201136 100644
 --- a/chrome/browser/cbf/cbf_web_contents_delegate.cc
@@ -1077,7 +814,7 @@ index 7988899d6c927..55f77662c142d 100644
                                 const content::DropData& drop_data,
                                 const url::Origin& source_origin,
 diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
-index f4e63e1539f72..7b30109c40496 100644
+index 2504a048f0ef1..0258069aa5fa9 100644
 --- a/chrome/browser/cbf/mojom/cbf_browser.mojom
 +++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
 @@ -1,5 +1,8 @@
@@ -1089,7 +826,7 @@ index f4e63e1539f72..7b30109c40496 100644
  struct CbfProfileInfo {
    string profile_id;
    string profile_path;
-@@ -578,6 +581,37 @@ struct CbfContextMenu {
+@@ -580,6 +583,37 @@ struct CbfContextMenu {
    array<CbfMenuItem> items;
  };
  
@@ -1127,7 +864,7 @@ index f4e63e1539f72..7b30109c40496 100644
  interface CbfBrowserObserver {
    OnShutdownBlocked(uint64 request_id, array<uint64> dirty_tab_ids);
    OnShutdownProceeding(uint64 request_id);
-@@ -608,6 +642,10 @@ interface CbfProfileObserver {
+@@ -610,6 +644,10 @@ interface CbfProfileObserver {
    OnExtensionPopupContextMenuRequested(uint64 tab_id,
                                         uint64 popup_id,
                                         CbfContextMenu menu);
@@ -1138,7 +875,7 @@ index f4e63e1539f72..7b30109c40496 100644
    OnExtensionPopupCursorChanged(uint64 tab_id,
                                  uint64 popup_id,
                                  CbfCursorType cursor_type);
-@@ -631,6 +669,7 @@ interface CbfProfileObserver {
+@@ -633,6 +671,7 @@ interface CbfProfileObserver {
    OnTabResizeAcknowledged(uint64 tab_id);
    OnImeBoundsUpdated(CbfImeBoundsUpdate update);
    OnContextMenuRequested(uint64 tab_id, CbfContextMenu menu);
@@ -1146,7 +883,7 @@ index f4e63e1539f72..7b30109c40496 100644
    OnTabOpenRequested(CbfTabOpenRequest request);
    OnTabOpenResolved(CbfTabOpenResult result);
    OnTitleUpdated(uint64 tab_id, string title);
-@@ -688,6 +727,8 @@ interface CbfProfileService {
+@@ -690,6 +729,8 @@ interface CbfProfileService {
    SetComposition(CbfImeComposition composition);
    CommitText(CbfImeCommitText commit);
    FinishComposingText(uint64 tab_id, CbfConfirmCompositionBehavior behavior);
@@ -1451,10 +1188,10 @@ index 0000000000000..a3abb3385b831
 +
 +#endif  // CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_CHOICE_MENU_CONTROLLER_H_
 diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
-index 962bc183403ba..404877ac300eb 100644
+index 05d815181f1e7..4ce0cb0b5997c 100644
 --- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
 +++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
-@@ -355,6 +355,32 @@ void CbfTestProfileObserver::WaitForExtensionPopupCloseRequestedCount(
+@@ -414,6 +414,32 @@ void CbfTestProfileObserver::WaitForExtensionPopupCloseRequestedCount(
    quit_wait_loop_.Reset();
  }
  
@@ -1487,7 +1224,7 @@ index 962bc183403ba..404877ac300eb 100644
  void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t tab_id,
                                                      uint32_t ca_context_id) {}
  
-@@ -414,6 +440,23 @@ void CbfTestProfileObserver::OnExtensionPopupContextMenuRequested(
+@@ -473,6 +499,23 @@ void CbfTestProfileObserver::OnExtensionPopupContextMenuRequested(
    MaybeQuitWaitLoop();
  }
  
@@ -1511,7 +1248,7 @@ index 962bc183403ba..404877ac300eb 100644
  void CbfTestProfileObserver::OnExtensionPopupCursorChanged(
      uint64_t tab_id,
      uint64_t popup_id,
-@@ -504,6 +547,21 @@ void CbfTestProfileObserver::OnContextMenuRequested(
+@@ -563,6 +606,21 @@ void CbfTestProfileObserver::OnContextMenuRequested(
      uint64_t tab_id,
      cbf::mojom::CbfContextMenuPtr menu) {}
  
@@ -1533,7 +1270,7 @@ index 962bc183403ba..404877ac300eb 100644
  void CbfTestProfileObserver::OnTabOpenRequested(
      cbf::mojom::CbfTabOpenRequestPtr request) {}
  
-@@ -741,6 +799,17 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
+@@ -832,6 +890,17 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
        extension_popup_close_requested_events_.size() >=
            wait_extension_popup_close_requested_count_) {
      quit_wait_loop_.Run();
@@ -1551,7 +1288,7 @@ index 962bc183403ba..404877ac300eb 100644
    }
  }
  
-@@ -761,6 +830,8 @@ void CbfTestProfileObserver::ResetWaitTargets() {
+@@ -854,6 +923,8 @@ void CbfTestProfileObserver::ResetWaitTargets() {
    wait_extension_popup_title_updated_count_ = 0;
    wait_extension_popup_javascript_dialog_count_ = 0;
    wait_extension_popup_close_requested_count_ = 0;
@@ -1561,10 +1298,10 @@ index 962bc183403ba..404877ac300eb 100644
  
  }  // namespace cbf::test
 diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
-index 4713143844621..5acd843038e63 100644
+index 4828f1bbbfbde..d2888790f95ad 100644
 --- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
 +++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
-@@ -206,6 +206,21 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+@@ -243,6 +243,21 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
      uint64_t popup_id = 0;
    };
  
@@ -1586,7 +1323,7 @@ index 4713143844621..5acd843038e63 100644
    enum class DownloadEventKind {
      kCreated,
      kUpdated,
-@@ -277,6 +292,13 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+@@ -322,6 +337,13 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
    extension_popup_close_requested_events() const {
      return extension_popup_close_requested_events_;
    }
@@ -1600,7 +1337,7 @@ index 4713143844621..5acd843038e63 100644
    const std::vector<DownloadEventKind>& download_event_order() const {
      return download_event_order_;
    }
-@@ -297,6 +319,8 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+@@ -344,6 +366,8 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
    void WaitForExtensionPopupTitleUpdatedCount(size_t expected_count);
    void WaitForExtensionPopupJavaScriptDialogCount(size_t expected_count);
    void WaitForExtensionPopupCloseRequestedCount(size_t expected_count);
@@ -1609,7 +1346,7 @@ index 4713143844621..5acd843038e63 100644
  
    // cbf::mojom::CbfProfileObserver
    void OnSurfaceHandleUpdated(uint64_t tab_id,
-@@ -320,6 +344,11 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+@@ -367,6 +391,11 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
        uint64_t tab_id,
        uint64_t popup_id,
        cbf::mojom::CbfContextMenuPtr menu) override;
@@ -1621,7 +1358,7 @@ index 4713143844621..5acd843038e63 100644
    void OnExtensionPopupCursorChanged(
        uint64_t tab_id,
        uint64_t popup_id,
-@@ -354,6 +383,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+@@ -401,6 +430,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
    void OnContextMenuRequested(
        uint64_t tab_id,
        cbf::mojom::CbfContextMenuPtr menu) override;
@@ -1631,7 +1368,7 @@ index 4713143844621..5acd843038e63 100644
    void OnTabOpenRequested(
        cbf::mojom::CbfTabOpenRequestPtr request) override;
    void OnTabOpenResolved(
-@@ -439,6 +471,8 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+@@ -488,6 +520,8 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
        extension_popup_javascript_dialog_events_;
    std::vector<ExtensionPopupCloseRequestedEvent>
        extension_popup_close_requested_events_;
@@ -1640,7 +1377,7 @@ index 4713143844621..5acd843038e63 100644
    std::vector<DownloadEventKind> download_event_order_;
  
    size_t wait_web_page_closed_count_ = 0;
-@@ -457,6 +491,8 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+@@ -508,6 +542,8 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
    size_t wait_extension_popup_title_updated_count_ = 0;
    size_t wait_extension_popup_javascript_dialog_count_ = 0;
    size_t wait_extension_popup_close_requested_count_ = 0;

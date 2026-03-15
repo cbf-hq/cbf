@@ -1,4 +1,4 @@
-From 23c64a414bf45323c28e8870688d79af61b7dc53 Mon Sep 17 00:00:00 2001
+From 7f76f0980ec51488e611044968388c3e3b5292aa Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 13 Mar 2026 10:18:40 +0900
 Subject: [PATCH 24/25] Add bridge event wait support
@@ -892,7 +892,7 @@ index 38f203feb1850..c3094ae5b8899 100644
  }
  
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
-index eeda906459d2e..282020608c862 100644
+index 2d99d358ed804..c6c0a00cded63 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 @@ -68,6 +68,13 @@ enum CbfEventKind {
@@ -909,7 +909,7 @@ index eeda906459d2e..282020608c862 100644
  enum CbfExtensionInstallPromptResult {
    kCbfExtensionInstallPromptResultAccepted = 0,
    kCbfExtensionInstallPromptResultAcceptedWithWithheldPermissions = 1,
-@@ -702,6 +709,9 @@ void cbf_bridge_convert_nspasteboard_to_drag_data(
+@@ -704,6 +711,9 @@ void cbf_bridge_convert_nspasteboard_to_drag_data(
      void* nspasteboard,
      CbfDragData* out_data);
  void cbf_bridge_free_converted_drag_data(CbfDragData* data);

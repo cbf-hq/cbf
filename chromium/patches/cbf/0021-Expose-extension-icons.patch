@@ -1,4 +1,4 @@
-From aab68024f1b0d744bc255a5522bd4c19f92e1ec4 Mon Sep 17 00:00:00 2001
+From 7d275ce5061053cdaa781d031134d245421f16f6 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 9 Mar 2026 12:05:51 +0900
 Subject: [PATCH 21/25] Expose extension icons
@@ -8,9 +8,9 @@ Subject: [PATCH 21/25] Expose extension icons
  chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  16 +++
  .../browser/cbf/bridge/cbf_bridge_profiles.cc |  37 +++++-
  chrome/browser/cbf/cbf_profile_service.cc     | 109 ++++++++++++++++--
- .../cbf/cbf_profile_service_browsertest.cc    |  97 ++++++++++++++++
+ .../cbf/cbf_profile_service_browsertest.cc    |  96 +++++++++++++++
  chrome/browser/cbf/mojom/cbf_browser.mojom    |  15 +++
- 6 files changed, 298 insertions(+), 10 deletions(-)
+ 6 files changed, 297 insertions(+), 10 deletions(-)
 
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
 index 4921f24689190..821ebc4994778 100644
@@ -72,10 +72,10 @@ index 4921f24689190..821ebc4994778 100644
    delete[] list.items;
  }
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
-index 82043a756bd66..5f194a453a427 100644
+index a38daaaea2881..254d8c7d38e37 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
-@@ -119,6 +119,13 @@ enum CbfDownloadOutcome {
+@@ -121,6 +121,13 @@ enum CbfDownloadOutcome {
    kCbfDownloadOutcomeInterrupted = 3,
  };
  
@@ -89,7 +89,7 @@ index 82043a756bd66..5f194a453a427 100644
  enum CbfTabOpenHint {
    kCbfTabOpenHintUnknown = 0,
    kCbfTabOpenHintCurrentContext = 1,
-@@ -377,12 +384,21 @@ typedef struct CbfStringList {
+@@ -379,12 +386,21 @@ typedef struct CbfStringList {
    uint32_t len;
  } CbfStringList;
  
@@ -181,7 +181,7 @@ index fe960365b5f18..bb9396997f16c 100644
        auto permissions = UNSAFE_BUFFERS(
            base::span(extension.permission_names.items, extension.permission_names.len));
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
-index 2cfb7e56fae81..84047553c5efb 100644
+index b75278cbfbafd..44070cb83a5e9 100644
 --- a/chrome/browser/cbf/cbf_profile_service.cc
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
 @@ -8,9 +8,12 @@
@@ -348,10 +348,10 @@ index 2cfb7e56fae81..84047553c5efb 100644
  
  bool CbfProfileService::RequestAuxiliaryInstallPromptForWebstore(
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index 401a3b8768bc3..1beb69d6d8826 100644
+index 4d12f5e7863cd..bd86df4971e20 100644
 --- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-@@ -12,12 +12,14 @@
+@@ -12,6 +12,7 @@
  #include "base/files/scoped_temp_dir.h"
  #include "base/functional/bind.h"
  #include "base/run_loop.h"
@@ -359,20 +359,21 @@ index 401a3b8768bc3..1beb69d6d8826 100644
  #include "base/strings/string_number_conversions.h"
  #include "base/task/cancelable_task_tracker.h"
  #include "base/threading/thread_restrictions.h"
- #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
+@@ -19,6 +20,7 @@
  #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
  #include "chrome/browser/history/history_service_factory.h"
+ #include "chrome/browser/extensions/extension_install_prompt.h"
 +#include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/ui/browser.h"
  #include "chrome/browser/ui/browser_window.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
-@@ -34,10 +36,15 @@
+@@ -35,11 +37,15 @@
  #include "content/public/test/browser_test_utils.h"
  #include "content/public/test/slow_download_http_response.h"
  #include "content/public/test/slow_http_response.h"
 +#include "extensions/browser/extension_registry.h"
 +#include "extensions/common/constants.h"
-+#include "extensions/common/extension_builder.h"
+ #include "extensions/common/extension_builder.h"
  #include "net/http/http_status_code.h"
  #include "net/test/embedded_test_server/http_request.h"
  #include "net/test/embedded_test_server/http_response.h"
@@ -382,7 +383,7 @@ index 401a3b8768bc3..1beb69d6d8826 100644
  
  namespace cbf {
  namespace {
-@@ -182,11 +189,72 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -184,11 +190,72 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
      profile_service_->RespondPromptUi(tab_id, request_id, std::move(response));
    }
  
@@ -455,8 +456,8 @@ index 401a3b8768bc3..1beb69d6d8826 100644
  };
  
  IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
-@@ -195,6 +263,35 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp)
-   profile_service_->OpenDevTools(kInvalidTabId);
+@@ -257,6 +324,35 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   EXPECT_TRUE(resolution.detail.empty());
  }
  
 +IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
@@ -492,7 +493,7 @@ index 401a3b8768bc3..1beb69d6d8826 100644
                         DownloadPromptAllowStoresFileAtDestinationPath) {
    EnsureDownloadServerStarted();
 diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
-index e48ed1138dc1c..faf19a804b851 100644
+index 3b31b1580a53d..7804462a03db1 100644
 --- a/chrome/browser/cbf/mojom/cbf_browser.mojom
 +++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
 @@ -12,6 +12,21 @@ struct CbfExtensionInfo {

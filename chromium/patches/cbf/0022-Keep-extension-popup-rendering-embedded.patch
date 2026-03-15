@@ -1,4 +1,4 @@
-From f2915f4aa48975854e134617c7c837cd4ac486ee Mon Sep 17 00:00:00 2001
+From 31ce0d7e9db05d486109ca9b37474385e46ed4a0 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 10 Mar 2026 14:00:00 +0900
 Subject: [PATCH 22/25] Keep extension popup rendering embedded
@@ -8,7 +8,7 @@ Subject: [PATCH 22/25] Keep extension popup rendering embedded
  1 file changed, 791 insertions(+), 187 deletions(-)
 
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
-index 84047553c5efb..dd29d87d3257c 100644
+index 44070cb83a5e9..fe45d4d5f1e08 100644
 --- a/chrome/browser/cbf/cbf_profile_service.cc
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
 @@ -1,62 +1,79 @@
@@ -911,7 +911,7 @@ index 84047553c5efb..dd29d87d3257c 100644
    if (!response) {
      return;
    }
-@@ -858,8 +1392,8 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
+@@ -876,8 +1410,8 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
      base::FilePath selected_path = pending.suggested_path;
      if (response->destination_path.has_value() &&
          !response->destination_path->empty()) {
@@ -922,7 +922,7 @@ index 84047553c5efb..dd29d87d3257c 100644
      }
  
      if (response->allow) {
-@@ -870,8 +1404,7 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
+@@ -888,8 +1422,7 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
      } else {
        ResolvePendingDownloadPrompt(
            std::move(pending), DownloadConfirmationResult::CANCELED,
@@ -932,7 +932,7 @@ index 84047553c5efb..dd29d87d3257c 100644
      }
      return;
    }
-@@ -956,12 +1489,11 @@ void CbfProfileService::CloseAuxiliaryWindow(uint64_t tab_id,
+@@ -974,12 +1507,11 @@ void CbfProfileService::CloseAuxiliaryWindow(uint64_t tab_id,
        prompt_it->second.tab_id != tab_id) {
      return;
    }
@@ -948,7 +948,7 @@ index 84047553c5efb..dd29d87d3257c 100644
    popup_controller_->RespondTabOpen(std::move(response));
  }
  
-@@ -999,27 +1531,25 @@ void CbfProfileService::CloseAllTabs() {
+@@ -1017,27 +1549,25 @@ void CbfProfileService::CloseAllTabs() {
  
  void CbfProfileService::CloseWebContents(content::WebContents* web_contents) {
    popup_controller_->ClearBeforeUnloadReason(web_contents);
@@ -993,7 +993,7 @@ index 84047553c5efb..dd29d87d3257c 100644
  }
  
  content::WebContentsDelegate* CbfProfileService::GetWebContentsDelegate() {
-@@ -1042,17 +1572,25 @@ bool CbfProfileService::HandleContextMenu(
+@@ -1060,17 +1590,25 @@ bool CbfProfileService::HandleContextMenu(
    return context_menu_controller_->HandleContextMenu(render_frame_host, params);
  }
  
@@ -1025,7 +1025,7 @@ index 84047553c5efb..dd29d87d3257c 100644
      ResolvePendingPermissionPromptsForTab(
          tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
      ResolvePendingDownloadPromptsForTab(
-@@ -1075,22 +1613,19 @@ void CbfProfileService::OnBeforeUnloadDialogRequested(
+@@ -1093,22 +1631,19 @@ void CbfProfileService::OnBeforeUnloadDialogRequested(
    if (!browser_service_ || !web_contents) {
      return;
    }
@@ -1052,7 +1052,7 @@ index 84047553c5efb..dd29d87d3257c 100644
    if (tab_id == kInvalidTabId) {
      return;
    }
-@@ -1103,8 +1638,7 @@ void CbfProfileService::OnBeforeUnloadFired(
+@@ -1121,8 +1656,7 @@ void CbfProfileService::OnBeforeUnloadFired(
    if (proceed && is_close_request) {
      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
          FROM_HERE, base::BindOnce(
@@ -1062,7 +1062,7 @@ index 84047553c5efb..dd29d87d3257c 100644
                           if (!self) {
                             return;
                           }
-@@ -1126,8 +1660,7 @@ void CbfProfileService::NotifyBeforeUnloadDialogRequested(
+@@ -1144,8 +1678,7 @@ void CbfProfileService::NotifyBeforeUnloadDialogRequested(
    if (!observer_ || !web_contents) {
      return;
    }
@@ -1072,7 +1072,7 @@ index 84047553c5efb..dd29d87d3257c 100644
    if (tab_id == kInvalidTabId) {
      return;
    }
-@@ -1143,29 +1676,68 @@ mojom::CbfBeforeUnloadReason CbfProfileService::ResolveBeforeUnloadReason(
+@@ -1161,29 +1694,68 @@ mojom::CbfBeforeUnloadReason CbfProfileService::ResolveBeforeUnloadReason(
  void CbfProfileService::NotifySurfaceHandleUpdated(
      content::WebContents* web_contents,
      std::uint32_t ca_context_id) {
@@ -1150,7 +1150,7 @@ index 84047553c5efb..dd29d87d3257c 100644
  }
  
  void CbfProfileService::NotifyNavigationStateChanged(
-@@ -1175,15 +1747,15 @@ void CbfProfileService::NotifyNavigationStateChanged(
+@@ -1193,15 +1765,15 @@ void CbfProfileService::NotifyNavigationStateChanged(
      return;
    }
  
@@ -1170,7 +1170,7 @@ index 84047553c5efb..dd29d87d3257c 100644
  }
  
  void CbfProfileService::NotifyTitleUpdated(content::WebContents* web_contents) {
-@@ -1191,8 +1763,7 @@ void CbfProfileService::NotifyTitleUpdated(content::WebContents* web_contents) {
+@@ -1209,8 +1781,7 @@ void CbfProfileService::NotifyTitleUpdated(content::WebContents* web_contents) {
      return;
    }
  
@@ -1180,7 +1180,7 @@ index 84047553c5efb..dd29d87d3257c 100644
    if (tab_id == kInvalidTabId) {
      return;
    }
-@@ -1208,8 +1779,7 @@ void CbfProfileService::NotifyFaviconUrlUpdated(
+@@ -1226,8 +1797,7 @@ void CbfProfileService::NotifyFaviconUrlUpdated(
      return;
    }
  
@@ -1190,7 +1190,7 @@ index 84047553c5efb..dd29d87d3257c 100644
    if (tab_id == kInvalidTabId) {
      return;
    }
-@@ -1241,13 +1811,13 @@ void CbfProfileService::ResolveExtensionInstallPrompt(
+@@ -1259,13 +1829,13 @@ void CbfProfileService::ResolveExtensionInstallPrompt(
          close_reason_override.value_or(ToAuxiliaryWindowCloseReason(result)));
    }
    NotifyAuxiliaryWindowResolved(
@@ -1210,7 +1210,7 @@ index 84047553c5efb..dd29d87d3257c 100644
    }
  }
  
-@@ -1257,10 +1827,12 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
+@@ -1275,10 +1845,12 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
      return false;
    }
    auto& pending = it->second;
@@ -1225,7 +1225,7 @@ index 84047553c5efb..dd29d87d3257c 100644
      return false;
    }
    if (pending.prompt) {
-@@ -1274,7 +1846,8 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
+@@ -1292,7 +1864,8 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
    pending.prompt->ShowDialog(
        base::BindOnce(
            [](base::WeakPtr<CbfProfileService> self, uint64_t prompt_request_id,
@@ -1235,7 +1235,7 @@ index 84047553c5efb..dd29d87d3257c 100644
              if (!self) {
                return;
              }
-@@ -1291,9 +1864,11 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
+@@ -1309,9 +1882,11 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
               ExtensionInstallPrompt::DoneCallback done_callback,
               std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt) {
              if (!self) {
@@ -1250,7 +1250,7 @@ index 84047553c5efb..dd29d87d3257c 100644
                return;
              }
              self->NotifyAuxiliaryWindowOpened(
-@@ -1301,9 +1876,11 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
+@@ -1319,9 +1894,11 @@ bool CbfProfileService::OpenDefaultAuxiliaryWindowImpl(uint64_t request_id) {
                  mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt,
                  extension_name, true);
              ExtensionInstallPrompt::GetDefaultShowDialogCallback().Run(
@@ -1264,7 +1264,7 @@ index 84047553c5efb..dd29d87d3257c 100644
    auxiliary_window_to_prompt_request_[auxiliary_window_id] = request_id;
    return true;
  }
-@@ -1314,7 +1891,8 @@ bool CbfProfileService::RespondAuxiliaryWindowImpl(
+@@ -1332,7 +1909,8 @@ bool CbfProfileService::RespondAuxiliaryWindowImpl(
    if (!response) {
      return false;
    }
@@ -1274,7 +1274,7 @@ index 84047553c5efb..dd29d87d3257c 100644
      return false;
    }
    ResolveExtensionInstallPrompt(
-@@ -1328,9 +1906,9 @@ bool CbfProfileService::RespondAuxiliaryWindowImpl(
+@@ -1346,9 +1924,9 @@ bool CbfProfileService::RespondAuxiliaryWindowImpl(
  void CbfProfileService::ResolveAndClosePlatformPrompt(
      uint64_t request_id,
      mojom::CbfAuxiliaryWindowCloseReason reason) {
@@ -1287,7 +1287,7 @@ index 84047553c5efb..dd29d87d3257c 100644
  }
  
  void CbfProfileService::NotifyAuxiliaryWindowOpenRequested(
-@@ -1394,6 +1972,30 @@ void CbfProfileService::NotifyAuxiliaryWindowClosed(
+@@ -1412,6 +1990,30 @@ void CbfProfileService::NotifyAuxiliaryWindowClosed(
    observer_->OnAuxiliaryWindowClosed(tab_id, window_id, kind, reason);
  }
  
@@ -1318,7 +1318,7 @@ index 84047553c5efb..dd29d87d3257c 100644
  void CbfProfileService::NotifyPromptUiRequested(
      uint64_t tab_id,
      uint64_t request_id,
-@@ -1511,8 +2113,7 @@ bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
+@@ -1529,8 +2131,7 @@ bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
    if (!pending.delegate) {
      ResolvePendingDownloadPrompt(
          std::move(pending), DownloadConfirmationResult::FAILED,
@@ -1328,7 +1328,7 @@ index 84047553c5efb..dd29d87d3257c 100644
      return false;
    }
  
-@@ -1530,14 +2131,15 @@ bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
+@@ -1548,14 +2149,15 @@ bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
                [](base::WeakPtr<CbfProfileService> self, TabId tab_id,
                   uint64_t request_id, uint64_t download_id,
                   std::string download_guid,
@@ -1347,7 +1347,7 @@ index 84047553c5efb..dd29d87d3257c 100644
                    resolution = mojom::CbfPromptUiResolutionResult::kAllowed;
                  } else if (result == DownloadConfirmationResult::CANCELED) {
                    resolution = mojom::CbfPromptUiResolutionResult::kDenied;
-@@ -1558,12 +2160,11 @@ bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
+@@ -1576,12 +2178,11 @@ bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
  
                  std::move(callback).Run(result, selected_file_info);
                },
@@ -1363,7 +1363,7 @@ index 84047553c5efb..dd29d87d3257c 100644
      return false;
    }
    return true;
-@@ -1588,10 +2189,11 @@ void CbfProfileService::ResolvePendingDownloadPrompt(
+@@ -1606,10 +2207,11 @@ void CbfProfileService::ResolvePendingDownloadPrompt(
      std::move(pending.callback).Run(confirmation_result, selected_file_info);
    }
  
@@ -1379,7 +1379,7 @@ index 84047553c5efb..dd29d87d3257c 100644
  }
  
  void CbfProfileService::ResolvePendingDownloadPromptsForTab(
-@@ -1729,7 +2331,8 @@ void CbfProfileService::TryAttachPrintPreviewDialog(TabId tab_id,
+@@ -1747,7 +2349,8 @@ void CbfProfileService::TryAttachPrintPreviewDialog(TabId tab_id,
      return;
    }
  
@@ -1389,7 +1389,7 @@ index 84047553c5efb..dd29d87d3257c 100644
    if (!dialog_controller) {
      return;
    }
-@@ -1768,9 +2371,9 @@ void CbfProfileService::RegisterPrintPreviewDialog(
+@@ -1786,9 +2389,9 @@ void CbfProfileService::RegisterPrintPreviewDialog(
    print_preview_dialog_to_window_[preview_dialog] = window_id;
    print_preview_window_to_web_page_[window_id] = tab_id;
    print_preview_web_contents_collection_.StartObserving(preview_dialog);
@@ -1402,7 +1402,7 @@ index 84047553c5efb..dd29d87d3257c 100644
  }
  
  void CbfProfileService::ResolvePrintPreviewWindowClosed(
-@@ -1820,7 +2423,8 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
+@@ -1838,7 +2441,8 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
    CloseAllTabs();
  }
  

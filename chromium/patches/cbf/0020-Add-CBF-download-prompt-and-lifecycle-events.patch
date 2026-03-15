@@ -1,4 +1,4 @@
-From 66d8c0d353eddf23aa7a67456c68828bc791cccd Mon Sep 17 00:00:00 2001
+From 5af1e7584f15893f7538ee0f8bd86414fed5436d Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 7 Mar 2026 10:51:45 +0900
 Subject: [PATCH 20/25] Add CBF download prompt and lifecycle events
@@ -10,25 +10,25 @@ Subject: [PATCH 20/25] Add CBF download prompt and lifecycle events
  .../cbf/bridge/cbf_bridge_client_impl.cc      | 104 ++++
  .../cbf/bridge/cbf_bridge_client_impl.h       |  19 +
  .../browser/cbf/bridge/cbf_bridge_events.cc   |  57 ++
- chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  57 +-
- .../browser/cbf/bridge/cbf_bridge_web_page.cc | 131 ++++-
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  59 +-
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc | 139 ++++-
  .../cbf/cbf_download_manager_delegate.cc      |  93 +++
- .../cbf/cbf_download_manager_delegate.h       |  67 +++
- chrome/browser/cbf/cbf_profile_service.cc     | 554 +++++++++++++++++-
+ .../cbf/cbf_download_manager_delegate.h       |  67 ++
+ chrome/browser/cbf/cbf_profile_service.cc     | 572 +++++++++++++++++-
  chrome/browser/cbf/cbf_profile_service.h      | 105 +++-
- .../cbf/cbf_profile_service_browsertest.cc    | 372 ++++++++++++
+ .../cbf/cbf_profile_service_browsertest.cc    | 434 +++++++++++++
  .../browser/cbf/cbf_web_contents_delegate.cc  |  22 +
- chrome/browser/cbf/mojom/cbf_browser.mojom    |  74 +++
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  76 +++
  .../profile/cbf_profile_input_controller.cc   |  15 +-
- .../cbf/test/cbf_test_profile_observer.cc     | 238 +++++++-
- .../cbf/test/cbf_test_profile_observer.h      | 133 +++++
+ .../cbf/test/cbf_test_profile_observer.cc     | 335 +++++++++-
+ .../cbf/test/cbf_test_profile_observer.h      | 184 ++++++
  .../download/download_core_service_impl.cc    |  29 +
  .../download/download_core_service_impl.h     |   2 +
  .../common/in_progress_download_manager.cc    |   6 +-
  .../internal/common/resource_downloader.cc    |  15 +-
  .../internal/common/resource_downloader.h     |   7 +-
  .../browser/download/download_manager_impl.cc |   3 +-
- 24 files changed, 2086 insertions(+), 37 deletions(-)
+ 24 files changed, 2324 insertions(+), 39 deletions(-)
  create mode 100644 chrome/browser/cbf/cbf_download_manager_delegate.cc
  create mode 100644 chrome/browser/cbf/cbf_download_manager_delegate.h
 
@@ -345,7 +345,7 @@ index 3ce7cb93fbe00..4921f24689190 100644
    event->permission_names.items = nullptr;
    event->permission_names.len = 0;
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
-index f42511c2c6003..82043a756bd66 100644
+index f42511c2c6003..a38daaaea2881 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
 @@ -39,6 +39,9 @@ enum CbfEventKind {
@@ -358,15 +358,17 @@ index f42511c2c6003..82043a756bd66 100644
    kEventTabCreated = kEventWebPageCreated,
    kEventNewTabRequested = kEventNewWebPageRequested,
    kEventTabClosed = kEventWebPageClosed,
-@@ -69,6 +72,7 @@ enum CbfAuxiliaryWindowCloseReason {
+@@ -69,6 +72,9 @@ enum CbfAuxiliaryWindowCloseReason {
  enum CbfPromptUiKind {
    kCbfPromptUiKindUnknown = 0,
    kCbfPromptUiKindPermissionPrompt = 1,
 +  kCbfPromptUiKindDownloadPrompt = 2,
++  kCbfPromptUiKindExtensionInstallPrompt = 3,
++  kCbfPromptUiKindPrintPreviewDialog = 4,
  };
  
  enum CbfPromptUiPermissionType {
-@@ -86,6 +90,35 @@ enum CbfPromptUiResolutionResult {
+@@ -86,6 +92,35 @@ enum CbfPromptUiResolutionResult {
    kCbfPromptUiResolutionResultAborted = 3,
  };
  
@@ -402,7 +404,7 @@ index f42511c2c6003..82043a756bd66 100644
  enum CbfTabOpenHint {
    kCbfTabOpenHintUnknown = 0,
    kCbfTabOpenHintCurrentContext = 1,
-@@ -534,6 +567,21 @@ typedef struct CbfBridgeEvent {
+@@ -534,6 +569,21 @@ typedef struct CbfBridgeEvent {
    uint8_t prompt_ui_permission;
    uint8_t prompt_ui_result;
    char* prompt_ui_permission_key;
@@ -424,7 +426,7 @@ index f42511c2c6003..82043a756bd66 100644
    uint8_t tab_open_hint;
    bool tab_open_user_gesture;
    bool tab_open_has_source;
-@@ -651,7 +699,14 @@ bool cbf_bridge_client_respond_prompt_ui(
+@@ -651,7 +701,14 @@ bool cbf_bridge_client_respond_prompt_ui(
      uint64_t tab_id,
      uint64_t request_id,
      uint8_t prompt_ui_kind,
@@ -441,7 +443,7 @@ index f42511c2c6003..82043a756bd66 100644
                                         uint64_t tab_id,
                                         uint64_t prompt_ui_id);
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
-index 9183dfdeccc63..fb6e2b838ff9a 100644
+index 9183dfdeccc63..d2ebe1c5b46f7 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
 @@ -491,7 +491,8 @@ bool CbfBridgeClient::RespondAuxiliaryWindow(uint64_t tab_id,
@@ -464,12 +466,20 @@ index 9183dfdeccc63..fb6e2b838ff9a 100644
              auto it = impl->web_page_profiles.find(tab_id);
              if (it == impl->web_page_profiles.end()) {
                return;
-@@ -518,16 +520,103 @@ bool CbfBridgeClient::RespondPromptUi(uint64_t tab_id,
+@@ -518,16 +520,111 @@ bool CbfBridgeClient::RespondPromptUi(uint64_t tab_id,
                case kCbfPromptUiKindPermissionPrompt:
                  response->kind = cbf::mojom::CbfPromptUiKind::kPermissionPrompt;
                  break;
 +              case kCbfPromptUiKindDownloadPrompt:
 +                response->kind = cbf::mojom::CbfPromptUiKind::kDownloadPrompt;
++                break;
++              case kCbfPromptUiKindExtensionInstallPrompt:
++                response->kind =
++                    cbf::mojom::CbfPromptUiKind::kExtensionInstallPrompt;
++                break;
++              case kCbfPromptUiKindPrintPreviewDialog:
++                response->kind =
++                    cbf::mojom::CbfPromptUiKind::kPrintPreviewDialog;
 +                break;
                case kCbfPromptUiKindUnknown:
                default:
@@ -569,7 +579,7 @@ index 9183dfdeccc63..fb6e2b838ff9a 100644
    return true;
  }
  
-@@ -803,12 +892,44 @@ extern "C" bool cbf_bridge_client_respond_prompt_ui(
+@@ -803,12 +900,44 @@ extern "C" bool cbf_bridge_client_respond_prompt_ui(
      uint64_t tab_id,
      uint64_t request_id,
      uint8_t prompt_ui_kind,
@@ -789,7 +799,7 @@ index 0000000000000..7de5406394510
 +
 +#endif  // CHROME_BROWSER_CBF_CBF_DOWNLOAD_MANAGER_DELEGATE_H_
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
-index 2fd95cfbd4a16..2cfb7e56fae81 100644
+index 2fd95cfbd4a16..b75278cbfbafd 100644
 --- a/chrome/browser/cbf/cbf_profile_service.cc
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
 @@ -7,6 +7,7 @@
@@ -1050,20 +1060,38 @@ index 2fd95cfbd4a16..2cfb7e56fae81 100644
 +
 +  auto download_it = pending_download_prompts_.find(request_id);
 +  if (download_it == pending_download_prompts_.end()) {
++    return;
++  }
++  if (download_it->second.tab_id != tab_id) {
      return;
    }
 -  OpenDefaultAuxiliaryWindowImpl(request_id);
-+  if (download_it->second.tab_id != tab_id) {
-+    return;
-+  }
 +  OpenDefaultDownloadPromptImpl(request_id);
  }
  
  void CbfProfileService::RespondAuxiliaryWindow(
-@@ -560,6 +750,40 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
+@@ -560,6 +750,58 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
    if (!response) {
      return;
    }
++
++  if (response->kind == mojom::CbfPromptUiKind::kExtensionInstallPrompt) {
++    auto it = pending_extension_prompts_.find(request_id);
++    if (it == pending_extension_prompts_.end()) {
++      return;
++    }
++    if (it->second.tab_id != tab_id) {
++      DCHECK(false);
++      return;
++    }
++
++    ResolveExtensionInstallPrompt(
++        request_id,
++        response->allow ? mojom::CbfExtensionInstallPromptResult::kAccepted
++                        : mojom::CbfExtensionInstallPromptResult::kUserCanceled,
++        std::string());
++    return;
++  }
 +
 +  if (response->kind == mojom::CbfPromptUiKind::kDownloadPrompt) {
 +    auto it = pending_download_prompts_.find(request_id);
@@ -1101,7 +1129,7 @@ index 2fd95cfbd4a16..2cfb7e56fae81 100644
    if (response->kind != mojom::CbfPromptUiKind::kPermissionPrompt) {
      return;
    }
-@@ -594,6 +818,24 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
+@@ -594,6 +836,24 @@ void CbfProfileService::RespondPromptUi(uint64_t tab_id,
                           pending.permission, pending.permission_key, result);
  }
  
@@ -1126,7 +1154,7 @@ index 2fd95cfbd4a16..2cfb7e56fae81 100644
  void CbfProfileService::CloseAuxiliaryWindow(uint64_t tab_id,
                                               uint64_t window_id) {
    auto print_it = print_preview_window_to_dialog_.find(window_id);
-@@ -722,6 +964,8 @@ void CbfProfileService::NotifyTabClosed(TabId tab_id) {
+@@ -722,6 +982,8 @@ void CbfProfileService::NotifyTabClosed(TabId tab_id) {
    if (tab_id != kInvalidTabId) {
      ResolvePendingPermissionPromptsForTab(
          tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
@@ -1135,7 +1163,7 @@ index 2fd95cfbd4a16..2cfb7e56fae81 100644
      context_menu_controller_->OnTabClosed(tab_id);
      input_controller_->OnTabClosed(tab_id);
      ime_controller_->OnTabClosed(tab_id);
-@@ -1064,7 +1308,12 @@ void CbfProfileService::NotifyPromptUiRequested(
+@@ -1064,7 +1326,12 @@ void CbfProfileService::NotifyPromptUiRequested(
      uint64_t request_id,
      mojom::CbfPromptUiKind kind,
      mojom::CbfPromptUiPermissionType permission,
@@ -1149,7 +1177,7 @@ index 2fd95cfbd4a16..2cfb7e56fae81 100644
    if (!observer_) {
      return;
    }
-@@ -1073,6 +1322,11 @@ void CbfProfileService::NotifyPromptUiRequested(
+@@ -1073,6 +1340,11 @@ void CbfProfileService::NotifyPromptUiRequested(
    request->kind = kind;
    request->permission = permission;
    request->permission_key = permission_key;
@@ -1161,7 +1189,7 @@ index 2fd95cfbd4a16..2cfb7e56fae81 100644
    observer_->OnPromptUiRequested(tab_id, std::move(request));
  }
  
-@@ -1082,7 +1336,9 @@ void CbfProfileService::NotifyPromptUiResolved(
+@@ -1082,7 +1354,9 @@ void CbfProfileService::NotifyPromptUiResolved(
      mojom::CbfPromptUiKind kind,
      mojom::CbfPromptUiPermissionType permission,
      const std::string& permission_key,
@@ -1172,7 +1200,7 @@ index 2fd95cfbd4a16..2cfb7e56fae81 100644
    if (!observer_) {
      return;
    }
-@@ -1092,6 +1348,8 @@ void CbfProfileService::NotifyPromptUiResolved(
+@@ -1092,6 +1366,8 @@ void CbfProfileService::NotifyPromptUiResolved(
    resolution->permission = permission;
    resolution->permission_key = permission_key;
    resolution->result = result;
@@ -1181,7 +1209,7 @@ index 2fd95cfbd4a16..2cfb7e56fae81 100644
    observer_->OnPromptUiResolved(tab_id, std::move(resolution));
  }
  
-@@ -1151,6 +1409,215 @@ void CbfProfileService::ResolvePendingPermissionPromptsForShutdown(
+@@ -1151,6 +1427,215 @@ void CbfProfileService::ResolvePendingPermissionPromptsForShutdown(
    }
  }
  
@@ -1397,7 +1425,7 @@ index 2fd95cfbd4a16..2cfb7e56fae81 100644
  void CbfProfileService::TryAttachPrintPreviewDialog(TabId tab_id,
                                                      int attempts_remaining) {
    if (attempts_remaining < 0) {
-@@ -1257,6 +1724,8 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
+@@ -1257,6 +1742,8 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
    profile_observation_.Reset();
    ResolvePendingPermissionPromptsForShutdown(
        mojom::CbfPromptUiResolutionResult::kAborted);
@@ -1406,7 +1434,7 @@ index 2fd95cfbd4a16..2cfb7e56fae81 100644
    CloseAllTabs();
  }
  
-@@ -1278,6 +1747,81 @@ void CbfProfileService::RenderProcessGone(content::WebContents* web_contents,
+@@ -1278,6 +1765,81 @@ void CbfProfileService::RenderProcessGone(content::WebContents* web_contents,
    WebContentsDestroyed(web_contents);
  }
  
@@ -1682,10 +1710,10 @@ index 1211c5bb64f81..a6e2df5bba275 100644
    base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
  
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index 3565100f07274..401a3b8768bc3 100644
+index 3565100f07274..4d12f5e7863cd 100644
 --- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-@@ -1,14 +1,20 @@
+@@ -1,17 +1,24 @@
  #include "chrome/browser/cbf/cbf_profile_service.h"
  
  #include <memory>
@@ -1706,7 +1734,11 @@ index 3565100f07274..401a3b8768bc3 100644
  #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
  #include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
  #include "chrome/browser/history/history_service_factory.h"
-@@ -19,12 +25,15 @@
++#include "chrome/browser/extensions/extension_install_prompt.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+@@ -19,12 +26,16 @@
  #include "chrome/browser/ui/webui/webui_embedding_context.h"
  #include "chrome/common/url_constants.h"
  #include "chrome/test/base/in_process_browser_test.h"
@@ -1719,10 +1751,11 @@ index 3565100f07274..401a3b8768bc3 100644
  #include "content/public/test/browser_test_utils.h"
 +#include "content/public/test/slow_download_http_response.h"
 +#include "content/public/test/slow_http_response.h"
++#include "extensions/common/extension_builder.h"
  #include "net/http/http_status_code.h"
  #include "net/test/embedded_test_server/http_request.h"
  #include "net/test/embedded_test_server/http_response.h"
-@@ -37,6 +46,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -37,6 +48,7 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
   protected:
    void SetUpOnMainThread() override {
      InProcessBrowserTest::SetUpOnMainThread();
@@ -1730,7 +1763,7 @@ index 3565100f07274..401a3b8768bc3 100644
      profile_service_ =
          std::make_unique<CbfProfileService>(browser()->profile(), nullptr);
      profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
-@@ -104,8 +114,79 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+@@ -104,8 +116,79 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
      ASSERT_TRUE(content::WaitForLoadStop(web_contents));
    }
  
@@ -1810,10 +1843,70 @@ index 3565100f07274..401a3b8768bc3 100644
  };
  
  IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
-@@ -114,6 +195,297 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp)
+@@ -114,6 +197,357 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp)
    profile_service_->OpenDevTools(kInvalidTabId);
  }
  
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       RespondPromptUiAcceptsExtensionInstallPrompt) {
++  const TabId tab_id = CreatePage();
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  scoped_refptr<const extensions::Extension> extension =
++      extensions::ExtensionBuilder("PromptUi Install").Build();
++  ASSERT_TRUE(extension);
++
++  ExtensionInstallPrompt::Result prompt_result =
++      ExtensionInstallPrompt::Result::ABORTED;
++  std::string prompt_detail;
++  base::RunLoop prompt_done;
++  ASSERT_TRUE(profile_service_->RequestAuxiliaryInstallPromptForWebstore(
++      web_contents, extension.get(), nullptr,
++      base::BindOnce(
++          [](ExtensionInstallPrompt::Result* out_result,
++             std::string* out_detail, base::RunLoop* run_loop,
++             ExtensionInstallPrompt::DoneCallbackPayload payload) {
++            *out_result = payload.result;
++            *out_detail = payload.justification;
++            run_loop->Quit();
++          },
++          &prompt_result, &prompt_detail, &prompt_done)));
++
++  observer_.WaitForAuxiliaryWindowOpenRequestedCount(1);
++  ASSERT_FALSE(observer_.auxiliary_window_open_requested_events().empty());
++  const auto& request = observer_.auxiliary_window_open_requested_events().back();
++  EXPECT_EQ(request.tab_id, tab_id);
++  EXPECT_EQ(request.kind, mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt);
++  EXPECT_EQ(request.extension_id, extension->id());
++  EXPECT_EQ(request.extension_name, extension->name());
++
++  auto response = mojom::CbfPromptUiResponse::New();
++  response->kind = mojom::CbfPromptUiKind::kExtensionInstallPrompt;
++  response->allow = true;
++  profile_service_->RespondPromptUi(tab_id, request.request_id,
++                                    std::move(response));
++
++  prompt_done.Run();
++  EXPECT_EQ(prompt_result, ExtensionInstallPrompt::Result::ACCEPTED);
++  EXPECT_TRUE(prompt_detail.empty());
++
++  observer_.WaitForAuxiliaryWindowResolvedCount(1);
++  ASSERT_FALSE(observer_.auxiliary_window_resolved_events().empty());
++  const auto& resolution = observer_.auxiliary_window_resolved_events().back();
++  EXPECT_EQ(resolution.tab_id, tab_id);
++  EXPECT_EQ(resolution.request_id, request.request_id);
++  EXPECT_EQ(resolution.kind,
++            mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt);
++  EXPECT_EQ(resolution.extension_id, extension->id());
++  EXPECT_EQ(resolution.result, mojom::CbfExtensionInstallPromptResult::kAccepted);
++  EXPECT_TRUE(resolution.detail.empty());
++}
++
 +IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
 +                       DownloadPromptAllowStoresFileAtDestinationPath) {
 +  EnsureDownloadServerStarted();
@@ -2149,18 +2242,20 @@ index a94675fbb5bdb..167a8ac314019 100644
      case WindowOpenDisposition::NEW_BACKGROUND_TAB:
      case WindowOpenDisposition::NEW_WINDOW:
 diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
-index 1b3e8408079f3..e48ed1138dc1c 100644
+index 1b3e8408079f3..3b31b1580a53d 100644
 --- a/chrome/browser/cbf/mojom/cbf_browser.mojom
 +++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
-@@ -58,6 +58,7 @@ enum CbfAuxiliaryWindowCloseReason {
+@@ -58,6 +58,9 @@ enum CbfAuxiliaryWindowCloseReason {
  enum CbfPromptUiKind {
    kUnknown,
    kPermissionPrompt,
 +  kDownloadPrompt,
++  kExtensionInstallPrompt,
++  kPrintPreviewDialog,
  };
  
  enum CbfPromptUiPermissionType {
-@@ -75,16 +76,35 @@ enum CbfPromptUiResolutionResult {
+@@ -75,16 +78,35 @@ enum CbfPromptUiResolutionResult {
    kAborted,
  };
  
@@ -2196,7 +2291,7 @@ index 1b3e8408079f3..e48ed1138dc1c 100644
  };
  
  struct CbfPromptUiResolution {
-@@ -93,6 +113,54 @@ struct CbfPromptUiResolution {
+@@ -93,6 +115,54 @@ struct CbfPromptUiResolution {
    CbfPromptUiPermissionType permission;
    string permission_key;
    CbfPromptUiResolutionResult result;
@@ -2251,7 +2346,7 @@ index 1b3e8408079f3..e48ed1138dc1c 100644
  };
  
  enum CbfTabOpenHint {
-@@ -524,6 +592,9 @@ interface CbfProfileObserver {
+@@ -524,6 +594,9 @@ interface CbfProfileObserver {
                              CbfAuxiliaryWindowResolution resolution);
    OnPromptUiRequested(uint64 tab_id, CbfPromptUiRequest request);
    OnPromptUiResolved(uint64 tab_id, CbfPromptUiResolution resolution);
@@ -2261,7 +2356,7 @@ index 1b3e8408079f3..e48ed1138dc1c 100644
    OnExtensionRuntimeWarning(uint64 tab_id, string detail);
    OnAuxiliaryWindowOpened(uint64 tab_id,
                            uint64 window_id,
-@@ -570,6 +641,9 @@ interface CbfProfileService {
+@@ -570,6 +643,9 @@ interface CbfProfileService {
                           uint64 request_id,
                           CbfAuxiliaryWindowResponse response);
    RespondPromptUi(uint64 tab_id, uint64 request_id, CbfPromptUiResponse response);
@@ -2314,13 +2409,44 @@ index ddc7d15298584..16e0e9fdb7e9d 100644
      return;
    }
 diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
-index ff43485f178e3..869b2bc92afad 100644
+index ff43485f178e3..c058a5d5a1586 100644
 --- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
 +++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
-@@ -2,6 +2,75 @@
+@@ -2,6 +2,106 @@
  
  namespace cbf::test {
  
++CbfTestProfileObserver::AuxiliaryWindowRequestEvent::
++    AuxiliaryWindowRequestEvent() = default;
++CbfTestProfileObserver::AuxiliaryWindowRequestEvent::
++    ~AuxiliaryWindowRequestEvent() = default;
++CbfTestProfileObserver::AuxiliaryWindowRequestEvent::
++    AuxiliaryWindowRequestEvent(const AuxiliaryWindowRequestEvent&) = default;
++CbfTestProfileObserver::AuxiliaryWindowRequestEvent&
++CbfTestProfileObserver::AuxiliaryWindowRequestEvent::operator=(
++    const AuxiliaryWindowRequestEvent&) = default;
++CbfTestProfileObserver::AuxiliaryWindowRequestEvent::
++    AuxiliaryWindowRequestEvent(AuxiliaryWindowRequestEvent&&) = default;
++CbfTestProfileObserver::AuxiliaryWindowRequestEvent&
++CbfTestProfileObserver::AuxiliaryWindowRequestEvent::operator=(
++    AuxiliaryWindowRequestEvent&&) = default;
++
++CbfTestProfileObserver::AuxiliaryWindowResolutionEvent::
++    AuxiliaryWindowResolutionEvent() = default;
++CbfTestProfileObserver::AuxiliaryWindowResolutionEvent::
++    ~AuxiliaryWindowResolutionEvent() = default;
++CbfTestProfileObserver::AuxiliaryWindowResolutionEvent::
++    AuxiliaryWindowResolutionEvent(const AuxiliaryWindowResolutionEvent&) =
++        default;
++CbfTestProfileObserver::AuxiliaryWindowResolutionEvent&
++CbfTestProfileObserver::AuxiliaryWindowResolutionEvent::operator=(
++    const AuxiliaryWindowResolutionEvent&) = default;
++CbfTestProfileObserver::AuxiliaryWindowResolutionEvent::
++    AuxiliaryWindowResolutionEvent(AuxiliaryWindowResolutionEvent&&) = default;
++CbfTestProfileObserver::AuxiliaryWindowResolutionEvent&
++CbfTestProfileObserver::AuxiliaryWindowResolutionEvent::operator=(
++    AuxiliaryWindowResolutionEvent&&) = default;
++
 +CbfTestProfileObserver::PromptUiRequestEvent::PromptUiRequestEvent() = default;
 +CbfTestProfileObserver::PromptUiRequestEvent::~PromptUiRequestEvent() = default;
 +CbfTestProfileObserver::PromptUiRequestEvent::PromptUiRequestEvent(
@@ -2393,7 +2519,7 @@ index ff43485f178e3..869b2bc92afad 100644
  CbfTestProfileObserver::CbfTestProfileObserver() = default;
  CbfTestProfileObserver::~CbfTestProfileObserver() = default;
  
-@@ -11,6 +80,7 @@ CbfTestProfileObserver::BindNewPipeAndPassRemote() {
+@@ -11,6 +111,7 @@ CbfTestProfileObserver::BindNewPipeAndPassRemote() {
  }
  
  void CbfTestProfileObserver::WaitForWebPageClosedCount(size_t expected_count) {
@@ -2401,7 +2527,7 @@ index ff43485f178e3..869b2bc92afad 100644
    wait_web_page_closed_count_ = expected_count;
    if (web_page_closed_events_.size() >= wait_web_page_closed_count_) {
      return;
-@@ -22,6 +92,7 @@ void CbfTestProfileObserver::WaitForWebPageClosedCount(size_t expected_count) {
+@@ -22,6 +123,7 @@ void CbfTestProfileObserver::WaitForWebPageClosedCount(size_t expected_count) {
  }
  
  void CbfTestProfileObserver::WaitForDevToolsOpenedCount(size_t expected_count) {
@@ -2409,10 +2535,38 @@ index ff43485f178e3..869b2bc92afad 100644
    wait_devtools_opened_count_ = expected_count;
    if (devtools_opened_events_.size() >= wait_devtools_opened_count_) {
      return;
-@@ -32,6 +103,67 @@ void CbfTestProfileObserver::WaitForDevToolsOpenedCount(size_t expected_count) {
+@@ -32,6 +134,95 @@ void CbfTestProfileObserver::WaitForDevToolsOpenedCount(size_t expected_count) {
    quit_wait_loop_.Reset();
  }
  
++void CbfTestProfileObserver::WaitForAuxiliaryWindowOpenRequestedCount(
++    size_t expected_count) {
++  ResetWaitTargets();
++  wait_auxiliary_window_open_requested_count_ = expected_count;
++  if (auxiliary_window_open_requested_events_.size() >=
++      wait_auxiliary_window_open_requested_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
++void CbfTestProfileObserver::WaitForAuxiliaryWindowResolvedCount(
++    size_t expected_count) {
++  ResetWaitTargets();
++  wait_auxiliary_window_resolved_count_ = expected_count;
++  if (auxiliary_window_resolved_events_.size() >=
++      wait_auxiliary_window_resolved_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
 +void CbfTestProfileObserver::WaitForPromptUiRequestedCount(size_t expected_count) {
 +  ResetWaitTargets();
 +  wait_prompt_ui_requested_count_ = expected_count;
@@ -2477,7 +2631,37 @@ index ff43485f178e3..869b2bc92afad 100644
  void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t tab_id,
                                                      uint32_t ca_context_id) {}
  
-@@ -106,11 +238,78 @@ void CbfTestProfileObserver::OnAuxiliaryWindowResolved(
+@@ -98,19 +289,106 @@ void CbfTestProfileObserver::OnExtensionsListed(
+ 
+ void CbfTestProfileObserver::OnAuxiliaryWindowOpenRequested(
+     uint64_t tab_id,
+-    cbf::mojom::CbfAuxiliaryWindowRequestPtr request) {}
++    cbf::mojom::CbfAuxiliaryWindowRequestPtr request) {
++  AuxiliaryWindowRequestEvent event;
++  event.tab_id = tab_id;
++  event.request_id = request->request_id;
++  event.kind = request->kind;
++  event.extension_id = request->extension_id;
++  event.extension_name = request->extension_name;
++  event.permission_names = request->permission_names;
++  auxiliary_window_open_requested_events_.push_back(std::move(event));
++  MaybeQuitWaitLoop();
++}
+ 
+ void CbfTestProfileObserver::OnAuxiliaryWindowResolved(
+     uint64_t tab_id,
+-    cbf::mojom::CbfAuxiliaryWindowResolutionPtr resolution) {}
++    cbf::mojom::CbfAuxiliaryWindowResolutionPtr resolution) {
++  AuxiliaryWindowResolutionEvent event;
++  event.tab_id = tab_id;
++  event.request_id = resolution->request_id;
++  event.kind = resolution->kind;
++  event.extension_id = resolution->extension_id;
++  event.result = resolution->result;
++  event.detail = resolution->detail;
++  auxiliary_window_resolved_events_.push_back(std::move(event));
++  MaybeQuitWaitLoop();
++}
  
  void CbfTestProfileObserver::OnPromptUiRequested(
      uint64_t tab_id,
@@ -2558,10 +2742,22 @@ index ff43485f178e3..869b2bc92afad 100644
  
  void CbfTestProfileObserver::OnExtensionRuntimeWarning(
      uint64_t tab_id,
-@@ -141,7 +340,42 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
+@@ -141,7 +419,56 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
    if (wait_devtools_opened_count_ > 0 &&
        devtools_opened_events_.size() >= wait_devtools_opened_count_) {
      quit_wait_loop_.Run();
++    return;
+   }
++  if (wait_auxiliary_window_open_requested_count_ > 0 &&
++      auxiliary_window_open_requested_events_.size() >=
++          wait_auxiliary_window_open_requested_count_) {
++    quit_wait_loop_.Run();
++    return;
++  }
++  if (wait_auxiliary_window_resolved_count_ > 0 &&
++      auxiliary_window_resolved_events_.size() >=
++          wait_auxiliary_window_resolved_count_) {
++    quit_wait_loop_.Run();
 +    return;
 +  }
 +  if (wait_prompt_ui_requested_count_ > 0 &&
@@ -2583,7 +2779,7 @@ index ff43485f178e3..869b2bc92afad 100644
 +      download_updated_events_.size() >= wait_download_updated_count_) {
 +    quit_wait_loop_.Run();
 +    return;
-   }
++  }
 +  if (wait_download_completed_count_ > 0 &&
 +      download_completed_events_.size() >= wait_download_completed_count_) {
 +    quit_wait_loop_.Run();
@@ -2593,6 +2789,8 @@ index ff43485f178e3..869b2bc92afad 100644
 +void CbfTestProfileObserver::ResetWaitTargets() {
 +  wait_web_page_closed_count_ = 0;
 +  wait_devtools_opened_count_ = 0;
++  wait_auxiliary_window_open_requested_count_ = 0;
++  wait_auxiliary_window_resolved_count_ = 0;
 +  wait_prompt_ui_requested_count_ = 0;
 +  wait_prompt_ui_resolved_count_ = 0;
 +  wait_download_created_count_ = 0;
@@ -2602,7 +2800,7 @@ index ff43485f178e3..869b2bc92afad 100644
  
  }  // namespace cbf::test
 diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
-index c3321319201cd..edce2203c1057 100644
+index c3321319201cd..018909f0bd11a 100644
 --- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
 +++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
 @@ -2,6 +2,7 @@
@@ -2613,10 +2811,47 @@ index c3321319201cd..edce2203c1057 100644
  #include <string>
  #include <utility>
  #include <vector>
-@@ -17,6 +18,100 @@ namespace cbf::test {
+@@ -17,6 +18,137 @@ namespace cbf::test {
  // Simple mojom observer implementation used by CBF tests.
  class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
   public:
++  struct AuxiliaryWindowRequestEvent {
++    AuxiliaryWindowRequestEvent();
++    ~AuxiliaryWindowRequestEvent();
++    AuxiliaryWindowRequestEvent(const AuxiliaryWindowRequestEvent&);
++    AuxiliaryWindowRequestEvent& operator=(const AuxiliaryWindowRequestEvent&);
++    AuxiliaryWindowRequestEvent(AuxiliaryWindowRequestEvent&&);
++    AuxiliaryWindowRequestEvent& operator=(AuxiliaryWindowRequestEvent&&);
++
++    uint64_t tab_id = 0;
++    uint64_t request_id = 0;
++    cbf::mojom::CbfAuxiliaryWindowKind kind =
++        cbf::mojom::CbfAuxiliaryWindowKind::kUnknown;
++    std::string extension_id;
++    std::string extension_name;
++    std::vector<std::string> permission_names;
++  };
++
++  struct AuxiliaryWindowResolutionEvent {
++    AuxiliaryWindowResolutionEvent();
++    ~AuxiliaryWindowResolutionEvent();
++    AuxiliaryWindowResolutionEvent(const AuxiliaryWindowResolutionEvent&);
++    AuxiliaryWindowResolutionEvent& operator=(
++        const AuxiliaryWindowResolutionEvent&);
++    AuxiliaryWindowResolutionEvent(AuxiliaryWindowResolutionEvent&&);
++    AuxiliaryWindowResolutionEvent& operator=(
++        AuxiliaryWindowResolutionEvent&&);
++
++    uint64_t tab_id = 0;
++    uint64_t request_id = 0;
++    cbf::mojom::CbfAuxiliaryWindowKind kind =
++        cbf::mojom::CbfAuxiliaryWindowKind::kUnknown;
++    std::string extension_id;
++    cbf::mojom::CbfExtensionInstallPromptResult result =
++        cbf::mojom::CbfExtensionInstallPromptResult::kAborted;
++    std::string detail;
++  };
++
 +  struct PromptUiRequestEvent {
 +    PromptUiRequestEvent();
 +    ~PromptUiRequestEvent();
@@ -2714,10 +2949,18 @@ index c3321319201cd..edce2203c1057 100644
    CbfTestProfileObserver();
    CbfTestProfileObserver(const CbfTestProfileObserver&) = delete;
    CbfTestProfileObserver& operator=(const CbfTestProfileObserver&) = delete;
-@@ -31,9 +126,32 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+@@ -31,9 +163,42 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
        const {
      return devtools_opened_events_;
    }
++  const std::vector<AuxiliaryWindowRequestEvent>&
++  auxiliary_window_open_requested_events() const {
++    return auxiliary_window_open_requested_events_;
++  }
++  const std::vector<AuxiliaryWindowResolutionEvent>&
++  auxiliary_window_resolved_events() const {
++    return auxiliary_window_resolved_events_;
++  }
 +  const std::vector<PromptUiRequestEvent>& prompt_ui_requested_events() const {
 +    return prompt_ui_requested_events_;
 +  }
@@ -2739,6 +2982,8 @@ index c3321319201cd..edce2203c1057 100644
  
    void WaitForWebPageClosedCount(size_t expected_count);
    void WaitForDevToolsOpenedCount(size_t expected_count);
++  void WaitForAuxiliaryWindowOpenRequestedCount(size_t expected_count);
++  void WaitForAuxiliaryWindowResolvedCount(size_t expected_count);
 +  void WaitForPromptUiRequestedCount(size_t expected_count);
 +  void WaitForPromptUiResolvedCount(size_t expected_count);
 +  void WaitForDownloadCreatedCount(size_t expected_count);
@@ -2747,7 +2992,7 @@ index c3321319201cd..edce2203c1057 100644
  
    // cbf::mojom::CbfProfileObserver
    void OnSurfaceHandleUpdated(uint64_t tab_id,
-@@ -83,6 +201,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+@@ -83,6 +248,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
    void OnPromptUiResolved(
        uint64_t tab_id,
        cbf::mojom::CbfPromptUiResolutionPtr resolution) override;
@@ -2757,7 +3002,7 @@ index c3321319201cd..edce2203c1057 100644
    void OnExtensionRuntimeWarning(uint64_t tab_id,
                                   const std::string& detail) override;
    void OnAuxiliaryWindowOpened(uint64_t tab_id,
-@@ -98,13 +219,25 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+@@ -98,13 +266,29 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
  
   private:
    void MaybeQuitWaitLoop();
@@ -2766,6 +3011,8 @@ index c3321319201cd..edce2203c1057 100644
    mojo::Receiver<cbf::mojom::CbfProfileObserver> receiver_{this};
    std::vector<uint64_t> web_page_closed_events_;
    std::vector<std::pair<uint64_t, uint64_t>> devtools_opened_events_;
++  std::vector<AuxiliaryWindowRequestEvent> auxiliary_window_open_requested_events_;
++  std::vector<AuxiliaryWindowResolutionEvent> auxiliary_window_resolved_events_;
 +  std::vector<PromptUiRequestEvent> prompt_ui_requested_events_;
 +  std::vector<PromptUiResolutionEvent> prompt_ui_resolved_events_;
 +  std::vector<DownloadCreatedEvent> download_created_events_;
@@ -2775,6 +3022,8 @@ index c3321319201cd..edce2203c1057 100644
  
    size_t wait_web_page_closed_count_ = 0;
    size_t wait_devtools_opened_count_ = 0;
++  size_t wait_auxiliary_window_open_requested_count_ = 0;
++  size_t wait_auxiliary_window_resolved_count_ = 0;
 +  size_t wait_prompt_ui_requested_count_ = 0;
 +  size_t wait_prompt_ui_resolved_count_ = 0;
 +  size_t wait_download_created_count_ = 0;
