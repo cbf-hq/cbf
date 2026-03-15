@@ -9,6 +9,16 @@ keywords.workspace = true
 license.workspace = true
 readme.workspace = true
 
+[features]
+default = []
+native-dialogs = [
+    "dep:block2",
+    "dep:objc2",
+    "dep:objc2-app-kit",
+    "dep:objc2-core-foundation",
+    "dep:objc2-foundation",
+]
+
 [dependencies]
 thiserror.workspace = true
 cursor-icon = { workspace = true }
@@ -17,3 +27,27 @@ async-process.workspace = true
 futures-lite.workspace = true
 oneshot = { workspace = true, features = ["async", "std"] }
 tracing.workspace = true
+raw-window-handle.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = { workspace = true, optional = true }
+objc2 = { workspace = true, optional = true }
+objc2-foundation = { workspace = true, optional = true }
+objc2-core-foundation = { workspace = true, optional = true, features = [
+    "CFCGTypes",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
+workspace = true
+optional = true
+features = [
+    "NSAlert",
+    "NSApplication",
+    "NSButton",
+    "NSControl",
+    "NSResponder",
+    "NSTextField",
+    "NSView",
+    "NSWindow",
+    "block2",
+]

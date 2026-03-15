@@ -10,7 +10,7 @@ use cbf::{
         browsing_context_open::BrowsingContextOpenHint,
         browsing_context_open::BrowsingContextOpenResponse,
         context_menu::ContextMenu,
-        dialog::{BeforeUnloadReason, DialogResponse, DialogType},
+        dialog::{BeforeUnloadReason, DialogResponse, DialogType, JavaScriptDialogRequest},
         download::{DownloadId, DownloadOutcome, DownloadPromptActionHint, DownloadState},
         drag::{DragOperations, DragStartRequest},
         extension::ExtensionInfo,
@@ -377,6 +377,17 @@ pub(crate) enum CoreAction {
         extensions: Vec<ExtensionInfo>,
     },
     StartPlatformDrag(DragStartRequest),
+    PresentJavaScriptDialog {
+        target: JavaScriptDialogTarget,
+        request_id: u64,
+        request: JavaScriptDialogRequest,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum JavaScriptDialogTarget {
+    BrowsingContext(BrowsingContextId),
+    TransientBrowsingContext(TransientBrowsingContextId),
 }
 
 impl CoreState {
@@ -889,11 +900,10 @@ impl CoreState {
                         suggested_path,
                         self.cli.download_dir.as_deref(),
                     );
-                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
-                        profile_id,
-                        request_id,
-                        response,
-                    ) {
+                    if let Err(err) = self
+                        .browser_handle()
+                        .respond_auxiliary_window(profile_id, request_id, response)
+                    {
                         warn!(
                             "failed to respond download prompt request_id={request_id}, download_id={download_id:?}: {err}"
                         );
@@ -933,11 +943,10 @@ impl CoreState {
                         triggering_extension_name.as_deref(),
                         *can_report_abuse,
                     );
-                    if let Err(err) = self.browser_handle().respond_auxiliary_window(
-                        profile_id,
-                        request_id,
-                        response,
-                    ) {
+                    if let Err(err) = self
+                        .browser_handle()
+                        .respond_auxiliary_window(profile_id, request_id, response)
+                    {
                         warn!(
                             "failed to respond extension uninstall prompt request_id={request_id}: {err}"
                         );
@@ -985,7 +994,9 @@ impl CoreState {
             }
             BrowserEvent::ProfilesListed { profiles } => {
                 let Some(profile_id) = Self::resolve_startup_profile_id(&profiles) else {
-                    error!("backend returned no profiles; exiting without issuing profile-scoped commands");
+                    error!(
+                        "backend returned no profiles; exiting without issuing profile-scoped commands"
+                    );
                     return vec![CoreAction::ExitEventLoop];
                 };
 
@@ -1313,22 +1324,24 @@ impl CoreState {
                 r#type,
                 beforeunload_reason,
             } => {
-                let response = show_javascript_dialog(
-                    r#type,
-                    &message,
-                    default_prompt_text.as_deref(),
-                    beforeunload_reason.as_ref(),
-                );
-                if let Err(err) = respond_javascript_dialog_for_browsing_context(
-                    self.browser_handle(),
-                    browsing_context_id,
-                    request_id,
-                    r#type,
-                    response,
-                ) {
-                    warn!("failed to respond javascript dialog: {err}");
+                if r#type == DialogType::BeforeUnload {
+                    let response = show_beforeunload_dialog(&message, beforeunload_reason.as_ref());
+                    if let Err(err) = respond_javascript_dialog_for_browsing_context(
+                        self.browser_handle(),
+                        browsing_context_id,
+                        request_id,
+                        r#type,
+                        response,
+                    ) {
+                        warn!("failed to respond javascript dialog: {err}");
+                    }
+                    return Vec::new();
                 }
-                Vec::new()
+                vec![CoreAction::PresentJavaScriptDialog {
+                    target: JavaScriptDialogTarget::BrowsingContext(browsing_context_id),
+                    request_id,
+                    request: JavaScriptDialogRequest::new(r#type, message, default_prompt_text),
+                }]
             }
             BrowsingContextEvent::PermissionRequested { request_id, .. } => {
                 _ = self.browser_handle().confirm_permission(
@@ -1473,23 +1486,27 @@ impl CoreState {
                 r#type,
                 beforeunload_reason,
             } => {
-                let response = show_javascript_dialog(
-                    r#type,
-                    &message,
-                    default_prompt_text.as_deref(),
-                    beforeunload_reason.as_ref(),
-                );
-                if let Err(err) = self
-                    .browser_handle()
-                    .respond_javascript_dialog_in_transient_browsing_context(
-                        transient_browsing_context_id,
-                        request_id,
-                        response,
-                    )
-                {
-                    warn!("failed to respond transient javascript dialog: {err}");
+                if r#type == DialogType::BeforeUnload {
+                    let response = show_beforeunload_dialog(&message, beforeunload_reason.as_ref());
+                    if let Err(err) = self
+                        .browser_handle()
+                        .respond_javascript_dialog_in_transient_browsing_context(
+                            transient_browsing_context_id,
+                            request_id,
+                            response,
+                        )
+                    {
+                        warn!("failed to respond transient javascript dialog: {err}");
+                    }
+                    return Vec::new();
                 }
-                Vec::new()
+                vec![CoreAction::PresentJavaScriptDialog {
+                    target: JavaScriptDialogTarget::TransientBrowsingContext(
+                        transient_browsing_context_id,
+                    ),
+                    request_id,
+                    request: JavaScriptDialogRequest::new(r#type, message, default_prompt_text),
+                }]
             }
             TransientBrowsingContextEvent::TitleUpdated { title } => {
                 if let Some(state) = self
@@ -1553,53 +1570,24 @@ fn respond_javascript_dialog_for_browsing_context(
     browser.respond_javascript_dialog(browsing_context_id, request_id, response)
 }
 
-fn show_javascript_dialog(
-    dialog_type: DialogType,
+fn show_beforeunload_dialog(
     message: &str,
-    default_prompt_text: Option<&str>,
     beforeunload_reason: Option<&BeforeUnloadReason>,
 ) -> DialogResponse {
-    match dialog_type {
-        DialogType::Alert => {
-            let _ = MessageDialog::new()
-                .set_level(MessageLevel::Info)
-                .set_title("JavaScript Alert")
-                .set_description(message)
-                .set_buttons(MessageButtons::Ok)
-                .show();
-            DialogResponse::Success { input: None }
-        }
-        DialogType::Confirm => {
-            let confirmed = MessageDialog::new()
-                .set_level(MessageLevel::Info)
-                .set_title("JavaScript Confirm")
-                .set_description(message)
-                .set_buttons(MessageButtons::YesNo)
-                .show();
-            if confirmed == MessageDialogResult::Yes {
-                DialogResponse::Success { input: None }
-            } else {
-                DialogResponse::Cancel
-            }
-        }
-        DialogType::Prompt => show_prompt_dialog(message, default_prompt_text),
-        DialogType::BeforeUnload => {
-            let reason_suffix = beforeunload_reason
-                .map(beforeunload_reason_description)
-                .unwrap_or("The page requested confirmation before closing.");
-            let description = format!("{message}\n\n{reason_suffix}");
-            let confirmed = MessageDialog::new()
-                .set_level(MessageLevel::Warning)
-                .set_title("Leave Page?")
-                .set_description(&description)
-                .set_buttons(MessageButtons::YesNo)
-                .show();
-            if confirmed == MessageDialogResult::Yes {
-                DialogResponse::Success { input: None }
-            } else {
-                DialogResponse::Cancel
-            }
-        }
+    let reason_suffix = beforeunload_reason
+        .map(beforeunload_reason_description)
+        .unwrap_or("The page requested confirmation before closing.");
+    let description = format!("{message}\n\n{reason_suffix}");
+    let confirmed = MessageDialog::new()
+        .set_level(MessageLevel::Warning)
+        .set_title("Leave Page?")
+        .set_description(&description)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+    if confirmed == MessageDialogResult::Yes {
+        DialogResponse::Success { input: None }
+    } else {
+        DialogResponse::Cancel
     }
 }
 
@@ -1612,63 +1600,6 @@ fn beforeunload_reason_description(reason: &BeforeUnloadReason) -> &'static str 
         BeforeUnloadReason::Reload => "Reloading may discard unsaved changes.",
         BeforeUnloadReason::WindowClose => "Closing the window may discard unsaved changes.",
         BeforeUnloadReason::Unknown => "The page requested confirmation before closing.",
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn show_prompt_dialog(message: &str, default_prompt_text: Option<&str>) -> DialogResponse {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSTextField};
-    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-    use objc2_foundation::NSString;
-
-    let Some(mtm) = MainThreadMarker::new() else {
-        return DialogResponse::Cancel;
-    };
-
-    let alert = NSAlert::new(mtm);
-    let message_text = NSString::from_str("JavaScript Prompt");
-    let informative_text = NSString::from_str(message);
-    let ok = NSString::from_str("OK");
-    let cancel = NSString::from_str("Cancel");
-    let initial = NSString::from_str(default_prompt_text.unwrap_or_default());
-
-    alert.setMessageText(&message_text);
-    alert.setInformativeText(&informative_text);
-    alert.setAlertStyle(NSAlertStyle::Informational);
-    alert.addButtonWithTitle(&ok);
-    alert.addButtonWithTitle(&cancel);
-
-    let input = NSTextField::textFieldWithString(&initial, mtm);
-    input.setFrame(CGRect::new(
-        CGPoint::new(0.0, 0.0),
-        CGSize::new(320.0, 24.0),
-    ));
-    alert.setAccessoryView(Some(&input));
-
-    if alert.runModal() == NSAlertFirstButtonReturn {
-        DialogResponse::Success {
-            input: Some(input.stringValue().to_string()),
-        }
-    } else {
-        DialogResponse::Cancel
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn show_prompt_dialog(message: &str, default_prompt_text: Option<&str>) -> DialogResponse {
-    let confirmed = MessageDialog::new()
-        .set_level(MessageLevel::Info)
-        .set_title("JavaScript Prompt")
-        .set_description(message)
-        .set_buttons(MessageButtons::YesNo)
-        .show();
-    if confirmed == MessageDialogResult::Yes {
-        DialogResponse::Success {
-            input: default_prompt_text.map(ToOwned::to_owned),
-        }
-    } else {
-        DialogResponse::Cancel
     }
 }
 
@@ -1709,10 +1640,7 @@ fn build_extension_install_prompt_message(
     )
 }
 
-fn show_extension_install_prompt_dialog(
-    extension_name: &str,
-    permission_names: &[String],
-) -> bool {
+fn show_extension_install_prompt_dialog(extension_name: &str, permission_names: &[String]) -> bool {
     let message = build_extension_install_prompt_message(extension_name, permission_names);
 
     let result = MessageDialog::new()

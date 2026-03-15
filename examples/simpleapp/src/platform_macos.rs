@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    thread,
 };
 
 mod menu;
@@ -16,6 +17,7 @@ use cbf::{
         transient_browsing_context::{TransientImeCommitText, TransientImeComposition},
         window_open::WindowDescriptor,
     },
+    dialogs::{DialogPresentationContext, DialogPresenter, NativeDialogPresenter},
 };
 use cbf_chrome::{
     backend::ChromiumBackend,
@@ -39,11 +41,11 @@ use winit::{
 use crate::{
     app::{PlatformApp, UserEvent, run_with_platform},
     core::{
-        CoreAction, CoreState, PRIMARY_HOST_WINDOW_ID, SharedState, ViewTarget,
-        bind_transient_to_window, browsing_context_id_for_target, browsing_context_id_for_window,
-        drag_allowed_operations, remove_drag_session, set_drag_allowed_operations,
-        set_primary_host_window_id, transient_browsing_context_id_for_window,
-        window_id_for_transient_browsing_context,
+        CoreAction, CoreState, JavaScriptDialogTarget, PRIMARY_HOST_WINDOW_ID, SharedState,
+        ViewTarget, bind_transient_to_window, browsing_context_id_for_target,
+        browsing_context_id_for_window, drag_allowed_operations, remove_drag_session,
+        set_drag_allowed_operations, set_primary_host_window_id,
+        transient_browsing_context_id_for_window, window_id_for_transient_browsing_context,
     },
 };
 
@@ -744,6 +746,75 @@ impl SimpleAppMac {
         let winit_id = self.winit_id_by_host_window.get(&host_window_id)?;
         self.windows.get(winit_id).map(|entry| &entry.window)
     }
+
+    fn presentation_context_for_host_window(
+        &self,
+        host_window_id: HostWindowId,
+    ) -> DialogPresentationContext {
+        let Some(window) = self.window_for_host_id(host_window_id) else {
+            return DialogPresentationContext::default();
+        };
+        let Ok(window_handle) = window.window_handle() else {
+            return DialogPresentationContext::default();
+        };
+
+        DialogPresentationContext::new().with_parent_window_handle(window_handle.as_raw())
+    }
+
+    fn presentation_context_for_target(
+        &self,
+        target: JavaScriptDialogTarget,
+    ) -> DialogPresentationContext {
+        let host_window_id = match target {
+            JavaScriptDialogTarget::BrowsingContext(browsing_context_id) => {
+                let guard = self.shared.lock().expect("shared state lock poisoned");
+                guard
+                    .browsing_context_to_window
+                    .get(&browsing_context_id)
+                    .copied()
+            }
+            JavaScriptDialogTarget::TransientBrowsingContext(transient_browsing_context_id) => {
+                window_id_for_transient_browsing_context(
+                    &self.shared,
+                    transient_browsing_context_id,
+                )
+            }
+        };
+
+        host_window_id
+            .map(|window_id| self.presentation_context_for_host_window(window_id))
+            .unwrap_or_default()
+    }
+
+    fn present_javascript_dialog(
+        &self,
+        target: JavaScriptDialogTarget,
+        request_id: u64,
+        request: cbf::data::dialog::JavaScriptDialogRequest,
+    ) {
+        let future = NativeDialogPresenter
+            .present_javascript_dialog(request, self.presentation_context_for_target(target));
+        let browser_handle = self.browser_handle.clone();
+
+        thread::spawn(move || {
+            let response = futures_lite::future::block_on(future);
+            let result = match target {
+                JavaScriptDialogTarget::BrowsingContext(browsing_context_id) => browser_handle
+                    .respond_javascript_dialog(browsing_context_id, request_id, response),
+                JavaScriptDialogTarget::TransientBrowsingContext(transient_browsing_context_id) => {
+                    browser_handle.respond_javascript_dialog_in_transient_browsing_context(
+                        transient_browsing_context_id,
+                        request_id,
+                        response,
+                    )
+                }
+            };
+
+            if let Err(err) = result {
+                warn!("failed to respond javascript dialog asynchronously: {err}");
+            }
+        });
+    }
 }
 
 impl PlatformApp for SimpleAppMac {
@@ -959,6 +1030,11 @@ impl PlatformApp for SimpleAppMac {
                         );
                     }
                 }
+                CoreAction::PresentJavaScriptDialog {
+                    target,
+                    request_id,
+                    request,
+                } => self.present_javascript_dialog(target, request_id, request),
                 CoreAction::SetExtensionsMenuLoading => {
                     if let Some(menu) = self.menu.as_ref() {
                         menu.show_extensions_loading();

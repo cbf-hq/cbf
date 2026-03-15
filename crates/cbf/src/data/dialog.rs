@@ -19,6 +19,32 @@ pub enum BeforeUnloadReason {
     WindowClose,
 }
 
+/// Browser-generic request payload for JavaScript dialogs.
+///
+/// This request model is intended for `alert`, `confirm`, and `prompt`.
+/// `DialogType::BeforeUnload` remains handled via the existing dedicated flow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JavaScriptDialogRequest {
+    pub r#type: DialogType,
+    pub message: String,
+    pub default_prompt_text: Option<String>,
+}
+
+impl JavaScriptDialogRequest {
+    /// Creates a browser-generic JavaScript dialog request payload.
+    pub fn new(
+        r#type: DialogType,
+        message: impl Into<String>,
+        default_prompt_text: Option<String>,
+    ) -> Self {
+        Self {
+            r#type,
+            message: message.into(),
+            default_prompt_text,
+        }
+    }
+}
+
 /// Response payload for a JavaScript dialog request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogResponse {

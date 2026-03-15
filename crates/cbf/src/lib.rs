@@ -6,12 +6,18 @@
 //!
 //! For setup, architecture, and implementation details, see the repository
 //! documentation under `docs/`.
+//!
+//! Dialog abstractions are available under [`dialogs`].
+//! Optional convenience helpers:
+//! - `native-dialogs`: native helper functions and [`dialogs::NativeDialogPresenter`]
+//!   for `alert` / `confirm`, plus macOS `prompt` support.
 
 pub mod backend_event_loop;
 pub mod browser;
 pub mod command;
 pub mod data;
 pub mod delegate;
+pub mod dialogs;
 pub mod error;
 pub mod event;
 pub mod middleware;
