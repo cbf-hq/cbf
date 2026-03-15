@@ -4,6 +4,9 @@ This guide defines the MVP release flow for pre-built macOS artifacts.
 It is intentionally local and manually invoked. Artifact upload is still a
 maintainer step outside the repository automation.
 
+For crate versioning and GitHub Release tag/title rules, see
+`docs/developer-guide/versioning-and-release-metadata.md`.
+
 ## 1. Scope
 
 The MVP release bundle contains these top-level files:
@@ -52,7 +55,9 @@ The local release flow expects:
 - `chromium/src`
 - `./depot_tools`
 
-The release version is taken from the single git tag that points at `HEAD`.
+The runtime release bundle identifier is taken from the single git tag that
+points at `HEAD`. Use the canonical runtime bundle tag format defined in
+`docs/developer-guide/versioning-and-release-metadata.md`.
 If `HEAD` is untagged, the release flow fails.
 
 ## 4. Task entrypoints
@@ -127,7 +132,8 @@ After `task release` completes:
 
 1. Inspect the generated files under `dist/release/<git-tag>/`.
 2. Inspect `SOURCE_INFO.txt` and confirm the recorded revisions and GN args.
-3. Upload `dist/release/cbf-chrome-macos-<git-tag>.tar.gz` to the desired GitHub Release or issue thread.
+3. Upload `dist/release/cbf-chrome-macos-<git-tag>.tar.gz` to the matching
+   runtime bundle GitHub Release.
 
 No GitHub Actions workflow, Jenkins job, or scheduled release automation is part
 of this MVP process.
