@@ -1,7 +1,4 @@
-use std::{
-    collections::VecDeque,
-    time::Instant,
-};
+use std::{collections::VecDeque, time::Instant};
 
 use crate::{
     command::BrowserCommand,
@@ -146,8 +143,14 @@ mod tests {
         let now = Instant::now();
         let deadline = now + Duration::from_millis(10);
 
-        assert_eq!(choose_earlier_deadline(Some(deadline), None), Some(deadline));
-        assert_eq!(choose_earlier_deadline(None, Some(deadline)), Some(deadline));
+        assert_eq!(
+            choose_earlier_deadline(Some(deadline), None),
+            Some(deadline)
+        );
+        assert_eq!(
+            choose_earlier_deadline(None, Some(deadline)),
+            Some(deadline)
+        );
         assert_eq!(choose_earlier_deadline(None, None), None);
     }
 }

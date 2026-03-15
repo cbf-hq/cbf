@@ -147,6 +147,20 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 menu: menu.clone().into(),
             }),
         }),
+        IpcEvent::ExtensionPopupChoiceMenuRequested {
+            profile_id,
+            browsing_context_id,
+            popup_id,
+            request_id,
+            ..
+        } => Some(BrowserEvent::TransientBrowsingContext {
+            profile_id: profile_id.clone(),
+            transient_browsing_context_id: popup_id.to_transient_browsing_context_id(),
+            parent_browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(TransientBrowsingContextEvent::ChoiceMenuRequested {
+                request_id: *request_id,
+            }),
+        }),
         IpcEvent::ExtensionPopupCursorChanged {
             profile_id,
             browsing_context_id,
@@ -277,6 +291,18 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             browsing_context_id: browsing_context_id.to_browsing_context_id(),
             event: Box::new(BrowsingContextEvent::ContextMenuRequested {
                 menu: menu.clone().into(),
+            }),
+        }),
+        IpcEvent::ChoiceMenuRequested {
+            profile_id,
+            browsing_context_id,
+            request_id,
+            ..
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(BrowsingContextEvent::ChoiceMenuRequested {
+                request_id: *request_id,
             }),
         }),
         IpcEvent::TabOpenRequested {

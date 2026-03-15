@@ -197,7 +197,9 @@ fn stop_reason_from_wake_state(inner: &WakeStateInner) -> Option<BackendStopReas
 enum ShutdownState {
     #[default]
     Idle,
-    Proceeding { request_id: u64 },
+    Proceeding {
+        request_id: u64,
+    },
 }
 
 fn normalize_stop_reason(
@@ -205,10 +207,9 @@ fn normalize_stop_reason(
     shutdown_state: ShutdownState,
 ) -> BackendStopReason {
     match (reason, shutdown_state) {
-        (
-            BackendStopReason::Disconnected,
-            ShutdownState::Proceeding { .. },
-        ) => BackendStopReason::ShutdownRequested,
+        (BackendStopReason::Disconnected, ShutdownState::Proceeding { .. }) => {
+            BackendStopReason::ShutdownRequested
+        }
         (reason, _) => reason,
     }
 }
@@ -531,16 +532,14 @@ impl ChromiumBackend {
         raw_delegate: &mut dyn ChromeRawDelegate,
         shutdown_state: &mut ShutdownState,
     ) -> bool {
-        if let Some(stop_reason) =
-            Self::drain_ready_sources(
-                event_loop,
-                client,
-                event_tx,
-                dispatcher,
-                raw_delegate,
-                shutdown_state,
-            )
-        {
+        if let Some(stop_reason) = Self::drain_ready_sources(
+            event_loop,
+            client,
+            event_tx,
+            dispatcher,
+            raw_delegate,
+            shutdown_state,
+        ) {
             let stop_reason = normalize_stop_reason(stop_reason, *shutdown_state);
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
@@ -549,21 +548,21 @@ impl ChromiumBackend {
         let wake = event_loop.wait_until(dispatcher.next_wake_deadline());
         if matches!(
             wake,
-            BackendWake::CommandReady | BackendWake::BackendInputReady | BackendWake::DeadlineReached
+            BackendWake::CommandReady
+                | BackendWake::BackendInputReady
+                | BackendWake::DeadlineReached
         ) {
             dispatcher.on_wake();
         }
 
-        if let Some(stop_reason) =
-            Self::drain_ready_sources(
-                event_loop,
-                client,
-                event_tx,
-                dispatcher,
-                raw_delegate,
-                shutdown_state,
-            )
-        {
+        if let Some(stop_reason) = Self::drain_ready_sources(
+            event_loop,
+            client,
+            event_tx,
+            dispatcher,
+            raw_delegate,
+            shutdown_state,
+        ) {
             let stop_reason = normalize_stop_reason(stop_reason, *shutdown_state);
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
@@ -1082,6 +1081,15 @@ impl ChromiumBackend {
             } => client
                 .execute_context_menu_command(*menu_id, *command_id, *event_flags)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::AcceptChoiceMenuSelection {
+                request_id,
+                indices,
+            } => client
+                .accept_choice_menu_selection(*request_id, indices)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::DismissChoiceMenu { request_id } => client
+                .dismiss_choice_menu(*request_id)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::DismissContextMenu { menu_id } => client
                 .dismiss_context_menu(*menu_id)
                 .map(|_| (None, Vec::new())),
@@ -1501,10 +1509,7 @@ mod tests {
             &mut shutdown_state,
             &IpcEvent::ShutdownProceeding { request_id: 11 },
         );
-        assert_eq!(
-            shutdown_state,
-            ShutdownState::Proceeding { request_id: 11 }
-        );
+        assert_eq!(shutdown_state, ShutdownState::Proceeding { request_id: 11 });
 
         update_shutdown_state(
             &mut shutdown_state,

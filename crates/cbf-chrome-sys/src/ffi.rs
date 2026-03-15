@@ -51,6 +51,8 @@ pub const CBF_EVENT_EXTENSION_POPUP_JAVASCRIPT_DIALOG_REQUESTED: u8 = 40;
 pub const CBF_EVENT_EXTENSION_POPUP_CLOSE_REQUESTED: u8 = 41;
 pub const CBF_EVENT_EXTENSION_POPUP_RENDER_PROCESS_GONE: u8 = 42;
 pub const CBF_EVENT_JAVASCRIPT_DIALOG_REQUESTED: u8 = 43;
+pub const CBF_EVENT_CHOICE_MENU_REQUESTED: u8 = 44;
+pub const CBF_EVENT_EXTENSION_POPUP_CHOICE_MENU_REQUESTED: u8 = 45;
 
 pub const CBF_BRIDGE_EVENT_WAIT_STATUS_EVENT_AVAILABLE: i32 = 0;
 pub const CBF_BRIDGE_EVENT_WAIT_STATUS_TIMED_OUT: i32 = 1;
@@ -278,6 +280,13 @@ pub const CBF_MENU_ITEM_SUBMENU: u8 = 5;
 pub const CBF_MENU_ITEM_ACTIONABLE_SUBMENU: u8 = 6;
 pub const CBF_MENU_ITEM_HIGHLIGHTED: u8 = 7;
 pub const CBF_MENU_ITEM_TITLE: u8 = 8;
+pub const CBF_CHOICE_MENU_ITEM_OPTION: u8 = 0;
+pub const CBF_CHOICE_MENU_ITEM_CHECKABLE_OPTION: u8 = 1;
+pub const CBF_CHOICE_MENU_ITEM_GROUP: u8 = 2;
+pub const CBF_CHOICE_MENU_ITEM_SEPARATOR: u8 = 3;
+pub const CBF_CHOICE_MENU_ITEM_SUB_MENU: u8 = 4;
+pub const CBF_CHOICE_MENU_TEXT_DIRECTION_LEFT_TO_RIGHT: u8 = 0;
+pub const CBF_CHOICE_MENU_TEXT_DIRECTION_RIGHT_TO_LEFT: u8 = 1;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
@@ -305,6 +314,7 @@ pub struct CbfBridgeEvent {
     pub ime_bounds: CbfImeBoundsUpdate,
     pub dirty_tab_ids: CbfTabIdList,
     pub context_menu: CbfContextMenu,
+    pub choice_menu: CbfChoiceMenu,
     pub target_url: *mut c_char,
     pub url: *mut c_char,
     pub is_popup: bool,
@@ -356,6 +366,49 @@ pub struct CbfBridgeEvent {
     pub tab_open_result_kind: u8,
     pub tab_open_has_target: bool,
     pub tab_open_target_tab_id: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfChoiceMenuItemList {
+    pub items: *const CbfChoiceMenuItem,
+    pub len: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfChoiceMenuItem {
+    pub type_: u8,
+    pub label: *mut c_char,
+    pub tool_tip: *mut c_char,
+    pub action: u32,
+    pub text_direction: u8,
+    pub has_text_direction_override: bool,
+    pub enabled: bool,
+    pub checked: bool,
+    pub children: CbfChoiceMenuItemList,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfChoiceMenu {
+    pub request_id: u64,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub item_font_size: f64,
+    pub selected_item: i32,
+    pub right_aligned: bool,
+    pub allow_multiple_selection: bool,
+    pub items: CbfChoiceMenuItemList,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfChoiceMenuSelectedIndices {
+    pub items: *const i32,
+    pub len: u32,
 }
 
 #[repr(C)]
@@ -894,6 +947,15 @@ unsafe extern "C" {
     pub fn cbf_bridge_client_dismiss_context_menu(
         client: *mut CbfBridgeClientHandle,
         menu_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_accept_choice_menu_selection(
+        client: *mut CbfBridgeClientHandle,
+        request_id: u64,
+        indices: *const CbfChoiceMenuSelectedIndices,
+    ) -> bool;
+    pub fn cbf_bridge_client_dismiss_choice_menu(
+        client: *mut CbfBridgeClientHandle,
+        request_id: u64,
     ) -> bool;
     pub fn cbf_bridge_client_confirm_beforeunload(
         client: *mut CbfBridgeClientHandle,

@@ -1367,6 +1367,42 @@ impl IpcClient {
         }
     }
 
+    /// Accept a host-owned choice menu selection.
+    pub fn accept_choice_menu_selection(
+        &mut self,
+        request_id: u64,
+        indices: &[i32],
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let ffi_indices = CbfChoiceMenuSelectedIndices {
+            items: indices.as_ptr(),
+            len: indices.len() as u32,
+        };
+        if unsafe {
+            cbf_bridge_client_accept_choice_menu_selection(self.inner, request_id, &ffi_indices)
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Dismiss a host-owned choice menu without a selection.
+    pub fn dismiss_choice_menu(&mut self, request_id: u64) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe { cbf_bridge_client_dismiss_choice_menu(self.inner, request_id) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
     /// Dismiss the context menu with the given id.
     pub fn dismiss_context_menu(&mut self, menu_id: u64) -> Result<(), Error> {
         if self.inner.is_null() {

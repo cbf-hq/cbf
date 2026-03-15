@@ -39,6 +39,10 @@ use cbf::data::{
 };
 
 use super::bindings::{CALayerHost, ContextId};
+use super::choice_menu::ChromeChoiceMenuPresenter;
+#[cfg(feature = "macos-choice-menu-default")]
+use super::choice_menu::MacChoiceMenuPresenter;
+use crate::data::choice_menu::{ChromeChoiceMenu, ChromeChoiceMenuSelectionMode};
 use crate::ffi::{
     convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
     convert_nsevent_to_mouse_wheel_event,
@@ -60,6 +64,10 @@ pub trait BrowserViewMacDelegate {
     fn on_context_menu_command(&self, view: &BrowserViewMac, menu_id: u64, command_id: i32);
     /// Called when a context menu is dismissed.
     fn on_context_menu_dismissed(&self, view: &BrowserViewMac, menu_id: u64);
+    /// Called when a choice menu selection is accepted.
+    fn on_choice_menu_selected(&self, view: &BrowserViewMac, request_id: u64, indices: Vec<i32>);
+    /// Called when a choice menu is dismissed.
+    fn on_choice_menu_dismissed(&self, view: &BrowserViewMac, request_id: u64);
     /// Called when NSResponder focus state for BrowserViewMac changed.
     fn on_focus_changed(&self, view: &BrowserViewMac, focused: bool);
     /// Called when native drag session moves.
@@ -83,6 +91,8 @@ pub struct BrowserViewMacConfig {
 
 const NO_MENU_ID: u64 = 0;
 const NO_COMMAND_ID: i32 = i32::MIN;
+const NO_CHOICE_MENU_REQUEST_ID: u64 = 0;
+const NO_CHOICE_MENU_ACTION: i32 = i32::MIN;
 
 /// IME events emitted by BrowserViewMac.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,6 +148,8 @@ pub struct BrowserViewMacIvars {
     edit_commands: RefCell<Vec<String>>,
     context_menu_id: Cell<u64>,
     context_menu_selected_command_id: Cell<i32>,
+    choice_menu_request_id: Cell<u64>,
+    choice_menu_selected_action: Cell<i32>,
     active_drag_source: RefCell<Option<Retained<AnyObject>>>,
 }
 
@@ -288,6 +300,12 @@ define_class!(
             self.ivars()
                 .context_menu_selected_command_id
                 .set(tag as i32);
+        }
+
+        #[unsafe(method(choiceMenuItemSelected:))]
+        fn choice_menu_item_selected(&self, sender: &AnyObject) {
+            let tag: isize = unsafe { msg_send![sender, tag] };
+            self.ivars().choice_menu_selected_action.set(tag as i32);
         }
     }
 
@@ -517,6 +535,8 @@ impl BrowserViewMac {
             edit_commands: RefCell::new(Vec::new()),
             context_menu_id: Cell::new(NO_MENU_ID),
             context_menu_selected_command_id: Cell::new(NO_COMMAND_ID),
+            choice_menu_request_id: Cell::new(NO_CHOICE_MENU_REQUEST_ID),
+            choice_menu_selected_action: Cell::new(NO_CHOICE_MENU_ACTION),
             active_drag_source: RefCell::new(None),
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };
@@ -601,6 +621,71 @@ impl BrowserViewMac {
             self.ivars()
                 .delegate
                 .on_context_menu_command(self, menu_id, command_id);
+        }
+    }
+
+    /// Show a host-owned `<select>` choice menu.
+    pub fn show_choice_menu(&self, menu: ChromeChoiceMenu) {
+        #[cfg(feature = "macos-choice-menu-default")]
+        return self.show_choice_menu_with_presenter(menu, &MacChoiceMenuPresenter);
+        #[cfg(not(feature = "macos-choice-menu-default"))]
+        {
+            self.ivars()
+                .delegate
+                .on_choice_menu_dismissed(self, menu.request_id);
+        }
+    }
+
+    /// Show a host-owned `<select>` choice menu with a custom presenter.
+    pub fn show_choice_menu_with_presenter<P: ChromeChoiceMenuPresenter>(
+        &self,
+        menu: ChromeChoiceMenu,
+        presenter: &P,
+    ) {
+        if self.window().is_none() {
+            self.ivars()
+                .delegate
+                .on_choice_menu_dismissed(self, menu.request_id);
+            return;
+        }
+
+        if matches!(menu.selection_mode, ChromeChoiceMenuSelectionMode::Multiple) {
+            self.ivars()
+                .delegate
+                .on_choice_menu_dismissed(self, menu.request_id);
+            return;
+        }
+
+        self.ivars().choice_menu_request_id.set(menu.request_id);
+        self.ivars()
+            .choice_menu_selected_action
+            .set(NO_CHOICE_MENU_ACTION);
+
+        let result = presenter.show_choice_menu(self, &menu);
+
+        let request_id = self
+            .ivars()
+            .choice_menu_request_id
+            .replace(NO_CHOICE_MENU_REQUEST_ID);
+        self.ivars()
+            .choice_menu_selected_action
+            .set(NO_CHOICE_MENU_ACTION);
+
+        if request_id == NO_CHOICE_MENU_REQUEST_ID {
+            return;
+        }
+
+        match result {
+            Some(indices) if !indices.is_empty() => {
+                self.ivars()
+                    .delegate
+                    .on_choice_menu_selected(self, request_id, indices);
+            }
+            _ => {
+                self.ivars()
+                    .delegate
+                    .on_choice_menu_dismissed(self, request_id);
+            }
         }
     }
 
@@ -738,6 +823,14 @@ impl BrowserViewMac {
 
     fn send_mac_ime_event(&self, event: BrowserViewMacImeEvent) {
         self.ivars().delegate.on_ime_event(self, event);
+    }
+
+    pub(crate) fn take_choice_menu_result(&self) -> Option<i32> {
+        let action = self
+            .ivars()
+            .choice_menu_selected_action
+            .replace(NO_CHOICE_MENU_ACTION);
+        (action != NO_CHOICE_MENU_ACTION).then_some(action)
     }
 
     fn send_mac_char_event(&self, text: String) {

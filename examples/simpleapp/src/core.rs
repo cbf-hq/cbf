@@ -24,7 +24,9 @@ use cbf::{
     event::{BackendStopReason, BrowserEvent, BrowsingContextEvent, TransientBrowsingContextEvent},
 };
 use cbf_chrome::{
-    backend::ChromiumBackend, browser::ChromiumBrowserHandleExt, data::surface::SurfaceHandle,
+    backend::ChromiumBackend,
+    browser::ChromiumBrowserHandleExt,
+    data::{choice_menu::ChromeChoiceMenu, surface::SurfaceHandle},
 };
 use cursor_icon::CursorIcon;
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
@@ -357,6 +359,14 @@ pub(crate) enum CoreAction {
     ShowContextMenuInTransientBrowsingContext {
         transient_browsing_context_id: TransientBrowsingContextId,
         menu: ContextMenu,
+    },
+    ShowChoiceMenu {
+        browsing_context_id: BrowsingContextId,
+        menu: ChromeChoiceMenu,
+    },
+    ShowChoiceMenuInTransientBrowsingContext {
+        transient_browsing_context_id: TransientBrowsingContextId,
+        menu: ChromeChoiceMenu,
     },
     SetExtensionsMenuLoading,
     ReplaceExtensionsMenu {
@@ -1120,6 +1130,7 @@ impl CoreState {
                     menu,
                 }]
             }
+            BrowsingContextEvent::ChoiceMenuRequested { .. } => Vec::new(),
             BrowsingContextEvent::DragStartRequested { request } => {
                 vec![CoreAction::StartPlatformDrag(request)]
             }
@@ -1372,6 +1383,7 @@ impl CoreState {
                     menu,
                 }]
             }
+            TransientBrowsingContextEvent::ChoiceMenuRequested { .. } => Vec::new(),
             TransientBrowsingContextEvent::JavaScriptDialogRequested {
                 request_id,
                 message,

@@ -3,6 +3,7 @@ use cursor_icon::CursorIcon;
 use cbf::data::dialog::DialogType;
 
 use crate::data::{
+    choice_menu::ChromeChoiceMenu,
     context_menu::ChromeContextMenu,
     download::{ChromeDownloadCompletion, ChromeDownloadProgress, ChromeDownloadSnapshot},
     drag::ChromeDragStartRequest,
@@ -57,6 +58,14 @@ pub enum IpcEvent {
         browsing_context_id: TabId,
         popup_id: PopupId,
         menu: ChromeContextMenu,
+    },
+    /// A host-owned choice menu was requested for an extension popup.
+    ExtensionPopupChoiceMenuRequested {
+        profile_id: String,
+        browsing_context_id: TabId,
+        popup_id: PopupId,
+        request_id: u64,
+        menu: ChromeChoiceMenu,
     },
     /// The cursor appearance changed for an extension popup.
     ExtensionPopupCursorChanged {
@@ -144,6 +153,13 @@ pub enum IpcEvent {
         profile_id: String,
         browsing_context_id: TabId,
         menu: ChromeContextMenu,
+    },
+    /// The backend requested a host-owned choice menu.
+    ChoiceMenuRequested {
+        profile_id: String,
+        browsing_context_id: TabId,
+        request_id: u64,
+        menu: ChromeChoiceMenu,
     },
     /// Host-mediated open request for tab.
     ///

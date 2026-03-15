@@ -5,3 +5,4 @@
 
 pub mod bindings;
 pub mod browser_view;
+pub mod choice_menu;

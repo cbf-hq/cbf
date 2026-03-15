@@ -9,6 +9,10 @@ keywords.workspace = true
 license.workspace = true
 readme.workspace = true
 
+[features]
+default = ["macos-choice-menu-default"]
+macos-choice-menu-default = []
+
 [dependencies]
 cbf = { path = "../cbf" }
 cbf-chrome-sys = { path = "../cbf-chrome-sys" }

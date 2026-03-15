@@ -14,6 +14,10 @@ use cbf::data::{
 
 use super::{Error, IpcEvent, utils::c_string_to_string};
 use crate::data::{
+    choice_menu::{
+        ChromeChoiceMenu, ChromeChoiceMenuItem, ChromeChoiceMenuSelectionMode,
+        choice_menu_item_type_from_ffi, choice_menu_text_direction_from_ffi,
+    },
     context_menu::{
         ChromeContextMenu, ChromeContextMenuAccelerator, ChromeContextMenuIcon,
         ChromeContextMenuItem, ChromeContextMenuItemType,
@@ -88,6 +92,15 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 browsing_context_id: TabId::new(event.tab_id),
                 popup_id: PopupId::new(event.extension_popup_id),
                 menu: parse_context_menu(event.context_menu),
+            })
+        }
+        CBF_EVENT_EXTENSION_POPUP_CHOICE_MENU_REQUESTED => {
+            Ok(IpcEvent::ExtensionPopupChoiceMenuRequested {
+                profile_id: c_string_to_string(event.profile_id),
+                browsing_context_id: TabId::new(event.tab_id),
+                popup_id: PopupId::new(event.extension_popup_id),
+                request_id: event.request_id,
+                menu: parse_choice_menu(event.choice_menu),
             })
         }
         CBF_EVENT_EXTENSION_POPUP_CURSOR_CHANGED => Ok(IpcEvent::ExtensionPopupCursorChanged {
@@ -169,6 +182,12 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             menu: parse_context_menu(event.context_menu),
+        }),
+        CBF_EVENT_CHOICE_MENU_REQUESTED => Ok(IpcEvent::ChoiceMenuRequested {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            request_id: event.request_id,
+            menu: parse_choice_menu(event.choice_menu),
         }),
         CBF_EVENT_TAB_OPEN_REQUESTED => Ok(IpcEvent::TabOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
@@ -598,6 +617,48 @@ fn parse_context_menu(menu: CbfContextMenu) -> ChromeContextMenu {
     };
 
     crate::data::context_menu::filter_supported(menu)
+}
+
+fn parse_choice_menu(menu: CbfChoiceMenu) -> ChromeChoiceMenu {
+    ChromeChoiceMenu {
+        request_id: menu.request_id,
+        x: menu.x,
+        y: menu.y,
+        width: menu.width,
+        height: menu.height,
+        item_font_size: menu.item_font_size,
+        selected_item: menu.selected_item,
+        right_aligned: menu.right_aligned,
+        selection_mode: if menu.allow_multiple_selection {
+            ChromeChoiceMenuSelectionMode::Multiple
+        } else {
+            ChromeChoiceMenuSelectionMode::Single
+        },
+        items: parse_choice_menu_items(menu.items),
+    }
+}
+
+fn parse_choice_menu_items(list: CbfChoiceMenuItemList) -> Vec<ChromeChoiceMenuItem> {
+    if list.len == 0 || list.items.is_null() {
+        return Vec::new();
+    }
+
+    let items = unsafe { std::slice::from_raw_parts(list.items, list.len as usize) };
+    items.iter().map(parse_choice_menu_item).collect()
+}
+
+fn parse_choice_menu_item(item: &CbfChoiceMenuItem) -> ChromeChoiceMenuItem {
+    ChromeChoiceMenuItem {
+        item_type: choice_menu_item_type_from_ffi(item.type_),
+        label: optional_string_from_ffi(item.label),
+        tool_tip: optional_string_from_ffi(item.tool_tip),
+        enabled: item.enabled,
+        checked: item.checked,
+        text_direction: choice_menu_text_direction_from_ffi(item.text_direction),
+        has_text_direction_override: item.has_text_direction_override,
+        action: item.action,
+        children: parse_choice_menu_items(item.children),
+    }
 }
 
 fn parse_context_menu_items(list: CbfContextMenuItemList) -> Vec<ChromeContextMenuItem> {

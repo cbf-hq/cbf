@@ -560,6 +560,23 @@ impl<B: Backend> BrowserHandle<B> {
         self.send(BrowserCommand::DismissContextMenu { menu_id })
     }
 
+    /// Accept a host-owned choice menu selection by request id.
+    pub fn accept_choice_menu_selection(
+        &self,
+        request_id: u64,
+        indices: Vec<i32>,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::AcceptChoiceMenuSelection {
+            request_id,
+            indices,
+        })
+    }
+
+    /// Dismiss an open host-owned choice menu by request id.
+    pub fn dismiss_choice_menu(&self, request_id: u64) -> Result<(), Error> {
+        self.send(BrowserCommand::DismissChoiceMenu { request_id })
+    }
+
     /// Pause an in-progress download.
     pub fn pause_download(&self, download_id: DownloadId) -> Result<(), Error> {
         self.send(BrowserCommand::PauseDownload { download_id })

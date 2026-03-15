@@ -14,6 +14,7 @@ use cbf::{
 };
 use cbf_chrome::{
     backend::ChromiumBackend,
+    data::choice_menu::ChromeChoiceMenu,
     data::surface::SurfaceHandle,
     event::ChromeEvent,
     ffi::IpcEvent,
@@ -63,6 +64,14 @@ pub(crate) enum UserEvent {
     DevToolsOpened {
         browsing_context_id: BrowsingContextId,
         inspected_browsing_context_id: BrowsingContextId,
+    },
+    ChoiceMenuRequested {
+        browsing_context_id: BrowsingContextId,
+        menu: ChromeChoiceMenu,
+    },
+    ExtensionPopupChoiceMenuRequested {
+        transient_browsing_context_id: TransientBrowsingContextId,
+        menu: ChromeChoiceMenu,
     },
 }
 
@@ -183,6 +192,36 @@ pub(crate) fn spawn_browser_event_forwarder(
                     {
                         return;
                     }
+                    if let ChromeEvent::Ipc(ipc_event) = event.as_raw().clone()
+                        && let IpcEvent::ChoiceMenuRequested {
+                            browsing_context_id,
+                            menu,
+                            ..
+                        } = *ipc_event
+                        && proxy
+                            .send_event(UserEvent::ChoiceMenuRequested {
+                                browsing_context_id: browsing_context_id.into(),
+                                menu,
+                            })
+                            .is_err()
+                    {
+                        return;
+                    }
+                    if let ChromeEvent::Ipc(ipc_event) = event.as_raw().clone()
+                        && let IpcEvent::ExtensionPopupChoiceMenuRequested {
+                            popup_id, menu, ..
+                        } = *ipc_event
+                        && proxy
+                            .send_event(UserEvent::ExtensionPopupChoiceMenuRequested {
+                                transient_browsing_context_id: TransientBrowsingContextId::new(
+                                    popup_id.get(),
+                                ),
+                                menu,
+                            })
+                            .is_err()
+                    {
+                        return;
+                    }
                 }
                 Err(err) => {
                     if shutdown_observed {
@@ -280,6 +319,20 @@ impl<P: PlatformApp> ApplicationHandler<UserEvent> for AppRunner<P> {
             } => self
                 .core
                 .handle_devtools_opened(browsing_context_id, inspected_browsing_context_id),
+            UserEvent::ChoiceMenuRequested {
+                browsing_context_id,
+                menu,
+            } => vec![CoreAction::ShowChoiceMenu {
+                browsing_context_id,
+                menu,
+            }],
+            UserEvent::ExtensionPopupChoiceMenuRequested {
+                transient_browsing_context_id,
+                menu,
+            } => vec![CoreAction::ShowChoiceMenuInTransientBrowsingContext {
+                transient_browsing_context_id,
+                menu,
+            }],
         };
         self.platform
             .apply_core_actions(event_loop, &mut self.core, actions);

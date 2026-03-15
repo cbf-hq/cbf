@@ -207,6 +207,12 @@ pub enum BrowserCommand {
         behavior: ConfirmCompositionBehavior,
     },
 
+    /// Accept a host-owned choice menu selection by request id.
+    AcceptChoiceMenuSelection { request_id: u64, indices: Vec<i32> },
+
+    /// Dismiss an open host-owned choice menu by request id.
+    DismissChoiceMenu { request_id: u64 },
+
     /// Execute a context menu command by menu id.
     ExecuteContextMenuCommand {
         menu_id: u64,
@@ -298,6 +304,8 @@ pub enum BrowserOperation {
     CommitTransientText,
     FinishComposingText,
     FinishComposingTextInTransientBrowsingContext,
+    AcceptChoiceMenuSelection,
+    DismissChoiceMenu,
     ExecuteContextMenuCommand,
     DismissContextMenu,
     PauseDownload,
@@ -366,6 +374,8 @@ impl BrowserOperation {
             BrowserCommand::FinishComposingTextInTransientBrowsingContext { .. } => {
                 Self::FinishComposingTextInTransientBrowsingContext
             }
+            BrowserCommand::AcceptChoiceMenuSelection { .. } => Self::AcceptChoiceMenuSelection,
+            BrowserCommand::DismissChoiceMenu { .. } => Self::DismissChoiceMenu,
             BrowserCommand::ExecuteContextMenuCommand { .. } => Self::ExecuteContextMenuCommand,
             BrowserCommand::DismissContextMenu { .. } => Self::DismissContextMenu,
             BrowserCommand::PauseDownload { .. } => Self::PauseDownload,
@@ -430,6 +440,8 @@ impl std::fmt::Display for BrowserOperation {
             Self::FinishComposingTextInTransientBrowsingContext => {
                 "finish_composing_text_in_transient_browsing_context"
             }
+            Self::AcceptChoiceMenuSelection => "accept_choice_menu_selection",
+            Self::DismissChoiceMenu => "dismiss_choice_menu",
             Self::ExecuteContextMenuCommand => "execute_context_menu_command",
             Self::DismissContextMenu => "dismiss_context_menu",
             Self::PauseDownload => "pause_download",

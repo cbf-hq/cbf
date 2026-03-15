@@ -216,6 +216,12 @@ pub enum BrowsingContextEvent {
     /// should not be carried through this event.
     ImeBoundsUpdated { update: ImeBoundsUpdate },
 
+    /// A host-owned choice menu display was requested.
+    ///
+    /// Backend-specific payload should be retrieved from the backend-native raw
+    /// event stream using this request id.
+    ChoiceMenuRequested { request_id: u64 },
+
     /// A context menu display was requested.
     ContextMenuRequested { menu: ContextMenu },
 
@@ -320,6 +326,13 @@ pub enum TransientBrowsingContextEvent {
 
     /// The cursor shape should be updated for this transient browsing context.
     CursorChanged { cursor_type: CursorIcon },
+
+    /// A host-owned choice menu display was requested for this transient
+    /// browsing context.
+    ///
+    /// Backend-specific payload should be retrieved from the backend-native raw
+    /// event stream using this request id.
+    ChoiceMenuRequested { request_id: u64 },
 
     /// A context menu display was requested for this transient browsing context.
     ContextMenuRequested { menu: ContextMenu },

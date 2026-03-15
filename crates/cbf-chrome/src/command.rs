@@ -138,6 +138,13 @@ pub enum ChromeCommand {
         command_id: i32,
         event_flags: i32,
     },
+    AcceptChoiceMenuSelection {
+        request_id: u64,
+        indices: Vec<i32>,
+    },
+    DismissChoiceMenu {
+        request_id: u64,
+    },
     DismissContextMenu {
         menu_id: u64,
     },
@@ -448,6 +455,16 @@ impl From<BrowserCommand> for ChromeCommand {
                 command_id,
                 event_flags,
             },
+            BrowserCommand::AcceptChoiceMenuSelection {
+                request_id,
+                indices,
+            } => Self::AcceptChoiceMenuSelection {
+                request_id,
+                indices,
+            },
+            BrowserCommand::DismissChoiceMenu { request_id } => {
+                Self::DismissChoiceMenu { request_id }
+            }
             BrowserCommand::DismissContextMenu { menu_id } => Self::DismissContextMenu { menu_id },
             BrowserCommand::PauseDownload { download_id } => Self::PauseDownload {
                 download_id: download_id.into(),

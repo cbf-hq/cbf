@@ -369,6 +369,21 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         }
     }
 
+    fn on_choice_menu_selected(&self, _view: &BrowserViewMac, request_id: u64, indices: Vec<i32>) {
+        if let Err(err) = self
+            .handle
+            .accept_choice_menu_selection(request_id, indices)
+        {
+            warn!("failed to accept choice menu selection: {err}");
+        }
+    }
+
+    fn on_choice_menu_dismissed(&self, _view: &BrowserViewMac, request_id: u64) {
+        if let Err(err) = self.handle.dismiss_choice_menu(request_id) {
+            warn!("failed to dismiss choice menu: {err}");
+        }
+    }
+
     fn on_focus_changed(&self, _view: &BrowserViewMac, focused: bool) {
         self.with_page_id(|browsing_context_id| {
             if let Err(err) = self
@@ -911,6 +926,25 @@ impl PlatformApp for SimpleAppMac {
                         self.view_for_transient_id(transient_browsing_context_id)
                     {
                         browser_view.show_context_menu(menu);
+                    }
+                }
+                CoreAction::ShowChoiceMenu {
+                    browsing_context_id,
+                    menu,
+                } => {
+                    if let Some(browser_view) = self.view_for_context_id(core, browsing_context_id)
+                    {
+                        browser_view.show_choice_menu(menu);
+                    }
+                }
+                CoreAction::ShowChoiceMenuInTransientBrowsingContext {
+                    transient_browsing_context_id,
+                    menu,
+                } => {
+                    if let Some(browser_view) =
+                        self.view_for_transient_id(transient_browsing_context_id)
+                    {
+                        browser_view.show_choice_menu(menu);
                     }
                 }
                 CoreAction::StartPlatformDrag(request) => {
