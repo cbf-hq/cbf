@@ -63,20 +63,21 @@ Design principles:
 - **Surface & Input**
   - ✅ Surface creation & bounds
   - ✅ Mouse / keyboard events
-  - 🚧 IME events
+  - ✅ General IME events
 - **Content & Interaction**
   - ✅ Get DOM HTML
   - ✅ Drag and drop on webpage
   - 🚧 Context menu events
   - ❌ Drag and drop from other apps
 - **Downloads & Print**
-  - ✅ Download management
+  - ✅ General download management
   - 🚧 Print dialog UI
   - ❌ Print preview UI
 - **Profile & Extensions**
   - ✅ Open webpage with profile
   - ✅ Get profile / extension list & info
   - ✅ Extension inline UI
+  - 🚧 Full extension support
 - **Developer Tools & Built-in Pages**
   - 🚧 DevTools UI (embedded)
   - ✅ `chrome://version`

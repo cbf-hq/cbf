@@ -29,7 +29,7 @@ This document provides a high-level overview of the features supported by CBF, c
 | Surface creation | ✅ | macOS | Uses `CAContextID` |
 | Change surface bounds | ✅ | macOS | |
 | Send mouse/key events | ✅ | macOS | |
-| Send IME events | 🚧 | macOS | Basic input supported; composition events not fully implemented |
+| Send IME events | ✅ | macOS | |
 
 ## Content & Interaction
 
@@ -57,6 +57,7 @@ This document provides a high-level overview of the features supported by CBF, c
 | Get profile info | ✅ | macOS | |
 | Get extension list | ✅ | macOS | |
 | Extension inline UI | ✅ | macOS | |
+| Full extension support | 🚧 | macOS | |
 
 ## Developer Tools & Built-in Pages
 
