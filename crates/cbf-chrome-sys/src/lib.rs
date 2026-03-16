@@ -3,4 +3,3 @@
 //! This crate owns the unsafe C ABI contract with `cbf_bridge`.
 
 pub mod ffi;
-pub mod modifiers;
