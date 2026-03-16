@@ -127,6 +127,16 @@ impl From<ChromeContextMenu> for cbf::data::context_menu::ContextMenu {
     }
 }
 
+/// Chromium-derived command ids mirrored from `chrome/app/chrome_command_ids.h`.
+/// Keep these values aligned with the Chromium revision used by CBF because the
+/// backend reports and accepts the same command id space.
+///
+/// Current upstream reference:
+/// - `IDC_BACK`, `IDC_FORWARD`, `IDC_RELOAD`
+/// - `IDC_PRINT`
+/// - `IDC_CONTENT_CONTEXT_*`
+///   in `chromium/src/chrome/app/chrome_command_ids.h`
+///
 /// Command id for navigating back.
 pub const CMD_BACK: i32 = 33000;
 /// Command id for navigating forward.

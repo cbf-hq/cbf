@@ -1310,10 +1310,12 @@ fn extract_insert_text(value: &AnyObject) -> Option<String> {
     Some(text)
 }
 
-// These values are Chromium-compatible Windows virtual-key codes, not raw
+// Chromium-derived VKEY constants mirrored for the marked-text accelerator
+// guard. These are Chromium-compatible Windows virtual-key codes, not raw
 // macOS `NSEvent.keyCode` values. `convert_nsevent_to_key_event` populates
 // `KeyEvent.key_code` from Chromium's `windows_key_code`, so this guard must
 // compare against the same VKEY values used by Chromium's
+// `components/remote_cocoa/app_shim/bridged_content_view.mm`
 // `ShouldIgnoreAcceleratorWithMarkedText`.
 const VKEY_TAB: i32 = 0x09;
 const VKEY_RETURN: i32 = 0x0D;
