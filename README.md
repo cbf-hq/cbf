@@ -166,7 +166,7 @@ Design principles:
 
 ## Example: simpleapp
 
-`simpleapp` is a single-window sample app using `winit` + `cbf`.
+[`simpleapp`](examples/simpleapp/README.md) is a single-window sample app using `winit` + `cbf`.
 It currently supports macOS only.
 
 Before running it, follow [User Setup](https://cbf-hq.github.io/cbf/getting-started/user-setup.html) to obtain the CBF Chromium runtime
