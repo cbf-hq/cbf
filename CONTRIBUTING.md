@@ -7,10 +7,10 @@ Thanks for contributing.
 Read these first:
 
 - `README.md`
-- `docs/getting-started/concepts.md`
-- `docs/getting-started/user-setup.md`
-- `docs/developer-guide/contributor-setup.md`
-- `docs/developer-guide/licensing.md`
+- [Concepts](https://cbf-hq.github.io/cbf/getting-started/concepts.html)
+- [User Setup](https://cbf-hq.github.io/cbf/getting-started/user-setup.html)
+- [Contributor Setup](https://cbf-hq.github.io/cbf/developer-guide/contributor-setup.html)
+- [Licensing](https://cbf-hq.github.io/cbf/developer-guide/licensing.html)
 
 ## 2. Scope of Contributions
 
@@ -26,9 +26,9 @@ Main areas:
 
 When changing bridge/fork/boundary behavior, follow these:
 
-- `docs/developer-guide/chromium-fork-workflow.md`
-- `docs/developer-guide/chromium-integration-rules.md`
-- `docs/developer-guide/chromium-implementation-guide.md`
+- [Chromium Fork Workflow](https://cbf-hq.github.io/cbf/developer-guide/chromium-fork-workflow.html)
+- [Chromium Integration Rules](https://cbf-hq.github.io/cbf/developer-guide/chromium-integration-rules.html)
+- [Chromium Implementation Guide](https://cbf-hq.github.io/cbf/developer-guide/chromium-implementation-guide.html)
 
 Key rules:
 

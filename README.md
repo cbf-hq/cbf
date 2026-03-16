@@ -66,30 +66,31 @@ Linux, Windows, and Intel macOS are not yet supported.
   - ✅ `chrome://version`
   - 🚧 `chrome://history` / `chrome://settings`
 
-→ See [docs/feature-matrix.md](docs/feature-matrix.md) for full details and notes.
+→ See the [Feature Matrix](https://cbf-hq.github.io/cbf/feature-matrix.html) for full details and notes.
 
 ## Documentation
 
-- Concepts and user guides: `docs/`
-- User Setup: `docs/getting-started/user-setup.md`
-- Contributor Setup: `docs/developer-guide/contributor-setup.md`
-- Feature Matrix: `docs/feature-matrix.md`
-- Contributing Guide: `CONTRIBUTING.md`
-- Security Policy: `SECURITY.md`
+- Documentation: [CBF Book](https://cbf-hq.github.io/cbf/)
+- Concepts: [Concepts](https://cbf-hq.github.io/cbf/getting-started/concepts.html)
+- User Setup: [User Setup](https://cbf-hq.github.io/cbf/getting-started/user-setup.html)
+- Contributor Setup: [Contributor Setup](https://cbf-hq.github.io/cbf/developer-guide/contributor-setup.html)
+- Feature Matrix: [Feature Matrix](https://cbf-hq.github.io/cbf/feature-matrix.html)
+- Contributing Guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security Policy: [`SECURITY.md`](SECURITY.md)
 
 ## Support and Reporting
 
 - Questions and general discussion: GitHub Discussions
 - Bug reports and feature requests: GitHub Issues
-- Security issues: follow `SECURITY.md`
+- Security issues: follow [`SECURITY.md`](SECURITY.md)
 
 ## Quick Start
 
 CBF currently requires a CBF-patched Chromium runtime and the `cbf_bridge` library.
 For setup and first-run instructions, start with:
 
-- User Setup: `docs/getting-started/user-setup.md`
-- Feature Matrix: `docs/feature-matrix.md`
+- User Setup: [User Setup](https://cbf-hq.github.io/cbf/getting-started/user-setup.html)
+- Feature Matrix: [Feature Matrix](https://cbf-hq.github.io/cbf/feature-matrix.html)
 
 Prebuilt release artifacts are planned, but are not available yet.
 For now, you must build the CBF-patched Chromium runtime and `cbf_bridge` library yourself.
@@ -168,7 +169,7 @@ Design principles:
 `simpleapp` is a single-window sample app using `winit` + `cbf`.
 It currently supports macOS only.
 
-Before running it, follow `docs/getting-started/user-setup.md` to obtain the CBF Chromium runtime
+Before running it, follow [User Setup](https://cbf-hq.github.io/cbf/getting-started/user-setup.html) to obtain the CBF Chromium runtime
 and configure `CBF_BRIDGE_LIB_DIR`.
 
 Run:
@@ -186,4 +187,4 @@ You can also set `CBF_CHROMIUM_EXECUTABLE` and omit `--chromium-executable`.
 - Chromium-derived portions of the CBF codebase: Chromium BSD-style license (see `LICENSE.chromium`)
 - Chromium and other third-party components: distributed under their respective licenses and notice requirements
 
-See `docs/developer-guide/licensing.md` for policy details.
+See [Licensing](https://cbf-hq.github.io/cbf/developer-guide/licensing.html) for policy details.
