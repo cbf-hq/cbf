@@ -12,7 +12,7 @@ members = [
 [workspace.package]
 version = "0.1.0-alpha.2"
 edition = "2024"
-authors = ["Takagi Tasuku <tasuren@outlook.jp>"]
+authors = ["Takagi Tasuku <tasuren@icloud.com>"]
 description = "A framework for developing Chromium-based browsers"
 keywords = ["chromium", "browser"]
 license = "BSD-3-Clause"
