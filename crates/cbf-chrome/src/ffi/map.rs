@@ -4,8 +4,6 @@ use std::{ffi::c_void, ptr::NonNull};
 use cbf::data::dialog::DialogType;
 use cbf_chrome_sys::ffi::*;
 use cursor_icon::CursorIcon;
-use tracing::debug;
-
 use cbf::data::{
     drag::DragData,
     key::KeyEvent,
@@ -238,13 +236,6 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             let profile_id = c_string_to_string(event.profile_id);
             let browsing_context_id = TabId::new(event.tab_id);
             let reason = beforeunload_reason_from_ffi(event.beforeunload_reason);
-            debug!(
-                ?profile_id,
-                %browsing_context_id,
-                request_id = event.request_id,
-                ?reason,
-                "CBF beforeunload event received"
-            );
             Ok(IpcEvent::BeforeUnloadDialogRequested {
                 profile_id,
                 browsing_context_id,

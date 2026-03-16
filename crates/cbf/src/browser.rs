@@ -3,8 +3,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use async_channel::{Receiver, Sender, TrySendError};
-use tracing::info;
-
 use crate::{
     command::BrowserCommand,
     data::{
@@ -628,10 +626,6 @@ impl<B: Backend> BrowserHandle<B> {
         request_id: u64,
     ) -> Result<(), Error> {
         let profile_id = profile_id.into();
-        info!(
-            profile_id,
-            request_id, "dispatch open_default_auxiliary_window"
-        );
         self.send(BrowserCommand::OpenDefaultAuxiliaryWindow {
             profile_id,
             request_id,
@@ -646,12 +640,6 @@ impl<B: Backend> BrowserHandle<B> {
         response: AuxiliaryWindowResponse,
     ) -> Result<(), Error> {
         let profile_id = profile_id.into();
-        info!(
-            profile_id,
-            request_id,
-            ?response,
-            "dispatch respond_auxiliary_window"
-        );
         self.send(BrowserCommand::RespondAuxiliaryWindow {
             profile_id,
             request_id,
@@ -680,7 +668,6 @@ impl<B: Backend> BrowserHandle<B> {
         window_id: AuxiliaryWindowId,
     ) -> Result<(), Error> {
         let profile_id = profile_id.into();
-        info!(profile_id, ?window_id, "dispatch close_auxiliary_window");
         self.send(BrowserCommand::CloseAuxiliaryWindow {
             profile_id,
             window_id,
@@ -693,11 +680,6 @@ impl<B: Backend> BrowserHandle<B> {
         request_id: u64,
         response: BrowsingContextOpenResponse,
     ) -> Result<(), Error> {
-        info!(
-            request_id,
-            ?response,
-            "dispatch respond_browsing_context_open"
-        );
         self.send(BrowserCommand::RespondBrowsingContextOpen {
             request_id,
             response,
@@ -710,7 +692,6 @@ impl<B: Backend> BrowserHandle<B> {
         request_id: u64,
         response: WindowOpenResponse,
     ) -> Result<(), Error> {
-        info!(request_id, ?response, "dispatch respond_window_open");
         self.send(BrowserCommand::RespondWindowOpen {
             request_id,
             response,

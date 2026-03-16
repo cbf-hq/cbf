@@ -6,7 +6,7 @@ use std::{
 
 use cbf::data::{edit::EditAction, window_open::WindowOpenResponse};
 use cbf_chrome_sys::ffi::*;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use super::map::{
     ime_range_to_ffi, key_event_type_to_ffi, mouse_button_to_ffi, mouse_event_type_to_ffi,
@@ -129,7 +129,6 @@ impl IpcClient {
             unsafe { cbf_bridge_client_destroy(inner) };
             return Err(Error::ConnectionFailed);
         }
-        debug!("IPC client connected via inherited endpoint");
         Ok(Self { inner })
     }
 
@@ -548,10 +547,6 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
         let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
-        debug!(
-            profile_id = profile_id.to_string_lossy().as_ref(),
-            request_id, "ffi open_default_prompt_ui"
-        );
         if unsafe {
             cbf_bridge_client_open_default_prompt_ui(self.inner, profile_id.as_ptr(), request_id)
         } {
@@ -608,15 +603,6 @@ impl IpcClient {
             ),
             PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None, false),
         };
-        debug!(
-            profile_id = profile_id.to_string_lossy().as_ref(),
-            request_id,
-            prompt_ui_kind,
-            proceed,
-            report_abuse,
-            ?response,
-            "ffi respond_prompt_ui"
-        );
         if unsafe {
             cbf_bridge_client_respond_prompt_ui(
                 self.inner,
@@ -711,11 +697,6 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
         let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
-        debug!(
-            profile_id = profile_id.to_string_lossy().as_ref(),
-            ?prompt_ui_id,
-            "ffi close_prompt_ui"
-        );
         if unsafe {
             cbf_bridge_client_close_prompt_ui(self.inner, profile_id.as_ptr(), prompt_ui_id.get())
         } {
@@ -781,14 +762,6 @@ impl IpcClient {
             ),
             ChromeBrowsingContextOpenResponse::Deny => (CBF_TAB_OPEN_RESPONSE_DENY, 0, false),
         };
-        debug!(
-            request_id,
-            response_kind,
-            target_tab_id,
-            activate,
-            ?response,
-            "ffi respond_tab_open"
-        );
         if unsafe {
             cbf_bridge_client_respond_tab_open(
                 self.inner,
