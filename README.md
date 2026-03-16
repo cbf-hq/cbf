@@ -3,10 +3,29 @@
 CBF is a Rust-oriented browser backend framework built on Chromium.
 It provides a stable, application-agnostic API surface for controlling browsing contexts and receiving browser events, while isolating Chromium/Mojo implementation details behind an FFI boundary.
 
-## Documentation
+## Current Status
 
-- Most of documentation is in `docs/` (concepts, usage guides, chromium integration).
-- Contributing Guide: `CONTRIBUTING.md` (contribution process and commit conventions)
+- Pre-1.0 alpha. Breaking changes are expected.
+- CBF is still under active development. Unexpected crashes, incomplete features, and security bugs are still possible.
+- You must build your own CBF-patched Chromium runtime for now. Prebuilt runtimes will be provided in the future.
+- Currently supported runtime target: macOS on Apple Silicon (`aarch64-apple-darwin`).
+- If you discover a security issue, do not open a public issue. See `SECURITY.md`.
+
+## Vision
+
+- Keep CBF independent from any specific product domain.
+- Expose browser-generic vocabulary (`Browser`, `BrowsingContext`, `Navigation`, `Dialog`, `Permission`).
+- Treat IPC failures as normal conditions (disconnects, timeouts, crashes).
+- Improve framework quality so CBF can be reused by other browser projects.
+
+## Who It's For / Not For
+
+CBF is aimed at applications that want to build Chromium-based browser functionality primarily in Rust,
+while minimizing how much application code must depend directly on Chromium-side implementation details.
+
+CBF is not primarily a CEF-style customization layer for exposing fine-grained Chromium handler surfaces.
+If your main goal is deep per-subsystem customization through Chromium-specific hooks such as JS binding,
+lifecycle, process management, or other browser-internal events, that is outside the main scope of CBF.
 
 ## Platform Support
 
@@ -15,12 +34,66 @@ It provides a stable, application-agnostic API surface for controlling browsing 
 | x86_64  | ❌    | ❌    | ❌      |
 | aarch64 | ❌    | ✅    | ❌      |
 
-## Vision
+Only macOS on Apple Silicon is supported at this time.
+Linux, Windows, and Intel macOS are not yet supported.
 
-- Keep CBF independent from any specific product domain.
-- Expose browser-generic vocabulary (`Browser`, `BrowsingContext`, `Navigation`, `Dialog`, `Permission`).
-- Treat IPC failures as normal conditions (disconnects, timeouts, crashes).
-- Improve framework quality so CBF can be reused by other browser projects.
+## Feature Overview
+
+- **Page Lifecycle & Navigation**
+  - ✅ Open / navigate / close webpage
+  - ✅ Go back / forward / reload
+  - ✅ beforeunload events
+- **Surface & Input**
+  - ✅ Surface creation & bounds
+  - ✅ Mouse / keyboard events
+  - ✅ General IME events
+- **Content & Interaction**
+  - ✅ Get DOM HTML
+  - ✅ Drag and drop on webpage
+  - 🚧 Context menu events
+  - ❌ Drag and drop from other apps
+- **Downloads & Print**
+  - ✅ General download management
+  - 🚧 Print dialog UI
+  - ❌ Print preview UI
+- **Profile & Extensions**
+  - ✅ Open webpage with profile
+  - ✅ Get profile / extension list & info
+  - ✅ Extension inline UI
+  - 🚧 Full extension support
+- **Developer Tools & Built-in Pages**
+  - 🚧 DevTools UI (embedded)
+  - ✅ `chrome://version`
+  - 🚧 `chrome://history` / `chrome://settings`
+
+→ See [docs/feature-matrix.md](docs/feature-matrix.md) for full details and notes.
+
+## Documentation
+
+- Concepts and user guides: `docs/`
+- User Setup: `docs/getting-started/user-setup.md`
+- Contributor Setup: `docs/developer-guide/contributor-setup.md`
+- Feature Matrix: `docs/feature-matrix.md`
+- Contributing Guide: `CONTRIBUTING.md`
+- Security Policy: `SECURITY.md`
+
+## Quick Start
+
+CBF currently requires a CBF-patched Chromium runtime and the `cbf_bridge` library.
+For setup and first-run instructions, start with:
+
+- User Setup: `docs/getting-started/user-setup.md`
+- Feature Matrix: `docs/feature-matrix.md`
+
+Planned release artifacts:
+
+- GitHub Releases: `cbf-chrome-macos-<git-tag>.tar.gz`
+  - Contains `Chromium.app` and `libcbf_bridge.dylib`
+- crates.io:
+  - `cbf`
+  - `cbf-chrome`
+  - `cbf-chrome-sys`
+  - `cbf-cli`
 
 ## Layered Architecture
 
@@ -54,37 +127,6 @@ Design principles:
 - Command/response boundaries are explicit.
 - Process crash/stop events are observable (`BackendReady`, `BackendStopped`, render crash events).
 
-## Feature Overview
-
-- **Page Lifecycle & Navigation**
-  - ✅ Open / navigate / close webpage
-  - ✅ Go back / forward / reload
-  - ✅ beforeunload events
-- **Surface & Input**
-  - ✅ Surface creation & bounds
-  - ✅ Mouse / keyboard events
-  - ✅ General IME events
-- **Content & Interaction**
-  - ✅ Get DOM HTML
-  - ✅ Drag and drop on webpage
-  - 🚧 Context menu events
-  - ❌ Drag and drop from other apps
-- **Downloads & Print**
-  - ✅ General download management
-  - 🚧 Print dialog UI
-  - ❌ Print preview UI
-- **Profile & Extensions**
-  - ✅ Open webpage with profile
-  - ✅ Get profile / extension list & info
-  - ✅ Extension inline UI
-  - 🚧 Full extension support
-- **Developer Tools & Built-in Pages**
-  - 🚧 DevTools UI (embedded)
-  - ✅ `chrome://version`
-  - 🚧 `chrome://history` / `chrome://settings`
-
-→ See [docs/feature-matrix.md](docs/feature-matrix.md) for full details and notes.
-
 ## Ownership and Lifecycle
 
 - `BrowsingContext` maps to Chromium `content::WebContents` as the core unit.
@@ -95,6 +137,10 @@ Design principles:
 ## Example: simpleapp
 
 `simpleapp` is a single-window sample app using `winit` + `cbf`.
+It currently supports macOS only.
+
+Before running it, follow `docs/getting-started/user-setup.md` to obtain the CBF Chromium runtime
+and configure `CBF_BRIDGE_LIB_DIR`.
 
 Run:
 
@@ -110,32 +156,4 @@ You can also set `CBF_CHROMIUM_EXECUTABLE` and omit `--chromium-executable`.
 - CBF authored code: `BSD 3-Clause`
 - Chromium/third-party components: follow each upstream license and notice requirements
 
-See `docs/licensing.md` for policy details.
-
-## CLI (MVP)
-
-This repository now includes `cbf-cli` (`cbf` binary) for packaging CBF apps on macOS.
-
-Create a macOS app bundle:
-
-```bash
-cargo run -p cbf-cli -- bundle macos \
-  --bin-path /path/to/your/app/binary \
-  --chromium-app /path/to/Chromium.app \
-  --bridge-lib-dir /path/to/cbf_bridge/libdir
-```
-
-The command creates `<out-dir>/<AppName>.app` (default `dist/`) and bundles:
-
-- app executable (`Contents/MacOS`)
-- `libcbf_bridge.dylib` (`Contents/Frameworks`)
-- `Chromium.app` (`Contents/Frameworks`)
-
-Optional metadata can be configured in your app `Cargo.toml`:
-
-```toml
-[package.metadata.cbf.macos-bundle]
-app-name = "MyApp"
-bundle-identifier = "com.example.myapp"
-icon = "assets/icon.icns"
-```
+See `docs/developer-guide/licensing.md` for policy details.
