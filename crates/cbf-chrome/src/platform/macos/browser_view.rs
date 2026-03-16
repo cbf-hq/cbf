@@ -35,7 +35,7 @@ use cbf::data::{
     drag::DragStartRequest,
     edit::EditAction,
     ime::{ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, TextSelectionBounds},
-    key::KeyEvent,
+    key::{KeyEvent, KeyEventType},
     mouse::{MouseEvent, MouseWheelEvent, PointerType},
 };
 
@@ -58,7 +58,7 @@ pub trait BrowserViewMacDelegate {
     /// Called when an IME event is produced by the view.
     fn on_ime_event(&self, view: &BrowserViewMac, event: BrowserViewMacImeEvent);
     /// Called when plain character input is received.
-    fn on_char_event(&self, view: &BrowserViewMac, text: String);
+    fn on_char_event(&self, view: &BrowserViewMac, event: KeyEvent);
     /// Called when a mouse event is translated from macOS input.
     fn on_mouse_event(&self, view: &BrowserViewMac, event: MouseEvent);
     /// Called when a mouse wheel event is translated from macOS input.
@@ -145,10 +145,13 @@ pub struct BrowserViewMacIvars {
     ime_handled: Cell<bool>,
     suppress_key_up: Cell<bool>,
     ime_insert_expected: Cell<bool>,
+    saw_insert_command: Cell<bool>,
+    sent_char_event: Cell<bool>,
     ime_bounds: RefCell<Option<ImeBoundsUpdate>>,
     browser_layer: Retained<CALayerHost>,
     browser_layer_frame: Cell<CGRect>,
     edit_commands: RefCell<Vec<String>>,
+    pending_char_event: RefCell<Option<KeyEvent>>,
     context_menu_id: Cell<u64>,
     context_menu_selected_command_id: Cell<i32>,
     choice_menu_request_id: Cell<u64>,
@@ -170,12 +173,21 @@ define_class!(
             let had_marked_text = self.ivars().has_marked_text.get();
             self.ivars().ime_handled.set(false);
             self.ivars().suppress_key_up.set(false);
+            self.ivars().saw_insert_command.set(false);
+            self.ivars().sent_char_event.set(false);
             self.ivars().edit_commands.borrow_mut().clear();
+            self.ivars().pending_char_event.borrow_mut().take();
+
+            let nsevent_ptr = NonNull::from(event).cast::<c_void>();
+            self.ivars()
+                .pending_char_event
+                .replace(Some(convert_nsevent_to_key_event(0, nsevent_ptr)));
 
             let events = NSArray::arrayWithObject(event);
             self.interpretKeyEvents(&events);
 
             if self.ivars().ime_handled.get() {
+                self.ivars().pending_char_event.borrow_mut().take();
                 self.ivars().suppress_key_up.set(true);
                 return;
             }
@@ -188,11 +200,21 @@ define_class!(
                 // normal RawKeyDown/KeyDown anyway, the page can observe it as
                 // an accelerator and submit a form even though the IME already
                 // consumed it to confirm or navigate candidates.
+                self.ivars().pending_char_event.borrow_mut().take();
                 self.ivars().suppress_key_up.set(true);
                 return;
             }
 
             self.forward_key_event(event);
+            if self.ivars().saw_insert_command.get() && !self.ivars().sent_char_event.get() {
+                let pending_char_event = self.ivars().pending_char_event.borrow().clone();
+                if let Some(text) = synthesized_char_text(pending_char_event.as_ref())
+                    && let Some(event) = build_char_event(pending_char_event, text)
+                {
+                    self.send_mac_char_event(event);
+                }
+            }
+            self.ivars().pending_char_event.borrow_mut().take();
         }
 
         #[unsafe(method(keyUp:))]
@@ -345,7 +367,7 @@ define_class!(
     unsafe impl NSTextInputClient for BrowserViewMac {
         #[unsafe(method(insertText:replacementRange:))]
         unsafe fn insertText_replacementRange(&self, string: &AnyObject, replacement_range: NSRange) {
-            let Some(text) = extract_may_be_ns_attributed_string(string) else { return };
+            let Some(text) = extract_insert_text(string) else { return };
 
             if self.ivars().ime_insert_expected.get() {
                 self.mark_ime_handled();
@@ -360,7 +382,11 @@ define_class!(
                 // Normal text input (not via IME composition).
                 // We send a Char event. We do NOT mark IME handled, so that the
                 // corresponding KeyDown event (if any) is also sent by key_down.
-                self.send_mac_char_event(text);
+                let pending_char_event = self.ivars().pending_char_event.borrow().clone();
+                if let Some(event) = build_char_event(pending_char_event, text) {
+                    self.ivars().sent_char_event.set(true);
+                    self.send_mac_char_event(event);
+                }
             }
         }
 
@@ -373,6 +399,7 @@ define_class!(
             if command.to_ascii_lowercase().starts_with("insert") {
                 // Chromium ignores insert* commands during key down to avoid
                 // tab inserting text instead of moving focus.
+                self.ivars().saw_insert_command.set(true);
                 return;
             }
             self.ivars().edit_commands.borrow_mut().push(command);
@@ -385,7 +412,7 @@ define_class!(
             selected_range: NSRange,
             replacement_range: NSRange,
         ) {
-            if let Some(text) = extract_may_be_ns_attributed_string(string) {
+            if let Some(text) = extract_insert_text(string) {
                 self.mark_ime_handled();
                 self.ivars().ime_insert_expected.set(true);
                 let marked_range = composition_range_for_text(&text);
@@ -562,10 +589,13 @@ impl BrowserViewMac {
             ime_handled: Cell::new(false),
             suppress_key_up: Cell::new(false),
             ime_insert_expected: Cell::new(false),
+            saw_insert_command: Cell::new(false),
+            sent_char_event: Cell::new(false),
             ime_bounds: RefCell::new(None),
             browser_layer,
             browser_layer_frame: Cell::new(config.frame),
             edit_commands: RefCell::new(Vec::new()),
+            pending_char_event: RefCell::new(None),
             context_menu_id: Cell::new(NO_MENU_ID),
             context_menu_selected_command_id: Cell::new(NO_COMMAND_ID),
             choice_menu_request_id: Cell::new(NO_CHOICE_MENU_REQUEST_ID),
@@ -870,8 +900,8 @@ impl BrowserViewMac {
         (action != NO_CHOICE_MENU_ACTION).then_some(action)
     }
 
-    fn send_mac_char_event(&self, text: String) {
-        self.ivars().delegate.on_char_event(self, text);
+    fn send_mac_char_event(&self, event: KeyEvent) {
+        self.ivars().delegate.on_char_event(self, event);
     }
 
     fn update_marked_state(
@@ -1219,7 +1249,45 @@ fn composition_range_for_text(text: &str) -> NSRange {
     NSRange::new(0, length)
 }
 
-fn extract_may_be_ns_attributed_string(value: &AnyObject) -> Option<String> {
+fn build_char_event(template: Option<KeyEvent>, text: String) -> Option<KeyEvent> {
+    if text.is_empty() {
+        return None;
+    }
+
+    let mut event =
+        template.unwrap_or_else(|| KeyEvent::char_input(0, 0, 0, text.clone(), text.clone()));
+    event.type_ = KeyEventType::Char;
+    event.text = Some(text.clone());
+
+    if event
+        .unmodified_text
+        .as_deref()
+        .map(str::is_empty)
+        .unwrap_or(true)
+    {
+        event.unmodified_text = Some(text);
+    }
+
+    Some(event)
+}
+
+fn synthesized_char_text(template: Option<&KeyEvent>) -> Option<String> {
+    let event = template?;
+    event
+        .text
+        .as_ref()
+        .filter(|text| !text.is_empty())
+        .cloned()
+        .or_else(|| {
+            event
+                .unmodified_text
+                .as_ref()
+                .filter(|text| !text.is_empty())
+                .cloned()
+        })
+}
+
+fn extract_insert_text(value: &AnyObject) -> Option<String> {
     let mut text = if let Some(attributed) = value.downcast_ref::<NSAttributedString>() {
         Some(attributed.string().to_string())
     } else {
@@ -1228,8 +1296,12 @@ fn extract_may_be_ns_attributed_string(value: &AnyObject) -> Option<String> {
             .map(|ns_string| ns_string.to_string())
     }?;
 
-    // Sanitize the text by removing control characters.
-    text = text.chars().filter(|c| !c.is_control()).collect::<String>();
+    // Keep return/newline so Enter still emits a Char event, but drop other
+    // control characters that should not be treated as text insertion.
+    text = text
+        .chars()
+        .filter(|c| matches!(c, '\r' | '\n') || !c.is_control())
+        .collect::<String>();
 
     if text.is_empty() {
         return None;
@@ -1361,11 +1433,14 @@ fn flip_rect_in_layer(rect: CGRect, layer_height: f64) -> CGRect {
 
 #[cfg(test)]
 mod tests {
-    use cbf::data::key::KeyEvent;
+    use cbf::data::key::{KeyEvent, KeyEventType};
+    use objc2::rc::Retained;
+    use objc2_foundation::NSString;
 
     use super::{
         VKEY_DOWN, VKEY_ESCAPE, VKEY_LEFT, VKEY_NEXT, VKEY_PRIOR, VKEY_RETURN, VKEY_RIGHT,
-        VKEY_TAB, VKEY_UP, should_ignore_accelerator_with_marked_text_key_event,
+        VKEY_TAB, VKEY_UP, build_char_event, extract_insert_text,
+        should_ignore_accelerator_with_marked_text_key_event, synthesized_char_text,
     };
 
     #[test]
@@ -1392,5 +1467,40 @@ mod tests {
         assert!(!should_ignore_accelerator_with_marked_text_key_event(
             &event
         ));
+    }
+
+    #[test]
+    fn char_event_preserves_key_metadata_from_pending_keydown() {
+        let mut template = KeyEvent::raw_key_down(42, 191, 4);
+        template.dom_code = Some("Slash".to_string());
+        template.dom_key = Some("/".to_string());
+        template.unmodified_text = Some("/".to_string());
+
+        let event = build_char_event(Some(template), "/".to_string()).unwrap();
+
+        assert_eq!(event.type_, KeyEventType::Char);
+        assert_eq!(event.key_code, 191);
+        assert_eq!(event.platform_key_code, 42);
+        assert_eq!(event.modifiers, 4);
+        assert_eq!(event.dom_code.as_deref(), Some("Slash"));
+        assert_eq!(event.dom_key.as_deref(), Some("/"));
+        assert_eq!(event.text.as_deref(), Some("/"));
+        assert_eq!(event.unmodified_text.as_deref(), Some("/"));
+    }
+
+    #[test]
+    fn extract_insert_text_keeps_enter_but_drops_other_controls() {
+        let text: Retained<NSString> = NSString::from_str("a\r\n\t\u{0}b");
+        let extracted = extract_insert_text(text.as_ref()).unwrap();
+        assert_eq!(extracted, "a\r\nb");
+    }
+
+    #[test]
+    fn synthesized_char_text_uses_enter_from_key_event() {
+        let mut event = KeyEvent::raw_key_down(0, VKEY_RETURN, 0);
+        event.text = Some("\r".to_string());
+        event.unmodified_text = Some("\r".to_string());
+
+        assert_eq!(synthesized_char_text(Some(&event)).as_deref(), Some("\r"));
     }
 }

@@ -281,24 +281,9 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
         });
     }
 
-    fn on_char_event(&self, _view: &BrowserViewMac, text: String) {
-        let transient_text = text.clone();
+    fn on_char_event(&self, _view: &BrowserViewMac, event: cbf::data::key::KeyEvent) {
+        let transient_event = event.clone();
         self.with_page_id(|browsing_context_id| {
-            let event = cbf::data::key::KeyEvent {
-                type_: cbf::data::key::KeyEventType::Char,
-                modifiers: 0,
-                key_code: 0,
-                platform_key_code: 0,
-                dom_code: None,
-                dom_key: None,
-                text: Some(text.clone()),
-                unmodified_text: Some(text),
-                auto_repeat: false,
-                is_keypad: false,
-                is_system_key: false,
-                location: 0,
-            };
-
             if let Err(err) = self
                 .handle
                 .send_key_event(browsing_context_id, event, Vec::new())
@@ -307,24 +292,9 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
             }
         });
         self.with_transient_id(|transient_browsing_context_id| {
-            let event = cbf::data::key::KeyEvent {
-                type_: cbf::data::key::KeyEventType::Char,
-                modifiers: 0,
-                key_code: 0,
-                platform_key_code: 0,
-                dom_code: None,
-                dom_key: None,
-                text: Some(transient_text.clone()),
-                unmodified_text: Some(transient_text),
-                auto_repeat: false,
-                is_keypad: false,
-                is_system_key: false,
-                location: 0,
-            };
-
             if let Err(err) = self.handle.send_key_event_to_transient_browsing_context(
                 transient_browsing_context_id,
-                event,
+                transient_event,
                 Vec::new(),
             ) {
                 warn!("failed to send transient char input: {err}");
