@@ -92,10 +92,14 @@ The local release flow expects:
 - `chromium/src`
 - `./depot_tools`
 
-The runtime release bundle identifier is taken from the single git tag that
-points at `HEAD`. Use the canonical runtime bundle tag format defined in
-`docs/developer-guide/versioning-and-release-metadata.md`.
+By default, the runtime release bundle identifier is taken from the single git
+tag that points at `HEAD`. Use the canonical runtime bundle tag format defined
+in `docs/developer-guide/versioning-and-release-metadata.md`.
 If `HEAD` is untagged, the release flow fails.
+
+If a maintainer needs to package a different tagged revision or `HEAD` has
+multiple release-related tags, pass `--tag <tag>` to select the release tag
+explicitly.
 
 ## 4. Task entrypoints
 
@@ -105,6 +109,12 @@ Validate prerequisites:
 
 ```bash
 task release:check
+```
+
+Explicit tag:
+
+```bash
+task release:check TAG=cbf-chrome-runtime-v0.1.0+chromium-146.0.7632.160-r1
 ```
 
 Build release artifacts:

@@ -49,6 +49,17 @@ def _common_depot_tools_option[FS: Callable[..., Any]](func: FS) -> FS:
     )(func)
 
 
+def _common_release_tag_option[FS: Callable[..., Any]](func: FS) -> FS:
+    return click.option(
+        "--tag",
+        default=None,
+        help=(
+            "Release tag to package. "
+            "Defaults to the single tag pointing at HEAD."
+        ),
+    )(func)
+
+
 def cmd_chromium_apply(*, series: str, base: str | None, branch: str | None) -> int:
     root = repo_root()
     patches = apply_series(
@@ -352,44 +363,50 @@ def run(
 
 @release_group.command("check", help="Validate release prerequisites.")
 @_common_series_options
+@_common_release_tag_option
 @click.option(
     "--allow-dirty",
     is_flag=True,
     help="Allow packaging from a dirty worktree.",
 )
-def release_check_command(*, series: str, allow_dirty: bool) -> None:
-    paths = release_check(allow_dirty=allow_dirty, series=series)
+def release_check_command(*, series: str, tag: str | None, allow_dirty: bool) -> None:
+    paths = release_check(allow_dirty=allow_dirty, series=series, tag=tag)
     click.echo(f"Release prerequisites OK: {paths.out_dir}")
 
 
 @release_group.command("licenses", help="Generate release license files.")
 @_common_series_options
-def release_licenses_command(*, series: str) -> None:
-    paths = write_release_licenses(series=series)
+@_common_release_tag_option
+def release_licenses_command(*, series: str, tag: str | None) -> None:
+    paths = write_release_licenses(series=series, tag=tag)
     click.echo(f"Wrote release licenses under {paths.version_dir}")
 
 
 @release_group.command("source-info", help="Generate SOURCE_INFO.txt.")
 @_common_series_options
+@_common_release_tag_option
 @click.option(
     "--allow-dirty",
     is_flag=True,
     help="Allow metadata generation from a dirty worktree.",
 )
-def release_source_info_command(*, series: str, allow_dirty: bool) -> None:
-    paths = write_source_info(allow_dirty=allow_dirty, series=series)
+def release_source_info_command(
+    *, series: str, tag: str | None, allow_dirty: bool
+) -> None:
+    paths = write_source_info(allow_dirty=allow_dirty, series=series, tag=tag)
     click.echo(f"Wrote source info: {paths.source_info}")
 
 
 @release_group.command("package", help="Assemble the release tar.gz archive.")
 @_common_series_options
+@_common_release_tag_option
 @click.option(
     "--allow-dirty",
     is_flag=True,
     help="Allow packaging from a dirty worktree.",
 )
-def release_package_command(*, series: str, allow_dirty: bool) -> None:
-    paths = create_release_archive(allow_dirty=allow_dirty, series=series)
+def release_package_command(*, series: str, tag: str | None, allow_dirty: bool) -> None:
+    paths = create_release_archive(allow_dirty=allow_dirty, series=series, tag=tag)
     click.echo(f"Created release archive: {paths.archive_path}")
 
 

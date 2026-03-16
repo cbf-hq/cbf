@@ -54,6 +54,9 @@ uv run tool release source-info
 uv run tool release package
 ```
 
+Each release command also accepts `--tag <tag>` to package a specific release
+tag instead of relying on the single tag pointing at `HEAD`.
+
 These commands are normally orchestrated from the repository root via
 `Taskfile.yml`.
 

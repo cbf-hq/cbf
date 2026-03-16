@@ -68,7 +68,7 @@ Optional supplemental artifact:
 `THIRD_PARTY_LICENSES.txt` should be generated from Chromium with:
 
 ```bash
-python tools/licenses.py license_file --format txt
+python tools/licenses/licenses.py license_file --format txt
 ```
 
 `CHROMIUM_THIRD_PARTY_NOTICES.html` is human-readable supplemental attribution.

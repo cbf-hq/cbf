@@ -85,7 +85,17 @@ def resolve_release_paths(version: str) -> ReleasePaths:
     )
 
 
-def current_release_version(root: Path) -> str:
+def current_release_version(root: Path, *, tag: str | None = None) -> str:
+    if tag is not None:
+        result = run_with_return(
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"],
+            cwd=root,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise ConfigError(f"Release tag does not exist: {tag}")
+        return tag
+
     result = run_with_return(["git", "tag", "--points-at", "HEAD"], cwd=root)
     tags = [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
@@ -243,7 +253,7 @@ def render_source_info(metadata: ReleaseMetadata) -> str:
         "License Bundle:\n"
         "- CBF-License-File: CBF_LICENSE.txt\n"
         "- Third-Party-License-File: THIRD_PARTY_LICENSES.txt\n"
-        "- Third-Party-Licenses-Source: tools/licenses.py license_file --format txt\n"
+        "- Third-Party-Licenses-Source: tools/licenses/licenses.py license_file --format txt\n"
         "- Chromium-Third-Party-Notices-File: CHROMIUM_THIRD_PARTY_NOTICES.html\n"
         "- Chromium-Third-Party-Notices-Included: false\n"
     )
@@ -281,34 +291,46 @@ def collect_metadata(paths: ReleasePaths, *, allow_dirty: bool, series: str) -> 
     )
 
 
-def release_check(*, allow_dirty: bool, series: str) -> ReleasePaths:
+def release_check(*, allow_dirty: bool, series: str, tag: str | None = None) -> ReleasePaths:
     root = repo_root()
     check_required_tools(root)
-    version = current_release_version(root)
+    version = current_release_version(root, tag=tag)
     paths = resolve_release_paths(version)
     ensure_clean_worktrees(root, paths.chromium_src, allow_dirty=allow_dirty)
     validate_release_gn_args(parse_args_gn(paths.args_gn))
     return paths
 
 
-def write_release_licenses(*, series: str) -> ReleasePaths:
+def write_release_licenses(*, series: str, tag: str | None = None) -> ReleasePaths:
     root = repo_root()
-    version = current_release_version(root)
+    version = current_release_version(root, tag=tag)
     paths = resolve_release_paths(version)
     paths.version_dir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(root / "LICENSE", paths.cbf_license)
 
     result = run_with_return(
-        [sys.executable, "tools/licenses.py", "license_file", "--format", "txt"],
+        [
+            sys.executable,
+            "tools/licenses/licenses.py",
+            "license_file",
+            "--format",
+            "txt",
+            str(paths.third_party_licenses),
+        ],
         cwd=paths.chromium_src,
     )
-    paths.third_party_licenses.write_text(result.stdout, encoding="utf-8")
+    if not paths.third_party_licenses.is_file():
+        raise ConfigError(
+            f"Chromium license generator did not create output: {paths.third_party_licenses}"
+        )
     return paths
 
 
-def write_source_info(*, allow_dirty: bool, series: str) -> ReleasePaths:
+def write_source_info(
+    *, allow_dirty: bool, series: str, tag: str | None = None
+) -> ReleasePaths:
     root = repo_root()
-    version = current_release_version(root)
+    version = current_release_version(root, tag=tag)
     paths = resolve_release_paths(version)
     paths.version_dir.mkdir(parents=True, exist_ok=True)
     metadata = collect_metadata(paths, allow_dirty=allow_dirty, series=series)
@@ -316,9 +338,11 @@ def write_source_info(*, allow_dirty: bool, series: str) -> ReleasePaths:
     return paths
 
 
-def create_release_archive(*, allow_dirty: bool, series: str) -> ReleasePaths:
+def create_release_archive(
+    *, allow_dirty: bool, series: str, tag: str | None = None
+) -> ReleasePaths:
     root = repo_root()
-    version = current_release_version(root)
+    version = current_release_version(root, tag=tag)
     paths = resolve_release_paths(version)
     metadata = collect_metadata(paths, allow_dirty=allow_dirty, series=series)
     paths.version_dir.mkdir(parents=True, exist_ok=True)
