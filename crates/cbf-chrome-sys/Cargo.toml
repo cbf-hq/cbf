@@ -10,3 +10,7 @@ license.workspace = true
 readme = "README.md"
 
 [dependencies]
+
+[package.metadata.docs.rs]
+default-target = "aarch64-apple-darwin"
+targets = ["aarch64-apple-darwin"]

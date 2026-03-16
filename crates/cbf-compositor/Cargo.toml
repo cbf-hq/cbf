@@ -20,3 +20,7 @@ cbf-chrome = { version = "0.1.0-alpha.1", path = "../cbf-chrome", optional = tru
 raw-window-handle.workspace = true
 thiserror.workspace = true
 winit = { workspace = true, optional = true }
+
+[package.metadata.docs.rs]
+default-target = "aarch64-apple-darwin"
+targets = ["aarch64-apple-darwin"]

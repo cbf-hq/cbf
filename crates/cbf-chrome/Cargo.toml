@@ -70,3 +70,7 @@ features = [
   "NSWindow",
   "objc2-quartz-core"
 ]
+
+[package.metadata.docs.rs]
+default-target = "aarch64-apple-darwin"
+targets = ["aarch64-apple-darwin"]
