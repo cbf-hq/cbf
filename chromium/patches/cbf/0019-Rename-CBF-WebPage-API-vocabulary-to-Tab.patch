@@ -1,7 +1,7 @@
 From 4c26c1cc307958158b0c2d11807c16690e62d830 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 6 Mar 2026 11:43:12 +0900
-Subject: [PATCH 19/28] Rename CBF WebPage API vocabulary to Tab
+Subject: [PATCH 19/29] Rename CBF WebPage API vocabulary to Tab
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge_client.h | 10 +--

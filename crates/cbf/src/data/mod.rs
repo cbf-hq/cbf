@@ -9,6 +9,7 @@ pub mod context_menu;
 pub mod dialog;
 pub mod download;
 pub mod drag;
+pub mod edit;
 pub mod extension;
 pub mod ids;
 pub mod ime;

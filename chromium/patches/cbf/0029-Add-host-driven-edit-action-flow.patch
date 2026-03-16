@@ -1,0 +1,407 @@
+From f58ed0e6a51860630d5c170a63aa05ca20cbf068 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Mon, 16 Mar 2026 09:35:38 +0900
+Subject: [PATCH 29/29] Add host-driven edit action flow
+
+---
+ chrome/browser/cbf/bridge/cbf_bridge.h        |  8 ++
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |  2 +
+ .../cbf/bridge/cbf_bridge_converters.cc       | 19 ++++
+ .../cbf/bridge/cbf_bridge_converters.h        |  1 +
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    | 16 ++++
+ chrome/browser/cbf/bridge/cbf_bridge_input.cc | 93 +++++++++++++++++++
+ chrome/browser/cbf/cbf_profile_service.cc     | 15 +++
+ chrome/browser/cbf/cbf_profile_service.h      |  3 +
+ chrome/browser/cbf/mojom/cbf_browser.mojom    | 11 +++
+ .../profile/cbf_profile_input_controller.cc   | 36 +++++++
+ .../profile/cbf_profile_input_controller.h    |  3 +
+ .../cbf_profile_input_controller_unittest.cc  |  3 +
+ 12 files changed, 210 insertions(+)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index 89e123b459748..be5631df07ada 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -108,6 +108,14 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_finish_composing_text(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+     uint8_t behavior);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_execute_edit_action(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id,
++    uint8_t action);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_execute_extension_popup_edit_action(
++    CbfBridgeClientHandle* client,
++    uint64_t popup_id,
++    uint8_t action);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_execute_context_menu_command(
+     CbfBridgeClientHandle* client,
+     uint64_t menu_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index b817f5eddff41..bc27fcaa4e11e 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -37,6 +37,8 @@ class CbfBridgeClient {
+   bool SetComposition(const CbfImeComposition* composition);
+   bool CommitText(const CbfImeCommitText* commit);
+   bool FinishComposingText(uint64_t tab_id, uint8_t behavior);
++  bool ExecuteEditAction(uint64_t tab_id, uint8_t action);
++  bool ExecuteExtensionPopupEditAction(uint64_t popup_id, uint8_t action);
+   bool ExecuteContextMenuCommand(uint64_t menu_id,
+                                  int32_t command_id,
+                                  int32_t event_flags);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_converters.cc b/chrome/browser/cbf/bridge/cbf_bridge_converters.cc
+index 800cd567177ab..a86c6b1b1f8dd 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_converters.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_converters.cc
+@@ -148,6 +148,25 @@ cbf::mojom::CbfConfirmCompositionBehavior ToMojomConfirmCompositionBehavior(
+   }
+ }
+ 
++cbf::mojom::CbfEditAction ToMojomEditAction(uint8_t value) {
++  switch (value) {
++    case kCbfEditActionUndo:
++      return cbf::mojom::CbfEditAction::kUndo;
++    case kCbfEditActionRedo:
++      return cbf::mojom::CbfEditAction::kRedo;
++    case kCbfEditActionCut:
++      return cbf::mojom::CbfEditAction::kCut;
++    case kCbfEditActionCopy:
++      return cbf::mojom::CbfEditAction::kCopy;
++    case kCbfEditActionPaste:
++      return cbf::mojom::CbfEditAction::kPaste;
++    case kCbfEditActionSelectAll:
++      return cbf::mojom::CbfEditAction::kSelectAll;
++    default:
++      return cbf::mojom::CbfEditAction::kCopy;
++  }
++}
++
+ std::vector<cbf::mojom::CbfImeTextSpanPtr> ToMojomImeTextSpans(
+     const CbfImeTextSpanList& list) {
+   std::vector<cbf::mojom::CbfImeTextSpanPtr> spans;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_converters.h b/chrome/browser/cbf/bridge/cbf_bridge_converters.h
+index 3a89ad677dc90..bbfbd3239611a 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_converters.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_converters.h
+@@ -19,6 +19,7 @@ cbf::mojom::CbfImeTextSpanUnderlineStyle ToMojomImeTextSpanUnderlineStyle(
+     uint8_t value);
+ cbf::mojom::CbfConfirmCompositionBehavior ToMojomConfirmCompositionBehavior(
+     uint8_t value);
++cbf::mojom::CbfEditAction ToMojomEditAction(uint8_t value);
+ std::vector<cbf::mojom::CbfImeTextSpanPtr> ToMojomImeTextSpans(
+     const CbfImeTextSpanList& list);
+ 
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index 6a9e56f875ede..e51818fc7f4a0 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -758,6 +758,15 @@ typedef struct CbfImeCommitText {
+   CbfImeTextSpanList spans;
+ } CbfImeCommitText;
+ 
++enum CbfEditAction {
++  kCbfEditActionUndo = 0,
++  kCbfEditActionRedo = 1,
++  kCbfEditActionCut = 2,
++  kCbfEditActionCopy = 3,
++  kCbfEditActionPaste = 4,
++  kCbfEditActionSelectAll = 5,
++};
++
+ void cbf_bridge_convert_nsevent(
+     void* nsevent,
+     uint64_t tab_id,
+@@ -782,6 +791,13 @@ void cbf_bridge_free_converted_drag_data(CbfDragData* data);
+ enum CbfBridgeEventWaitStatus cbf_bridge_client_wait_for_event(
+     CbfBridgeClientHandle* client,
+     int64_t timeout_ms);
++bool cbf_bridge_client_execute_edit_action(CbfBridgeClientHandle* client,
++                                           uint64_t tab_id,
++                                           uint8_t action);
++bool cbf_bridge_client_execute_extension_popup_edit_action(
++    CbfBridgeClientHandle* client,
++    uint64_t popup_id,
++    uint8_t action);
+ bool cbf_bridge_client_execute_context_menu_command(
+     CbfBridgeClientHandle* client,
+     uint64_t menu_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_input.cc b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
+index fafab8f5c06f5..c8044fe03c084 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_input.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
+@@ -732,6 +732,77 @@ bool CbfBridgeClient::FinishExtensionPopupComposingText(uint64_t popup_id,
+   return true;
+ }
+ 
++bool CbfBridgeClient::ExecuteEditAction(uint64_t tab_id, uint8_t action) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++  const auto mojom_action = ToMojomEditAction(action);
++
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id,
++             cbf::mojom::CbfEditAction action) {
++            if (!impl->browser_remote.is_bound()) {
++              return;
++            }
++            auto it = impl->web_page_profiles.find(tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->ExecuteEditAction(tab_id, action);
++          },
++          impl, tab_id, mojom_action));
++  return true;
++}
++
++bool CbfBridgeClient::ExecuteExtensionPopupEditAction(uint64_t popup_id,
++                                                      uint8_t action) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++  const auto mojom_action = ToMojomEditAction(action);
++
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t popup_id,
++             cbf::mojom::CbfEditAction action) {
++            auto it = impl->popup_profiles.find(popup_id);
++            if (it == impl->popup_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->ExecuteExtensionPopupEditAction(
++                popup_id, action);
++          },
++          impl, popup_id, mojom_action));
++  return true;
++}
++
+ }  // namespace cbf_bridge::internal
+ 
+ extern "C" bool cbf_bridge_client_send_key_event(
+@@ -893,6 +964,28 @@ extern "C" bool cbf_bridge_client_finish_extension_popup_composing_text(
+       ->FinishExtensionPopupComposingText(popup_id, behavior);
+ }
+ 
++extern "C" bool cbf_bridge_client_execute_edit_action(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id,
++    uint8_t action) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->ExecuteEditAction(tab_id, action);
++}
++
++extern "C" bool cbf_bridge_client_execute_extension_popup_edit_action(
++    CbfBridgeClientHandle* client,
++    uint64_t popup_id,
++    uint8_t action) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->ExecuteExtensionPopupEditAction(popup_id, action);
++}
++
+ extern "C" void cbf_bridge_convert_nsevent(
+     void* nsevent,
+     uint64_t tab_id,
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 6f88b36102357..fb8d488c5530a 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -929,6 +929,11 @@ void CbfProfileService::FinishComposingText(
+   ime_controller_->FinishComposingText(tab_id, behavior);
+ }
+ 
++void CbfProfileService::ExecuteEditAction(uint64_t tab_id,
++                                          mojom::CbfEditAction action) {
++  input_controller_->ExecuteEditAction(tab_id, action);
++}
++
+ void CbfProfileService::ExecuteContextMenuCommand(uint64_t menu_id,
+                                                   int32_t command_id,
+                                                   int32_t event_flags) {
+@@ -1074,6 +1079,16 @@ void CbfProfileService::SendExtensionPopupKeyEvent(
+                                                std::move(event), commands);
+ }
+ 
++void CbfProfileService::ExecuteExtensionPopupEditAction(
++    uint64_t popup_id,
++    mojom::CbfEditAction action) {
++  ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id);
++  if (!popup) {
++    return;
++  }
++  input_controller_->ExecuteEditActionForWebContents(popup->contents(), action);
++}
++
+ void CbfProfileService::SendExtensionPopupMouseEvent(
+     uint64_t popup_id,
+     mojom::CbfMouseEventPtr event) {
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index f86c0a7b3f0c6..d69f2c3604861 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -106,6 +106,7 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void CommitText(mojom::CbfImeCommitTextPtr commit) override;
+   void FinishComposingText(uint64_t tab_id,
+                            mojom::CbfConfirmCompositionBehavior behavior) override;
++  void ExecuteEditAction(uint64_t tab_id, mojom::CbfEditAction action) override;
+   void AcceptChoiceMenuSelection(uint64_t request_id,
+                                  const std::vector<int32_t>& indices) override;
+   void DismissChoiceMenu(uint64_t request_id) override;
+@@ -136,6 +137,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+       uint64_t popup_id,
+       mojom::CbfKeyEventPtr event,
+       const std::optional<std::vector<std::string>>& commands) override;
++  void ExecuteExtensionPopupEditAction(uint64_t popup_id,
++                                       mojom::CbfEditAction action) override;
+   void SendExtensionPopupMouseEvent(uint64_t popup_id,
+                                     mojom::CbfMouseEventPtr event) override;
+   void SendExtensionPopupMouseWheelEvent(
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index b1e97878f3f40..5b81aa31be80f 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -322,6 +322,15 @@ enum CbfConfirmCompositionBehavior {
+   kKeepSelection,
+ };
+ 
++enum CbfEditAction {
++  kUndo,
++  kRedo,
++  kCut,
++  kCopy,
++  kPaste,
++  kSelectAll,
++};
++
+ enum CbfBeforeUnloadReason {
+   kUnknown,
+   kCloseTab,
+@@ -756,6 +765,7 @@ interface CbfProfileService {
+   SetComposition(CbfImeComposition composition);
+   CommitText(CbfImeCommitText commit);
+   FinishComposingText(uint64 tab_id, CbfConfirmCompositionBehavior behavior);
++  ExecuteEditAction(uint64 tab_id, CbfEditAction action);
+   AcceptChoiceMenuSelection(uint64 request_id, array<int32> indices);
+   DismissChoiceMenu(uint64 request_id);
+   ExecuteContextMenuCommand(uint64 menu_id, int32 command_id, int32 event_flags);
+@@ -777,6 +787,7 @@ interface CbfProfileService {
+   SendExtensionPopupKeyEvent(uint64 popup_id,
+                              CbfKeyEvent event,
+                              array<string>? commands);
++  ExecuteExtensionPopupEditAction(uint64 popup_id, CbfEditAction action);
+   SendExtensionPopupMouseEvent(uint64 popup_id, CbfMouseEvent event);
+   SendExtensionPopupMouseWheelEvent(uint64 popup_id, CbfMouseWheelEvent event);
+   SetExtensionPopupComposition(uint64 popup_id, CbfImeComposition composition);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
+index 0635841a84083..bce9748ddc8ea 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
+@@ -187,6 +187,42 @@ void CbfProfileInputController::SendKeyEventToWebContents(
+       key_event, ui::LatencyInfo(), std::move(edit_commands));
+ }
+ 
++void CbfProfileInputController::ExecuteEditAction(
++    TabId tab_id,
++    mojom::CbfEditAction action) {
++  ExecuteEditActionForWebContents(context_->tab_manager().GetWebContents(tab_id),
++                                  action);
++}
++
++void CbfProfileInputController::ExecuteEditActionForWebContents(
++    content::WebContents* web_contents,
++    mojom::CbfEditAction action) {
++  if (!web_contents) {
++    return;
++  }
++
++  switch (action) {
++    case mojom::CbfEditAction::kUndo:
++      web_contents->Undo();
++      return;
++    case mojom::CbfEditAction::kRedo:
++      web_contents->Redo();
++      return;
++    case mojom::CbfEditAction::kCut:
++      web_contents->Cut();
++      return;
++    case mojom::CbfEditAction::kCopy:
++      web_contents->Copy();
++      return;
++    case mojom::CbfEditAction::kPaste:
++      web_contents->Paste();
++      return;
++    case mojom::CbfEditAction::kSelectAll:
++      web_contents->SelectAll();
++      return;
++  }
++}
++
+ void CbfProfileInputController::SendMouseEvent(mojom::CbfMouseEventPtr event) {
+   content::WebContents* web_contents =
+       context_->tab_manager().GetWebContents(event->tab_id);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.h b/chrome/browser/cbf/profile/cbf_profile_input_controller.h
+index eef8f400abd0b..a54dcc7c6619e 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_input_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.h
+@@ -32,6 +32,9 @@ class CbfProfileInputController {
+       content::WebContents* web_contents,
+       mojom::CbfKeyEventPtr event,
+       const std::optional<std::vector<std::string>>& commands);
++  void ExecuteEditAction(TabId tab_id, mojom::CbfEditAction action);
++  void ExecuteEditActionForWebContents(content::WebContents* web_contents,
++                                       mojom::CbfEditAction action);
+   void SendMouseEvent(mojom::CbfMouseEventPtr event);
+   void SendMouseEventToWebContents(content::WebContents* web_contents,
+                                    mojom::CbfMouseEventPtr event);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
+index 828124ddd3a95..f8f24278f3ccd 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_input_controller_unittest.cc
+@@ -49,6 +49,9 @@ TEST_F(CbfProfileInputControllerTest, InvalidTabIdInputEventsAreNoOp) {
+   wheel_event->tab_id = kInvalidTabId;
+   wheel_event->delta_units = mojom::CbfScrollGranularity::kScrollByPixel;
+   controller_.SendMouseWheelEvent(std::move(wheel_event));
++
++  controller_.ExecuteEditAction(kInvalidTabId, mojom::CbfEditAction::kCopy);
++  controller_.ExecuteEditActionForWebContents(nullptr, mojom::CbfEditAction::kPaste);
+ }
+ 
+ TEST_F(CbfProfileInputControllerTest, DuplicateCloseIsSafe) {
+-- 
+2.50.1 (Apple Git-155)
+

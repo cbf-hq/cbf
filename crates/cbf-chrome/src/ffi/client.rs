@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use cbf::data::window_open::WindowOpenResponse;
+use cbf::data::{edit::EditAction, window_open::WindowOpenResponse};
 use cbf_chrome_sys::ffi::*;
 use tracing::{debug, warn};
 
@@ -1416,6 +1416,52 @@ impl IpcClient {
         }
     }
 
+    /// Execute a browser-generic edit action for the given page.
+    pub fn execute_edit_action(
+        &mut self,
+        browsing_context_id: TabId,
+        action: EditAction,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe {
+            cbf_bridge_client_execute_edit_action(
+                self.inner,
+                browsing_context_id.get(),
+                edit_action_to_ffi(action),
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Execute a browser-generic edit action for the given extension popup.
+    pub fn execute_extension_popup_edit_action(
+        &mut self,
+        popup_id: PopupId,
+        action: EditAction,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe {
+            cbf_bridge_client_execute_extension_popup_edit_action(
+                self.inner,
+                popup_id.get(),
+                edit_action_to_ffi(action),
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
     /// Execute a context menu command for the given menu.
     pub fn execute_context_menu_command(
         &mut self,
@@ -1565,6 +1611,17 @@ fn wait_for_event_inner(
         CBF_BRIDGE_EVENT_WAIT_STATUS_DISCONNECTED => Ok(EventWaitResult::Disconnected),
         CBF_BRIDGE_EVENT_WAIT_STATUS_CLOSED => Ok(EventWaitResult::Closed),
         _ => Err(Error::InvalidEvent),
+    }
+}
+
+fn edit_action_to_ffi(action: EditAction) -> u8 {
+    match action {
+        EditAction::Undo => CBF_EDIT_ACTION_UNDO,
+        EditAction::Redo => CBF_EDIT_ACTION_REDO,
+        EditAction::Cut => CBF_EDIT_ACTION_CUT,
+        EditAction::Copy => CBF_EDIT_ACTION_COPY,
+        EditAction::Paste => CBF_EDIT_ACTION_PASTE,
+        EditAction::SelectAll => CBF_EDIT_ACTION_SELECT_ALL,
     }
 }
 

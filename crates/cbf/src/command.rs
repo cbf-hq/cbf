@@ -9,6 +9,7 @@ use crate::data::{
     dialog::DialogResponse,
     download::DownloadId,
     drag::{DragDrop, DragUpdate},
+    edit::EditAction,
     ids::{BrowsingContextId, TransientBrowsingContextId},
     ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
     key::KeyEvent,
@@ -143,11 +144,21 @@ pub enum BrowserCommand {
         event: KeyEvent,
         commands: Vec<String>,
     },
+    /// Execute a browser-generic edit action for the page.
+    ExecuteEditAction {
+        browsing_context_id: BrowsingContextId,
+        action: EditAction,
+    },
     /// Deliver a keyboard event to a transient browsing context.
     SendKeyEventToTransientBrowsingContext {
         transient_browsing_context_id: TransientBrowsingContextId,
         event: KeyEvent,
         commands: Vec<String>,
+    },
+    /// Execute a browser-generic edit action for a transient browsing context.
+    ExecuteEditActionInTransientBrowsingContext {
+        transient_browsing_context_id: TransientBrowsingContextId,
+        action: EditAction,
     },
     /// Deliver a mouse event to the page.
     SendMouseEvent {
@@ -287,7 +298,9 @@ pub enum BrowserOperation {
     SetBrowsingContextFocus,
     SetTransientBrowsingContextFocus,
     SendKeyEvent,
+    ExecuteEditAction,
     SendKeyEventToTransientBrowsingContext,
+    ExecuteEditActionInTransientBrowsingContext,
     SendMouseEvent,
     SendMouseEventToTransientBrowsingContext,
     SendMouseWheelEvent,
@@ -349,8 +362,12 @@ impl BrowserOperation {
                 Self::SetTransientBrowsingContextFocus
             }
             BrowserCommand::SendKeyEvent { .. } => Self::SendKeyEvent,
+            BrowserCommand::ExecuteEditAction { .. } => Self::ExecuteEditAction,
             BrowserCommand::SendKeyEventToTransientBrowsingContext { .. } => {
                 Self::SendKeyEventToTransientBrowsingContext
+            }
+            BrowserCommand::ExecuteEditActionInTransientBrowsingContext { .. } => {
+                Self::ExecuteEditActionInTransientBrowsingContext
             }
             BrowserCommand::SendMouseEvent { .. } => Self::SendMouseEvent,
             BrowserCommand::SendMouseEventToTransientBrowsingContext { .. } => {
@@ -415,8 +432,12 @@ impl std::fmt::Display for BrowserOperation {
             Self::SetBrowsingContextFocus => "set_browsing_context_focus",
             Self::SetTransientBrowsingContextFocus => "set_transient_browsing_context_focus",
             Self::SendKeyEvent => "send_key_event",
+            Self::ExecuteEditAction => "execute_edit_action",
             Self::SendKeyEventToTransientBrowsingContext => {
                 "send_key_event_to_transient_browsing_context"
+            }
+            Self::ExecuteEditActionInTransientBrowsingContext => {
+                "execute_edit_action_in_transient_browsing_context"
             }
             Self::SendMouseEvent => "send_mouse_event",
             Self::SendMouseEventToTransientBrowsingContext => {
@@ -458,7 +479,10 @@ impl std::fmt::Display for BrowserOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::ids::{BrowsingContextId, TransientBrowsingContextId};
+    use crate::data::{
+        edit::EditAction,
+        ids::{BrowsingContextId, TransientBrowsingContextId},
+    };
 
     #[test]
     fn operation_from_command_maps_to_expected_variant() {
@@ -495,6 +519,23 @@ mod tests {
         assert_eq!(
             BrowserOperation::from_command(&command),
             BrowserOperation::CloseTransientBrowsingContext
+        );
+    }
+
+    #[test]
+    fn operation_from_command_covers_edit_action_command() {
+        let command = BrowserCommand::ExecuteEditAction {
+            browsing_context_id: BrowsingContextId::new(5),
+            action: EditAction::Copy,
+        };
+
+        assert_eq!(
+            BrowserOperation::from_command(&command),
+            BrowserOperation::ExecuteEditAction
+        );
+        assert_eq!(
+            BrowserOperation::ExecuteEditAction.to_string(),
+            "execute_edit_action"
         );
     }
 }

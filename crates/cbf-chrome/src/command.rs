@@ -1,5 +1,8 @@
-use cbf::command::{BrowserCommand, BrowserOperation};
 use cbf::data::dialog::DialogResponse;
+use cbf::{
+    command::{BrowserCommand, BrowserOperation},
+    data::edit::EditAction,
+};
 
 use crate::data::{
     browsing_context_open::ChromeBrowsingContextOpenResponse,
@@ -105,6 +108,10 @@ pub enum ChromeCommand {
         event: ChromeKeyEvent,
         commands: Vec<String>,
     },
+    ExecuteEditAction {
+        browsing_context_id: TabId,
+        action: EditAction,
+    },
     SendMouseEvent {
         browsing_context_id: TabId,
         event: ChromeMouseEvent,
@@ -180,6 +187,10 @@ pub enum ChromeCommand {
         popup_id: PopupId,
         event: ChromeKeyEvent,
         commands: Vec<String>,
+    },
+    ExecuteExtensionPopupEditAction {
+        popup_id: PopupId,
+        action: EditAction,
     },
     SendExtensionPopupMouseEvent {
         popup_id: PopupId,
@@ -370,6 +381,13 @@ impl From<BrowserCommand> for ChromeCommand {
                 event: event.into(),
                 commands,
             },
+            BrowserCommand::ExecuteEditAction {
+                browsing_context_id,
+                action,
+            } => Self::ExecuteEditAction {
+                browsing_context_id: browsing_context_id.into(),
+                action,
+            },
             BrowserCommand::SendKeyEventToTransientBrowsingContext {
                 transient_browsing_context_id,
                 event,
@@ -378,6 +396,13 @@ impl From<BrowserCommand> for ChromeCommand {
                 popup_id: transient_browsing_context_id.into(),
                 event: event.into(),
                 commands,
+            },
+            BrowserCommand::ExecuteEditActionInTransientBrowsingContext {
+                transient_browsing_context_id,
+                action,
+            } => Self::ExecuteExtensionPopupEditAction {
+                popup_id: transient_browsing_context_id.into(),
+                action,
             },
             BrowserCommand::SendMouseEvent {
                 browsing_context_id,
@@ -561,6 +586,7 @@ mod tests {
         command::BrowserCommand,
         data::{
             auxiliary_window::{AuxiliaryWindowId, AuxiliaryWindowResponse},
+            edit::EditAction,
             ids::{BrowsingContextId, TransientBrowsingContextId},
         },
     };
@@ -696,6 +722,40 @@ mod tests {
             raw,
             ChromeCommand::CloseExtensionPopup { popup_id }
                 if popup_id == PopupId::new(99)
+        ));
+    }
+
+    #[test]
+    fn edit_action_command_maps_to_chrome_edit_action() {
+        let command = BrowserCommand::ExecuteEditAction {
+            browsing_context_id: BrowsingContextId::new(11),
+            action: EditAction::Paste,
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::ExecuteEditAction {
+                browsing_context_id,
+                action: EditAction::Paste,
+            } if browsing_context_id == TabId::new(11)
+        ));
+    }
+
+    #[test]
+    fn transient_edit_action_command_maps_to_extension_popup_edit_action() {
+        let command = BrowserCommand::ExecuteEditActionInTransientBrowsingContext {
+            transient_browsing_context_id: TransientBrowsingContextId::new(12),
+            action: EditAction::SelectAll,
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::ExecuteExtensionPopupEditAction {
+                popup_id,
+                action: EditAction::SelectAll,
+            } if popup_id == PopupId::new(12)
         ));
     }
 }

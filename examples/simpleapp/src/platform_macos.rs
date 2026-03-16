@@ -10,6 +10,7 @@ use cbf::{
     browser::BrowserHandle,
     data::{
         drag::{DragDrop, DragUpdate},
+        edit::EditAction,
         ids::{BrowsingContextId, TransientBrowsingContextId, WindowId as HostWindowId},
         ime::{
             ConfirmCompositionBehavior, ImeCommitText, ImeComposition, ImeTextSpan, ImeTextSpanType,
@@ -128,6 +129,25 @@ impl BrowserViewMacDelegate for SimpleBrowserViewDelegate {
                 transient_commands,
             ) {
                 warn!("failed to forward transient key event: {err}");
+            }
+        });
+    }
+
+    fn on_edit_action(&self, _view: &BrowserViewMac, action: EditAction) {
+        self.with_page_id(|browsing_context_id| {
+            if let Err(err) = self.handle.execute_edit_action(browsing_context_id, action) {
+                warn!("failed to execute edit action: {err}");
+            }
+        });
+        self.with_transient_id(|transient_browsing_context_id| {
+            if let Err(err) = self
+                .handle
+                .execute_edit_action_in_transient_browsing_context(
+                    transient_browsing_context_id,
+                    action,
+                )
+            {
+                warn!("failed to execute transient edit action: {err}");
             }
         });
     }

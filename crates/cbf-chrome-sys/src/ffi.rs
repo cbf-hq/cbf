@@ -237,6 +237,12 @@ pub const CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SQUIGGLE: u8 = 4;
 
 pub const CBF_IME_CONFIRM_DO_NOT_KEEP_SELECTION: u8 = 0;
 pub const CBF_IME_CONFIRM_KEEP_SELECTION: u8 = 1;
+pub const CBF_EDIT_ACTION_UNDO: u8 = 0;
+pub const CBF_EDIT_ACTION_REDO: u8 = 1;
+pub const CBF_EDIT_ACTION_CUT: u8 = 2;
+pub const CBF_EDIT_ACTION_COPY: u8 = 3;
+pub const CBF_EDIT_ACTION_PASTE: u8 = 4;
+pub const CBF_EDIT_ACTION_SELECT_ALL: u8 = 5;
 
 pub const CBF_BEFOREUNLOAD_REASON_UNKNOWN: u8 = 0;
 pub const CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE: u8 = 1;
@@ -959,6 +965,16 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         popup_id: u64,
         behavior: u8,
+    ) -> bool;
+    pub fn cbf_bridge_client_execute_edit_action(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        action: u8,
+    ) -> bool;
+    pub fn cbf_bridge_client_execute_extension_popup_edit_action(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
+        action: u8,
     ) -> bool;
     pub fn cbf_bridge_client_execute_context_menu_command(
         client: *mut CbfBridgeClientHandle,

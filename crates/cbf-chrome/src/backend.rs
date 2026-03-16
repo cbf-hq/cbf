@@ -1015,6 +1015,9 @@ impl ChromiumBackend {
             } => client
                 .send_extension_popup_key_event_raw(*popup_id, event, commands)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::ExecuteExtensionPopupEditAction { popup_id, action } => client
+                .execute_extension_popup_edit_action(*popup_id, *action)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::SendExtensionPopupMouseEvent { popup_id, event } => client
                 .send_extension_popup_mouse_event(*popup_id, event)
                 .map(|_| (None, Vec::new())),
@@ -1027,6 +1030,12 @@ impl ChromiumBackend {
                 commands,
             } => client
                 .send_key_event_raw(*browsing_context_id, event, commands)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::ExecuteEditAction {
+                browsing_context_id,
+                action,
+            } => client
+                .execute_edit_action(*browsing_context_id, *action)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::SendMouseEvent {
                 browsing_context_id,

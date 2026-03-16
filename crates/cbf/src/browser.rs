@@ -12,6 +12,7 @@ use crate::{
         browsing_context_open::BrowsingContextOpenResponse,
         download::DownloadId,
         drag::{DragDrop, DragUpdate},
+        edit::EditAction,
         ids::{BrowsingContextId, TransientBrowsingContextId},
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         key::KeyEvent,
@@ -408,6 +409,18 @@ impl<B: Backend> BrowserHandle<B> {
         })
     }
 
+    /// Execute a browser-generic edit action for the web page.
+    pub fn execute_edit_action(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        action: EditAction,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::ExecuteEditAction {
+            browsing_context_id,
+            action,
+        })
+    }
+
     /// Send a keyboard input event to the transient browsing context.
     pub fn send_key_event_to_transient_browsing_context(
         &self,
@@ -420,6 +433,20 @@ impl<B: Backend> BrowserHandle<B> {
             event,
             commands,
         })
+    }
+
+    /// Execute a browser-generic edit action for the transient browsing context.
+    pub fn execute_edit_action_in_transient_browsing_context(
+        &self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        action: EditAction,
+    ) -> Result<(), Error> {
+        self.send(
+            BrowserCommand::ExecuteEditActionInTransientBrowsingContext {
+                transient_browsing_context_id,
+                action,
+            },
+        )
     }
 
     /// Send a mouse input event to the web page.

@@ -33,6 +33,7 @@ use objc2_quartz_core::CATransaction;
 use cbf::data::{
     context_menu::{ContextMenu, ContextMenuIcon, ContextMenuItem, ContextMenuItemType},
     drag::DragStartRequest,
+    edit::EditAction,
     ime::{ImeBoundsUpdate, ImeCompositionBounds, ImeRect, ImeTextRange, TextSelectionBounds},
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent, PointerType},
@@ -52,6 +53,8 @@ use crate::ffi::{
 pub trait BrowserViewMacDelegate {
     /// Called when a key event is translated from macOS input.
     fn on_key_event(&self, view: &BrowserViewMac, event: KeyEvent, commands: Vec<String>);
+    /// Called when a browser-generic edit action is requested by AppKit.
+    fn on_edit_action(&self, view: &BrowserViewMac, action: EditAction);
     /// Called when an IME event is produced by the view.
     fn on_ime_event(&self, view: &BrowserViewMac, event: BrowserViewMacImeEvent);
     /// Called when plain character input is received.
@@ -227,6 +230,36 @@ define_class!(
         fn resign_first_responder(&self) -> bool {
             self.ivars().delegate.on_focus_changed(self, false);
             true
+        }
+
+        #[unsafe(method(undo:))]
+        fn undo(&self, _sender: &AnyObject) {
+            self.send_edit_action(EditAction::Undo);
+        }
+
+        #[unsafe(method(redo:))]
+        fn redo(&self, _sender: &AnyObject) {
+            self.send_edit_action(EditAction::Redo);
+        }
+
+        #[unsafe(method(cut:))]
+        fn cut(&self, _sender: &AnyObject) {
+            self.send_edit_action(EditAction::Cut);
+        }
+
+        #[unsafe(method(copy:))]
+        fn copy(&self, _sender: &AnyObject) {
+            self.send_edit_action(EditAction::Copy);
+        }
+
+        #[unsafe(method(paste:))]
+        fn paste(&self, _sender: &AnyObject) {
+            self.send_edit_action(EditAction::Paste);
+        }
+
+        #[unsafe(method(selectAll:))]
+        fn select_all(&self, _sender: &AnyObject) {
+            self.send_edit_action(EditAction::SelectAll);
         }
 
         #[unsafe(method(mouseDown:))]
@@ -802,6 +835,10 @@ impl BrowserViewMac {
         self.ivars()
             .delegate
             .on_key_event(self, key_event, commands);
+    }
+
+    fn send_edit_action(&self, action: EditAction) {
+        self.ivars().delegate.on_edit_action(self, action);
     }
 
     fn forward_mouse_event(&self, event: &NSEvent) {
