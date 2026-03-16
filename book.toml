@@ -5,8 +5,8 @@ src = "docs/"
 title = "CBF Documentation"
 
 [output.html]
-git-repository-url = "https://github.com/tasuren/cbf"
-edit-url-template = "https://github.com/tasuren/cbf/edit/main/{path}"
+git-repository-url = "https://github.com/cbf-hq/cbf"
+edit-url-template = "https://github.com/cbf-hq/cbf/edit/main/{path}"
 
 [build]
 build-dir = "target/mdbook"
