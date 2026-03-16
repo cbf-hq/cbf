@@ -1,0 +1,281 @@
+From 0a8a98388c596188be45d301157c4a45a8bcd824 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Mon, 16 Mar 2026 09:57:36 +0900
+Subject: [PATCH 30/30] Hide browser app from Dock without helper confusion
+
+---
+ base/apple/foundation_util.h                  |  8 ++++
+ base/apple/foundation_util.mm                 | 40 +++++++++++++++++++
+ base/apple/foundation_util_unittest.mm        | 19 +++++++++
+ chrome/app/app-Info.plist                     |  2 +
+ chrome/app/chrome_main_delegate.cc            |  8 ++--
+ chrome/app/chrome_main_mac.mm                 |  6 +--
+ chrome/browser/app_controller_mac.mm          | 23 +++++------
+ .../apps/app_shim/app_shim_manager_mac.cc     | 17 ++++----
+ chrome/common/chrome_paths_mac.mm             |  2 +-
+ content/shell/app/paths_apple.mm              |  2 +-
+ 10 files changed, 96 insertions(+), 31 deletions(-)
+
+diff --git a/base/apple/foundation_util.h b/base/apple/foundation_util.h
+index be35b825ac92a..69f1f041eda46 100644
+--- a/base/apple/foundation_util.h
++++ b/base/apple/foundation_util.h
+@@ -48,6 +48,14 @@ BASE_EXPORT void ClearAmIBundledCache();
+ // Returns true if this process is marked as a "Background only process".
+ BASE_EXPORT bool IsBackgroundOnlyProcess();
+ 
++// Returns true if `exec_path` points to a helper executable nested under a
++// framework bundle's `Helpers/*.app/Contents/MacOS/` directory.
++BASE_EXPORT bool IsHelperApplicationExecutablePath(const FilePath& exec_path);
++
++// Returns true if the current executable is running from a helper app nested
++// under a framework bundle's `Helpers` directory.
++BASE_EXPORT bool IsHelperApplication();
++
+ // Returns the path to a resource within the framework bundle.
+ BASE_EXPORT FilePath PathForFrameworkBundleResource(const char* resource_name);
+ 
+diff --git a/base/apple/foundation_util.mm b/base/apple/foundation_util.mm
+index 2c5fd953795d0..e00b749b5100d 100644
+--- a/base/apple/foundation_util.mm
++++ b/base/apple/foundation_util.mm
+@@ -23,6 +23,7 @@
+ #include "base/no_destructor.h"
+ #include "base/numerics/checked_math.h"
+ #include "base/numerics/safe_conversions.h"
++#include "base/path_service.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/sys_string_conversions.h"
+ #include "build/branding_buildflags.h"
+@@ -105,6 +106,45 @@ bool IsBackgroundOnlyProcess() {
+   }
+ }
+ 
++bool IsHelperApplicationExecutablePath(const FilePath& exec_path) {
++#if BUILDFLAG(IS_IOS)
++  return false;
++#else
++  if (exec_path.empty()) {
++    return false;
++  }
++
++  const FilePath macos_dir = exec_path.DirName();
++  if (macos_dir.BaseName().value() != "MacOS") {
++    return false;
++  }
++
++  const FilePath contents_dir = macos_dir.DirName();
++  if (contents_dir.BaseName().value() != "Contents") {
++    return false;
++  }
++
++  const FilePath helper_app_dir = contents_dir.DirName();
++  if (helper_app_dir.Extension() != ".app") {
++    return false;
++  }
++
++  return helper_app_dir.DirName().BaseName().value() == "Helpers";
++#endif
++}
++
++bool IsHelperApplication() {
++#if BUILDFLAG(IS_IOS)
++  return false;
++#else
++  FilePath exec_path;
++  if (!PathService::Get(base::FILE_EXE, &exec_path)) {
++    return false;
++  }
++  return IsHelperApplicationExecutablePath(exec_path);
++#endif
++}
++
+ FilePath PathForFrameworkBundleResource(const char* resource_name) {
+   NSBundle* bundle = apple::FrameworkBundle();
+   NSURL* resource_url = [bundle URLForResource:@(resource_name)
+diff --git a/base/apple/foundation_util_unittest.mm b/base/apple/foundation_util_unittest.mm
+index e6d641b05edab..acebf6ddf9e2d 100644
+--- a/base/apple/foundation_util_unittest.mm
++++ b/base/apple/foundation_util_unittest.mm
+@@ -22,6 +22,25 @@
+ 
+ namespace base::apple {
+ 
++TEST(FoundationUtilTest, IsHelperApplicationExecutablePath) {
++  EXPECT_TRUE(IsHelperApplicationExecutablePath(FilePath(
++      "/tmp/Chromium.app/Contents/Frameworks/Chromium Framework.framework/"
++      "Versions/1.2.3.4/Helpers/Chromium Helper.app/Contents/MacOS/"
++      "Chromium Helper")));
++  EXPECT_TRUE(IsHelperApplicationExecutablePath(
++      FilePath("/tmp/Content Shell.app/Contents/Frameworks/"
++               "Content Shell Framework.framework/Versions/C/Helpers/"
++               "Content Shell Helper.app/Contents/MacOS/"
++               "Content Shell Helper")));
++
++  EXPECT_FALSE(IsHelperApplicationExecutablePath(
++      FilePath("/tmp/Chromium.app/Contents/MacOS/Chromium")));
++  EXPECT_FALSE(IsHelperApplicationExecutablePath(
++      FilePath("/tmp/Chromium.app/Contents/Frameworks/"
++               "Chromium Framework.framework/Versions/1.2.3.4/Chromium")));
++  EXPECT_FALSE(IsHelperApplicationExecutablePath(FilePath()));
++}
++
+ TEST(FoundationUtilTest, CFCast) {
+   // Build out the CF types to be tested as empty containers.
+   ScopedCFTypeRef<CFTypeRef> test_array(
+diff --git a/chrome/app/app-Info.plist b/chrome/app/app-Info.plist
+index e813de1e4e364..e697705858f4f 100644
+--- a/chrome/app/app-Info.plist
++++ b/chrome/app/app-Info.plist
+@@ -213,6 +213,8 @@
+ 	<string>${CHROMIUM_MIN_SYSTEM_VERSION}</string>
+ 	<key>LSRequiresNativeExecution</key>
+ 	<true/>
++	<key>LSUIElement</key>
++	<string>1</string>
+ 	<key>NSCameraReactionEffectGesturesEnabledDefault</key>
+ 	<false/>
+ 	<key>NSPrincipalClass</key>
+diff --git a/chrome/app/chrome_main_delegate.cc b/chrome/app/chrome_main_delegate.cc
+index d7d5bade9350c..40721b06daadc 100644
+--- a/chrome/app/chrome_main_delegate.cc
++++ b/chrome/app/chrome_main_delegate.cc
+@@ -1282,12 +1282,10 @@ void ChromeMainDelegate::InitMacCrashReporter(
+   // should never see a --type switch (switches::kProcessType).  Likewise,
+   // the helper should always have a --type switch.
+   //
+-  // This check is done this late so there is already a call to
+-  // base::apple::IsBackgroundOnlyProcess(), so there is no change in
+-  // startup/initialization order.
++  // This check is done this late so startup has already initialized the app
++  // bundle state used by the helper/browser distinction.
+ 
+-  // The helper's Info.plist marks it as a background only app.
+-  if (base::apple::IsBackgroundOnlyProcess()) {
++  if (base::apple::IsHelperApplication()) {
+     CHECK(command_line.HasSwitch(switches::kProcessType) &&
+           !process_type.empty())
+         << "Helper application requires --type.";
+diff --git a/chrome/app/chrome_main_mac.mm b/chrome/app/chrome_main_mac.mm
+index ce3eb640350b9..78ddfa064b06e 100644
+--- a/chrome/app/chrome_main_mac.mm
++++ b/chrome/app/chrome_main_mac.mm
+@@ -31,7 +31,7 @@ bool IsAlertsHelperLaunchedViaNotificationAction() {
+   // We allow the main Chrome app to be launched via a notification action. We
+   // detect and log that to UMA by checking the passed in NSNotification in
+   // -applicationDidFinishLaunching: (//chrome/browser/app_controller_mac.mm).
+-  if (!base::apple::IsBackgroundOnlyProcess()) {
++  if (!base::apple::IsHelperApplication()) {
+     return false;
+   }
+ 
+@@ -59,7 +59,7 @@ bool IsAlertsHelperLaunchedViaNotificationAction() {
+ // initialization failures are aggregated under. Explicitly detect this and exit
+ // cleanly instead. https://crbug.com/374353396
+ bool IsHelperAppLaunchedBySafeExamBrowser() {
+-  if (!base::apple::IsBackgroundOnlyProcess()) {
++  if (!base::apple::IsHelperApplication()) {
+     return false;
+   }
+ 
+@@ -84,7 +84,7 @@ bool IsHelperAppLaunchedBySafeExamBrowser() {
+       return nil;
+     }
+ 
+-    if (!base::apple::IsBackgroundOnlyProcess()) {
++    if (!base::apple::IsHelperApplication()) {
+       // Shortcut: in the browser process, just return the main app bundle.
+       return NSBundle.mainBundle;
+     }
+diff --git a/chrome/browser/app_controller_mac.mm b/chrome/browser/app_controller_mac.mm
+index b7c3520adc628..ff6ec99376785 100644
+--- a/chrome/browser/app_controller_mac.mm
++++ b/chrome/browser/app_controller_mac.mm
+@@ -725,18 +725,17 @@ @implementation AppController {
+   // browser process to also stay alive without any windows open. To support
+   // this, this ScopedKeepAlive is created in -applicationDidFinishLaunching.
+   //
+-  // When the user launches an app shim while Chrome isn't running, the app shim
+-  // launches Chrome with the _kLSOpenOptionBackgroundLaunchKey option. This
+-  // causes the activationPolicy to be equal to
+-  // NSApplicationActivationPolicyProhibited (i.e. Chrome is not visibly running
+-  // in the Dock and task switcher). In this state we don't want to keep the
+-  // browser process alive indefinitely (but can't skip creating this
+-  // ScopedKeepAlive entirely, as that could result in the  browser process
+-  // terminating before it has fully initialized and had a chance to for example
+-  // process messages from app shims). Once the app shim launch has been
+-  // processed to the point of having created the expected Browser instances or
+-  // other ScopedKeepAlive instances, -resetKeepAliveWhileHidden is called to
+-  // reset `_keepAlive`.
++  // Chrome may run with activationPolicy set to
++  // NSApplicationActivationPolicyProhibited (i.e. Chrome is not visibly
++  // running in the Dock and task switcher), either because it was launched in
++  // the background or because the main app bundle is configured as an
++  // LSUIElement. In that state we don't want to keep the browser process alive
++  // indefinitely (but can't skip creating this ScopedKeepAlive entirely, as
++  // that could result in the browser process terminating before it has fully
++  // initialized and had a chance to for example process messages from app
++  // shims). Once startup has created the expected Browser instances or other
++  // ScopedKeepAlive instances, -resetKeepAliveWhileHidden can reset
++  // `_keepAlive`.
+   //
+   // When the user explicitly launches Chrome, or when Chrome creates any
+   // windows, the `activationPolicy` is changed by the OS. By observing
+diff --git a/chrome/browser/apps/app_shim/app_shim_manager_mac.cc b/chrome/browser/apps/app_shim/app_shim_manager_mac.cc
+index 5049321ea962b..5294d3dd2398d 100644
+--- a/chrome/browser/apps/app_shim/app_shim_manager_mac.cc
++++ b/chrome/browser/apps/app_shim/app_shim_manager_mac.cc
+@@ -1129,16 +1129,15 @@ void AppShimManager::OnShimProcessConnectedAndAllLaunchesDone(
+         bootstrap->GetAppShimPid(), result);
+   }
+ 
+-  // If the browser process was launched by the App Shim in hidden mode, the
+-  // browser process should not stay alive indefinitely after all Browser
+-  // instances have been closed. Calling ResetKeepAliveWhileHidden() lets
+-  // the browser process terminate itself when no more Browsers or other
+-  // ScopedKeepAlives exist.
++  // If the browser process is currently running in hidden mode, it should not
++  // stay alive indefinitely after all Browser instances have been closed.
++  // Calling ResetKeepAliveWhileHidden() lets the browser process terminate
++  // itself when no more Browsers or other ScopedKeepAlives exist.
+   //
+-  // At this point, if chrome was launched by an App Shim we would have finished
+-  // creating any browser windows or other ScopedKeepAlive instances that
+-  // resulted from the app shim launch, so now is a good time to stop the
+-  // browser process from keeping itself alive indefinitely.
++  // At this point any browser windows or other ScopedKeepAlive instances that
++  // resulted from the app shim launch have already been created, so now is a
++  // good time to stop the browser process from keeping itself alive
++  // indefinitely while hidden.
+   app_controller_mac::ResetKeepAliveWhileHidden();
+ 
+   // If we failed because the profile was locked, launch the profile manager.
+diff --git a/chrome/common/chrome_paths_mac.mm b/chrome/common/chrome_paths_mac.mm
+index 6829c9cb92c22..f42a38a3aa037 100644
+--- a/chrome/common/chrome_paths_mac.mm
++++ b/chrome/common/chrome_paths_mac.mm
+@@ -149,7 +149,7 @@ bool GetUserVideosDirectory(base::FilePath* result) {
+   path = path.DirName().DirName();
+   DCHECK_EQ(path.BaseName().value(), "Contents");
+ 
+-  if (base::apple::IsBackgroundOnlyProcess()) {
++  if (base::apple::IsHelperApplication()) {
+     // |path| is Chromium.app/Contents/Frameworks/Chromium Framework.framework/
+     // Versions/X/Helpers/Chromium Helper.app/Contents. Go up three times to
+     // the versioned framework directory.
+diff --git a/content/shell/app/paths_apple.mm b/content/shell/app/paths_apple.mm
+index 98c49f8163fb2..13973f7992083 100644
+--- a/content/shell/app/paths_apple.mm
++++ b/content/shell/app/paths_apple.mm
+@@ -19,7 +19,7 @@
+   base::PathService::Get(base::FILE_EXE, &path);
+ 
+   // Up to Contents.
+-  if (base::apple::IsBackgroundOnlyProcess()) {
++  if (base::apple::IsHelperApplication()) {
+     // The running executable is the helper, located at:
+     // Content Shell.app/Contents/Frameworks/
+     // Content Shell Framework.framework/Versions/C/Helpers/Content Shell
+-- 
+2.50.1 (Apple Git-155)
+
