@@ -7,7 +7,7 @@ description = "Chromium-specific safe API layer for CBF"
 repository.workspace = true
 keywords.workspace = true
 license.workspace = true
-readme.workspace = true
+readme = "README.md"
 
 [features]
 default = ["macos-choice-menu-default"]
