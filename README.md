@@ -114,6 +114,26 @@ Dependency direction:
 - `cbf-chrome`: depends on `cbf` and `cbf-chrome-sys`
 - `cbf-chrome-sys`: links to Chromium bridge/runtime
 
+## Process Model
+
+CBF uses a process-separated architecture.
+
+The browser-side objects such as Chromium `WebContents` remain owned by the Chromium process.
+Rust code does not hold or manage those objects directly. Instead, CBF communicates across the
+FFI/IPC boundary using browser commands, browser events, and stable logical IDs such as
+`BrowsingContextId`.
+
+This separation is intentional: it keeps Chromium-specific lifetime/threading constraints out of
+the public `cbf` API and makes disconnects, crashes, and backend restarts explicit parts of the
+failure model.
+
+### Design Influence
+
+Some parts of CBF's architecture were informed by the process-separated, event-driven design seen in
+ChatGPT Atlas's OWL architecture. CBF is not a clone of that system, but it shares the same general
+preference for keeping browser-process ownership on the backend side and exposing a higher-level,
+stable control surface to the application side.
+
 ## API Model
 
 CBF centers on two primitives:
