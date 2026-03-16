@@ -35,6 +35,10 @@ For source-only distribution:
 
 - Keep BSD 3-Clause license text for CBF code.
 - Document that Chromium/tooling dependencies are governed by their own licenses.
+- If the repository includes Chromium patch files or other Chromium-derived
+  source diffs, include the Chromium license text alongside the repository
+  (for example as `LICENSE.chromium`) and note that Chromium-derived portions
+  remain subject to Chromium's license terms.
 
 For binary/distribution bundles containing Chromium artifacts:
 

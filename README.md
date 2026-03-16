@@ -173,7 +173,8 @@ You can also set `CBF_CHROMIUM_EXECUTABLE` and omit `--chromium-executable`.
 
 ## Licensing
 
-- CBF authored code: `BSD 3-Clause`
-- Chromium/third-party components: follow each upstream license and notice requirements
+- CBF-authored code: BSD 3-Clause
+- Chromium-derived portions of the CBF codebase: Chromium BSD-style license (see `LICENSE.chromium`)
+- Chromium and other third-party components: distributed under their respective licenses and notice requirements
 
 See `docs/developer-guide/licensing.md` for policy details.
