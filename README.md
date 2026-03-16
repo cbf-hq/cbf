@@ -77,6 +77,12 @@ Linux, Windows, and Intel macOS are not yet supported.
 - Contributing Guide: `CONTRIBUTING.md`
 - Security Policy: `SECURITY.md`
 
+## Support and Reporting
+
+- Questions and general discussion: GitHub Discussions
+- Bug reports and feature requests: GitHub Issues
+- Security issues: follow `SECURITY.md`
+
 ## Quick Start
 
 CBF currently requires a CBF-patched Chromium runtime and the `cbf_bridge` library.
@@ -85,7 +91,10 @@ For setup and first-run instructions, start with:
 - User Setup: `docs/getting-started/user-setup.md`
 - Feature Matrix: `docs/feature-matrix.md`
 
-Planned release artifacts:
+Prebuilt release artifacts are planned, but are not available yet.
+For now, you must build the CBF-patched Chromium runtime and `cbf_bridge` library yourself.
+
+When available, planned release artifacts are:
 
 - GitHub Releases: `cbf-chrome-macos-<git-tag>.tar.gz`
   - Contains `Chromium.app` and `libcbf_bridge.dylib`
