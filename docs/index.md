@@ -11,3 +11,5 @@ Who this book is for:
 - Application developers integrating CBF with prebuilt artifacts.
 - Contributors changing crates, bridge code, or Chromium-fork patches.
 - Maintainers reviewing architecture boundaries and failure handling rules.
+
+> Note: For API reference, please check docs.rs: [`cbf` crate](https://docs.rs/cbf/latest/cbf/), [`cbf-chrome` crate](https://docs.rs/cbf-chrome/latest/cbf_chrome/), [`cbf-chrome-sys` crate](https://docs.rs/cbf-chrome-sys/latest/cbf_chrome_sys/).

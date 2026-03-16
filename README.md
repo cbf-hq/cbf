@@ -70,11 +70,15 @@ Linux, Windows, and Intel macOS are not yet supported.
 
 ## Documentation
 
-- Documentation: [CBF Book](https://cbf-hq.github.io/cbf/)
-- Concepts: [Concepts](https://cbf-hq.github.io/cbf/getting-started/concepts.html)
-- User Setup: [User Setup](https://cbf-hq.github.io/cbf/getting-started/user-setup.html)
-- Contributor Setup: [Contributor Setup](https://cbf-hq.github.io/cbf/developer-guide/contributor-setup.html)
-- Feature Matrix: [Feature Matrix](https://cbf-hq.github.io/cbf/feature-matrix.html)
+- Book: [CBF Book](https://cbf-hq.github.io/cbf/)
+  - Concepts: [Concepts](https://cbf-hq.github.io/cbf/getting-started/concepts.html)
+  - User Setup: [User Setup](https://cbf-hq.github.io/cbf/getting-started/user-setup.html)
+  - Contributor Setup: [Contributor Setup](https://cbf-hq.github.io/cbf/developer-guide/contributor-setup.html)
+  - Feature Matrix: [Feature Matrix](https://cbf-hq.github.io/cbf/feature-matrix.html)
+- API Reference
+  - `cbf`: [cbf API](https://docs.rs/cbf/latest/cbf/)
+  - `cbf-chrome`: [cbf-chrome API](https://docs.rs/cbf-chrome/latest/cbf_chrome/)
+  - `cbf-chrome-sys`: [cbf-chrome-sys API](https://docs.rs/cbf-chrome-sys/latest/cbf_chrome_sys/)
 - Contributing Guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Security Policy: [`SECURITY.md`](SECURITY.md)
 
