@@ -1,6 +1,6 @@
 [package]
 name = "cbf-chrome"
-version.workspace = true
+version = "0.1.0-alpha.1"
 edition.workspace = true
 authors.workspace = true
 description = "Chromium-specific safe API layer for CBF"
@@ -14,8 +14,8 @@ default = ["macos-choice-menu-default"]
 macos-choice-menu-default = []
 
 [dependencies]
-cbf = { path = "../cbf" }
-cbf-chrome-sys = { path = "../cbf-chrome-sys" }
+cbf = { version = "0.1.0-alpha.1", path = "../cbf" }
+cbf-chrome-sys = { version = "146.1.0-alpha.1", path = "../cbf-chrome-sys" }
 thiserror.workspace = true
 cursor-icon = { workspace = true }
 async-channel.workspace = true

@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "cbf"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.1"
 dependencies = [
  "async-channel",
  "async-process",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "cbf-chrome"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.1"
 dependencies = [
  "async-channel",
  "async-process",
@@ -668,11 +668,11 @@ dependencies = [
 
 [[package]]
 name = "cbf-chrome-sys"
-version = "0.1.0-alpha.2"
+version = "146.1.0-alpha.1"
 
 [[package]]
 name = "cbf-cli"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.1"
 dependencies = [
  "cargo_metadata",
  "clap",
@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "cbf-compositor"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.1"
 dependencies = [
  "cbf",
  "cbf-chrome",
@@ -3097,7 +3097,7 @@ dependencies = [
 
 [[package]]
 name = "simpleapp"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.1"
 dependencies = [
  "cbf",
  "cbf-chrome",
