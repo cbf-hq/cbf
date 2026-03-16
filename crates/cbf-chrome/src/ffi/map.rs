@@ -2,13 +2,13 @@
 use std::{ffi::c_void, ptr::NonNull};
 
 use cbf::data::dialog::DialogType;
-use cbf_chrome_sys::ffi::*;
-use cursor_icon::CursorIcon;
 use cbf::data::{
     drag::DragData,
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent, PointerType},
 };
+use cbf_chrome_sys::ffi::*;
+use cursor_icon::CursorIcon;
 
 use super::{Error, IpcEvent, utils::c_string_to_string};
 use crate::data::{

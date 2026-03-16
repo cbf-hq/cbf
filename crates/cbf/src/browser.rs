@@ -2,7 +2,6 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use async_channel::{Receiver, Sender, TrySendError};
 use crate::{
     command::BrowserCommand,
     data::{
@@ -22,6 +21,7 @@ use crate::{
     error::Error,
     event::BrowserEvent,
 };
+use async_channel::{Receiver, Sender, TrySendError};
 
 /// A backend implementation that can drive a browser process.
 ///
