@@ -5,6 +5,7 @@ use std::{
 };
 
 mod menu;
+mod window_visibility;
 
 use cbf::{
     browser::BrowserHandle,
@@ -33,6 +34,7 @@ use objc2_app_kit::NSView;
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tracing::{debug, warn};
+use window_visibility::WindowVisibilityObserver;
 use winit::{
     dpi::LogicalSize,
     event_loop::{ActiveEventLoop, EventLoopProxy},
@@ -452,6 +454,7 @@ struct WindowEntry {
     window: Window,
     primary_browser_view: Retained<BrowserViewMac>,
     devtools_browser_view: Option<Retained<BrowserViewMac>>,
+    _visibility_observer: Option<WindowVisibilityObserver>,
 }
 
 /// macOS platform-specific application implementation.
@@ -535,6 +538,25 @@ impl SimpleAppMac {
             Arc::clone(&self.shared),
             binding,
         )?;
+        let visibility_observer = if matches!(binding, BrowserViewBinding::Transient(_)) {
+            None
+        } else {
+            match WindowVisibilityObserver::install(
+                &window,
+                self.browser_handle.clone(),
+                Arc::clone(&self.shared),
+                host_window_id,
+            ) {
+                Ok(observer) => Some(observer),
+                Err(err) => {
+                    warn!(
+                        host_window_id = %host_window_id,
+                        "failed to install macOS window visibility observer: {err}"
+                    );
+                    None
+                }
+            }
+        };
 
         let winit_window_id = window.id();
         self.windows.insert(
@@ -544,6 +566,7 @@ impl SimpleAppMac {
                 window,
                 primary_browser_view: browser_view,
                 devtools_browser_view: None,
+                _visibility_observer: visibility_observer,
             },
         );
         self.winit_id_by_host_window
