@@ -16,6 +16,7 @@ chromium/*
 !chromium/patches/
 !chromium/patches/cbf/
 !chromium/patches/cbf/**
+!chromium/CHANGELOG.md
 depot_tools
 
 # OS
