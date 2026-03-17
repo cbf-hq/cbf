@@ -15,6 +15,7 @@ use crate::data::{
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
     transient_browsing_context::{TransientImeCommitText, TransientImeComposition},
+    visibility::BrowsingContextVisibility,
     window_open::WindowOpenResponse,
 };
 
@@ -135,6 +136,11 @@ pub enum BrowserCommand {
     SetTransientBrowsingContextFocus {
         transient_browsing_context_id: TransientBrowsingContextId,
         focused: bool,
+    },
+    /// Update whether the given web page should be treated as visible.
+    SetBrowsingContextVisibility {
+        browsing_context_id: BrowsingContextId,
+        visibility: BrowsingContextVisibility,
     },
 
     // --- Input ---
@@ -297,6 +303,7 @@ pub enum BrowserOperation {
     GetBrowsingContextDomHtml,
     SetBrowsingContextFocus,
     SetTransientBrowsingContextFocus,
+    SetBrowsingContextVisibility,
     SendKeyEvent,
     ExecuteEditAction,
     SendKeyEventToTransientBrowsingContext,
@@ -360,6 +367,9 @@ impl BrowserOperation {
             BrowserCommand::SetBrowsingContextFocus { .. } => Self::SetBrowsingContextFocus,
             BrowserCommand::SetTransientBrowsingContextFocus { .. } => {
                 Self::SetTransientBrowsingContextFocus
+            }
+            BrowserCommand::SetBrowsingContextVisibility { .. } => {
+                Self::SetBrowsingContextVisibility
             }
             BrowserCommand::SendKeyEvent { .. } => Self::SendKeyEvent,
             BrowserCommand::ExecuteEditAction { .. } => Self::ExecuteEditAction,
@@ -431,6 +441,7 @@ impl std::fmt::Display for BrowserOperation {
             Self::GetBrowsingContextDomHtml => "get_browsing_context_dom_html",
             Self::SetBrowsingContextFocus => "set_browsing_context_focus",
             Self::SetTransientBrowsingContextFocus => "set_transient_browsing_context_focus",
+            Self::SetBrowsingContextVisibility => "set_browsing_context_visibility",
             Self::SendKeyEvent => "send_key_event",
             Self::ExecuteEditAction => "execute_edit_action",
             Self::SendKeyEventToTransientBrowsingContext => {
@@ -482,6 +493,7 @@ mod tests {
     use crate::data::{
         edit::EditAction,
         ids::{BrowsingContextId, TransientBrowsingContextId},
+        visibility::BrowsingContextVisibility,
     };
 
     #[test]
@@ -536,6 +548,23 @@ mod tests {
         assert_eq!(
             BrowserOperation::ExecuteEditAction.to_string(),
             "execute_edit_action"
+        );
+    }
+
+    #[test]
+    fn operation_from_command_covers_visibility_command() {
+        let command = BrowserCommand::SetBrowsingContextVisibility {
+            browsing_context_id: BrowsingContextId::new(5),
+            visibility: BrowsingContextVisibility::Hidden,
+        };
+
+        assert_eq!(
+            BrowserOperation::from_command(&command),
+            BrowserOperation::SetBrowsingContextVisibility
+        );
+        assert_eq!(
+            BrowserOperation::SetBrowsingContextVisibility.to_string(),
+            "set_browsing_context_visibility"
         );
     }
 }

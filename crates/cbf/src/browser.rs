@@ -15,6 +15,7 @@ use crate::{
         key::KeyEvent,
         mouse::{MouseEvent, MouseWheelEvent},
         transient_browsing_context::{TransientImeCommitText, TransientImeComposition},
+        visibility::BrowsingContextVisibility,
         window_open::WindowOpenResponse,
     },
     delegate::BackendDelegate,
@@ -378,6 +379,18 @@ impl<B: Backend> BrowserHandle<B> {
         self.send(BrowserCommand::SetTransientBrowsingContextFocus {
             transient_browsing_context_id,
             focused,
+        })
+    }
+
+    /// Update whether the web page should be treated as visible.
+    pub fn set_browsing_context_visibility(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        visibility: BrowsingContextVisibility,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::SetBrowsingContextVisibility {
+            browsing_context_id,
+            visibility,
         })
     }
 
