@@ -1,0 +1,445 @@
+From 1414b71400dc91564d106833bd62b85dd7acbf21 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Tue, 17 Mar 2026 10:13:52 +0900
+Subject: [PATCH 31/31] Add browsing context visibility flow
+
+---
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |  1 +
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  8 +++
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc | 60 +++++++++++++++++++
+ .../browser/cbf/cbf_ca_context_id_observer.cc |  7 +++
+ .../browser/cbf/cbf_ca_context_id_observer.h  |  1 +
+ chrome/browser/cbf/cbf_profile_service.cc     |  5 ++
+ chrome/browser/cbf/cbf_profile_service.h      |  2 +
+ .../cbf/cbf_profile_service_browsertest.cc    | 44 ++++++++++++++
+ chrome/browser/cbf/cbf_tab_manager.cc         |  2 +-
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  6 ++
+ .../cbf_profile_navigation_controller.cc      | 19 ++++++
+ .../cbf_profile_navigation_controller.h       |  2 +
+ .../cbf/test/cbf_test_profile_observer.cc     | 23 ++++++-
+ .../cbf/test/cbf_test_profile_observer.h      | 11 ++++
+ 14 files changed, 189 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index bc27fcaa4e11e..ba4c5fa0e2e57 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -28,6 +28,7 @@ class CbfBridgeClient {
+                      const std::string& profile_id);
+   bool SetTabSize(uint64_t tab_id, uint32_t width, uint32_t height);
+   bool SetTabFocus(uint64_t tab_id, bool focused);
++  bool SetTabVisibility(uint64_t tab_id, uint8_t visibility);
+   bool SendKeyEvent(const CbfKeyEvent* event, const CbfCommandList* commands);
+   bool SendMouseEvent(const CbfMouseEvent* event);
+   bool SendMouseWheelEvent(const CbfMouseWheelEvent* event);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index e51818fc7f4a0..6c2516eef5370 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -187,6 +187,11 @@ enum CbfTabOpenResult {
+   kCbfTabOpenResultAborted = 3,
+ };
+ 
++enum CbfTabVisibility {
++  kCbfTabVisibilityVisible = 0,
++  kCbfTabVisibilityHidden = 1,
++};
++
+ enum CbfSurfaceHandleKind {
+   kSurfaceHandleNone = 0,
+   kSurfaceHandleMacCaContextId = 1,
+@@ -850,6 +855,9 @@ bool cbf_bridge_client_inspect_element(CbfBridgeClientHandle* client,
+ bool cbf_bridge_client_set_web_page_focus(CbfBridgeClientHandle* client,
+                                           uint64_t tab_id,
+                                           bool focused);
++bool cbf_bridge_client_set_tab_visibility(CbfBridgeClientHandle* client,
++                                          uint64_t tab_id,
++                                          uint8_t visibility);
+ bool cbf_bridge_client_get_web_page_dom_html(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index 9c25f9394bd1f..1531895074594 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -137,6 +137,55 @@ bool CbfBridgeClient::SetTabFocus(const uint64_t tab_id,
+   return true;
+ }
+ 
++bool CbfBridgeClient::SetTabVisibility(const uint64_t tab_id,
++                                       const uint8_t visibility) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, const uint64_t tab_id,
++             const uint8_t visibility) {
++            if (!impl->browser_remote.is_bound()) {
++              return;
++            }
++            auto it = impl->web_page_profiles.find(tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++
++            cbf::mojom::CbfTabVisibility mojo_visibility =
++                cbf::mojom::CbfTabVisibility::kVisible;
++            switch (visibility) {
++              case kCbfTabVisibilityVisible:
++                mojo_visibility = cbf::mojom::CbfTabVisibility::kVisible;
++                break;
++              case kCbfTabVisibilityHidden:
++                mojo_visibility = cbf::mojom::CbfTabVisibility::kHidden;
++                break;
++              default:
++                return;
++            }
++
++            remote_it->second.remote->SetTabVisibility(tab_id, mojo_visibility);
++          },
++          impl, tab_id, visibility));
++  return true;
++}
++
+ bool CbfBridgeClient::RequestCloseTab(const uint64_t tab_id) {
+   if (!impl_) {
+     return false;
+@@ -1043,6 +1092,17 @@ extern "C" bool cbf_bridge_client_set_tab_focus(
+   return cbf_bridge_client_set_web_page_focus(client, tab_id, focused);
+ }
+ 
++extern "C" bool cbf_bridge_client_set_tab_visibility(
++    CbfBridgeClientHandle* client,
++    const uint64_t tab_id,
++    const uint8_t visibility) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->SetTabVisibility(tab_id, visibility);
++}
++
+ extern "C" bool cbf_bridge_client_confirm_beforeunload(
+     CbfBridgeClientHandle* client,
+     const uint64_t tab_id,
+diff --git a/chrome/browser/cbf/cbf_ca_context_id_observer.cc b/chrome/browser/cbf/cbf_ca_context_id_observer.cc
+index 885c8d2f3e2c8..8adcf022be76c 100644
+--- a/chrome/browser/cbf/cbf_ca_context_id_observer.cc
++++ b/chrome/browser/cbf/cbf_ca_context_id_observer.cc
+@@ -55,6 +55,13 @@ void CbfCaContextIdObserver::DidFinishNavigation(
+   profile_service_->NotifyNavigationStateChanged(web_contents(), false);
+ }
+ 
++void CbfCaContextIdObserver::OnVisibilityChanged(
++    content::Visibility visibility) {
++  if (visibility == content::Visibility::VISIBLE) {
++    StartPollingIfNeeded();
++  }
++}
++
+ void CbfCaContextIdObserver::TitleWasSet(content::NavigationEntry* entry) {
+   (void)entry;
+   if (!profile_service_ || !web_contents()) {
+diff --git a/chrome/browser/cbf/cbf_ca_context_id_observer.h b/chrome/browser/cbf/cbf_ca_context_id_observer.h
+index 389be1dccb26d..d19fb26d43b9f 100644
+--- a/chrome/browser/cbf/cbf_ca_context_id_observer.h
++++ b/chrome/browser/cbf/cbf_ca_context_id_observer.h
+@@ -38,6 +38,7 @@ class CbfCaContextIdObserver
+   void DidFirstVisuallyNonEmptyPaint() override;
+   void DidStartNavigation(content::NavigationHandle* navigation_handle) override;
+   void DidFinishNavigation(content::NavigationHandle* navigation_handle) override;
++  void OnVisibilityChanged(content::Visibility visibility) override;
+   void TitleWasSet(content::NavigationEntry* entry) override;
+   void DidUpdateFaviconURL(
+       content::RenderFrameHost* render_frame_host,
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index fb8d488c5530a..12897f56cff8e 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -1045,6 +1045,11 @@ void CbfProfileService::SetTabFocus(uint64_t tab_id, bool focused) {
+   }
+ }
+ 
++void CbfProfileService::SetTabVisibility(uint64_t tab_id,
++                                         mojom::CbfTabVisibility visibility) {
++  navigation_controller_->SetTabVisibility(tab_id, visibility);
++}
++
+ void CbfProfileService::CloseExtensionPopup(uint64_t popup_id) {
+   CloseExtensionPopupById(popup_id);
+ }
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index d69f2c3604861..84945773a7f37 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -127,6 +127,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void OpenDevTools(uint64_t tab_id) override;
+   void InspectElement(uint64_t tab_id, int32_t x, int32_t y) override;
+   void SetTabFocus(uint64_t tab_id, bool focused) override;
++  void SetTabVisibility(uint64_t tab_id,
++                        mojom::CbfTabVisibility visibility) override;
+   void CloseExtensionPopup(uint64_t popup_id) override;
+   void SetExtensionPopupSize(uint64_t popup_id,
+                              uint32_t width,
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index aaa18bd59ea1a..7180bd3c7a676 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -518,6 +518,50 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp)
+   profile_service_->RequestCloseTab(kInvalidTabId);
+   profile_service_->SendDragCancel(9999, kInvalidTabId);
+   profile_service_->OpenDevTools(kInvalidTabId);
++  profile_service_->SetTabVisibility(kInvalidTabId,
++                                     mojom::CbfTabVisibility::kHidden);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SetTabVisibilityUpdatesWebContentsVisibility) {
++  const TabId tab_id = CreatePage("about:blank");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  EXPECT_EQ(web_contents->GetVisibility(), content::Visibility::VISIBLE);
++
++  profile_service_->SetTabVisibility(tab_id, mojom::CbfTabVisibility::kHidden);
++  base::RunLoop().RunUntilIdle();
++  EXPECT_EQ(web_contents->GetVisibility(), content::Visibility::HIDDEN);
++
++  profile_service_->SetTabVisibility(tab_id, mojom::CbfTabVisibility::kVisible);
++  base::RunLoop().RunUntilIdle();
++  EXPECT_EQ(web_contents->GetVisibility(), content::Visibility::VISIBLE);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SetTabVisibilityRepeatedHideShowIsSafe) {
++  const TabId tab_id = CreatePage("about:blank");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  for (int i = 0; i < 3; ++i) {
++    profile_service_->SetTabVisibility(tab_id, mojom::CbfTabVisibility::kHidden);
++    base::RunLoop().RunUntilIdle();
++    EXPECT_EQ(web_contents->GetVisibility(), content::Visibility::HIDDEN);
++
++    profile_service_->SetTabVisibility(tab_id,
++                                       mojom::CbfTabVisibility::kVisible);
++    base::RunLoop().RunUntilIdle();
++    EXPECT_EQ(web_contents->GetVisibility(), content::Visibility::VISIBLE);
++  }
+ }
+ 
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+diff --git a/chrome/browser/cbf/cbf_tab_manager.cc b/chrome/browser/cbf/cbf_tab_manager.cc
+index bd99a76c7d366..ebefdcfe22a3d 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.cc
++++ b/chrome/browser/cbf/cbf_tab_manager.cc
+@@ -149,7 +149,7 @@ TabId CbfTabManager::CreateTab(const GURL& initial_url) {
+         std::string());
+   }
+ 
+-  web_contents_ptr->WasShown();
++  web_contents_ptr->UpdateWebContentsVisibility(content::Visibility::VISIBLE);
+   web_contents_ptr->Focus();
+ 
+   return tab_id;
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 5b81aa31be80f..facc10fb7fb13 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -331,6 +331,11 @@ enum CbfEditAction {
+   kSelectAll,
+ };
+ 
++enum CbfTabVisibility {
++  kVisible,
++  kHidden,
++};
++
+ enum CbfBeforeUnloadReason {
+   kUnknown,
+   kCloseTab,
+@@ -781,6 +786,7 @@ interface CbfProfileService {
+   OpenDevTools(uint64 tab_id);
+   InspectElement(uint64 tab_id, int32 x, int32 y);
+   SetTabFocus(uint64 tab_id, bool focused);
++  SetTabVisibility(uint64 tab_id, CbfTabVisibility visibility);
+   CloseExtensionPopup(uint64 popup_id);
+   SetExtensionPopupSize(uint64 popup_id, uint32 width, uint32 height) => ();
+   SetExtensionPopupFocus(uint64 popup_id, bool focused);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+index 4bb75e03e9467..40cf00276fb98 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+@@ -122,4 +122,23 @@ void CbfProfileNavigationController::SetTabFocus(TabId tab_id,
+   }
+ }
+ 
++void CbfProfileNavigationController::SetTabVisibility(
++    TabId tab_id,
++    mojom::CbfTabVisibility visibility) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(tab_id);
++  if (!web_contents) {
++    return;
++  }
++
++  switch (visibility) {
++    case mojom::CbfTabVisibility::kVisible:
++      web_contents->UpdateWebContentsVisibility(content::Visibility::VISIBLE);
++      break;
++    case mojom::CbfTabVisibility::kHidden:
++      web_contents->UpdateWebContentsVisibility(content::Visibility::HIDDEN);
++      break;
++  }
++}
++
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
+index 5bbabcaf5750c..07ac34bcccefc 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
+@@ -5,6 +5,7 @@
+ 
+ #include "base/memory/raw_ptr.h"
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
++#include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
+ 
+ namespace cbf {
+ 
+@@ -23,6 +24,7 @@ class CbfProfileNavigationController {
+   void GoForward(TabId tab_id);
+   void Reload(TabId tab_id, bool ignore_cache);
+   void SetTabFocus(TabId tab_id, bool focused);
++  void SetTabVisibility(TabId tab_id, mojom::CbfTabVisibility visibility);
+ 
+  private:
+   raw_ptr<CbfProfileServiceContext> context_;
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index 4a5b6b1a4e685..1d007b3cec4d8 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -331,6 +331,18 @@ void CbfTestProfileObserver::WaitForExtensionPopupOpenedCount(
+   quit_wait_loop_.Reset();
+ }
+ 
++void CbfTestProfileObserver::WaitForSurfaceCount(size_t expected_count) {
++  ResetWaitTargets();
++  wait_surface_count_ = expected_count;
++  if (surface_events_.size() >= wait_surface_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
+ void CbfTestProfileObserver::WaitForExtensionPopupSurfaceCount(
+     size_t expected_count) {
+   ResetWaitTargets();
+@@ -469,7 +481,11 @@ void CbfTestProfileObserver::WaitForExtensionPopupChoiceMenuCount(
+ }
+ 
+ void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t tab_id,
+-                                                    uint32_t ca_context_id) {}
++                                                    uint32_t ca_context_id) {
++  surface_events_.push_back(
++      {.tab_id = tab_id, .ca_context_id = ca_context_id});
++  MaybeQuitWaitLoop();
++}
+ 
+ void CbfTestProfileObserver::OnExtensionPopupOpened(
+     uint64_t tab_id,
+@@ -907,6 +923,10 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
+     quit_wait_loop_.Run();
+     return;
+   }
++  if (wait_surface_count_ > 0 && surface_events_.size() >= wait_surface_count_) {
++    quit_wait_loop_.Run();
++    return;
++  }
+   if (wait_extension_popup_surface_count_ > 0 &&
+       extension_popup_surface_events_.size() >=
+           wait_extension_popup_surface_count_) {
+@@ -980,6 +1000,7 @@ void CbfTestProfileObserver::ResetWaitTargets() {
+   wait_download_updated_count_ = 0;
+   wait_download_completed_count_ = 0;
+   wait_extension_popup_opened_count_ = 0;
++  wait_surface_count_ = 0;
+   wait_extension_popup_surface_count_ = 0;
+   wait_extension_popup_preferred_size_count_ = 0;
+   wait_extension_popup_closed_count_ = 0;
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index c28ffc19b2331..e0dbe011415da 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -178,6 +178,11 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+     std::string title;
+   };
+ 
++  struct SurfaceEvent {
++    uint64_t tab_id = 0;
++    uint32_t ca_context_id = 0;
++  };
++
+   struct ExtensionPopupSurfaceEvent {
+     uint64_t tab_id = 0;
+     uint64_t popup_id = 0;
+@@ -341,6 +346,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+       const {
+     return extension_popup_opened_events_;
+   }
++  const std::vector<SurfaceEvent>& surface_events() const {
++    return surface_events_;
++  }
+   const std::vector<ExtensionPopupSurfaceEvent>&
+   extension_popup_surface_events() const {
+     return extension_popup_surface_events_;
+@@ -396,6 +404,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void WaitForDownloadUpdatedCount(size_t expected_count);
+   void WaitForDownloadCompletedCount(size_t expected_count);
+   void WaitForExtensionPopupOpenedCount(size_t expected_count);
++  void WaitForSurfaceCount(size_t expected_count);
+   void WaitForExtensionPopupSurfaceCount(size_t expected_count);
+   void WaitForExtensionPopupPreferredSizeCount(size_t expected_count);
+   void WaitForExtensionPopupClosedCount(size_t expected_count);
+@@ -543,6 +552,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   std::vector<DownloadUpdatedEvent> download_updated_events_;
+   std::vector<DownloadCompletedEvent> download_completed_events_;
+   std::vector<ExtensionPopupOpenedEvent> extension_popup_opened_events_;
++  std::vector<SurfaceEvent> surface_events_;
+   std::vector<ExtensionPopupSurfaceEvent> extension_popup_surface_events_;
+   std::vector<ExtensionPopupPreferredSizeEvent>
+       extension_popup_preferred_size_events_;
+@@ -572,6 +582,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   size_t wait_download_updated_count_ = 0;
+   size_t wait_download_completed_count_ = 0;
+   size_t wait_extension_popup_opened_count_ = 0;
++  size_t wait_surface_count_ = 0;
+   size_t wait_extension_popup_surface_count_ = 0;
+   size_t wait_extension_popup_preferred_size_count_ = 0;
+   size_t wait_extension_popup_closed_count_ = 0;
+-- 
+2.50.1 (Apple Git-155)
+
