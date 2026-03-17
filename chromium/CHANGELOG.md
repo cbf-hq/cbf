@@ -14,6 +14,11 @@ source-built use rather than a downloadable binary bundle.
 
 ## [Unreleased]
 
+### Added
+
+- Host-driven browsing context visibility control in the Chromium runtime bridge and profile service.
+- macOS surface handle refresh after visibility recovery when the compositor CAContextID changes.
+
 ## [cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1] - 2026-03-17
 
 ### Added
@@ -37,4 +42,3 @@ source-built use rather than a downloadable binary bundle.
 
 [Unreleased]: https://github.com/cbf-hq/cbf/commits/HEAD/chromium
 [cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1
-
