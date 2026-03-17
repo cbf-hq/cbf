@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.2] - 2026-03-17
+
+### Added
+
+- Chromium backend wiring for browsing context visibility commands through the Rust API and FFI client.
+- macOS surface handle refresh after visibility recovery when the underlying CAContextID changes.
+
 ## [0.1.0-alpha.1] - 2026-03-16
 
 ### Added
@@ -19,5 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marked as an alpha release; runtime behavior and backend integration are still under active development and may still contain security bugs.
 
-[Unreleased]: https://github.com/cbf-hq/cbf/compare/cbf-chrome-v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/cbf-hq/cbf/compare/cbf-chrome-v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-v0.1.0-alpha.1

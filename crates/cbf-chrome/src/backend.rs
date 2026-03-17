@@ -1166,6 +1166,12 @@ impl ChromiumBackend {
             } => client
                 .set_tab_focus(*browsing_context_id, *focused)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::SetTabVisibility {
+                browsing_context_id,
+                visibility,
+            } => client
+                .set_tab_visibility(*browsing_context_id, *visibility)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::OpenDefaultPromptUi {
                 profile_id,
                 request_id,

@@ -29,6 +29,7 @@ use crate::data::{
     mouse::ChromeMouseEvent,
     profile::ChromeProfileInfo,
     prompt_ui::{PromptUiId, PromptUiResponse},
+    visibility::ChromeTabVisibility,
 };
 
 /// Client wrapper for the CBF IPC bridge.
@@ -324,6 +325,30 @@ impl IpcClient {
 
         if unsafe {
             cbf_bridge_client_set_tab_focus(self.inner, browsing_context_id.get(), focused)
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Update whether the specified tab should be treated as visible.
+    pub fn set_tab_visibility(
+        &mut self,
+        browsing_context_id: TabId,
+        visibility: ChromeTabVisibility,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let visibility = match visibility {
+            ChromeTabVisibility::Visible => CBF_TAB_VISIBILITY_VISIBLE,
+            ChromeTabVisibility::Hidden => CBF_TAB_VISIBILITY_HIDDEN,
+        };
+
+        if unsafe {
+            cbf_bridge_client_set_tab_visibility(self.inner, browsing_context_id.get(), visibility)
         } {
             Ok(())
         } else {

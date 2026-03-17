@@ -15,6 +15,7 @@ pub mod profile;
 pub mod prompt_ui;
 pub mod surface;
 pub mod tab_open;
+pub mod visibility;
 pub mod window_open;
 
 // Chrome-specific API policy:

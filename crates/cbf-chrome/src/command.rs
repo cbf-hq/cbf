@@ -15,6 +15,7 @@ use crate::data::{
         ChromeTransientImeCommitText, ChromeTransientImeComposition,
     },
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+    visibility::ChromeTabVisibility,
     mouse::ChromeMouseEvent,
     prompt_ui::{PromptUiId, PromptUiResponse},
     window_open::ChromeWindowOpenResponse,
@@ -102,6 +103,10 @@ pub enum ChromeCommand {
     SetTabFocus {
         browsing_context_id: TabId,
         focused: bool,
+    },
+    SetTabVisibility {
+        browsing_context_id: TabId,
+        visibility: ChromeTabVisibility,
     },
     SendKeyEvent {
         browsing_context_id: TabId,
@@ -372,6 +377,13 @@ impl From<BrowserCommand> for ChromeCommand {
                 popup_id: transient_browsing_context_id.into(),
                 focused,
             },
+            BrowserCommand::SetBrowsingContextVisibility {
+                browsing_context_id,
+                visibility,
+            } => Self::SetTabVisibility {
+                browsing_context_id: browsing_context_id.into(),
+                visibility: visibility.into(),
+            },
             BrowserCommand::SendKeyEvent {
                 browsing_context_id,
                 event,
@@ -588,6 +600,7 @@ mod tests {
             auxiliary_window::{AuxiliaryWindowId, AuxiliaryWindowResponse},
             edit::EditAction,
             ids::{BrowsingContextId, TransientBrowsingContextId},
+            visibility::BrowsingContextVisibility,
         },
     };
 
@@ -595,6 +608,7 @@ mod tests {
     use crate::data::{
         ids::{PopupId, TabId},
         prompt_ui::{PromptUiId, PromptUiResponse},
+        visibility::ChromeTabVisibility,
     };
 
     #[test]
@@ -756,6 +770,23 @@ mod tests {
                 popup_id,
                 action: EditAction::SelectAll,
             } if popup_id == PopupId::new(12)
+        ));
+    }
+
+    #[test]
+    fn set_visibility_command_converts_browsing_context_id_into_tab_id() {
+        let command = BrowserCommand::SetBrowsingContextVisibility {
+            browsing_context_id: BrowsingContextId::new(24),
+            visibility: BrowsingContextVisibility::Hidden,
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::SetTabVisibility {
+                browsing_context_id,
+                visibility: ChromeTabVisibility::Hidden,
+            } if browsing_context_id == TabId::new(24)
         ));
     }
 }
