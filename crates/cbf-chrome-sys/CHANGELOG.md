@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [146.1.0-alpha.2] - 2026-03-17
+
+### Added
+
+- FFI support for Chromium tab visibility commands in the bridge client ABI.
+
 ## [146.1.0-alpha.1] - 2026-03-16
 
 ### Added
@@ -19,5 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marked as an alpha release; ABI details and boundary behavior are still under active development and may still contain security bugs.
 
-[Unreleased]: https://github.com/cbf-hq/cbf/compare/cbf-chrome-sys-v146.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/cbf-hq/cbf/compare/cbf-chrome-sys-v146.1.0-alpha.2...HEAD
+[146.1.0-alpha.2]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-sys-v146.1.0-alpha.2
 [146.1.0-alpha.1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-sys-v146.1.0-alpha.1

@@ -1,6 +1,6 @@
 [package]
 name = "cbf-chrome-sys"
-version = "146.1.0-alpha.1"
+version = "146.1.0-alpha.2"
 edition.workspace = true
 authors.workspace = true
 description = "Chromium-specific low-level Rust FFI/wire boundary for CBF"

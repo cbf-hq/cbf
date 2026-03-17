@@ -185,6 +185,9 @@ pub const CBF_TAB_OPEN_RESULT_OPENED_EXISTING_CONTEXT: u8 = 1;
 pub const CBF_TAB_OPEN_RESULT_DENIED: u8 = 2;
 pub const CBF_TAB_OPEN_RESULT_ABORTED: u8 = 3;
 
+pub const CBF_TAB_VISIBILITY_VISIBLE: u8 = 0;
+pub const CBF_TAB_VISIBILITY_HIDDEN: u8 = 1;
+
 pub const CBF_SURFACE_HANDLE_NONE: u8 = 0;
 pub const CBF_SURFACE_HANDLE_MAC_CA_CONTEXT_ID: u8 = 1;
 pub const CBF_SURFACE_HANDLE_WINDOWS_HWND: u8 = 2;
@@ -865,6 +868,11 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
         focused: bool,
+    ) -> bool;
+    pub fn cbf_bridge_client_set_tab_visibility(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        visibility: u8,
     ) -> bool;
     pub fn cbf_bridge_client_set_extension_popup_focus(
         client: *mut CbfBridgeClientHandle,
