@@ -7,12 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0-alpha.2] - 2026-03-17
-
 ### Added
 
 - Browser-generic browsing context visibility control with `Visible` and `Hidden` states.
 - `SetBrowsingContextVisibility` command support for host-driven visibility changes.
+
+### Changed
+
+- Reorganized native dialog implementation into `dialogs/` with a dedicated macOS module to reduce inline platform `cfg` usage and make future platform-specific presenters easier to add.
 
 ## [0.1.0-alpha.1] - 2026-03-16
 
