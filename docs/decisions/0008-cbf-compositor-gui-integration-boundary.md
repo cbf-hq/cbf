@@ -304,14 +304,39 @@ where
 
 ## Follow-ups
 
-- Add a new crate scaffold for `cbf-compositor`.
 - Define the minimal event contract: list which `BrowserEvent` and
   `ChromeEvent` variants must be forwarded into the compositor.
-- Decide the exact browser command shapes emitted for frame creation, movement,
-  and teardown.
+- Decide the exact browser command shapes emitted for scene-level focus,
+  routing, and teardown.
 - Decide feature-gating and dependency policy for `WindowHost` adapters beyond
   `winit`.
 - Design the future child/subview embedding API (`attach_window_as_child(...)`
   or equivalent) separately from the top-level attach path.
 - Add a companion design note or issue for `cbf-cli` development tooling
   (`vite`, watch, auto-restart), explicitly separate from `cbf-compositor`.
+
+## Implementation Note
+
+The original `FrameSpec`-based implementation has been archived as
+`crates/cbf-compositor-old`. The active `cbf-compositor` crate is now being
+rewritten around two separate trees:
+
+- ownership tree: backend object relationships such as transient browsing
+  contexts remaining owned by a parent browsing context
+- composition tree: window assignment, z-order, bounds, visibility, and
+  surface attachment
+
+The current rewrite keeps the existing top-level `attach_window(...)` entry
+point, but the public model is scene/item-based rather than frame-based.
+
+- `SurfaceTarget` is limited to `BrowsingContext` and
+  `TransientBrowsingContext`.
+- transient ownership and presentation are intentionally decoupled: a transient
+  browsing context may be shown in the parent's window or a different window,
+  but still closes with its parent.
+- Chrome surface handles remain below the generic core boundary and are
+  consumed only by the `chrome` backend adapter plus the platform host.
+- The macOS renderer now uses a compositor-owned container view with one child
+  `BrowserViewMac` per scene item, so existing Chromium-backed key, wheel,
+  edit-action, and IME behavior can be reused while the new scene model is
+  introduced.

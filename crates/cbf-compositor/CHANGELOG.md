@@ -9,11 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- GUI composition integration layer for CBF desktop applications.
-- Optional integration points for `cbf-chrome` and `winit`.
+- Initial `cbf-compositor` implementation work for the first public alpha release.
+- Scene-based browser surface composition for `BrowsingContext` and `TransientBrowsingContext`.
+- Native window attachment and scene synchronization for host-managed browser surfaces.
+- macOS compositor hosting through a single `CompositorViewMac` that manages multiple Chromium surfaces.
 
 ### Security
 
-- The crate is not part of the current public release set and remains under active development.
+- Marked as an alpha-target crate; compositor behavior and platform integration remain under active development and may still contain security bugs.
 
 [Unreleased]: https://github.com/cbf-hq/cbf/commits/HEAD/crates/cbf-compositor

@@ -636,6 +636,11 @@ impl BrowserViewMac {
         self.ivars().ime_bounds.replace(Some(update));
     }
 
+    /// Clear IME bounds so macOS falls back to the default candidate rect.
+    pub fn clear_ime_bounds(&self) {
+        self.ivars().ime_bounds.replace(None);
+    }
+
     /// Access the underlying CALayerHost used for rendering.
     pub fn browser_layer(&self) -> &CALayerHost {
         &self.ivars().browser_layer

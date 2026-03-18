@@ -3,7 +3,7 @@ name = "cbf-compositor"
 version = "0.1.0-alpha.1"
 edition.workspace = true
 authors.workspace = true
-description = "GUI composition integration layer for CBF desktop applications"
+description = "Scene-based browser surface compositor for CBF desktop applications"
 repository.workspace = true
 keywords.workspace = true
 license.workspace = true
@@ -20,6 +20,47 @@ cbf-chrome = { version = "0.1.0-alpha.1", path = "../cbf-chrome", optional = tru
 raw-window-handle.workspace = true
 thiserror.workspace = true
 winit = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+objc2-core-foundation = { workspace = true, features = ["CFCGTypes"] }
+objc2-quartz-core = { workspace = true, features = [
+  "CALayer",
+  "CATransaction",
+  "objc2-core-foundation",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-foundation]
+workspace = true
+features = [
+  "NSArray",
+  "NSAttributedString",
+  "NSData",
+  "NSObject",
+  "NSProcessInfo",
+  "NSRange",
+  "NSString",
+  "NSGeometry",
+  "objc2-core-foundation",
+]
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
+workspace = true
+features = [
+  "NSApplication",
+  "NSControl",
+  "NSDragging",
+  "NSEvent",
+  "NSImage",
+  "NSMenu",
+  "NSMenuItem",
+  "NSPasteboard",
+  "NSResponder",
+  "NSTextInputClient",
+  "NSView",
+  "NSWindow",
+  "objc2-quartz-core",
+]
 
 [package.metadata.docs.rs]
 default-target = "aarch64-apple-darwin"

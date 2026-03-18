@@ -131,6 +131,7 @@ Examples:
 cbf-v0.1.0
 cbf-chrome-v0.1.0
 cbf-chrome-sys-v146.1.0
+cbf-compositor-v0.1.0-alpha.1
 cbf-cli-v0.1.0
 ```
 
@@ -146,6 +147,7 @@ Examples:
 cbf v0.1.0
 cbf-chrome v0.1.0
 cbf-chrome-sys v146.1.0
+cbf-compositor v0.1.0-alpha.1
 cbf-cli v0.1.0
 ```
 
@@ -262,6 +264,7 @@ Recommended changelog files:
 - `crates/cbf/CHANGELOG.md`
 - `crates/cbf-chrome/CHANGELOG.md`
 - `crates/cbf-chrome-sys/CHANGELOG.md`
+- `crates/cbf-compositor/CHANGELOG.md`
 - `crates/cbf-cli/CHANGELOG.md`
 - `chromium/CHANGELOG.md`
 
