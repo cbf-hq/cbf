@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- FFI support for Chromium tab and extension popup background policy commands in the bridge client ABI.
+
 ## [146.1.0-alpha.2] - 2026-03-17
 
 ### Added

@@ -853,11 +853,21 @@ unsafe extern "C" {
         width: u32,
         height: u32,
     ) -> bool;
+    pub fn cbf_bridge_client_set_tab_background_policy(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        transparent: bool,
+    ) -> bool;
     pub fn cbf_bridge_client_set_extension_popup_size(
         client: *mut CbfBridgeClientHandle,
         popup_id: u64,
         width: u32,
         height: u32,
+    ) -> bool;
+    pub fn cbf_bridge_client_set_extension_popup_background_policy(
+        client: *mut CbfBridgeClientHandle,
+        popup_id: u64,
+        transparent: bool,
     ) -> bool;
     pub fn cbf_bridge_client_set_web_page_focus(
         client: *mut CbfBridgeClientHandle,
