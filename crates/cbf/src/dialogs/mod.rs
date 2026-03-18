@@ -2,7 +2,7 @@
 //!
 //! `DialogPresenter` lets applications decouple dialog UI from event handling,
 //! so hosts can spawn dialog work on their own runtime and route the resulting
-//! [`DialogResponse`](crate::data::dialog::DialogResponse) back through
+//! [`DialogResponse`] back through
 //! `BrowserHandle`.
 //!
 //! Minimal manual wiring example:
