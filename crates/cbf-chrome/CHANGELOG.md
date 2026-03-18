@@ -7,12 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0-alpha.2] - 2026-03-17
-
 ### Added
 
 - Chromium backend wiring for browsing context visibility commands through the Rust API and FFI client.
 - macOS surface handle refresh after visibility recovery when the underlying CAContextID changes.
+- Chromium backend wiring for browsing context and extension popup background policy commands.
+- Transparent background transport support that drives both page base background color and browser-side view background color for embedded Chromium surfaces.
 
 ## [0.1.0-alpha.1] - 2026-03-16
 

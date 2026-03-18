@@ -5,6 +5,7 @@ use cbf::{
 };
 
 use crate::data::{
+    background::ChromeBackgroundPolicy,
     browsing_context_open::ChromeBrowsingContextOpenResponse,
     download::ChromeDownloadId,
     drag::{ChromeDragDrop, ChromeDragUpdate},
@@ -70,6 +71,10 @@ pub enum ChromeCommand {
         browsing_context_id: TabId,
         width: u32,
         height: u32,
+    },
+    SetTabBackgroundPolicy {
+        browsing_context_id: TabId,
+        policy: ChromeBackgroundPolicy,
     },
     Navigate {
         browsing_context_id: TabId,
@@ -183,6 +188,10 @@ pub enum ChromeCommand {
         popup_id: PopupId,
         width: u32,
         height: u32,
+    },
+    SetExtensionPopupBackgroundPolicy {
+        popup_id: PopupId,
+        policy: ChromeBackgroundPolicy,
     },
     SetExtensionPopupFocus {
         popup_id: PopupId,
@@ -326,6 +335,20 @@ impl From<BrowserCommand> for ChromeCommand {
                 popup_id: transient_browsing_context_id.into(),
                 width,
                 height,
+            },
+            BrowserCommand::SetBrowsingContextBackgroundPolicy {
+                browsing_context_id,
+                policy,
+            } => Self::SetTabBackgroundPolicy {
+                browsing_context_id: browsing_context_id.into(),
+                policy: policy.into(),
+            },
+            BrowserCommand::SetTransientBrowsingContextBackgroundPolicy {
+                transient_browsing_context_id,
+                policy,
+            } => Self::SetExtensionPopupBackgroundPolicy {
+                popup_id: transient_browsing_context_id.into(),
+                policy: policy.into(),
             },
             BrowserCommand::Navigate {
                 browsing_context_id,
@@ -597,6 +620,7 @@ mod tests {
     use cbf::{
         command::BrowserCommand,
         data::{
+            background::BackgroundPolicy,
             auxiliary_window::{AuxiliaryWindowId, AuxiliaryWindowResponse},
             edit::EditAction,
             ids::{BrowsingContextId, TransientBrowsingContextId},
@@ -606,6 +630,7 @@ mod tests {
 
     use super::ChromeCommand;
     use crate::data::{
+        background::ChromeBackgroundPolicy,
         ids::{PopupId, TabId},
         prompt_ui::{PromptUiId, PromptUiResponse},
         visibility::ChromeTabVisibility,
@@ -787,6 +812,40 @@ mod tests {
                 browsing_context_id,
                 visibility: ChromeTabVisibility::Hidden,
             } if browsing_context_id == TabId::new(24)
+        ));
+    }
+
+    #[test]
+    fn set_background_policy_command_converts_browsing_context_id_into_tab_id() {
+        let command = BrowserCommand::SetBrowsingContextBackgroundPolicy {
+            browsing_context_id: BrowsingContextId::new(25),
+            policy: BackgroundPolicy::Transparent,
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::SetTabBackgroundPolicy {
+                browsing_context_id,
+                policy: ChromeBackgroundPolicy::Transparent,
+            } if browsing_context_id == TabId::new(25)
+        ));
+    }
+
+    #[test]
+    fn transient_background_policy_command_maps_to_extension_popup_policy() {
+        let command = BrowserCommand::SetTransientBrowsingContextBackgroundPolicy {
+            transient_browsing_context_id: TransientBrowsingContextId::new(26),
+            policy: BackgroundPolicy::Opaque,
+        };
+
+        let raw: ChromeCommand = command.into();
+        assert!(matches!(
+            raw,
+            ChromeCommand::SetExtensionPopupBackgroundPolicy {
+                popup_id,
+                policy: ChromeBackgroundPolicy::Opaque,
+            } if popup_id == PopupId::new(26)
         ));
     }
 }

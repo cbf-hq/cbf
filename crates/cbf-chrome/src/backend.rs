@@ -975,6 +975,12 @@ impl ChromiumBackend {
             } => client
                 .set_tab_size(*browsing_context_id, *width, *height)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::SetTabBackgroundPolicy {
+                browsing_context_id,
+                policy,
+            } => client
+                .set_tab_background_policy(*browsing_context_id, *policy)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::ListProfiles => client
                 .list_profiles()
                 .map(|profiles| (None, vec![ChromeEvent::ProfilesListed { profiles }])),
@@ -1004,6 +1010,9 @@ impl ChromiumBackend {
                 height,
             } => client
                 .set_extension_popup_size(*popup_id, *width, *height)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SetExtensionPopupBackgroundPolicy { popup_id, policy } => client
+                .set_extension_popup_background_policy(*popup_id, *policy)
                 .map(|_| (None, Vec::new())),
             ChromeCommand::SetExtensionPopupFocus { popup_id, focused } => client
                 .set_extension_popup_focus(*popup_id, *focused)

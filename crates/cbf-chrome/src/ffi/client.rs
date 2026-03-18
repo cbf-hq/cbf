@@ -16,6 +16,7 @@ use super::map::{
 use super::utils::{c_string_to_string, to_optional_cstring};
 use super::{Error, IpcEvent};
 use crate::data::{
+    background::ChromeBackgroundPolicy,
     browsing_context_open::ChromeBrowsingContextOpenResponse,
     download::ChromeDownloadId,
     drag::{ChromeDragDrop, ChromeDragUpdate},
@@ -349,6 +350,31 @@ impl IpcClient {
 
         if unsafe {
             cbf_bridge_client_set_tab_visibility(self.inner, browsing_context_id.get(), visibility)
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Update the page background policy of the specified tab.
+    pub fn set_tab_background_policy(
+        &mut self,
+        browsing_context_id: TabId,
+        policy: ChromeBackgroundPolicy,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let transparent = matches!(policy, ChromeBackgroundPolicy::Transparent);
+
+        if unsafe {
+            cbf_bridge_client_set_tab_background_policy(
+                self.inner,
+                browsing_context_id.get(),
+                transparent,
+            )
         } {
             Ok(())
         } else {
@@ -1395,6 +1421,31 @@ impl IpcClient {
 
         if unsafe {
             cbf_bridge_client_set_extension_popup_size(self.inner, popup_id.get(), width, height)
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Update the page background policy of the specified extension popup.
+    pub fn set_extension_popup_background_policy(
+        &mut self,
+        popup_id: PopupId,
+        policy: ChromeBackgroundPolicy,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let transparent = matches!(policy, ChromeBackgroundPolicy::Transparent);
+
+        if unsafe {
+            cbf_bridge_client_set_extension_popup_background_policy(
+                self.inner,
+                popup_id.get(),
+                transparent,
+            )
         } {
             Ok(())
         } else {
