@@ -15,6 +15,9 @@ pub(crate) struct Cli {
     pub(crate) url: String,
 
     #[arg(long)]
+    pub(crate) test_overlay_surface: bool,
+
+    #[arg(long)]
     pub(crate) chromium_executable: Option<PathBuf>,
 
     #[arg(long)]

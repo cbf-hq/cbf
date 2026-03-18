@@ -34,20 +34,22 @@ use crate::{
         events::MenuCommand,
         state::{
             CoreAction, DEVTOOLS_HOST_WINDOW_ID, DownloadStatus, JavaScriptDialogTarget,
-            MAIN_PAGE_CREATE_REQUEST_ID, PRIMARY_HOST_WINDOW_ID, SharedStateHandle,
-            TOOLBAR_CREATE_REQUEST_ID, TransientPopupState, bind_browsing_context_to_window,
-            browsing_context_ids_for_window, devtools_browsing_context_id, has_bound_windows,
+            MAIN_PAGE_CREATE_REQUEST_ID, OVERLAY_CREATE_REQUEST_ID, PRIMARY_HOST_WINDOW_ID,
+            SharedStateHandle, TOOLBAR_CREATE_REQUEST_ID, TransientPopupState,
+            bind_browsing_context_to_window, browsing_context_ids_for_window,
+            devtools_browsing_context_id, has_bound_windows, overlay_browsing_context_id,
             primary_browsing_context_id, primary_host_window_id,
             register_pending_window_open_request, set_devtools_browsing_context_id,
-            set_primary_browsing_context_id, set_toolbar_browsing_context_id,
-            take_pending_window_open_request, toolbar_browsing_context_id,
-            transient_browsing_context_id_for_window, unbind_browsing_context,
-            unbind_transient_browsing_context, window_id_for_browsing_context,
-            window_id_for_transient_browsing_context,
+            set_overlay_browsing_context_id, set_primary_browsing_context_id,
+            set_toolbar_browsing_context_id, take_pending_window_open_request,
+            toolbar_browsing_context_id, transient_browsing_context_id_for_window,
+            unbind_browsing_context, unbind_transient_browsing_context,
+            window_id_for_browsing_context, window_id_for_transient_browsing_context,
         },
     },
     cli::Cli,
-    scene::{composition, ui_url::toolbar_ui_url},
+    scene::composition,
+    scene::ui_url::{overlay_test_ui_url, toolbar_ui_url},
 };
 
 pub(crate) struct AppController {
@@ -164,7 +166,10 @@ impl AppController {
     }
 
     pub(crate) fn handle_browser_event(&mut self, event: BrowserEvent) -> Vec<CoreAction> {
-        if let Err(err) = self.compositor.update_browser_event(&event, |_command| {}) {
+        let browser_handle = self.browser_handle.clone();
+        if let Err(err) = self.compositor.update_browser_event(&event, |command| {
+            forward_compositor_command(&browser_handle, command);
+        }) {
             warn!("failed to update compositor browser state: {err}");
         }
 
@@ -490,9 +495,14 @@ impl AppController {
         width: u32,
         height: u32,
     ) {
+        let browser_handle = self.browser_handle.clone();
         let result = if host_window_id == PRIMARY_HOST_WINDOW_ID {
+            let overlay_id = overlay_browsing_context_id(&self.shared);
             let toolbar_id = toolbar_browsing_context_id(&self.shared);
             let page_id = primary_browsing_context_id(&self.shared);
+            if let Some(overlay_id) = overlay_id {
+                self.resize_browsing_context(overlay_id, width, height);
+            }
             if let Some(toolbar_id) = toolbar_id {
                 self.resize_browsing_context(toolbar_id, width, 56);
             }
@@ -503,14 +513,15 @@ impl AppController {
                 CompositionCommand::SetWindowComposition {
                     window_id: compositor_window_id,
                     composition: composition::main_window_composition(
-                        toolbar_id, page_id, width, height,
+                        overlay_id, toolbar_id, page_id, width, height,
                     ),
                 },
-                |_command| {},
+                |command| forward_compositor_command(&browser_handle, command),
             )
         } else if host_window_id == DEVTOOLS_HOST_WINDOW_ID {
             if let Some(devtools_id) = devtools_browsing_context_id(&self.shared) {
                 self.resize_browsing_context(devtools_id, width, height);
+                let browser_handle = browser_handle.clone();
                 self.compositor.apply(
                     CompositionCommand::SetWindowComposition {
                         window_id: compositor_window_id,
@@ -520,15 +531,16 @@ impl AppController {
                             height,
                         ),
                     },
-                    |_command| {},
+                    |command| forward_compositor_command(&browser_handle, command),
                 )
             } else {
+                let browser_handle = browser_handle.clone();
                 self.compositor.apply(
                     CompositionCommand::SetWindowComposition {
                         window_id: compositor_window_id,
                         composition: Default::default(),
                     },
-                    |_command| {},
+                    |command| forward_compositor_command(&browser_handle, command),
                 )
             }
         } else if let Some(transient_id) =
@@ -540,6 +552,7 @@ impl AppController {
             {
                 warn!("failed to resize transient browsing context: {err}");
             }
+            let browser_handle = browser_handle.clone();
             self.compositor.apply(
                 CompositionCommand::SetWindowComposition {
                     window_id: compositor_window_id,
@@ -549,7 +562,7 @@ impl AppController {
                         height,
                     ),
                 },
-                |_command| {},
+                |command| forward_compositor_command(&browser_handle, command),
             )
         } else if let Some(browsing_context_id) =
             browsing_context_ids_for_window(&self.shared, host_window_id)
@@ -560,6 +573,7 @@ impl AppController {
                 })
         {
             self.resize_browsing_context(browsing_context_id, width, height);
+            let browser_handle = browser_handle.clone();
             self.compositor.apply(
                 CompositionCommand::SetWindowComposition {
                     window_id: compositor_window_id,
@@ -569,15 +583,16 @@ impl AppController {
                         height,
                     ),
                 },
-                |_command| {},
+                |command| forward_compositor_command(&browser_handle, command),
             )
         } else {
+            let browser_handle = browser_handle.clone();
             self.compositor.apply(
                 CompositionCommand::SetWindowComposition {
                     window_id: compositor_window_id,
                     composition: Default::default(),
                 },
-                |_command| {},
+                |command| forward_compositor_command(&browser_handle, command),
             )
         };
 
@@ -614,6 +629,7 @@ impl AppController {
 
         if !self.startup_requested {
             self.startup_requested = true;
+
             if let Err(err) = self.browser_handle.create_browsing_context(
                 TOOLBAR_CREATE_REQUEST_ID,
                 Some(toolbar_ui_url().unwrap_or_else(|_| "about:blank".to_string())),
@@ -621,6 +637,17 @@ impl AppController {
             ) {
                 warn!("failed to create toolbar browsing context: {err}");
             }
+
+            if self.cli.test_overlay_surface
+                && let Err(err) = self.browser_handle.create_browsing_context(
+                    OVERLAY_CREATE_REQUEST_ID,
+                    Some(overlay_test_ui_url().unwrap_or_else(|_| "about:blank".to_string())),
+                    profile_id.clone(),
+                )
+            {
+                warn!("failed to create overlay browsing context: {err}");
+            }
+
             if let Err(err) = self.browser_handle.create_browsing_context(
                 MAIN_PAGE_CREATE_REQUEST_ID,
                 Some(self.cli.url.clone()),
@@ -643,6 +670,9 @@ impl AppController {
                 let host_window_id = if request_id == TOOLBAR_CREATE_REQUEST_ID {
                     set_toolbar_browsing_context_id(&self.shared, Some(browsing_context_id));
                     Some(PRIMARY_HOST_WINDOW_ID)
+                } else if request_id == OVERLAY_CREATE_REQUEST_ID {
+                    set_overlay_browsing_context_id(&self.shared, Some(browsing_context_id));
+                    Some(PRIMARY_HOST_WINDOW_ID)
                 } else if request_id == MAIN_PAGE_CREATE_REQUEST_ID {
                     set_primary_browsing_context_id(&self.shared, Some(browsing_context_id));
                     Some(PRIMARY_HOST_WINDOW_ID)
@@ -664,7 +694,9 @@ impl AppController {
                 }
             }
             BrowsingContextEvent::TitleUpdated { title } => {
-                if Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared) {
+                if Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared)
+                    || Some(browsing_context_id) == overlay_browsing_context_id(&self.shared)
+                {
                     return Vec::new();
                 }
                 if let Some(window_id) =
@@ -802,6 +834,7 @@ impl AppController {
                 {
                     state.title = title.clone();
                 }
+
                 window_id_for_transient_browsing_context(
                     &self.shared,
                     transient_browsing_context_id,
@@ -840,6 +873,7 @@ impl AppController {
             } => {
                 if r#type == DialogType::BeforeUnload {
                     let response = show_beforeunload_dialog(&message, beforeunload_reason.as_ref());
+
                     if let Err(err) = self
                         .browser_handle
                         .respond_javascript_dialog_in_transient_browsing_context(
@@ -852,6 +886,7 @@ impl AppController {
                     }
                     return Vec::new();
                 }
+
                 vec![CoreAction::PresentJavaScriptDialog {
                     target: JavaScriptDialogTarget::TransientBrowsingContext(
                         transient_browsing_context_id,
@@ -876,6 +911,7 @@ impl AppController {
                     .remove(&transient_browsing_context_id);
                 self.blur_close_armed_transients
                     .remove(&transient_browsing_context_id);
+                
                 unbind_transient_browsing_context(&self.shared, transient_browsing_context_id)
                     .map(|window_id| CoreAction::CloseHostWindow { window_id })
                     .into_iter()
@@ -893,6 +929,7 @@ impl AppController {
         browsing_context_id: BrowsingContextId,
     ) -> Vec<CoreAction> {
         let is_toolbar = Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared);
+        let is_overlay = Some(browsing_context_id) == overlay_browsing_context_id(&self.shared);
         let is_primary = Some(browsing_context_id) == primary_browsing_context_id(&self.shared);
         let is_devtools = Some(browsing_context_id) == devtools_browsing_context_id(&self.shared);
 
@@ -900,6 +937,9 @@ impl AppController {
 
         if is_toolbar {
             set_toolbar_browsing_context_id(&self.shared, None);
+        }
+        if is_overlay {
+            set_overlay_browsing_context_id(&self.shared, None);
         }
         if is_primary {
             set_primary_browsing_context_id(&self.shared, None);
@@ -1337,5 +1377,14 @@ fn download_prompt_response_for_simpleapp(
                 destination_path: path,
             }
         }
+    }
+}
+
+fn forward_compositor_command(
+    browser_handle: &BrowserHandle<ChromiumBackend>,
+    command: cbf::command::BrowserCommand,
+) {
+    if let Err(err) = browser_handle.send(command) {
+        warn!("failed to forward compositor command: {err}");
     }
 }

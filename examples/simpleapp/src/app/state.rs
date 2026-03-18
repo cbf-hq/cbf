@@ -16,11 +16,13 @@ pub(crate) const PRIMARY_HOST_WINDOW_ID: HostWindowId = HostWindowId::new(u64::M
 pub(crate) const DEVTOOLS_HOST_WINDOW_ID: HostWindowId = HostWindowId::new(u64::MAX - 2);
 pub(crate) const MAIN_PAGE_CREATE_REQUEST_ID: u64 = 1;
 pub(crate) const TOOLBAR_CREATE_REQUEST_ID: u64 = 2;
+pub(crate) const OVERLAY_CREATE_REQUEST_ID: u64 = 3;
 
 #[derive(Default)]
 pub(crate) struct SharedState {
     pub(crate) primary_browsing_context_id: Option<BrowsingContextId>,
     pub(crate) toolbar_browsing_context_id: Option<BrowsingContextId>,
+    pub(crate) overlay_browsing_context_id: Option<BrowsingContextId>,
     pub(crate) devtools_browsing_context_id: Option<BrowsingContextId>,
     pub(crate) primary_host_window_id: Option<HostWindowId>,
     pub(crate) browsing_context_to_window: HashMap<BrowsingContextId, HostWindowId>,
@@ -257,6 +259,23 @@ pub(crate) fn toolbar_browsing_context_id(shared: &SharedStateHandle) -> Option<
         .lock()
         .expect("shared state lock poisoned")
         .toolbar_browsing_context_id
+}
+
+pub(crate) fn set_overlay_browsing_context_id(
+    shared: &SharedStateHandle,
+    browsing_context_id: Option<BrowsingContextId>,
+) {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .overlay_browsing_context_id = browsing_context_id;
+}
+
+pub(crate) fn overlay_browsing_context_id(shared: &SharedStateHandle) -> Option<BrowsingContextId> {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .overlay_browsing_context_id
 }
 
 pub(crate) fn set_devtools_browsing_context_id(

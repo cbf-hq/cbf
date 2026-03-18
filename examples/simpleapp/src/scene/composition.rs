@@ -8,14 +8,27 @@ use crate::scene::layout::{full_window_rect, main_page_rect, main_toolbar_rect};
 pub(crate) const MAIN_TOOLBAR_ITEM_ID: CompositionItemId = CompositionItemId::new(1);
 pub(crate) const MAIN_PAGE_ITEM_ID: CompositionItemId = CompositionItemId::new(2);
 pub(crate) const DEVTOOLS_ITEM_ID: CompositionItemId = CompositionItemId::new(3);
+pub(crate) const OVERLAY_ITEM_ID: CompositionItemId = CompositionItemId::new(4);
 
 pub(crate) fn main_window_composition(
+    overlay_id: Option<BrowsingContextId>,
     toolbar_id: Option<BrowsingContextId>,
     page_id: Option<BrowsingContextId>,
     width: u32,
     height: u32,
 ) -> WindowCompositionSpec {
     let mut items = Vec::new();
+
+    if let Some(overlay_id) = overlay_id {
+        items.push(CompositionItemSpec {
+            item_id: OVERLAY_ITEM_ID,
+            target: SurfaceTarget::BrowsingContext(overlay_id),
+            bounds: full_window_rect(width, height),
+            visible: true,
+            interactive: false,
+            background: BackgroundPolicy::Transparent,
+        });
+    }
 
     if let Some(toolbar_id) = toolbar_id {
         items.push(CompositionItemSpec {
