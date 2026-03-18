@@ -15,9 +15,9 @@ use crate::data::{
         ChromeTransientImeCommitText, ChromeTransientImeComposition,
     },
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
-    visibility::ChromeTabVisibility,
     mouse::ChromeMouseEvent,
     prompt_ui::{PromptUiId, PromptUiResponse},
+    visibility::ChromeTabVisibility,
     window_open::ChromeWindowOpenResponse,
 };
 

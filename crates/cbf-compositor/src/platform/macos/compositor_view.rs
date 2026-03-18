@@ -641,7 +641,10 @@ impl CompositorViewMac {
 
         // AppKit may consume the matching mouse-up while the menu is open,
         // leaving compositor-side pointer capture stuck on the pre-menu item.
-        self.ivars().input_state.borrow_mut().pointer_capture_item_id = None;
+        self.ivars()
+            .input_state
+            .borrow_mut()
+            .pointer_capture_item_id = None;
 
         let menu_id = self.ivars().context_menu_id.replace(NO_MENU_ID);
         let command_id = self
@@ -715,7 +718,10 @@ impl CompositorViewMac {
 
         // `<select>` popups use the same AppKit menu path and can also swallow
         // the release event that would normally clear pointer capture.
-        self.ivars().input_state.borrow_mut().pointer_capture_item_id = None;
+        self.ivars()
+            .input_state
+            .borrow_mut()
+            .pointer_capture_item_id = None;
 
         let request_id = self
             .ivars()
