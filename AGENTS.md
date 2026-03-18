@@ -127,7 +127,7 @@ Tooling helpers (from repo root):
 
 ## Commit Convention
 
-`<type>(<scope>): <subject>` — core scopes: `cbf`, `chrome`, `chrome-sys`, `bridge`, `chromium`;
+`<type>(<scope>): <subject>` — core scopes: `cbf`, `chrome`, `chrome-sys`, `compositor`, `cli`, `bridge`, `chromium`;
 additional: `docs`, `ci`, `build`, `release`.
 
 ## PR / Commit Checklist

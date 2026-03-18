@@ -54,11 +54,13 @@ Examples:
 
 Core scopes:
 
-- `cbf`
+- `cbf` (`cbf` crate changes)
 - `chrome` (`cbf-chrome` crate changes)
-- `chrome-sys`
-- `bridge`
-- `chromium` (`chromium/src` patch updates and fork changes)
+- `chrome-sys` (`cbf-chrome-sys` crate changes)
+- `compositor` (`cbf-compositor` crate changes)
+- `cli` (`cbf-cli` crate changes)
+- `bridge` (`cbf_bridge` library and integration changes)
+- `chromium` (Chromium fork changes)
 
 Use `chromium` for exported patch queue updates from `chromium/src`, even when the tracked
 change exists to support bridge behavior. Use `bridge` when the primary change is in
