@@ -19,8 +19,6 @@ pub struct CompositionItemSpec {
     pub target: SurfaceTarget,
     /// Item bounds in compositor-window coordinates.
     pub bounds: Rect,
-    /// Relative stacking order; higher values appear in front.
-    pub z_index: i32,
     /// Whether the item should currently be visible.
     pub visible: bool,
     /// Whether the item should participate in hit-testing.
@@ -32,6 +30,6 @@ pub struct CompositionItemSpec {
 /// Full scene description for one compositor-managed window.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WindowCompositionSpec {
-    /// Scene items to show in the window.
+    /// Scene items to show in the window, ordered from front to back.
     pub items: Vec<CompositionItemSpec>,
 }

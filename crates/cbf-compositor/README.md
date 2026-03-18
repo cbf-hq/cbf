@@ -8,6 +8,9 @@ applications.
 - composition tree: which window displays which browser surface, in what order,
   and at what bounds
 
+Within a window, `WindowCompositionSpec.items` defines front-to-back stacking
+order. The first item is topmost.
+
 The compositor only manages browser-managed surfaces:
 
 - `BrowsingContext`
@@ -30,4 +33,4 @@ The current implementation provides:
 The macOS implementation attaches exactly one compositor-owned `NSView` to the
 host content view. That responder view becomes first responder and routes
 keyboard, IME, mouse, wheel, menu, and drag interactions to the appropriate
-scene item based on z-order and hit-testing.
+scene item based on composition order and hit-testing.

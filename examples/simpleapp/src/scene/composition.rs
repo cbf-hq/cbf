@@ -17,24 +17,22 @@ pub(crate) fn main_window_composition(
 ) -> WindowCompositionSpec {
     let mut items = Vec::new();
 
-    if let Some(page_id) = page_id {
+    if let Some(toolbar_id) = toolbar_id {
         items.push(CompositionItemSpec {
-            item_id: MAIN_PAGE_ITEM_ID,
-            target: SurfaceTarget::BrowsingContext(page_id),
-            bounds: main_page_rect(width, height),
-            z_index: 0,
+            item_id: MAIN_TOOLBAR_ITEM_ID,
+            target: SurfaceTarget::BrowsingContext(toolbar_id),
+            bounds: main_toolbar_rect(width, height),
             visible: true,
             interactive: true,
             background: BackgroundPolicy::Opaque,
         });
     }
 
-    if let Some(toolbar_id) = toolbar_id {
+    if let Some(page_id) = page_id {
         items.push(CompositionItemSpec {
-            item_id: MAIN_TOOLBAR_ITEM_ID,
-            target: SurfaceTarget::BrowsingContext(toolbar_id),
-            bounds: main_toolbar_rect(width, height),
-            z_index: 1,
+            item_id: MAIN_PAGE_ITEM_ID,
+            target: SurfaceTarget::BrowsingContext(page_id),
+            bounds: main_page_rect(width, height),
             visible: true,
             interactive: true,
             background: BackgroundPolicy::Opaque,
@@ -54,7 +52,6 @@ pub(crate) fn devtools_window_composition(
             item_id: DEVTOOLS_ITEM_ID,
             target: SurfaceTarget::BrowsingContext(browsing_context_id),
             bounds: full_window_rect(width, height),
-            z_index: 0,
             visible: true,
             interactive: true,
             background: BackgroundPolicy::Opaque,
@@ -73,7 +70,6 @@ pub(crate) fn host_window_composition(
             item_id,
             target: SurfaceTarget::BrowsingContext(browsing_context_id),
             bounds: full_window_rect(width, height),
-            z_index: 0,
             visible: true,
             interactive: true,
             background: BackgroundPolicy::Opaque,
@@ -92,7 +88,6 @@ pub(crate) fn transient_window_composition(
             item_id,
             target: SurfaceTarget::TransientBrowsingContext(transient_browsing_context_id),
             bounds: full_window_rect(width, height),
-            z_index: 0,
             visible: true,
             interactive: true,
             background: BackgroundPolicy::Opaque,

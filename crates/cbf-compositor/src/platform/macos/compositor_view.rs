@@ -596,8 +596,7 @@ impl CompositorViewMac {
             self.remove_item(item_id);
         }
 
-        let mut ordered_items = items.to_vec();
-        ordered_items.sort_by_key(|item| item.z_index);
+        let ordered_items = items.to_vec();
 
         for item in &ordered_items {
             self.upsert_item(item);
@@ -877,7 +876,6 @@ impl CompositorViewMac {
                 target: item.target,
                 layer,
                 bounds: rect_to_cgrect(item.bounds),
-                z_index: item.z_index,
                 visible: item.visible,
                 interactive: item.interactive,
                 surface: item.surface.clone(),
@@ -887,7 +885,6 @@ impl CompositorViewMac {
 
         slot.target = item.target;
         slot.bounds = rect_to_cgrect(item.bounds);
-        slot.z_index = item.z_index;
         slot.visible = item.visible;
         slot.interactive = item.interactive;
         slot.surface = item.surface.clone();
@@ -918,7 +915,7 @@ impl CompositorViewMac {
 
         CATransaction::begin();
         CATransaction::setDisableActions(true);
-        for item_id in order.iter() {
+        for item_id in order.iter().rev() {
             if let Some(slot) = slots.get(item_id) {
                 slot.layer.removeFromSuperlayer();
                 root_layer.addSublayer(&slot.layer);
@@ -985,7 +982,7 @@ impl CompositorViewMac {
 
         let order = self.ivars().order.borrow();
         let slots = self.ivars().slots.borrow();
-        for item_id in order.iter().rev() {
+        for item_id in order.iter() {
             if let Some(slot) = slots.get(item_id)
                 && slot.target == target
                 && slot.visible

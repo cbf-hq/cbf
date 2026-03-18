@@ -25,7 +25,6 @@ pub(crate) struct PlatformSceneItem {
     pub(crate) item_id: CompositionItemId,
     pub(crate) target: SurfaceTarget,
     pub(crate) bounds: Rect,
-    pub(crate) z_index: i32,
     pub(crate) visible: bool,
     pub(crate) interactive: bool,
     pub(crate) surface: Option<PlatformSurfaceHandle>,

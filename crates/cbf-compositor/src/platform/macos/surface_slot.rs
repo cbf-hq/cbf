@@ -10,7 +10,6 @@ pub(crate) struct SurfaceSlot {
     pub(crate) target: SurfaceTarget,
     pub(crate) layer: Retained<CALayerHost>,
     pub(crate) bounds: CGRect,
-    pub(crate) z_index: i32,
     pub(crate) visible: bool,
     pub(crate) interactive: bool,
     pub(crate) surface: Option<PlatformSurfaceHandle>,

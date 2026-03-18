@@ -374,7 +374,6 @@ impl Compositor {
                     item_id: spec.item_id,
                     target: spec.target,
                     bounds: spec.bounds,
-                    z_index: spec.z_index,
                     visible: spec.visible,
                     interactive: spec.interactive,
                     surface: runtime_state.and_then(|state| state.surface.clone()),
@@ -491,6 +490,8 @@ impl Compositor {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use raw_window_handle::{
         AppKitDisplayHandle, AppKitWindowHandle, DisplayHandle, HandleError, HasDisplayHandle,
         HasWindowHandle, WindowHandle,
@@ -526,14 +527,21 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
     struct TestPlatformHost {
-        last_scene: Vec<PlatformSceneItem>,
+        last_scene: Rc<RefCell<Vec<PlatformSceneItem>>>,
+    }
+
+    impl Default for TestPlatformHost {
+        fn default() -> Self {
+            Self {
+                last_scene: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
     }
 
     impl PlatformWindowHost for TestPlatformHost {
         fn sync_scene(&mut self, items: &[PlatformSceneItem]) -> Result<(), CompositorError> {
-            self.last_scene = items.to_vec();
+            self.last_scene.replace(items.to_vec());
             Ok(())
         }
 
@@ -572,7 +580,6 @@ mod tests {
             item_id: CompositionItemId::new(item_id),
             target,
             bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-            z_index: item_id as i32,
             visible: true,
             interactive: true,
             background: BackgroundPolicy::Opaque,
@@ -638,5 +645,50 @@ mod tests {
                 .is_empty()
         );
         assert!(compositor.ownership_state.get(transient_id).is_none());
+    }
+
+    #[test]
+    fn sync_window_scene_preserves_front_to_back_item_order() {
+        let mut compositor = Compositor::new();
+        let window_id = CompositorWindowId::new(1);
+        let host = TestPlatformHost::default();
+        let scene_log = Rc::clone(&host.last_scene);
+        compositor.attach_test_window(window_id, Box::new(host));
+
+        compositor
+            .composition_state
+            .set_window_composition(
+                window_id,
+                WindowCompositionSpec {
+                    items: vec![
+                        item(
+                            3,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(30)),
+                        ),
+                        item(
+                            1,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(10)),
+                        ),
+                        item(
+                            2,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(20)),
+                        ),
+                    ],
+                },
+            )
+            .unwrap();
+
+        compositor.sync_window_scene(window_id).unwrap();
+
+        let scene = scene_log.borrow();
+        let ordered_ids = scene.iter().map(|item| item.item_id).collect::<Vec<_>>();
+        assert_eq!(
+            ordered_ids,
+            vec![
+                CompositionItemId::new(3),
+                CompositionItemId::new(1),
+                CompositionItemId::new(2),
+            ]
+        );
     }
 }

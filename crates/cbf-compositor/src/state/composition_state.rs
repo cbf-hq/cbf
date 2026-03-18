@@ -45,7 +45,7 @@ impl CompositionState {
     pub(crate) fn set_window_composition(
         &mut self,
         window_id: CompositorWindowId,
-        mut composition: WindowCompositionSpec,
+        composition: WindowCompositionSpec,
     ) -> Result<Vec<CompositionItemId>, CompositorError> {
         self.ensure_window(window_id);
 
@@ -73,7 +73,6 @@ impl CompositionState {
             }
         }
 
-        composition.items.sort_by_key(|item| item.z_index);
         let ordered_item_ids = composition
             .items
             .iter()
@@ -240,7 +239,6 @@ mod tests {
             item_id: CompositionItemId::new(item_id),
             target,
             bounds: Rect::new(1.0, 2.0, 3.0, 4.0),
-            z_index: 0,
             visible: true,
             interactive: true,
             background: BackgroundPolicy::Opaque,
@@ -281,6 +279,102 @@ mod tests {
             Some(SurfaceTarget::TransientBrowsingContext(
                 TransientBrowsingContextId::new(20)
             ))
+        );
+    }
+
+    #[test]
+    fn set_window_composition_preserves_front_to_back_input_order() {
+        let mut state = CompositionState::default();
+        let window_id = CompositorWindowId::new(1);
+        state.ensure_window(window_id);
+        state
+            .set_window_composition(
+                window_id,
+                WindowCompositionSpec {
+                    items: vec![
+                        item(
+                            3,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(30)),
+                        ),
+                        item(
+                            1,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(10)),
+                        ),
+                        item(
+                            2,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(20)),
+                        ),
+                    ],
+                },
+            )
+            .unwrap();
+
+        let ordered_ids = state
+            .items_for_window(window_id)
+            .unwrap()
+            .into_iter()
+            .map(|item| item.item_id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ordered_ids,
+            vec![
+                CompositionItemId::new(3),
+                CompositionItemId::new(1),
+                CompositionItemId::new(2),
+            ]
+        );
+    }
+
+    #[test]
+    fn set_window_composition_replaces_order_with_latest_input_order() {
+        let mut state = CompositionState::default();
+        let window_id = CompositorWindowId::new(1);
+        state.ensure_window(window_id);
+        state
+            .set_window_composition(
+                window_id,
+                WindowCompositionSpec {
+                    items: vec![
+                        item(
+                            1,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(10)),
+                        ),
+                        item(
+                            2,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(20)),
+                        ),
+                    ],
+                },
+            )
+            .unwrap();
+
+        state
+            .set_window_composition(
+                window_id,
+                WindowCompositionSpec {
+                    items: vec![
+                        item(
+                            2,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(20)),
+                        ),
+                        item(
+                            1,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(10)),
+                        ),
+                    ],
+                },
+            )
+            .unwrap();
+
+        let ordered_ids = state
+            .items_for_window(window_id)
+            .unwrap()
+            .into_iter()
+            .map(|item| item.item_id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ordered_ids,
+            vec![CompositionItemId::new(2), CompositionItemId::new(1)]
         );
     }
 }
