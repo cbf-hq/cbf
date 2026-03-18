@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cbf::{
     command::BrowserCommand,
     data::{
+        background::BackgroundPolicy as GenericBackgroundPolicy,
         context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId,
         ime::ImeBoundsUpdate,
     },
@@ -14,7 +15,7 @@ use cbf_chrome::{data::choice_menu::ChromeChoiceMenu, event::ChromeEvent};
 use crate::{
     core::CompositionCommand,
     error::CompositorError,
-    model::{CompositionItemId, CompositorWindowId, SurfaceTarget},
+    model::{BackgroundPolicy, CompositionItemId, CompositionItemSpec, CompositorWindowId, SurfaceTarget},
     platform::host::{
         PlatformSceneItem, PlatformSurfaceHandle, PlatformWindowHost, attach_window_host,
     },
@@ -116,18 +117,22 @@ impl Compositor {
         command: CompositionCommand,
         mut emit: impl FnMut(BrowserCommand),
     ) -> Result<(), CompositorError> {
-        _ = &mut emit;
-
         match command {
             CompositionCommand::SetWindowComposition {
                 window_id,
                 composition,
             } => {
                 self.ensure_window(window_id)?;
+                let previous_items = self
+                    .composition_state
+                    .items_for_window(window_id)
+                    .unwrap_or_default();
+                let next_items = composition.items.clone();
                 let removed = self
                     .composition_state
                     .set_window_composition(window_id, composition)?;
                 self.focus_state.clear_removed_items(&removed);
+                self.emit_background_policy_updates(&previous_items, &next_items, &mut emit);
                 self.sync_window_scene(window_id)
             }
             CompositionCommand::UpdateItemBounds {
@@ -338,6 +343,58 @@ impl Compositor {
         );
     }
 
+    fn emit_background_policy_updates(
+        &self,
+        previous_items: &[CompositionItemSpec],
+        next_items: &[CompositionItemSpec],
+        emit: &mut impl FnMut(BrowserCommand),
+    ) {
+        let previous = previous_items
+            .iter()
+            .map(|item| (item.target, item.background))
+            .collect::<HashMap<_, _>>();
+        let next = next_items
+            .iter()
+            .map(|item| (item.target, item.background))
+            .collect::<HashMap<_, _>>();
+
+        let mut targets = previous.keys().copied().collect::<HashSet<_>>();
+        targets.extend(next.keys().copied());
+
+        for target in targets {
+            let Some(next_policy) = next.get(&target).copied() else {
+                continue;
+            };
+            if previous.get(&target).copied() == Some(next_policy) {
+                continue;
+            }
+            self.emit_background_policy_command(target, next_policy, emit);
+        }
+    }
+
+    fn emit_background_policy_command(
+        &self,
+        target: SurfaceTarget,
+        policy: BackgroundPolicy,
+        emit: &mut impl FnMut(BrowserCommand),
+    ) {
+        let policy: GenericBackgroundPolicy = policy.into();
+        match target {
+            SurfaceTarget::BrowsingContext(browsing_context_id) => {
+                emit(BrowserCommand::SetBrowsingContextBackgroundPolicy {
+                    browsing_context_id,
+                    policy,
+                });
+            }
+            SurfaceTarget::TransientBrowsingContext(transient_browsing_context_id) => {
+                emit(BrowserCommand::SetTransientBrowsingContextBackgroundPolicy {
+                    transient_browsing_context_id,
+                    policy,
+                });
+            }
+        }
+    }
+
     fn ensure_window(&self, window_id: CompositorWindowId) -> Result<(), CompositorError> {
         if self.windows.contains_key(&window_id) {
             Ok(())
@@ -492,6 +549,7 @@ impl Compositor {
 mod tests {
     use std::{cell::RefCell, rc::Rc};
 
+    use cbf::data::background::BackgroundPolicy as GenericBackgroundPolicy;
     use raw_window_handle::{
         AppKitDisplayHandle, AppKitWindowHandle, DisplayHandle, HandleError, HasDisplayHandle,
         HasWindowHandle, WindowHandle,
@@ -583,6 +641,13 @@ mod tests {
             visible: true,
             interactive: true,
             background: BackgroundPolicy::Opaque,
+        }
+    }
+
+    fn transparent_item(item_id: u64, target: SurfaceTarget) -> CompositionItemSpec {
+        CompositionItemSpec {
+            background: BackgroundPolicy::Transparent,
+            ..item(item_id, target)
         }
     }
 
@@ -690,5 +755,149 @@ mod tests {
                 CompositionItemId::new(2),
             ]
         );
+    }
+
+    #[test]
+    fn set_window_composition_rejects_duplicate_target_across_windows() {
+        let mut compositor = Compositor::new();
+        let first_window = CompositorWindowId::new(1);
+        let second_window = CompositorWindowId::new(2);
+        let target = SurfaceTarget::BrowsingContext(BrowsingContextId::new(10));
+        compositor.attach_test_window(first_window, Box::<TestPlatformHost>::default());
+        compositor.attach_test_window(second_window, Box::<TestPlatformHost>::default());
+
+        compositor
+            .apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id: first_window,
+                    composition: WindowCompositionSpec {
+                        items: vec![item(1, target)],
+                    },
+                },
+                |_| {},
+            )
+            .unwrap();
+
+        let error = compositor
+            .apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id: second_window,
+                    composition: WindowCompositionSpec {
+                        items: vec![item(2, target)],
+                    },
+                },
+                |_| {},
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, CompositorError::DuplicateSurfaceTarget));
+    }
+
+    #[test]
+    fn set_window_composition_emits_background_policy_commands_only_for_changes() {
+        let mut compositor = Compositor::new();
+        let window_id = CompositorWindowId::new(1);
+        let target = SurfaceTarget::BrowsingContext(BrowsingContextId::new(10));
+        compositor.attach_test_window(window_id, Box::<TestPlatformHost>::default());
+
+        let emitted = Rc::new(RefCell::new(Vec::new()));
+        compositor
+            .apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id,
+                    composition: WindowCompositionSpec {
+                        items: vec![transparent_item(1, target)],
+                    },
+                },
+                {
+                    let emitted = Rc::clone(&emitted);
+                    move |command| emitted.borrow_mut().push(command)
+                },
+            )
+            .unwrap();
+
+        compositor
+            .apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id,
+                    composition: WindowCompositionSpec {
+                        items: vec![transparent_item(1, target)],
+                    },
+                },
+                {
+                    let emitted = Rc::clone(&emitted);
+                    move |command| emitted.borrow_mut().push(command)
+                },
+            )
+            .unwrap();
+
+        compositor
+            .apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id,
+                    composition: WindowCompositionSpec {
+                        items: vec![item(1, target)],
+                    },
+                },
+                {
+                    let emitted = Rc::clone(&emitted);
+                    move |command| emitted.borrow_mut().push(command)
+                },
+            )
+            .unwrap();
+
+        let emitted = emitted.take();
+        assert_eq!(emitted.len(), 2);
+        assert!(matches!(
+            emitted.first(),
+            Some(BrowserCommand::SetBrowsingContextBackgroundPolicy {
+                browsing_context_id,
+                policy: GenericBackgroundPolicy::Transparent,
+            }) if *browsing_context_id == BrowsingContextId::new(10)
+        ));
+        assert!(matches!(
+            emitted.get(1),
+            Some(BrowserCommand::SetBrowsingContextBackgroundPolicy {
+                browsing_context_id,
+                policy: GenericBackgroundPolicy::Opaque,
+            }) if *browsing_context_id == BrowsingContextId::new(10)
+        ));
+    }
+
+    #[test]
+    fn set_window_composition_emits_transient_background_policy_command() {
+        let mut compositor = Compositor::new();
+        let window_id = CompositorWindowId::new(1);
+        let target = SurfaceTarget::TransientBrowsingContext(
+            cbf::data::ids::TransientBrowsingContextId::new(20),
+        );
+        compositor.attach_test_window(window_id, Box::<TestPlatformHost>::default());
+
+        let emitted = Rc::new(RefCell::new(Vec::new()));
+        compositor
+            .apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id,
+                    composition: WindowCompositionSpec {
+                        items: vec![transparent_item(1, target)],
+                    },
+                },
+                {
+                    let emitted = Rc::clone(&emitted);
+                    move |command| emitted.borrow_mut().push(command)
+                },
+            )
+            .unwrap();
+
+        let emitted = emitted.take();
+        assert_eq!(emitted.len(), 1);
+        assert!(matches!(
+            emitted.first(),
+            Some(BrowserCommand::SetTransientBrowsingContextBackgroundPolicy {
+                transient_browsing_context_id,
+                policy: GenericBackgroundPolicy::Transparent,
+            }) if *transient_browsing_context_id
+                == cbf::data::ids::TransientBrowsingContextId::new(20)
+        ));
     }
 }

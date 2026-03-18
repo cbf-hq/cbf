@@ -73,6 +73,20 @@ impl CompositionState {
             }
         }
 
+        let mut desired_targets = HashSet::new();
+        for spec in &composition.items {
+            if !desired_targets.insert(spec.target) {
+                return Err(CompositorError::DuplicateSurfaceTarget);
+            }
+            if self
+                .items
+                .values()
+                .any(|state| state.window_id != window_id && state.spec.target == spec.target)
+            {
+                return Err(CompositorError::DuplicateSurfaceTarget);
+            }
+        }
+
         let ordered_item_ids = composition
             .items
             .iter()
@@ -229,6 +243,7 @@ mod tests {
     use cbf::data::ids::{BrowsingContextId, TransientBrowsingContextId};
 
     use super::CompositionState;
+    use crate::CompositorError;
     use crate::model::{
         BackgroundPolicy, CompositionItemId, CompositionItemSpec, CompositorWindowId, Rect,
         SurfaceTarget, WindowCompositionSpec,
@@ -376,5 +391,54 @@ mod tests {
             ordered_ids,
             vec![CompositionItemId::new(2), CompositionItemId::new(1)]
         );
+    }
+
+    #[test]
+    fn set_window_composition_rejects_duplicate_target_within_one_window() {
+        let mut state = CompositionState::default();
+        let window_id = CompositorWindowId::new(1);
+        state.ensure_window(window_id);
+        let target = SurfaceTarget::BrowsingContext(BrowsingContextId::new(10));
+
+        let error = state
+            .set_window_composition(
+                window_id,
+                WindowCompositionSpec {
+                    items: vec![item(1, target), item(2, target)],
+                },
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, CompositorError::DuplicateSurfaceTarget));
+    }
+
+    #[test]
+    fn set_window_composition_rejects_duplicate_target_across_windows() {
+        let mut state = CompositionState::default();
+        let first_window = CompositorWindowId::new(1);
+        let second_window = CompositorWindowId::new(2);
+        let target = SurfaceTarget::BrowsingContext(BrowsingContextId::new(10));
+        state.ensure_window(first_window);
+        state.ensure_window(second_window);
+
+        state
+            .set_window_composition(
+                first_window,
+                WindowCompositionSpec {
+                    items: vec![item(1, target)],
+                },
+            )
+            .unwrap();
+
+        let error = state
+            .set_window_composition(
+                second_window,
+                WindowCompositionSpec {
+                    items: vec![item(2, target)],
+                },
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, CompositorError::DuplicateSurfaceTarget));
     }
 }

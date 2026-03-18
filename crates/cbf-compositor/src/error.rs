@@ -17,6 +17,9 @@ pub enum CompositorError {
     /// A scene item cannot belong to two compositor windows at once.
     #[error("composition item is already attached to another window")]
     ItemOwnedByAnotherWindow,
+    /// A browser surface target cannot appear more than once in the live composition.
+    #[error("surface target is already attached in the live composition")]
+    DuplicateSurfaceTarget,
     /// The current target/platform combination does not support native hosting.
     #[error("platform-specific compositor support is unavailable")]
     PlatformUnsupported,

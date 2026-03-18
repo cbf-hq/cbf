@@ -10,6 +10,15 @@ pub enum BackgroundPolicy {
     Transparent,
 }
 
+impl From<BackgroundPolicy> for cbf::data::background::BackgroundPolicy {
+    fn from(value: BackgroundPolicy) -> Self {
+        match value {
+            BackgroundPolicy::Opaque => Self::Opaque,
+            BackgroundPolicy::Transparent => Self::Transparent,
+        }
+    }
+}
+
 /// Declarative description of one scene item inside a compositor window.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompositionItemSpec {
