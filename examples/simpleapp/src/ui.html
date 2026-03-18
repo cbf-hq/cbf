@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CBF Toolbar</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg-top: #f7f4ec;
+      --bg-bottom: #e9dfcc;
+      --panel: rgba(255, 251, 244, 0.82);
+      --panel-solid: rgba(255, 253, 248, 0.96);
+      --surface: rgba(255, 255, 255, 0.92);
+      --surface-strong: #ffffff;
+      --line: rgba(47, 36, 13, 0.12);
+      --line-strong: rgba(47, 36, 13, 0.18);
+      --text: #2d2417;
+      --muted: #746955;
+      --accent: #0b7a67;
+      --accent-hover: #096a59;
+      --accent-soft: rgba(11, 122, 103, 0.12);
+      --shadow: 0 10px 30px rgba(34, 25, 9, 0.10);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-top: #1b1f24;
+        --bg-bottom: #111418;
+        --panel: rgba(24, 28, 33, 0.76);
+        --panel-solid: rgba(28, 32, 38, 0.92);
+        --surface: rgba(40, 45, 51, 0.88);
+        --surface-strong: #353c44;
+        --line: rgba(236, 240, 245, 0.10);
+        --line-strong: rgba(236, 240, 245, 0.16);
+        --text: #edf1f5;
+        --muted: #a8b0ba;
+        --accent: #46b6a0;
+        --accent-hover: #5dc4b0;
+        --accent-soft: rgba(70, 182, 160, 0.16);
+        --shadow: 0 12px 34px rgba(0, 0, 0, 0.32);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+      color: var(--text);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0)),
+        linear-gradient(135deg, var(--bg-top), var(--bg-bottom));
+    }
+
+    .toolbar {
+      height: 100vh;
+      display: grid;
+      grid-template-columns: auto auto auto 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, var(--panel-solid), var(--panel)),
+        linear-gradient(135deg, var(--accent-soft), transparent 55%);
+      backdrop-filter: blur(18px) saturate(1.15);
+      box-shadow: var(--shadow);
+    }
+
+    button,
+    input {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      font: inherit;
+      color: inherit;
+    }
+
+    button {
+      min-width: 40px;
+      height: 36px;
+      background: var(--surface);
+      cursor: default;
+      transition: background-color 120ms ease, border-color 120ms ease;
+    }
+
+    button:hover {
+      background: var(--surface-strong);
+      border-color: var(--line-strong);
+    }
+
+    button.primary {
+      min-width: 76px;
+      background: var(--accent);
+      border-color: transparent;
+      color: white;
+    }
+
+    button.primary:hover {
+      background: var(--accent-hover);
+    }
+
+    input {
+      width: 100%;
+      height: 38px;
+      padding: 0 14px;
+      background: var(--surface);
+      border-color: var(--line-strong);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    input::selection {
+      background: var(--accent-soft);
+    }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="toolbar">
+    <button aria-label="Back">&larr;</button>
+    <button aria-label="Forward">&rarr;</button>
+    <button aria-label="Reload">&#8635;</button>
+    <input aria-label="Address bar" value="https://www.google.com">
+    <button class="primary">Open</button>
+  </div>
+</body>
+
+</html>

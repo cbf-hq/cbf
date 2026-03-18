@@ -2379,30 +2379,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "old-simpleapp"
-version = "0.1.0-alpha.2"
-dependencies = [
- "block2 0.6.2",
- "cbf",
- "cbf-chrome",
- "clap",
- "cursor-icon",
- "dirs",
- "futures-lite",
- "image",
- "muda",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-core-foundation",
- "objc2-foundation 0.3.2",
- "raw-window-handle",
- "rfd",
- "tracing",
- "tracing-subscriber",
- "winit",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -6,7 +6,6 @@ members = [
   "crates/cbf",
   "crates/cbf-chrome",
   "crates/cbf-chrome-sys",
-  "examples/old-simpleapp",
   "examples/simpleapp",
 ]
 

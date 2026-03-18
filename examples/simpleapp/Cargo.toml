@@ -3,7 +3,7 @@ name = "simpleapp"
 version = "0.1.0-alpha.2"
 edition.workspace = true
 authors.workspace = true
-description = "A minimal single-window sample app for CBF"
+description = "Compositor-based CBF sample app"
 repository.workspace = true
 keywords.workspace = true
 license.workspace = true
@@ -16,13 +16,17 @@ category = "public.app-category.developer-tools"
 minimum-system-version = "13.0"
 
 [dependencies]
-cbf = { version = "0.1.0-alpha.2", path = "../../crates/cbf", features = ["native-dialogs"] }
+cbf = { version = "0.1.0-alpha.2", path = "../../crates/cbf", features = [
+    "native-dialogs",
+] }
 cbf-chrome = { version = "0.1.0-alpha.2", path = "../../crates/cbf-chrome" }
+cbf-compositor = { version = "0.1.0-alpha.1", path = "../../crates/cbf-compositor" }
 clap = { workspace = true, features = ["derive"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 winit.workspace = true
 futures-lite.workspace = true
+async-executor = "1.13"
 raw-window-handle.workspace = true
 dirs.workspace = true
 cursor-icon.workspace = true
@@ -33,9 +37,22 @@ image = "0.25"
 block2 = { workspace = true }
 objc2 = { workspace = true }
 objc2-core-foundation = { workspace = true, features = ["CFCGTypes"] }
-objc2-foundation = { workspace = true, features = ["NSNotification", "NSOperation", "NSString", "block2"] }
+objc2-foundation = { workspace = true, features = [
+    "NSNotification",
+    "NSOperation",
+    "NSString",
+    "block2",
+] }
 muda = "0.17"
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
 workspace = true
-features = ["NSAlert", "NSApplication", "NSControl", "NSResponder", "NSTextField", "NSView", "NSWindow"]
+features = [
+    "NSAlert",
+    "NSApplication",
+    "NSControl",
+    "NSResponder",
+    "NSTextField",
+    "NSView",
+    "NSWindow",
+]

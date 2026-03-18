@@ -9,12 +9,11 @@ use muda::{
 use tracing::warn;
 use winit::event_loop::EventLoopProxy;
 
-use crate::app::{MenuCommand, UserEvent};
+use crate::app::events::{MenuCommand, UserEvent};
 
 const MENU_ID_RELOAD_EXTENSIONS: &str = "simpleapp.extensions.reload";
 const MENU_ID_EXTENSION_PREFIX: &str = "simpleapp.extensions.item.";
 const MENU_ID_EXTENSIONS_STATUS: &str = "simpleapp.extensions.status";
-
 const MENU_ICON_BITMAP_SIZE: u32 = 32;
 
 struct ExtensionMenuEntry {
@@ -36,12 +35,11 @@ impl MacMenu {
     pub(crate) fn new(proxy: EventLoopProxy<UserEvent>) -> muda::Result<Self> {
         MenuEvent::set_event_handler(Some(move |event| {
             if let Some(command) = menu_command_for_event(&event) {
-                let _ = proxy.send_event(UserEvent::Menu(command));
+                _ = proxy.send_event(UserEvent::Menu(command));
             }
         }));
 
         let menu_bar = Menu::new();
-
         let app_menu = Submenu::new("SimpleApp", true);
         app_menu.append_items(&[
             &PredefinedMenuItem::about(
@@ -115,7 +113,6 @@ impl MacMenu {
         if self.setup_done.replace(true) {
             return;
         }
-
         self.menu_bar.init_for_nsapp();
         self.window_menu.set_as_windows_menu_for_nsapp();
     }
@@ -127,14 +124,12 @@ impl MacMenu {
 
     pub(crate) fn replace_extensions(&self, extensions: &[ExtensionInfo]) {
         self.clear_extension_items();
-
         if extensions.is_empty() {
             self.replace_extensions_status("No extensions installed");
             return;
         }
 
         self.clear_extensions_status();
-
         let mut items = Vec::with_capacity(extensions.len());
         for extension in extensions {
             let menu_item = IconMenuItemBuilder::new()
@@ -163,13 +158,11 @@ impl MacMenu {
 
     fn replace_extensions_status(&self, text: &str) {
         self.clear_extensions_status();
-
         let item = MenuItem::with_id(MENU_ID_EXTENSIONS_STATUS, text, false, None);
         if let Err(err) = self.extensions_menu.append(&item) {
             warn!("failed to append extensions status item: {err}");
             return;
         }
-
         *self.extensions_status_item.borrow_mut() = Some(item);
     }
 
@@ -203,7 +196,6 @@ fn menu_command_for_event(event: &MenuEvent) -> Option<MenuCommand> {
     if event.id == MENU_ID_RELOAD_EXTENSIONS {
         return Some(MenuCommand::ReloadExtensions);
     }
-
     let extension_id = event.id.as_ref().strip_prefix(MENU_ID_EXTENSION_PREFIX)?;
     Some(MenuCommand::ActivateExtension {
         extension_id: extension_id.to_owned(),
@@ -223,7 +215,6 @@ fn decode_menu_icon(bytes: &[u8], format: Option<ImageFormat>) -> Option<Icon> {
         Some(format) => image::load_from_memory_with_format(bytes, format).ok()?,
         None => image::load_from_memory(bytes).ok()?,
     };
-
     let image = image.resize_exact(
         MENU_ICON_BITMAP_SIZE,
         MENU_ICON_BITMAP_SIZE,

@@ -18,10 +18,7 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tracing::warn;
 use winit::window::Window;
 
-use crate::core::{
-    PRIMARY_HOST_WINDOW_ID, SharedState, ViewTarget, browsing_context_id_for_target,
-    browsing_context_id_for_window,
-};
+use crate::app::state::{SharedStateHandle, browsing_context_ids_for_window};
 
 type NotificationBlock = RcBlock<dyn Fn(std::ptr::NonNull<NSNotification>) + 'static>;
 type ObserverToken = Retained<ProtocolObject<dyn NSObjectProtocol>>;
@@ -38,7 +35,7 @@ impl WindowVisibilityObserver {
     pub(super) fn install(
         window: &Window,
         browser_handle: BrowserHandle<ChromiumBackend>,
-        shared: Arc<Mutex<SharedState>>,
+        shared: SharedStateHandle,
         host_window_id: HostWindowId,
     ) -> Result<Self, String> {
         let ns_window = ns_window_for_winit_window(window)?;
@@ -48,7 +45,6 @@ impl WindowVisibilityObserver {
         let did_miniaturize_block = RcBlock::new({
             let browser_handle = browser_handle.clone();
             let shared = Arc::clone(&shared);
-
             move |_notification: std::ptr::NonNull<NSNotification>| {
                 sync_host_window_visibility(
                     &browser_handle,
@@ -124,33 +120,11 @@ fn ns_window_for_winit_window(window: &Window) -> Result<Retained<NSWindow>, Str
 
 fn sync_host_window_visibility(
     browser_handle: &BrowserHandle<ChromiumBackend>,
-    shared: &Arc<Mutex<SharedState>>,
+    shared: &Arc<Mutex<crate::app::state::SharedState>>,
     host_window_id: HostWindowId,
     visibility: BrowsingContextVisibility,
 ) {
-    let mut browsing_context_ids = Vec::with_capacity(2);
-
-    if host_window_id == PRIMARY_HOST_WINDOW_ID {
-        if let Some(browsing_context_id) =
-            browsing_context_id_for_target(shared, ViewTarget::Primary)
-        {
-            browsing_context_ids.push(browsing_context_id);
-        }
-        if let Some(browsing_context_id) =
-            browsing_context_id_for_target(shared, ViewTarget::DevTools)
-            && !browsing_context_ids.contains(&browsing_context_id)
-        {
-            browsing_context_ids.push(browsing_context_id);
-        }
-    }
-
-    if let Some(browsing_context_id) = browsing_context_id_for_window(shared, host_window_id)
-        && !browsing_context_ids.contains(&browsing_context_id)
-    {
-        browsing_context_ids.push(browsing_context_id);
-    }
-
-    for browsing_context_id in browsing_context_ids {
+    for browsing_context_id in browsing_context_ids_for_window(shared, host_window_id) {
         if let Err(err) =
             browser_handle.set_browsing_context_visibility(browsing_context_id, visibility)
         {

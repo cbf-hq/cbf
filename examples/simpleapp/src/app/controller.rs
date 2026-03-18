@@ -1,0 +1,1341 @@
+use std::collections::{HashMap, HashSet};
+
+use cbf::{
+    browser::BrowserHandle,
+    data::{
+        auxiliary_window::{AuxiliaryWindowKind, AuxiliaryWindowResponse, PermissionPromptType},
+        browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResponse},
+        dialog::{BeforeUnloadReason, DialogResponse, DialogType, JavaScriptDialogRequest},
+        download::{DownloadId, DownloadOutcome, DownloadPromptActionHint, DownloadState},
+        ids::{BrowsingContextId, TransientBrowsingContextId, WindowId as HostWindowId},
+        profile::ProfileInfo,
+        transient_browsing_context::TransientBrowsingContextKind,
+        window_open::{
+            WindowBounds, WindowDescriptor, WindowKind, WindowOpenResponse, WindowOpenResult,
+            WindowState,
+        },
+    },
+    event::{BackendStopReason, BrowserEvent, BrowsingContextEvent, TransientBrowsingContextEvent},
+};
+use cbf_chrome::{
+    backend::ChromiumBackend, browser::ChromiumBrowserHandleExt, event::ChromeEvent, ffi::IpcEvent,
+};
+use cbf_compositor::{
+    core::{AttachWindowOptions, CompositionCommand, Compositor},
+    model::{CompositorWindowId, SurfaceTarget},
+    window::WindowHost,
+};
+use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+use tracing::{error, info, warn};
+use winit::event::WindowEvent;
+
+use crate::{
+    app::{
+        events::MenuCommand,
+        state::{
+            CoreAction, DEVTOOLS_HOST_WINDOW_ID, DownloadStatus, JavaScriptDialogTarget,
+            MAIN_PAGE_CREATE_REQUEST_ID, PRIMARY_HOST_WINDOW_ID, SharedStateHandle,
+            TOOLBAR_CREATE_REQUEST_ID, TransientPopupState, bind_browsing_context_to_window,
+            browsing_context_ids_for_window, devtools_browsing_context_id, has_bound_windows,
+            primary_browsing_context_id, primary_host_window_id,
+            register_pending_window_open_request, set_devtools_browsing_context_id,
+            set_primary_browsing_context_id, set_toolbar_browsing_context_id,
+            take_pending_window_open_request, toolbar_browsing_context_id,
+            transient_browsing_context_id_for_window, unbind_browsing_context,
+            unbind_transient_browsing_context, window_id_for_browsing_context,
+            window_id_for_transient_browsing_context,
+        },
+    },
+    cli::Cli,
+    scene::{composition, ui_url::toolbar_ui_url},
+};
+
+pub(crate) struct AppController {
+    cli: Cli,
+    browser_handle: BrowserHandle<ChromiumBackend>,
+    compositor: Compositor,
+    shared: SharedStateHandle,
+    startup_requested: bool,
+    shutdown_requested: bool,
+    window_base_titles: HashMap<HostWindowId, String>,
+    downloads: HashMap<DownloadId, DownloadStatus>,
+    transient_popups: HashMap<TransientBrowsingContextId, TransientPopupState>,
+    pending_transient_popup_sizes: HashMap<TransientBrowsingContextId, (u32, u32)>,
+    blur_close_armed_transients: HashSet<TransientBrowsingContextId>,
+    resolved_profile_id: Option<String>,
+    extensions_loading: bool,
+}
+
+impl AppController {
+    pub(crate) fn new(
+        cli: Cli,
+        browser_handle: BrowserHandle<ChromiumBackend>,
+        shared: SharedStateHandle,
+    ) -> Self {
+        Self {
+            cli,
+            browser_handle,
+            compositor: Compositor::new(),
+            shared,
+            startup_requested: false,
+            shutdown_requested: false,
+            window_base_titles: HashMap::new(),
+            downloads: HashMap::new(),
+            transient_popups: HashMap::new(),
+            pending_transient_popup_sizes: HashMap::new(),
+            blur_close_armed_transients: HashSet::new(),
+            resolved_profile_id: None,
+            extensions_loading: false,
+        }
+    }
+
+    pub(crate) fn browser_handle(&self) -> BrowserHandle<ChromiumBackend> {
+        self.browser_handle.clone()
+    }
+
+    pub(crate) fn host_window_id_for_dialog_target(
+        &self,
+        target: JavaScriptDialogTarget,
+    ) -> Option<HostWindowId> {
+        match target {
+            JavaScriptDialogTarget::BrowsingContext(browsing_context_id) => {
+                window_id_for_browsing_context(&self.shared, browsing_context_id)
+            }
+            JavaScriptDialogTarget::TransientBrowsingContext(transient_browsing_context_id) => {
+                window_id_for_transient_browsing_context(
+                    &self.shared,
+                    transient_browsing_context_id,
+                )
+            }
+        }
+    }
+
+    pub(crate) fn attach_window<W>(&mut self, window: W) -> Result<CompositorWindowId, String>
+    where
+        W: WindowHost + 'static,
+    {
+        let handle = self.browser_handle.clone();
+        self.compositor
+            .attach_window(window, AttachWindowOptions, move |command| {
+                if let Err(err) = handle.send(command) {
+                    warn!("failed to forward compositor command: {err}");
+                }
+            })
+            .map_err(|err| format!("failed to attach compositor window: {err}"))
+    }
+
+    pub(crate) fn detach_window(
+        &mut self,
+        compositor_window_id: CompositorWindowId,
+    ) -> Result<(), String> {
+        self.compositor
+            .detach_window(compositor_window_id, |_command| {})
+            .map_err(|err| format!("failed to detach compositor window: {err}"))
+    }
+
+    pub(crate) fn handle_menu_command(&mut self, command: MenuCommand) -> Vec<CoreAction> {
+        match command {
+            MenuCommand::ReloadExtensions => {
+                let Some(profile_id) = self.resolved_profile_id.as_deref() else {
+                    warn!("ignoring extension reload before a canonical profile is resolved");
+                    return Vec::new();
+                };
+                if let Err(err) = self.browser_handle.request_list_extensions(profile_id) {
+                    warn!("failed to request extension list: {err}");
+                    return Vec::new();
+                }
+                self.extensions_loading = true;
+                vec![CoreAction::SetExtensionsMenuLoading]
+            }
+            MenuCommand::ActivateExtension { extension_id } => {
+                let Some(browsing_context_id) = primary_browsing_context_id(&self.shared) else {
+                    warn!("ignoring extension activation without a primary browsing context");
+                    return Vec::new();
+                };
+                if let Err(err) = self
+                    .browser_handle
+                    .activate_extension_action(browsing_context_id, extension_id)
+                {
+                    warn!("failed to activate extension action: {err}");
+                }
+                Vec::new()
+            }
+        }
+    }
+
+    pub(crate) fn handle_browser_event(&mut self, event: BrowserEvent) -> Vec<CoreAction> {
+        if let Err(err) = self.compositor.update_browser_event(&event, |_command| {}) {
+            warn!("failed to update compositor browser state: {err}");
+        }
+
+        match event {
+            BrowserEvent::BackendReady => {
+                if let Err(err) = self.browser_handle.request_list_profiles() {
+                    error!("failed to request profile list on startup: {err}");
+                    return vec![CoreAction::ExitEventLoop];
+                }
+                self.extensions_loading = true;
+                vec![
+                    CoreAction::EnsureMainWindow,
+                    CoreAction::SetExtensionsMenuLoading,
+                ]
+            }
+            BrowserEvent::BackendStopped { reason } => {
+                match reason {
+                    BackendStopReason::ShutdownRequested => {
+                        info!("backend stopped: shutdown requested")
+                    }
+                    BackendStopReason::Disconnected => warn!("backend stopped: disconnected"),
+                    BackendStopReason::Crashed => error!("backend stopped: crashed"),
+                    BackendStopReason::Error(info) => error!("backend stopped with error: {info}"),
+                }
+                vec![CoreAction::ExitEventLoop]
+            }
+            BrowserEvent::BackendError {
+                info,
+                terminal_hint,
+            } => {
+                warn!("backend error event: {info}, terminal_hint={terminal_hint}");
+                Vec::new()
+            }
+            BrowserEvent::ProfilesListed { profiles } => self.handle_profiles_listed(profiles),
+            BrowserEvent::ExtensionsListed { extensions, .. } => {
+                self.extensions_loading = false;
+                vec![CoreAction::ReplaceExtensionsMenu { extensions }]
+            }
+            BrowserEvent::BrowsingContext {
+                browsing_context_id,
+                event,
+                ..
+            } => self.handle_browsing_context_event(browsing_context_id, *event),
+            BrowserEvent::TransientBrowsingContext {
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                event,
+                ..
+            } => self.handle_transient_browsing_context_event(
+                transient_browsing_context_id,
+                parent_browsing_context_id,
+                *event,
+            ),
+            BrowserEvent::BrowsingContextOpenRequested {
+                request_id,
+                source_browsing_context_id,
+                target_url,
+                open_hint,
+                user_gesture,
+                ..
+            } => {
+                info!(
+                    "browsing context open requested: request_id={request_id}, source={source_browsing_context_id:?}, target_url={target_url}, hint={open_hint:?}, user_gesture={user_gesture}"
+                );
+                let response = match open_hint {
+                    BrowsingContextOpenHint::Unknown
+                    | BrowsingContextOpenHint::CurrentContext
+                    | BrowsingContextOpenHint::NewForegroundContext
+                    | BrowsingContextOpenHint::NewBackgroundContext => {
+                        let target_browsing_context_id = source_browsing_context_id
+                            .or_else(|| primary_browsing_context_id(&self.shared));
+                        if let Some(browsing_context_id) = target_browsing_context_id {
+                            BrowsingContextOpenResponse::AllowExistingContext {
+                                browsing_context_id,
+                                activate: true,
+                            }
+                        } else {
+                            BrowsingContextOpenResponse::Deny
+                        }
+                    }
+                };
+                if let Err(err) = self
+                    .browser_handle
+                    .respond_browsing_context_open(request_id, response)
+                {
+                    warn!("failed to respond browsing context open request: {err}");
+                }
+                Vec::new()
+            }
+            BrowserEvent::WindowOpenRequested { request, .. } => {
+                let kind = match request.requested_kind {
+                    WindowKind::Popup => WindowKind::Popup,
+                    _ => WindowKind::Normal,
+                };
+                let window = WindowDescriptor {
+                    window_id: HostWindowId::new(request.request_id),
+                    kind,
+                    state: WindowState::Normal,
+                    focused: true,
+                    incognito: false,
+                    always_on_top: false,
+                    bounds: WindowBounds {
+                        left: 80,
+                        top: 80,
+                        width: 1280,
+                        height: 900,
+                    },
+                };
+                register_pending_window_open_request(
+                    &self.shared,
+                    request.request_id,
+                    window.window_id,
+                );
+                if let Err(err) = self.browser_handle.respond_window_open(
+                    request.request_id,
+                    WindowOpenResponse::AllowNewWindow { window },
+                ) {
+                    warn!("failed to respond window open request: {err}");
+                }
+                vec![CoreAction::EnsureHostWindow { window }]
+            }
+            BrowserEvent::WindowOpenResolved {
+                request_id, result, ..
+            } => {
+                if matches!(result, WindowOpenResult::Denied | WindowOpenResult::Aborted)
+                    && let Some(window_id) =
+                        take_pending_window_open_request(&self.shared, request_id)
+                {
+                    return vec![CoreAction::CloseHostWindow { window_id }];
+                }
+                Vec::new()
+            }
+            BrowserEvent::AuxiliaryWindowOpenRequested {
+                profile_id,
+                request_id,
+                kind,
+                ..
+            } => {
+                self.handle_auxiliary_window_request(profile_id, request_id, kind);
+                Vec::new()
+            }
+            BrowserEvent::DownloadCreated {
+                download_id,
+                source_browsing_context_id,
+                file_name,
+                total_bytes,
+                ..
+            } => {
+                self.downloads.insert(
+                    download_id,
+                    DownloadStatus {
+                        source_browsing_context_id,
+                        file_name,
+                        received_bytes: 0,
+                        total_bytes,
+                        state: DownloadState::InProgress,
+                        is_paused: false,
+                    },
+                );
+                self.refresh_primary_window_title()
+            }
+            BrowserEvent::DownloadUpdated {
+                download_id,
+                source_browsing_context_id,
+                state,
+                file_name,
+                received_bytes,
+                total_bytes,
+                is_paused,
+                ..
+            } => {
+                self.downloads.insert(
+                    download_id,
+                    DownloadStatus {
+                        source_browsing_context_id,
+                        file_name,
+                        received_bytes,
+                        total_bytes,
+                        state,
+                        is_paused,
+                    },
+                );
+                self.refresh_primary_window_title()
+            }
+            BrowserEvent::DownloadCompleted {
+                download_id,
+                source_browsing_context_id,
+                outcome,
+                file_name,
+                received_bytes,
+                total_bytes,
+                ..
+            } => {
+                self.downloads.insert(
+                    download_id,
+                    DownloadStatus {
+                        source_browsing_context_id,
+                        file_name,
+                        received_bytes,
+                        total_bytes,
+                        state: match outcome {
+                            DownloadOutcome::Succeeded => DownloadState::Completed,
+                            DownloadOutcome::Cancelled => DownloadState::Cancelled,
+                            DownloadOutcome::Interrupted => DownloadState::Interrupted,
+                            DownloadOutcome::Unknown => DownloadState::Unknown,
+                        },
+                        is_paused: false,
+                    },
+                );
+                self.refresh_primary_window_title()
+            }
+            BrowserEvent::ShutdownBlocked { request_id, .. } => {
+                if let Err(err) = self.browser_handle.confirm_shutdown(request_id, true) {
+                    warn!("failed to confirm shutdown: {err}");
+                }
+                Vec::new()
+            }
+            BrowserEvent::ShutdownProceeding { .. }
+            | BrowserEvent::ShutdownCancelled { .. }
+            | BrowserEvent::BrowsingContextOpenResolved { .. }
+            | BrowserEvent::WindowOpened { .. }
+            | BrowserEvent::WindowClosed { .. }
+            | BrowserEvent::AuxiliaryWindowResolved { .. }
+            | BrowserEvent::AuxiliaryWindowOpened { .. }
+            | BrowserEvent::AuxiliaryWindowClosed { .. } => Vec::new(),
+        }
+    }
+
+    pub(crate) fn handle_chrome_event(&mut self, event: ChromeEvent) -> Vec<CoreAction> {
+        if let Err(err) = self.compositor.update_chrome_event(&event) {
+            warn!("failed to update compositor chrome state: {err}");
+        }
+
+        match event {
+            ChromeEvent::Ipc(ipc_event) => match *ipc_event {
+                IpcEvent::DevToolsOpened {
+                    browsing_context_id,
+                    inspected_browsing_context_id,
+                    ..
+                } => {
+                    let browsing_context_id = browsing_context_id.into();
+                    let inspected_browsing_context_id: BrowsingContextId =
+                        inspected_browsing_context_id.into();
+                    bind_browsing_context_to_window(
+                        &self.shared,
+                        browsing_context_id,
+                        DEVTOOLS_HOST_WINDOW_ID,
+                    );
+                    set_devtools_browsing_context_id(&self.shared, Some(browsing_context_id));
+                    info!(
+                        "devtools opened: inspected={}, devtools={}",
+                        inspected_browsing_context_id, browsing_context_id
+                    );
+                    vec![
+                        CoreAction::EnsureDevToolsWindow,
+                        CoreAction::SyncWindowScene {
+                            window_id: DEVTOOLS_HOST_WINDOW_ID,
+                        },
+                    ]
+                }
+                IpcEvent::ChoiceMenuRequested {
+                    browsing_context_id,
+                    menu,
+                    ..
+                } => {
+                    if let Err(err) = self.compositor.show_choice_menu(
+                        SurfaceTarget::BrowsingContext(browsing_context_id.into()),
+                        menu,
+                    ) {
+                        warn!("failed to show choice menu: {err}");
+                    }
+                    Vec::new()
+                }
+                IpcEvent::ExtensionPopupChoiceMenuRequested { popup_id, menu, .. } => {
+                    if let Err(err) = self.compositor.show_choice_menu(
+                        SurfaceTarget::TransientBrowsingContext(TransientBrowsingContextId::new(
+                            popup_id.get(),
+                        )),
+                        menu,
+                    ) {
+                        warn!("failed to show popup choice menu: {err}");
+                    }
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        }
+    }
+
+    pub(crate) fn handle_window_event(
+        &mut self,
+        window_id: HostWindowId,
+        event: &WindowEvent,
+    ) -> Vec<CoreAction> {
+        match event {
+            WindowEvent::Resized(_) => vec![CoreAction::SyncWindowScene { window_id }],
+            WindowEvent::CloseRequested => self.handle_window_close_requested(window_id),
+            WindowEvent::Focused(focused) => {
+                if let Some(transient_id) =
+                    transient_browsing_context_id_for_window(&self.shared, window_id)
+                {
+                    if *focused {
+                        self.blur_close_armed_transients.insert(transient_id);
+                    } else if self.blur_close_armed_transients.contains(&transient_id)
+                        && let Err(err) = self
+                            .browser_handle
+                            .close_transient_browsing_context(transient_id)
+                    {
+                        warn!("failed to close transient on blur: {err}");
+                    }
+                }
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    pub(crate) fn sync_window_scene(
+        &mut self,
+        host_window_id: HostWindowId,
+        compositor_window_id: CompositorWindowId,
+        width: u32,
+        height: u32,
+    ) {
+        let result = if host_window_id == PRIMARY_HOST_WINDOW_ID {
+            let toolbar_id = toolbar_browsing_context_id(&self.shared);
+            let page_id = primary_browsing_context_id(&self.shared);
+            if let Some(toolbar_id) = toolbar_id {
+                self.resize_browsing_context(toolbar_id, width, 56);
+            }
+            if let Some(page_id) = page_id {
+                self.resize_browsing_context(page_id, width, height.saturating_sub(56));
+            }
+            self.compositor.apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id: compositor_window_id,
+                    composition: composition::main_window_composition(
+                        toolbar_id, page_id, width, height,
+                    ),
+                },
+                |_command| {},
+            )
+        } else if host_window_id == DEVTOOLS_HOST_WINDOW_ID {
+            if let Some(devtools_id) = devtools_browsing_context_id(&self.shared) {
+                self.resize_browsing_context(devtools_id, width, height);
+                self.compositor.apply(
+                    CompositionCommand::SetWindowComposition {
+                        window_id: compositor_window_id,
+                        composition: composition::devtools_window_composition(
+                            devtools_id,
+                            width,
+                            height,
+                        ),
+                    },
+                    |_command| {},
+                )
+            } else {
+                self.compositor.apply(
+                    CompositionCommand::SetWindowComposition {
+                        window_id: compositor_window_id,
+                        composition: Default::default(),
+                    },
+                    |_command| {},
+                )
+            }
+        } else if let Some(transient_id) =
+            transient_browsing_context_id_for_window(&self.shared, host_window_id)
+        {
+            if let Err(err) =
+                self.browser_handle
+                    .resize_transient_browsing_context(transient_id, width, height)
+            {
+                warn!("failed to resize transient browsing context: {err}");
+            }
+            self.compositor.apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id: compositor_window_id,
+                    composition: composition::transient_window_composition(
+                        transient_id,
+                        width,
+                        height,
+                    ),
+                },
+                |_command| {},
+            )
+        } else if let Some(browsing_context_id) =
+            browsing_context_ids_for_window(&self.shared, host_window_id)
+                .into_iter()
+                .find(|candidate| {
+                    Some(*candidate) != toolbar_browsing_context_id(&self.shared)
+                        && Some(*candidate) != devtools_browsing_context_id(&self.shared)
+                })
+        {
+            self.resize_browsing_context(browsing_context_id, width, height);
+            self.compositor.apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id: compositor_window_id,
+                    composition: composition::host_window_composition(
+                        browsing_context_id,
+                        width,
+                        height,
+                    ),
+                },
+                |_command| {},
+            )
+        } else {
+            self.compositor.apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id: compositor_window_id,
+                    composition: Default::default(),
+                },
+                |_command| {},
+            )
+        };
+
+        if let Err(err) = result {
+            warn!("failed to sync compositor scene: {err}");
+        }
+    }
+
+    pub(crate) fn request_shutdown_once(&mut self) {
+        if self.shutdown_requested {
+            return;
+        }
+        self.shutdown_requested = true;
+        if let Err(err) = self.browser_handle.request_shutdown(1) {
+            warn!("failed to request shutdown: {err}");
+        }
+    }
+
+    fn handle_profiles_listed(&mut self, profiles: Vec<ProfileInfo>) -> Vec<CoreAction> {
+        let Some(profile_id) = profiles
+            .iter()
+            .find(|profile| profile.is_default)
+            .or_else(|| profiles.first())
+            .map(|profile| profile.profile_id.clone())
+        else {
+            warn!("no profile available for startup");
+            return vec![CoreAction::ExitEventLoop];
+        };
+
+        self.resolved_profile_id = Some(profile_id.clone());
+        if let Err(err) = self.browser_handle.request_list_extensions(&profile_id) {
+            warn!("failed to request extension list: {err}");
+        }
+
+        if !self.startup_requested {
+            self.startup_requested = true;
+            if let Err(err) = self.browser_handle.create_browsing_context(
+                TOOLBAR_CREATE_REQUEST_ID,
+                Some(toolbar_ui_url().unwrap_or_else(|_| "about:blank".to_string())),
+                profile_id.clone(),
+            ) {
+                warn!("failed to create toolbar browsing context: {err}");
+            }
+            if let Err(err) = self.browser_handle.create_browsing_context(
+                MAIN_PAGE_CREATE_REQUEST_ID,
+                Some(self.cli.url.clone()),
+                profile_id,
+            ) {
+                warn!("failed to create primary browsing context: {err}");
+            }
+        }
+
+        vec![CoreAction::SetExtensionsMenuLoading]
+    }
+
+    fn handle_browsing_context_event(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+        event: BrowsingContextEvent,
+    ) -> Vec<CoreAction> {
+        match event {
+            BrowsingContextEvent::Created { request_id } => {
+                let host_window_id = if request_id == TOOLBAR_CREATE_REQUEST_ID {
+                    set_toolbar_browsing_context_id(&self.shared, Some(browsing_context_id));
+                    Some(PRIMARY_HOST_WINDOW_ID)
+                } else if request_id == MAIN_PAGE_CREATE_REQUEST_ID {
+                    set_primary_browsing_context_id(&self.shared, Some(browsing_context_id));
+                    Some(PRIMARY_HOST_WINDOW_ID)
+                } else {
+                    take_pending_window_open_request(&self.shared, request_id)
+                };
+
+                if let Some(host_window_id) = host_window_id {
+                    bind_browsing_context_to_window(
+                        &self.shared,
+                        browsing_context_id,
+                        host_window_id,
+                    );
+                    vec![CoreAction::SyncWindowScene {
+                        window_id: host_window_id,
+                    }]
+                } else {
+                    Vec::new()
+                }
+            }
+            BrowsingContextEvent::TitleUpdated { title } => {
+                if Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared) {
+                    return Vec::new();
+                }
+                if let Some(window_id) =
+                    window_id_for_browsing_context(&self.shared, browsing_context_id)
+                {
+                    self.window_base_titles.insert(window_id, title);
+                    vec![CoreAction::UpdateWindowTitle {
+                        window_id,
+                        title: self.decorated_window_title(window_id),
+                    }]
+                } else {
+                    Vec::new()
+                }
+            }
+            BrowsingContextEvent::CursorChanged { cursor_type } => {
+                window_id_for_browsing_context(&self.shared, browsing_context_id)
+                    .map(|window_id| CoreAction::UpdateCursor {
+                        window_id,
+                        cursor: cursor_type,
+                    })
+                    .into_iter()
+                    .collect()
+            }
+            BrowsingContextEvent::ContextMenuRequested { menu } => {
+                if let Err(err) = self
+                    .compositor
+                    .show_context_menu(SurfaceTarget::BrowsingContext(browsing_context_id), menu)
+                {
+                    warn!("failed to show context menu: {err}");
+                }
+                Vec::new()
+            }
+            BrowsingContextEvent::DragStartRequested { request } => {
+                if let Err(err) = self.compositor.start_native_drag(request) {
+                    warn!("failed to start native drag: {err}");
+                }
+                Vec::new()
+            }
+            BrowsingContextEvent::JavaScriptDialogRequested {
+                request_id,
+                message,
+                default_prompt_text,
+                r#type,
+                beforeunload_reason,
+            } => {
+                if r#type == DialogType::BeforeUnload {
+                    let response = show_beforeunload_dialog(&message, beforeunload_reason.as_ref());
+                    if let Err(err) = respond_javascript_dialog_for_browsing_context(
+                        self.browser_handle.clone(),
+                        browsing_context_id,
+                        request_id,
+                        r#type,
+                        response,
+                    ) {
+                        warn!("failed to respond javascript dialog: {err}");
+                    }
+                    return Vec::new();
+                }
+                vec![CoreAction::PresentJavaScriptDialog {
+                    target: JavaScriptDialogTarget::BrowsingContext(browsing_context_id),
+                    request_id,
+                    request: JavaScriptDialogRequest::new(r#type, message, default_prompt_text),
+                }]
+            }
+            BrowsingContextEvent::PermissionRequested { request_id, .. } => {
+                _ = self
+                    .browser_handle
+                    .confirm_permission(browsing_context_id, request_id, false);
+                Vec::new()
+            }
+            BrowsingContextEvent::CloseRequested => {
+                if let Err(err) = self
+                    .browser_handle
+                    .request_close_browsing_context(browsing_context_id)
+                {
+                    warn!("failed to request close: {err}");
+                }
+                Vec::new()
+            }
+            BrowsingContextEvent::Closed => {
+                self.handle_closed_browsing_context(browsing_context_id)
+            }
+            BrowsingContextEvent::NavigationStateChanged { .. }
+            | BrowsingContextEvent::FaviconUrlUpdated { .. }
+            | BrowsingContextEvent::UpdateTargetUrl { .. }
+            | BrowsingContextEvent::FullscreenToggled { .. }
+            | BrowsingContextEvent::ImeBoundsUpdated { .. }
+            | BrowsingContextEvent::ChoiceMenuRequested { .. }
+            | BrowsingContextEvent::RenderProcessGone { .. }
+            | BrowsingContextEvent::AudioStateChanged { .. }
+            | BrowsingContextEvent::DomHtmlRead { .. }
+            | BrowsingContextEvent::ExtensionRuntimeWarning { .. }
+            | BrowsingContextEvent::SelectionChanged { .. }
+            | BrowsingContextEvent::ScrollPositionChanged { .. } => Vec::new(),
+        }
+    }
+
+    fn handle_transient_browsing_context_event(
+        &mut self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        parent_browsing_context_id: BrowsingContextId,
+        event: TransientBrowsingContextEvent,
+    ) -> Vec<CoreAction> {
+        match event {
+            TransientBrowsingContextEvent::Opened { kind, title } => {
+                if kind != TransientBrowsingContextKind::Popup {
+                    return Vec::new();
+                }
+                let size = self
+                    .pending_transient_popup_sizes
+                    .remove(&transient_browsing_context_id);
+                let state = TransientPopupState {
+                    parent_browsing_context_id,
+                    title: title.unwrap_or_else(|| "Extension Popup".to_string()),
+                    size,
+                    prev_sent_size: None,
+                };
+                let (width, height) = state.size.unwrap_or((420, 600));
+                self.transient_popups
+                    .insert(transient_browsing_context_id, state.clone());
+                vec![CoreAction::EnsureTransientHostWindow {
+                    transient_browsing_context_id,
+                    title: state.title,
+                    width,
+                    height,
+                }]
+            }
+            TransientBrowsingContextEvent::Resized { width, height } => {
+                self.handle_transient_resize(transient_browsing_context_id, width, height)
+            }
+            TransientBrowsingContextEvent::TitleUpdated { title } => {
+                if let Some(state) = self
+                    .transient_popups
+                    .get_mut(&transient_browsing_context_id)
+                {
+                    state.title = title.clone();
+                }
+                window_id_for_transient_browsing_context(
+                    &self.shared,
+                    transient_browsing_context_id,
+                )
+                .map(|window_id| CoreAction::UpdateWindowTitle { window_id, title })
+                .into_iter()
+                .collect()
+            }
+            TransientBrowsingContextEvent::CursorChanged { cursor_type } => {
+                window_id_for_transient_browsing_context(
+                    &self.shared,
+                    transient_browsing_context_id,
+                )
+                .map(|window_id| CoreAction::UpdateCursor {
+                    window_id,
+                    cursor: cursor_type,
+                })
+                .into_iter()
+                .collect()
+            }
+            TransientBrowsingContextEvent::ContextMenuRequested { menu } => {
+                if let Err(err) = self.compositor.show_context_menu(
+                    SurfaceTarget::TransientBrowsingContext(transient_browsing_context_id),
+                    menu,
+                ) {
+                    warn!("failed to show popup context menu: {err}");
+                }
+                Vec::new()
+            }
+            TransientBrowsingContextEvent::JavaScriptDialogRequested {
+                request_id,
+                message,
+                default_prompt_text,
+                r#type,
+                beforeunload_reason,
+            } => {
+                if r#type == DialogType::BeforeUnload {
+                    let response = show_beforeunload_dialog(&message, beforeunload_reason.as_ref());
+                    if let Err(err) = self
+                        .browser_handle
+                        .respond_javascript_dialog_in_transient_browsing_context(
+                            transient_browsing_context_id,
+                            request_id,
+                            response,
+                        )
+                    {
+                        warn!("failed to respond transient javascript dialog: {err}");
+                    }
+                    return Vec::new();
+                }
+                vec![CoreAction::PresentJavaScriptDialog {
+                    target: JavaScriptDialogTarget::TransientBrowsingContext(
+                        transient_browsing_context_id,
+                    ),
+                    request_id,
+                    request: JavaScriptDialogRequest::new(r#type, message, default_prompt_text),
+                }]
+            }
+            TransientBrowsingContextEvent::CloseRequested => {
+                if let Err(err) = self
+                    .browser_handle
+                    .close_transient_browsing_context(transient_browsing_context_id)
+                {
+                    warn!("failed to close transient: {err}");
+                }
+                Vec::new()
+            }
+            TransientBrowsingContextEvent::Closed { .. }
+            | TransientBrowsingContextEvent::RenderProcessGone { .. } => {
+                self.transient_popups.remove(&transient_browsing_context_id);
+                self.pending_transient_popup_sizes
+                    .remove(&transient_browsing_context_id);
+                self.blur_close_armed_transients
+                    .remove(&transient_browsing_context_id);
+                unbind_transient_browsing_context(&self.shared, transient_browsing_context_id)
+                    .map(|window_id| CoreAction::CloseHostWindow { window_id })
+                    .into_iter()
+                    .collect()
+            }
+            TransientBrowsingContextEvent::Focused
+            | TransientBrowsingContextEvent::Blurred
+            | TransientBrowsingContextEvent::ImeBoundsUpdated { .. }
+            | TransientBrowsingContextEvent::ChoiceMenuRequested { .. } => Vec::new(),
+        }
+    }
+
+    fn handle_closed_browsing_context(
+        &mut self,
+        browsing_context_id: BrowsingContextId,
+    ) -> Vec<CoreAction> {
+        let is_toolbar = Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared);
+        let is_primary = Some(browsing_context_id) == primary_browsing_context_id(&self.shared);
+        let is_devtools = Some(browsing_context_id) == devtools_browsing_context_id(&self.shared);
+
+        let window_id = unbind_browsing_context(&self.shared, browsing_context_id);
+
+        if is_toolbar {
+            set_toolbar_browsing_context_id(&self.shared, None);
+        }
+        if is_primary {
+            set_primary_browsing_context_id(&self.shared, None);
+
+            if let Some(toolbar_id) = toolbar_browsing_context_id(&self.shared) {
+                _ = self
+                    .browser_handle
+                    .request_close_browsing_context(toolbar_id);
+            }
+        }
+        if is_devtools {
+            set_devtools_browsing_context_id(&self.shared, None);
+        }
+
+        let mut actions = Vec::new();
+        if let Some(window_id) = window_id {
+            let remaining = browsing_context_ids_for_window(&self.shared, window_id);
+
+            if remaining.is_empty() || is_primary || is_devtools {
+                self.window_base_titles.remove(&window_id);
+                actions.push(CoreAction::CloseHostWindow { window_id });
+            } else {
+                actions.push(CoreAction::SyncWindowScene { window_id });
+            }
+        }
+        actions.extend(self.refresh_primary_window_title());
+
+        if !has_bound_windows(&self.shared) {
+            self.request_shutdown_once();
+            actions.push(CoreAction::ExitEventLoop);
+        }
+        actions
+    }
+
+    fn handle_transient_resize(
+        &mut self,
+        transient_browsing_context_id: TransientBrowsingContextId,
+        width: u32,
+        height: u32,
+    ) -> Vec<CoreAction> {
+        let Some(state) = self
+            .transient_popups
+            .get_mut(&transient_browsing_context_id)
+        else {
+            self.pending_transient_popup_sizes
+                .insert(transient_browsing_context_id, (width, height));
+            return Vec::new();
+        };
+
+        let new_size = (width, height);
+        let size_changed = state.size != Some(new_size);
+        let is_oscillating = size_changed && state.prev_sent_size == Some(new_size);
+        if is_oscillating {
+            return Vec::new();
+        }
+
+        let previous = state.size;
+        state.size = Some(new_size);
+        if let Some(window_id) =
+            window_id_for_transient_browsing_context(&self.shared, transient_browsing_context_id)
+        {
+            if size_changed {
+                state.prev_sent_size = previous;
+                return vec![CoreAction::ResizeHostWindow {
+                    window_id,
+                    width,
+                    height,
+                }];
+            }
+            Vec::new()
+        } else {
+            vec![CoreAction::EnsureTransientHostWindow {
+                transient_browsing_context_id,
+                title: state.title.clone(),
+                width,
+                height,
+            }]
+        }
+    }
+
+    fn handle_window_close_requested(&mut self, window_id: HostWindowId) -> Vec<CoreAction> {
+        if let Some(transient_id) =
+            transient_browsing_context_id_for_window(&self.shared, window_id)
+        {
+            if let Err(err) = self
+                .browser_handle
+                .close_transient_browsing_context(transient_id)
+            {
+                warn!("failed to close transient window: {err}");
+                return vec![CoreAction::CloseHostWindow { window_id }];
+            }
+            return Vec::new();
+        }
+
+        let browsing_context_ids = browsing_context_ids_for_window(&self.shared, window_id);
+        for browsing_context_id in browsing_context_ids {
+            if let Err(err) = self
+                .browser_handle
+                .request_close_browsing_context(browsing_context_id)
+            {
+                warn!("failed to request close for browsing context: {err}");
+            }
+        }
+        Vec::new()
+    }
+
+    fn handle_auxiliary_window_request(
+        &mut self,
+        profile_id: String,
+        request_id: u64,
+        kind: AuxiliaryWindowKind,
+    ) {
+        if let AuxiliaryWindowKind::PermissionPrompt { permission } = &kind {
+            let allow = show_permission_prompt_dialog(permission);
+            _ = self.browser_handle.respond_auxiliary_window(
+                profile_id,
+                request_id,
+                AuxiliaryWindowResponse::PermissionPrompt { allow },
+            );
+            return;
+        }
+
+        if let AuxiliaryWindowKind::ExtensionInstallPrompt {
+            extension_name,
+            permission_names,
+            ..
+        } = &kind
+        {
+            let proceed = show_extension_install_prompt_dialog(extension_name, permission_names);
+            _ = self.browser_handle.respond_auxiliary_window(
+                profile_id,
+                request_id,
+                AuxiliaryWindowResponse::ExtensionInstallPrompt { proceed },
+            );
+            return;
+        }
+
+        if let AuxiliaryWindowKind::ExtensionUninstallPrompt {
+            extension_name,
+            triggering_extension_name,
+            ..
+        } = &kind
+        {
+            let proceed = show_extension_uninstall_prompt_dialog(
+                extension_name,
+                triggering_extension_name.as_deref(),
+            );
+            _ = self.browser_handle.respond_auxiliary_window(
+                profile_id,
+                request_id,
+                AuxiliaryWindowResponse::ExtensionUninstallPrompt {
+                    proceed,
+                    report_abuse: false,
+                },
+            );
+            return;
+        }
+
+        if let AuxiliaryWindowKind::DownloadPrompt {
+            file_name,
+            suggested_path,
+            action_hint,
+            ..
+        } = &kind
+        {
+            let response = download_prompt_response_for_simpleapp(
+                *action_hint,
+                file_name,
+                suggested_path,
+                self.cli.download_dir.as_deref(),
+            );
+            _ = self
+                .browser_handle
+                .respond_auxiliary_window(profile_id, request_id, response);
+            return;
+        }
+
+        if let Err(err) = self
+            .browser_handle
+            .open_default_auxiliary_window(profile_id, request_id)
+        {
+            warn!("failed to open default auxiliary window: {err}");
+        }
+    }
+
+    fn resize_browsing_context(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        width: u32,
+        height: u32,
+    ) {
+        if let Err(err) =
+            self.browser_handle
+                .resize_browsing_context(browsing_context_id, width, height)
+        {
+            warn!("failed to resize browsing context: {err}");
+        }
+    }
+
+    fn decorated_window_title(&self, window_id: HostWindowId) -> String {
+        let base_title = self
+            .window_base_titles
+            .get(&window_id)
+            .cloned()
+            .unwrap_or_else(|| "CBF SimpleApp".to_string());
+
+        match self.download_title_suffix() {
+            Some(suffix) => format!("{base_title} - {suffix}"),
+            None => base_title,
+        }
+    }
+
+    fn refresh_primary_window_title(&self) -> Vec<CoreAction> {
+        primary_host_window_id(&self.shared)
+            .map(|window_id| CoreAction::UpdateWindowTitle {
+                window_id,
+                title: self.decorated_window_title(window_id),
+            })
+            .into_iter()
+            .collect()
+    }
+
+    fn download_title_suffix(&self) -> Option<String> {
+        let active: Vec<_> = self
+            .downloads
+            .values()
+            .filter(|download| {
+                matches!(
+                    download.state,
+                    DownloadState::InProgress | DownloadState::Paused
+                )
+            })
+            .collect();
+        if active.is_empty() {
+            return None;
+        }
+        if active.len() == 1 {
+            let download = active[0];
+            let verb = if download.is_paused {
+                "Paused"
+            } else {
+                "Downloading"
+            };
+            return Some(
+                match format_progress(download.received_bytes, download.total_bytes) {
+                    Some(progress) => format!("{verb} {progress} - {}", download.file_name),
+                    None => format!("{verb} - {}", download.file_name),
+                },
+            );
+        }
+        Some(format!("{} downloads active", active.len()))
+    }
+}
+
+fn format_progress(received_bytes: u64, total_bytes: Option<u64>) -> Option<String> {
+    total_bytes.and_then(|total| {
+        if total == 0 {
+            None
+        } else {
+            Some(format!("{}%", received_bytes.saturating_mul(100) / total))
+        }
+    })
+}
+
+fn respond_javascript_dialog_for_browsing_context(
+    browser: BrowserHandle<ChromiumBackend>,
+    browsing_context_id: BrowsingContextId,
+    request_id: u64,
+    dialog_type: DialogType,
+    response: DialogResponse,
+) -> Result<(), cbf::error::Error> {
+    if dialog_type == DialogType::BeforeUnload {
+        return browser.confirm_beforeunload(
+            browsing_context_id,
+            request_id,
+            matches!(response, DialogResponse::Success { .. }),
+        );
+    }
+    browser.respond_javascript_dialog(browsing_context_id, request_id, response)
+}
+
+pub(crate) fn respond_javascript_dialog_for_target(
+    browser: BrowserHandle<ChromiumBackend>,
+    target: JavaScriptDialogTarget,
+    request_id: u64,
+    response: DialogResponse,
+) {
+    let result = match target {
+        JavaScriptDialogTarget::BrowsingContext(browsing_context_id) => {
+            browser.respond_javascript_dialog(browsing_context_id, request_id, response)
+        }
+        JavaScriptDialogTarget::TransientBrowsingContext(transient_browsing_context_id) => browser
+            .respond_javascript_dialog_in_transient_browsing_context(
+                transient_browsing_context_id,
+                request_id,
+                response,
+            ),
+    };
+    if let Err(err) = result {
+        warn!("failed to respond javascript dialog: {err}");
+    }
+}
+
+fn show_beforeunload_dialog(
+    message: &str,
+    beforeunload_reason: Option<&BeforeUnloadReason>,
+) -> DialogResponse {
+    let reason_suffix = beforeunload_reason
+        .map(beforeunload_reason_description)
+        .unwrap_or("The page requested confirmation before closing.");
+    let description = format!("{message}\n\n{reason_suffix}");
+    let confirmed = MessageDialog::new()
+        .set_level(MessageLevel::Warning)
+        .set_title("Leave Page?")
+        .set_description(&description)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+
+    if confirmed == MessageDialogResult::Yes {
+        DialogResponse::Success { input: None }
+    } else {
+        DialogResponse::Cancel
+    }
+}
+
+fn beforeunload_reason_description(reason: &BeforeUnloadReason) -> &'static str {
+    match reason {
+        BeforeUnloadReason::CloseBrowsingContext => {
+            "Closing this page may discard unsaved changes."
+        }
+        BeforeUnloadReason::Navigate => "Navigating away may discard unsaved changes.",
+        BeforeUnloadReason::Reload => "Reloading may discard unsaved changes.",
+        BeforeUnloadReason::WindowClose => "Closing the window may discard unsaved changes.",
+        BeforeUnloadReason::Unknown => "The page requested confirmation before closing.",
+    }
+}
+
+fn show_permission_prompt_dialog(permission: &PermissionPromptType) -> bool {
+    let message = format!(
+        "{}\n\nAllow this request?",
+        permission_prompt_description(permission)
+    );
+
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Info)
+        .set_title("Permission Request")
+        .set_description(&message)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+
+    matches!(result, MessageDialogResult::Yes)
+}
+
+fn permission_prompt_description(permission: &PermissionPromptType) -> &'static str {
+    match permission {
+        PermissionPromptType::VideoCapture => "This page wants to use the camera.",
+        PermissionPromptType::AudioCapture => "This page wants to use the microphone.",
+        PermissionPromptType::Notifications => "This page wants to show notifications.",
+        PermissionPromptType::Geolocation => "This page wants to access your location.",
+        PermissionPromptType::Other(_) => "This page wants a browser permission.",
+        PermissionPromptType::Unknown => "This page wants a browser permission.",
+    }
+}
+
+fn show_extension_install_prompt_dialog(extension_name: &str, permission_names: &[String]) -> bool {
+    let permissions = if permission_names.is_empty() {
+        "No additional permissions were listed.".to_string()
+    } else {
+        permission_names
+            .iter()
+            .map(|permission| format!("• {permission}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let message = format!(
+        "Install the extension “{extension_name}”?\n\nRequested permissions:\n{permissions}"
+    );
+
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Info)
+        .set_title("Install Extension")
+        .set_description(&message)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+
+    matches!(result, MessageDialogResult::Yes)
+}
+
+fn show_extension_uninstall_prompt_dialog(
+    extension_name: &str,
+    triggering_extension_name: Option<&str>,
+) -> bool {
+    let mut message = format!("Remove the extension “{extension_name}”?");
+    if let Some(trigger) = triggering_extension_name {
+        message.push_str(&format!(
+            "\n\nThis request was initiated by the extension “{trigger}”."
+        ));
+    }
+
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Warning)
+        .set_title("Remove Extension")
+        .set_description(&message)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+
+    matches!(result, MessageDialogResult::Yes)
+}
+
+fn download_prompt_response_for_simpleapp(
+    action_hint: DownloadPromptActionHint,
+    file_name: &str,
+    suggested_path: &Option<String>,
+    download_dir: Option<&std::path::Path>,
+) -> AuxiliaryWindowResponse {
+    match action_hint {
+        DownloadPromptActionHint::AutoSave => AuxiliaryWindowResponse::DownloadPrompt {
+            allow: true,
+            destination_path: download_dir
+                .map(|dir| dir.join(file_name))
+                .or_else(|| suggested_path.as_ref().map(std::path::PathBuf::from))
+                .map(|path| path.to_string_lossy().to_string()),
+        },
+        DownloadPromptActionHint::Deny => AuxiliaryWindowResponse::DownloadPrompt {
+            allow: false,
+            destination_path: None,
+        },
+        DownloadPromptActionHint::SelectDestination | DownloadPromptActionHint::Unknown => {
+            let path = FileDialog::new()
+                .set_file_name(file_name)
+                .save_file()
+                .map(|path| path.to_string_lossy().to_string());
+            AuxiliaryWindowResponse::DownloadPrompt {
+                allow: path.is_some(),
+                destination_path: path,
+            }
+        }
+    }
+}
