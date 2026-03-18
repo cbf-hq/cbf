@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Browser-generic browsing context visibility control with `Visible` and `Hidden` states.
 - `SetBrowsingContextVisibility` command support for host-driven visibility changes.
+- Browser-generic background policy control for browsing contexts and transient browsing contexts.
+- `BackgroundPolicy` command support for host-driven opaque and transparent embedded surface behavior.
 
 ### Changed
 

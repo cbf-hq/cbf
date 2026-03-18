@@ -5,6 +5,7 @@
 
 use crate::data::{
     auxiliary_window::{AuxiliaryWindowId, AuxiliaryWindowResponse},
+    background::BackgroundPolicy,
     browsing_context_open::BrowsingContextOpenResponse,
     dialog::DialogResponse,
     download::DownloadId,
@@ -94,6 +95,16 @@ pub enum BrowserCommand {
         transient_browsing_context_id: TransientBrowsingContextId,
         width: u32,
         height: u32,
+    },
+    /// Update the page background policy of a web page surface.
+    SetBrowsingContextBackgroundPolicy {
+        browsing_context_id: BrowsingContextId,
+        policy: BackgroundPolicy,
+    },
+    /// Update the page background policy of a transient browsing context surface.
+    SetTransientBrowsingContextBackgroundPolicy {
+        transient_browsing_context_id: TransientBrowsingContextId,
+        policy: BackgroundPolicy,
     },
 
     // --- Navigation ---
@@ -295,6 +306,8 @@ pub enum BrowserOperation {
     CloseTransientBrowsingContext,
     ResizeBrowsingContext,
     ResizeTransientBrowsingContext,
+    SetBrowsingContextBackgroundPolicy,
+    SetTransientBrowsingContextBackgroundPolicy,
     Navigate,
     GoBack,
     GoForward,
@@ -357,6 +370,12 @@ impl BrowserOperation {
             BrowserCommand::ResizeBrowsingContext { .. } => Self::ResizeBrowsingContext,
             BrowserCommand::ResizeTransientBrowsingContext { .. } => {
                 Self::ResizeTransientBrowsingContext
+            }
+            BrowserCommand::SetBrowsingContextBackgroundPolicy { .. } => {
+                Self::SetBrowsingContextBackgroundPolicy
+            }
+            BrowserCommand::SetTransientBrowsingContextBackgroundPolicy { .. } => {
+                Self::SetTransientBrowsingContextBackgroundPolicy
             }
             BrowserCommand::Navigate { .. } => Self::Navigate,
             BrowserCommand::GoBack { .. } => Self::GoBack,
@@ -433,6 +452,10 @@ impl std::fmt::Display for BrowserOperation {
             Self::CloseTransientBrowsingContext => "close_transient_browsing_context",
             Self::ResizeBrowsingContext => "resize_browsing_context",
             Self::ResizeTransientBrowsingContext => "resize_transient_browsing_context",
+            Self::SetBrowsingContextBackgroundPolicy => "set_browsing_context_background_policy",
+            Self::SetTransientBrowsingContextBackgroundPolicy => {
+                "set_transient_browsing_context_background_policy"
+            }
             Self::Navigate => "navigate",
             Self::GoBack => "go_back",
             Self::GoForward => "go_forward",
