@@ -1,0 +1,506 @@
+From d5740c6de7f06f015f316fc10c5e6655e82bd0fc Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Wed, 18 Mar 2026 22:00:35 +0900
+Subject: [PATCH 32/32] Add browsing context background policy flow
+
+---
+ chrome/browser/cbf/bridge/cbf_bridge.h        |  8 ++
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |  2 +
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  7 ++
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc | 86 +++++++++++++++++++
+ chrome/browser/cbf/cbf_profile_service.cc     | 39 +++++++++
+ chrome/browser/cbf/cbf_profile_service.h      |  3 +
+ .../cbf/cbf_profile_service_browsertest.cc    | 78 +++++++++++++++++
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  2 +
+ .../cbf_profile_navigation_controller.cc      | 30 +++++++
+ .../cbf_profile_navigation_controller.h       |  1 +
+ 10 files changed, 256 insertions(+)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index be5631df07ada..b0fac2f7cf486 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -66,6 +66,10 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_tab_size(
+     uint64_t tab_id,
+     uint32_t width,
+     uint32_t height);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_tab_background_policy(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id,
++    bool transparent);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_web_page_focus(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+@@ -161,6 +165,10 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_extension_popup_size(
+     uint64_t popup_id,
+     uint32_t width,
+     uint32_t height);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_extension_popup_background_policy(
++    CbfBridgeClientHandle* client,
++    uint64_t popup_id,
++    bool transparent);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_extension_popup_focus(
+     CbfBridgeClientHandle* client,
+     uint64_t popup_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index ba4c5fa0e2e57..435654412a64e 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -27,6 +27,7 @@ class CbfBridgeClient {
+                      const std::string& initial_url,
+                      const std::string& profile_id);
+   bool SetTabSize(uint64_t tab_id, uint32_t width, uint32_t height);
++  bool SetTabBackgroundPolicy(uint64_t tab_id, bool transparent);
+   bool SetTabFocus(uint64_t tab_id, bool focused);
+   bool SetTabVisibility(uint64_t tab_id, uint8_t visibility);
+   bool SendKeyEvent(const CbfKeyEvent* event, const CbfCommandList* commands);
+@@ -71,6 +72,7 @@ class CbfBridgeClient {
+   bool PrintPreview(uint64_t tab_id);
+   bool ActivateExtensionAction(uint64_t tab_id, const std::string& extension_id);
+   bool SetExtensionPopupSize(uint64_t popup_id, uint32_t width, uint32_t height);
++  bool SetExtensionPopupBackgroundPolicy(uint64_t popup_id, bool transparent);
+   bool SetExtensionPopupFocus(uint64_t popup_id, bool focused);
+   bool SendExtensionPopupKeyEvent(uint64_t popup_id,
+                                   const CbfKeyEvent* event,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index 6c2516eef5370..ab930a3b7b763 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -858,6 +858,13 @@ bool cbf_bridge_client_set_web_page_focus(CbfBridgeClientHandle* client,
+ bool cbf_bridge_client_set_tab_visibility(CbfBridgeClientHandle* client,
+                                           uint64_t tab_id,
+                                           uint8_t visibility);
++bool cbf_bridge_client_set_tab_background_policy(CbfBridgeClientHandle* client,
++                                                 uint64_t tab_id,
++                                                 bool transparent);
++bool cbf_bridge_client_set_extension_popup_background_policy(
++    CbfBridgeClientHandle* client,
++    uint64_t popup_id,
++    bool transparent);
+ bool cbf_bridge_client_get_web_page_dom_html(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index 1531895074594..c29f83992d23a 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -102,6 +102,41 @@ bool CbfBridgeClient::SetTabSize(const uint64_t tab_id,
+   return true;
+ }
+ 
++bool CbfBridgeClient::SetTabBackgroundPolicy(const uint64_t tab_id,
++                                             const bool transparent) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, const uint64_t tab_id,
++             const bool transparent) {
++            if (!impl->browser_remote.is_bound()) {
++              return;
++            }
++            auto it = impl->web_page_profiles.find(tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->SetTabBackgroundPolicy(tab_id, transparent);
++          },
++          impl, tab_id, transparent));
++  return true;
++}
++
+ bool CbfBridgeClient::SetTabFocus(const uint64_t tab_id,
+                                       const bool focused) {
+   if (!impl_) {
+@@ -533,6 +568,35 @@ bool CbfBridgeClient::SetExtensionPopupSize(uint64_t popup_id,
+   return true;
+ }
+ 
++bool CbfBridgeClient::SetExtensionPopupBackgroundPolicy(uint64_t popup_id,
++                                                        bool transparent) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t popup_id, bool transparent) {
++            auto it = impl->popup_profiles.find(popup_id);
++            if (it == impl->popup_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->SetExtensionPopupBackgroundPolicy(
++                popup_id, transparent);
++          },
++          impl, popup_id, transparent));
++  return true;
++}
++
+ bool CbfBridgeClient::SetExtensionPopupFocus(uint64_t popup_id, bool focused) {
+   if (!impl_) {
+     return false;
+@@ -1074,6 +1138,17 @@ extern "C" bool cbf_bridge_client_set_tab_size(
+   return cbf_bridge_client_set_web_page_size(client, tab_id, width, height);
+ }
+ 
++extern "C" bool cbf_bridge_client_set_tab_background_policy(
++    CbfBridgeClientHandle* client,
++    const uint64_t tab_id,
++    const bool transparent) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->SetTabBackgroundPolicy(tab_id, transparent);
++}
++
+ extern "C" bool cbf_bridge_client_set_web_page_focus(
+     CbfBridgeClientHandle* client,
+     const uint64_t tab_id,
+@@ -1213,6 +1288,17 @@ extern "C" bool cbf_bridge_client_set_extension_popup_size(
+       ->SetExtensionPopupSize(popup_id, width, height);
+ }
+ 
++extern "C" bool cbf_bridge_client_set_extension_popup_background_policy(
++    CbfBridgeClientHandle* client,
++    uint64_t popup_id,
++    bool transparent) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->SetExtensionPopupBackgroundPolicy(popup_id, transparent);
++}
++
+ extern "C" bool cbf_bridge_client_set_extension_popup_focus(
+     CbfBridgeClientHandle* client,
+     uint64_t popup_id,
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 12897f56cff8e..a60c3309e7745 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -78,6 +78,7 @@
+ #include "extensions/browser/extension_registry.h"
+ #include "extensions/common/constants.h"
+ #include "extensions/common/extension.h"
++#include "third_party/skia/include/core/SkColor.h"
+ #include "extensions/common/manifest.h"
+ #include "extensions/common/manifest_handlers/icons_handler.h"
+ #include "extensions/common/permissions/permissions_data.h"
+@@ -394,6 +395,24 @@ mojom::CbfDownloadOutcome ToCbfDownloadOutcome(download::DownloadItem* item) {
+   }
+ }
+ 
++bool ApplyWebContentsBackgroundPolicy(content::WebContents* web_contents,
++                                      bool transparent) {
++  if (!web_contents) {
++    return false;
++  }
++
++  const SkColor color = transparent ? SK_ColorTRANSPARENT : SK_ColorWHITE;
++  web_contents->SetPageBaseBackgroundColor(color);
++
++  content::RenderWidgetHostView* view = web_contents->GetRenderWidgetHostView();
++  if (!view) {
++    return false;
++  }
++
++  view->SetBackgroundColor(color);
++  return true;
++}
++
+ }  // namespace
+ 
+ class CbfProfileService::ActiveExtensionPopup
+@@ -531,6 +550,13 @@ class CbfProfileService::ActiveExtensionPopup
+ 
+   void SetFocus(bool focused) { SetWebContentsFocus(contents(), focused); }
+ 
++  void SetBackgroundPolicy(bool transparent) {
++    if (!contents()) {
++      return;
++    }
++    ApplyWebContentsBackgroundPolicy(contents(), transparent);
++  }
++
+  private:
+   void OnHostLoaded() {
+     LOG(INFO) << "CBF extension popup host loaded: tab_id=" << tab_id_
+@@ -887,6 +913,11 @@ void CbfProfileService::SetTabSize(const TabId tab_id,
+           weak_factory_.GetWeakPtr(), tab_id, std::move(callback)));
+ }
+ 
++void CbfProfileService::SetTabBackgroundPolicy(uint64_t tab_id,
++                                               bool transparent) {
++  navigation_controller_->SetTabBackgroundPolicy(tab_id, transparent);
++}
++
+ void CbfProfileService::SendKeyEvent(
+     mojom::CbfKeyEventPtr event,
+     const std::optional<std::vector<std::string>>& commands) {
+@@ -1065,6 +1096,14 @@ void CbfProfileService::SetExtensionPopupSize(
+   std::move(callback).Run();
+ }
+ 
++void CbfProfileService::SetExtensionPopupBackgroundPolicy(uint64_t popup_id,
++                                                          bool transparent) {
++  if (ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id)) {
++    popup->SetBackgroundPolicy(transparent);
++    return;
++  }
++}
++
+ void CbfProfileService::SetExtensionPopupFocus(uint64_t popup_id,
+                                                bool focused) {
+   if (ActiveExtensionPopup* popup = GetActiveExtensionPopup(popup_id)) {
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 84945773a7f37..14d74181acd59 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -94,6 +94,7 @@ class CbfProfileService : public mojom::CbfProfileService,
+                       std::uint32_t width,
+                       std::uint32_t height,
+                       SetTabSizeCallback callback) override;
++  void SetTabBackgroundPolicy(uint64_t tab_id, bool transparent) override;
+   void SendKeyEvent(
+       mojom::CbfKeyEventPtr event,
+       const std::optional<std::vector<std::string>>& commands) override;
+@@ -134,6 +135,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+                              uint32_t width,
+                              uint32_t height,
+                              SetExtensionPopupSizeCallback callback) override;
++  void SetExtensionPopupBackgroundPolicy(uint64_t popup_id,
++                                         bool transparent) override;
+   void SetExtensionPopupFocus(uint64_t popup_id, bool focused) override;
+   void SendExtensionPopupKeyEvent(
+       uint64_t popup_id,
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 7180bd3c7a676..d558be7068439 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -40,6 +40,7 @@
+ #include "components/history/core/browser/history_types.h"
+ #include "components/tabs/public/tab_interface.h"
+ #include "content/public/browser/web_contents.h"
++#include "content/browser/web_contents/web_contents_impl.h"
+ #include "content/public/test/browser_test.h"
+ #include "content/public/test/browser_test_utils.h"
+ #include "content/public/test/slow_download_http_response.h"
+@@ -53,6 +54,7 @@
+ #include "net/test/embedded_test_server/http_request.h"
+ #include "net/test/embedded_test_server/http_response.h"
+ #include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
++#include "third_party/skia/include/core/SkColor.h"
+ #include "third_party/skia/include/core/SkBitmap.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ #include "ui/gfx/codec/png_codec.h"
+@@ -514,6 +516,13 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+   std::vector<std::unique_ptr<base::ScopedTempDir>> extension_dirs_;
+ };
+ 
++std::optional<SkColor> GetBaseBackgroundColor(content::WebContents* web_contents) {
++  if (!web_contents) {
++    return std::nullopt;
++  }
++  return static_cast<content::WebContentsImpl*>(web_contents)->GetBaseBackgroundColor();
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, InvalidRequestsAreSafeNoOp) {
+   profile_service_->RequestCloseTab(kInvalidTabId);
+   profile_service_->SendDragCancel(9999, kInvalidTabId);
+@@ -564,6 +573,36 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   }
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SetTabBackgroundPolicyUpdatesWebContentsBaseBackgroundColor) {
++  const TabId tab_id = CreatePage("about:blank");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  profile_service_->SetTabBackgroundPolicy(tab_id, true);
++  base::RunLoop().RunUntilIdle();
++  EXPECT_EQ(GetBaseBackgroundColor(web_contents), std::optional<SkColor>(SK_ColorTRANSPARENT));
++
++  profile_service_->SetTabBackgroundPolicy(tab_id, true);
++  base::RunLoop().RunUntilIdle();
++  EXPECT_EQ(GetBaseBackgroundColor(web_contents), std::optional<SkColor>(SK_ColorTRANSPARENT));
++
++  profile_service_->SetTabBackgroundPolicy(tab_id, false);
++  base::RunLoop().RunUntilIdle();
++  EXPECT_EQ(GetBaseBackgroundColor(web_contents), std::optional<SkColor>(SK_ColorWHITE));
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SetTabBackgroundPolicyIgnoresUnknownTab) {
++  profile_service_->SetTabBackgroundPolicy(kInvalidTabId, true);
++  profile_service_->SetTabBackgroundPolicy(kInvalidTabId, false);
++  base::RunLoop().RunUntilIdle();
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        ActivateExtensionActionEmitsPopupLifecycle) {
+   auto extension = LoadActionPopupExtension("Popup Extension");
+@@ -596,6 +635,45 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   observer_.WaitForExtensionPopupOpenedCount(2);
+ }
+ 
++IN_PROC_BROWSER_TEST_F(
++    CbfProfileServiceBrowserTest,
++    SetExtensionPopupBackgroundPolicyUpdatesPopupBaseBackgroundColor) {
++  auto extension = LoadActionPopupExtension("Popup Background");
++  ASSERT_TRUE(extension);
++
++  const TabId tab_id = CreatePage("about:blank");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  profile_service_->ActivateExtensionAction(tab_id, extension->id());
++  observer_.WaitForExtensionPopupOpenedCount(1);
++
++  const uint64_t popup_id = observer_.extension_popup_opened_events()[0].popup_id;
++  content::WebContents* popup_contents = GetPopupContents(popup_id);
++  ASSERT_NE(popup_contents, nullptr);
++
++  profile_service_->SetExtensionPopupBackgroundPolicy(popup_id, true);
++  base::RunLoop().RunUntilIdle();
++  EXPECT_EQ(GetBaseBackgroundColor(popup_contents),
++            std::optional<SkColor>(SK_ColorTRANSPARENT));
++
++  profile_service_->SetExtensionPopupBackgroundPolicy(popup_id, true);
++  base::RunLoop().RunUntilIdle();
++  EXPECT_EQ(GetBaseBackgroundColor(popup_contents),
++            std::optional<SkColor>(SK_ColorTRANSPARENT));
++
++  profile_service_->SetExtensionPopupBackgroundPolicy(popup_id, false);
++  base::RunLoop().RunUntilIdle();
++  EXPECT_EQ(GetBaseBackgroundColor(popup_contents), std::optional<SkColor>(SK_ColorWHITE));
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SetExtensionPopupBackgroundPolicyIgnoresUnknownPopup) {
++  profile_service_->SetExtensionPopupBackgroundPolicy(/*popup_id=*/999999, true);
++  profile_service_->SetExtensionPopupBackgroundPolicy(/*popup_id=*/999999, false);
++  base::RunLoop().RunUntilIdle();
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        ActivateExtensionActionIgnoresExtensionWithoutPopup) {
+   auto extension = LoadActionExtensionWithoutPopup("Action Without Popup");
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index facc10fb7fb13..457516e219426 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -761,6 +761,7 @@ interface CbfProfileService {
+   CreateTab(string initial_url, uint64 request_id) => (uint64 tab_id);
+   RequestCloseTab(uint64 tab_id);
+   SetTabSize(uint64 tab_id, uint32 width, uint32 height) => ();
++  SetTabBackgroundPolicy(uint64 tab_id, bool transparent);
+   SendKeyEvent(CbfKeyEvent event, array<string>? commands);
+   SendMouseEvent(CbfMouseEvent event);
+   SendMouseWheelEvent(CbfMouseWheelEvent event);
+@@ -789,6 +790,7 @@ interface CbfProfileService {
+   SetTabVisibility(uint64 tab_id, CbfTabVisibility visibility);
+   CloseExtensionPopup(uint64 popup_id);
+   SetExtensionPopupSize(uint64 popup_id, uint32 width, uint32 height) => ();
++  SetExtensionPopupBackgroundPolicy(uint64 popup_id, bool transparent);
+   SetExtensionPopupFocus(uint64 popup_id, bool focused);
+   SendExtensionPopupKeyEvent(uint64 popup_id,
+                              CbfKeyEvent event,
+diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+index 40cf00276fb98..2344fb30c8064 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+@@ -11,6 +11,7 @@
+ #include "content/public/browser/web_contents.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
+ #include "content/public/common/referrer.h"
++#include "third_party/skia/include/core/SkColor.h"
+ #include "ui/base/page_transition_types.h"
+ #include "url/gurl.h"
+ 
+@@ -42,6 +43,24 @@ content::RenderWidgetHost* ResolveInputRenderWidgetHost(
+   return view ? view->GetRenderWidgetHost() : nullptr;
+ }
+ 
++bool ApplyWebContentsBackgroundPolicy(content::WebContents* web_contents,
++                                      bool transparent) {
++  if (!web_contents) {
++    return false;
++  }
++
++  const SkColor color = transparent ? SK_ColorTRANSPARENT : SK_ColorWHITE;
++  web_contents->SetPageBaseBackgroundColor(color);
++
++  content::RenderWidgetHostView* view = web_contents->GetRenderWidgetHostView();
++  if (!view) {
++    return false;
++  }
++
++  view->SetBackgroundColor(color);
++  return true;
++}
++
+ }  // namespace
+ 
+ CbfProfileNavigationController::CbfProfileNavigationController(CbfProfileServiceContext* context)
+@@ -122,6 +141,17 @@ void CbfProfileNavigationController::SetTabFocus(TabId tab_id,
+   }
+ }
+ 
++void CbfProfileNavigationController::SetTabBackgroundPolicy(TabId tab_id,
++                                                            bool transparent) {
++  content::WebContents* web_contents =
++      context_->tab_manager().GetWebContents(tab_id);
++  if (!web_contents) {
++    return;
++  }
++
++  ApplyWebContentsBackgroundPolicy(web_contents, transparent);
++}
++
+ void CbfProfileNavigationController::SetTabVisibility(
+     TabId tab_id,
+     mojom::CbfTabVisibility visibility) {
+diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
+index 07ac34bcccefc..7373275859003 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.h
+@@ -24,6 +24,7 @@ class CbfProfileNavigationController {
+   void GoForward(TabId tab_id);
+   void Reload(TabId tab_id, bool ignore_cache);
+   void SetTabFocus(TabId tab_id, bool focused);
++  void SetTabBackgroundPolicy(TabId tab_id, bool transparent);
+   void SetTabVisibility(TabId tab_id, mojom::CbfTabVisibility visibility);
+ 
+  private:
+-- 
+2.50.1 (Apple Git-155)
+

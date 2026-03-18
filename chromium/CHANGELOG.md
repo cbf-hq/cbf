@@ -18,6 +18,8 @@ source-built use rather than a downloadable binary bundle.
 
 - Host-driven browsing context visibility control in the Chromium runtime bridge and profile service.
 - macOS surface handle refresh after visibility recovery when the compositor CAContextID changes.
+- Host-driven browsing context background policy control through the bridge, profile service, and browser tests.
+- Transparent embedded surface handling that applies both page base background color and browser-side view background color for tabs and extension popups.
 
 ## [cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1] - 2026-03-17
 

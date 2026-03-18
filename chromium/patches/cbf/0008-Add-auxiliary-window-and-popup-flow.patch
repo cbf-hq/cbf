@@ -1,7 +1,7 @@
 From 82c7913895660738b1091467ec945b3521e4b7ea Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 3 Mar 2026 18:37:44 +0900
-Subject: [PATCH 08/31] Add auxiliary window and popup flow
+Subject: [PATCH 08/32] Add auxiliary window and popup flow
 
 ---
  chrome/browser/cbf/cbf_profile_service.cc     | 541 +++++++++++++++---
