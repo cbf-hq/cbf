@@ -1,7 +1,7 @@
 From 68cbe0bbcf1c9409e841133fed12d7d428821ded Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 3 Mar 2026 18:37:19 +0900
-Subject: [PATCH 07/33] Stabilize DevTools frontend rebinding
+Subject: [PATCH 07/34] Stabilize DevTools frontend rebinding
 
 ---
  .../cbf/bridge/cbf_bridge_client_impl.cc      |   5 -

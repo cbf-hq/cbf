@@ -88,10 +88,11 @@ It returns a session handle, an event stream, and a process handle — **no wind
 use std::path::PathBuf;
 use cbf_chrome::backend::ChromiumBackendOptions;
 use cbf_chrome::process::{
-    ChromiumProcessOptions, RuntimeSelection, StartChromiumOptions, start_chromium,
+    ChromiumProcessOptions, ChromiumRuntime, RuntimeSelection, StartChromiumOptions,
+    start_chromium,
 };
 
-let (session, events, mut process) = start_chromium(
+let (session, events, process) = start_chromium(
     StartChromiumOptions {
         process: ChromiumProcessOptions {
             runtime: RuntimeSelection::Chrome,
@@ -102,12 +103,17 @@ let (session, events, mut process) = start_chromium(
         backend: ChromiumBackendOptions::new(),
     },
 )?;
+
+let runtime = ChromiumRuntime::new(session, events, process);
+runtime.install_signal_handlers()?;
 ```
 
 Operational notes:
 
 - Prefer explicit `user_data_dir` to avoid profile conflicts.
 - `executable_path` should point to the CBF Chromium-fork binary obtained in §2.
+- `start_chromium` remains the core tuple API; `ChromiumRuntime` is the opt-in lifecycle wrapper
+  for signal forwarding and best-effort shutdown hardening.
 
 ### Windows and surface attachment
 

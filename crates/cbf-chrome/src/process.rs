@@ -1,12 +1,24 @@
 use async_process::{Child, Command};
 use cbf_chrome_sys::ffi::{cbf_bridge_client_create, cbf_bridge_client_destroy};
 use futures_lite::future::block_on;
-use std::{env, path::PathBuf, process::ExitStatus};
+use signal_hook::iterator::Signals;
+use std::{
+    env,
+    path::PathBuf,
+    process::ExitStatus,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    thread,
+    time::{Duration, Instant},
+};
+use thiserror::Error;
 
 use cbf::{
-    browser::{BrowserSession, EventStream},
+    browser::{BrowserHandle, BrowserSession, EventStream},
     delegate::BackendDelegate,
-    error::{ApiErrorKind, BackendErrorInfo, Error},
+    error::{ApiErrorKind, BackendErrorInfo, Error as CbfError},
 };
 
 use crate::{
@@ -91,12 +103,12 @@ impl std::str::FromStr for RuntimeSelection {
     }
 }
 
-fn validate_runtime_selection(runtime: RuntimeSelection) -> Result<(), Error> {
+fn validate_runtime_selection(runtime: RuntimeSelection) -> Result<(), CbfError> {
     if matches!(runtime, RuntimeSelection::Chrome) {
         return Ok(());
     }
 
-    Err(Error::BackendFailure(BackendErrorInfo {
+    Err(CbfError::BackendFailure(BackendErrorInfo {
         kind: ApiErrorKind::Unsupported,
         operation: None,
         detail: Some(format!(
@@ -166,9 +178,22 @@ pub struct ChromiumProcess {
 }
 
 impl ChromiumProcess {
+    const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+    /// Returns the process id of the browser process.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     /// Forcefully kills the browser process.
     pub fn kill(&mut self) -> std::io::Result<()> {
         self.child.kill()
+    }
+
+    /// Requests browser process termination with `SIGTERM`.
+    #[cfg(unix)]
+    pub fn terminate(&self) -> std::io::Result<()> {
+        send_signal(self.pid(), libc::SIGTERM)
     }
 
     /// Waits for the browser process to exit.
@@ -185,6 +210,252 @@ impl ChromiumProcess {
     pub async fn wait(&mut self) -> std::io::Result<ExitStatus> {
         self.child.status().await
     }
+
+    /// Polls for process exit until `timeout` elapses.
+    pub fn wait_for_exit_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> std::io::Result<Option<ExitStatus>> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self.try_wait()? {
+                return Ok(Some(status));
+            }
+            if Instant::now() >= deadline {
+                return Ok(None);
+            }
+            thread::sleep(
+                Self::WAIT_POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShutdownMode {
+    Graceful,
+    Force,
+}
+
+#[derive(Debug, Error)]
+pub enum InstallSignalHandlersError {
+    #[error("signal handlers are already installed for a Chromium runtime")]
+    AlreadyInstalled,
+    #[error("failed to install signal handlers: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+#[derive(Debug)]
+struct ShutdownController {
+    browser: BrowserHandle<ChromiumBackend>,
+    pid: u32,
+    next_shutdown_request_id: AtomicU64,
+    shutdown_started: AtomicBool,
+}
+
+impl ShutdownController {
+    const FORCE_WAIT_TIMEOUT: Duration = Duration::from_secs(3);
+    const TERM_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
+
+    fn new(browser: BrowserHandle<ChromiumBackend>, pid: u32) -> Self {
+        Self {
+            browser,
+            pid,
+            next_shutdown_request_id: AtomicU64::new(1),
+            shutdown_started: AtomicBool::new(false),
+        }
+    }
+
+    fn begin_shutdown(&self) -> bool {
+        self.shutdown_started
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    fn shutdown_via_pid(&self, mode: ShutdownMode) {
+        if !self.begin_shutdown() {
+            return;
+        }
+
+        _ = match mode {
+            ShutdownMode::Graceful => self.browser.request_shutdown(
+                self.next_shutdown_request_id
+                    .fetch_add(1, Ordering::Relaxed),
+            ),
+            ShutdownMode::Force => self.browser.force_shutdown(),
+        };
+
+        if wait_for_pid_exit(self.pid, Self::FORCE_WAIT_TIMEOUT) {
+            return;
+        }
+
+        #[cfg(unix)]
+        {
+            let _ = send_signal(self.pid, libc::SIGTERM);
+        }
+
+        if wait_for_pid_exit(self.pid, Self::TERM_WAIT_TIMEOUT) {
+            return;
+        }
+
+        #[cfg(unix)]
+        {
+            let _ = send_signal(self.pid, libc::SIGKILL);
+        }
+    }
+}
+
+static SIGNAL_HANDLERS_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug)]
+pub struct ChromiumRuntime {
+    session: BrowserSession<ChromiumBackend>,
+    events: EventStream<ChromiumBackend>,
+    process: ChromiumProcess,
+    shutdown_controller: Arc<ShutdownController>,
+}
+
+impl ChromiumRuntime {
+    pub fn new(
+        session: BrowserSession<ChromiumBackend>,
+        events: EventStream<ChromiumBackend>,
+        process: ChromiumProcess,
+    ) -> Self {
+        let shutdown_controller =
+            Arc::new(ShutdownController::new(session.handle(), process.pid()));
+        Self {
+            session,
+            events,
+            process,
+            shutdown_controller,
+        }
+    }
+
+    pub fn session(&self) -> &BrowserSession<ChromiumBackend> {
+        &self.session
+    }
+
+    pub fn events(&self) -> EventStream<ChromiumBackend> {
+        self.events.clone()
+    }
+
+    pub fn process(&self) -> &ChromiumProcess {
+        &self.process
+    }
+
+    pub fn process_mut(&mut self) -> &mut ChromiumProcess {
+        &mut self.process
+    }
+
+    pub fn install_signal_handlers(&self) -> Result<(), InstallSignalHandlersError> {
+        if SIGNAL_HANDLERS_INSTALLED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(InstallSignalHandlersError::AlreadyInstalled);
+        }
+
+        let controller = Arc::clone(&self.shutdown_controller);
+        let signals = Signals::new([signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM])
+            .inspect_err(|_| {
+                SIGNAL_HANDLERS_INSTALLED.store(false, Ordering::Release);
+            })?;
+
+        thread::spawn(move || {
+            let mut signals = signals;
+            if signals.forever().next().is_some() {
+                controller.shutdown_via_pid(ShutdownMode::Force);
+            }
+        });
+
+        Ok(())
+    }
+
+    pub fn shutdown(&mut self, mode: ShutdownMode) -> std::io::Result<()> {
+        if !self.shutdown_controller.begin_shutdown() {
+            return Ok(());
+        }
+
+        let _ = match mode {
+            ShutdownMode::Graceful => self.session.close(),
+            ShutdownMode::Force => self.session.force_close(),
+        };
+
+        if self
+            .process
+            .wait_for_exit_timeout(ShutdownController::FORCE_WAIT_TIMEOUT)?
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        #[cfg(unix)]
+        self.process.terminate()?;
+
+        if self
+            .process
+            .wait_for_exit_timeout(ShutdownController::TERM_WAIT_TIMEOUT)?
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        match self.process.kill() {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::InvalidInput => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl Drop for ChromiumRuntime {
+    fn drop(&mut self) {
+        let _ = self.shutdown(ShutdownMode::Force);
+    }
+}
+
+#[cfg(unix)]
+fn send_signal(pid: u32, signal: libc::c_int) -> std::io::Result<()> {
+    let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
+    if result == 0 {
+        return Ok(());
+    }
+
+    let err = std::io::Error::last_os_error();
+    if matches!(err.raw_os_error(), Some(libc::ESRCH)) {
+        return Ok(());
+    }
+    Err(err)
+}
+
+#[cfg(unix)]
+fn process_exists(pid: u32) -> bool {
+    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    if result == 0 {
+        return true;
+    }
+
+    let err = std::io::Error::last_os_error();
+    !matches!(err.raw_os_error(), Some(libc::ESRCH))
+}
+
+#[cfg(not(unix))]
+fn process_exists(_pid: u32) -> bool {
+    false
+}
+
+fn wait_for_pid_exit(pid: u32, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !process_exists(pid) {
+            return true;
+        }
+        thread::sleep(
+            ChromiumProcess::WAIT_POLL_INTERVAL
+                .min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+    !process_exists(pid)
 }
 
 /// Launches the Chromium process and connects to it via an inherited Mojo endpoint.
@@ -201,7 +472,7 @@ pub fn start_chromium(
         EventStream<ChromiumBackend>,
         ChromiumProcess,
     ),
-    Error,
+    CbfError,
 > {
     let StartChromiumOptions { process, backend } = options;
 
@@ -222,7 +493,7 @@ pub fn start_chromium(
     // Create the bridge client handle and prepare the Mojo channel pair.
     let inner = unsafe { cbf_bridge_client_create() };
     if inner.is_null() {
-        return Err(Error::BackendFailure(cbf::error::BackendErrorInfo {
+        return Err(CbfError::BackendFailure(cbf::error::BackendErrorInfo {
             kind: cbf::error::ApiErrorKind::ConnectTimeout,
             operation: None,
             detail: Some("cbf_bridge_client_create returned null".to_owned()),
@@ -231,7 +502,7 @@ pub fn start_chromium(
 
     let (remote_fd, switch_arg) = IpcClient::prepare_channel().map_err(|_| {
         unsafe { cbf_bridge_client_destroy(inner) };
-        Error::BackendFailure(cbf::error::BackendErrorInfo {
+        CbfError::BackendFailure(cbf::error::BackendErrorInfo {
             kind: cbf::error::ApiErrorKind::ConnectTimeout,
             operation: None,
             detail: Some("prepare_channel failed".to_owned()),
@@ -241,7 +512,7 @@ pub fn start_chromium(
     // Generate a per-session token.
     let mut token_bytes = [0u8; 32];
     getrandom::fill(&mut token_bytes).map_err(|_| {
-        Error::BackendFailure(cbf::error::BackendErrorInfo {
+        CbfError::BackendFailure(cbf::error::BackendErrorInfo {
             kind: cbf::error::ApiErrorKind::ConnectTimeout,
             operation: None,
             detail: Some("token generation failed".to_owned()),
@@ -290,7 +561,7 @@ pub fn start_chromium(
 
     command.args(&extra_args);
 
-    let child = command.spawn().map_err(Error::ProcessSpawnError)?;
+    let child = command.spawn().map_err(CbfError::ProcessSpawnError)?;
 
     // Notify the bridge of the child PID: on macOS this registers the Mach
     // port with the rendezvous server; on other platforms it is bookkeeping.
@@ -307,7 +578,7 @@ pub fn start_chromium(
 
     // Complete the Mojo handshake: send the OutgoingInvitation and bind the remote.
     let client = unsafe { IpcClient::connect_inherited(inner) }.map_err(|_| {
-        Error::BackendFailure(cbf::error::BackendErrorInfo {
+        CbfError::BackendFailure(cbf::error::BackendErrorInfo {
             kind: cbf::error::ApiErrorKind::ConnectTimeout,
             operation: None,
             detail: Some("connect_inherited failed".to_owned()),
@@ -316,7 +587,7 @@ pub fn start_chromium(
 
     // Authenticate and set up the browser observer.
     client.authenticate(&session_token).map_err(|_| {
-        Error::BackendFailure(cbf::error::BackendErrorInfo {
+        CbfError::BackendFailure(cbf::error::BackendErrorInfo {
             kind: cbf::error::ApiErrorKind::ConnectTimeout,
             operation: None,
             detail: Some("authenticate failed".to_owned()),
@@ -332,6 +603,7 @@ pub fn start_chromium(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_process::Command;
 
     #[test]
     fn runtime_selection_defaults_to_chrome() {
@@ -344,7 +616,7 @@ mod tests {
         let err = validate_runtime_selection(RuntimeSelection::Alloy).unwrap_err();
 
         match err {
-            Error::BackendFailure(info) => {
+            CbfError::BackendFailure(info) => {
                 assert_eq!(info.kind, ApiErrorKind::Unsupported);
                 assert_eq!(
                     info.detail.as_deref(),
@@ -359,5 +631,43 @@ mod tests {
     fn runtime_selection_parses_known_values() {
         assert_eq!("chrome".parse(), Ok(RuntimeSelection::Chrome));
         assert_eq!("alloy".parse(), Ok(RuntimeSelection::Alloy));
+    }
+
+    #[cfg(unix)]
+    fn spawn_sleeping_process() -> ChromiumProcess {
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 30")
+            .spawn()
+            .expect("spawn sleeping process");
+        ChromiumProcess { child }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_exit_timeout_returns_none_while_process_is_alive() {
+        let mut process = spawn_sleeping_process();
+
+        let result = process
+            .wait_for_exit_timeout(Duration::from_millis(10))
+            .unwrap();
+
+        assert!(result.is_none());
+        process.kill().unwrap();
+        process.wait_blocking().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminate_requests_process_exit() {
+        let mut process = spawn_sleeping_process();
+
+        process.terminate().unwrap();
+
+        let status = process
+            .wait_for_exit_timeout(Duration::from_secs(2))
+            .unwrap()
+            .expect("terminated process should exit");
+        assert!(!status.success());
     }
 }

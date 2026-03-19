@@ -852,12 +852,20 @@ impl<B: Backend> BrowserSession<B> {
             Err(err) => Err(err),
         }
     }
+
+    /// Request an immediate shutdown without beforeunload confirmations.
+    pub fn force_close(&self) -> Result<(), Error> {
+        self.closed.store(true, Ordering::Release);
+
+        match self.handle.force_shutdown() {
+            Ok(()) | Err(Error::Disconnected) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
 }
 
 impl<B: Backend> Drop for BrowserSession<B> {
-    fn drop(&mut self) {
-        _ = self.close();
-    }
+    fn drop(&mut self) {}
 }
 
 #[cfg(test)]
@@ -920,5 +928,52 @@ mod tests {
             }
             CommandEnvelope::Generic { .. } => panic!("expected raw-only envelope"),
         }
+    }
+
+    #[test]
+    fn browser_session_close_sends_graceful_shutdown_once() {
+        let (tx, rx) = unbounded::<CommandEnvelope<MockBackend>>();
+        let session = super::BrowserSession::<MockBackend>::new(CommandSender::from_raw_sender(tx));
+
+        session.close().unwrap();
+        session.close().unwrap();
+
+        match rx.recv_blocking().unwrap() {
+            CommandEnvelope::Generic { command, raw } => {
+                assert!(matches!(
+                    command,
+                    BrowserCommand::Shutdown { request_id: 1 }
+                ));
+                assert!(matches!(raw, BrowserCommand::Shutdown { request_id: 1 }));
+            }
+            CommandEnvelope::RawOnly { .. } => panic!("expected graceful shutdown command"),
+        }
+        assert!(rx.is_empty());
+    }
+
+    #[test]
+    fn browser_session_force_close_sends_force_shutdown() {
+        let (tx, rx) = unbounded::<CommandEnvelope<MockBackend>>();
+        let session = super::BrowserSession::<MockBackend>::new(CommandSender::from_raw_sender(tx));
+
+        session.force_close().unwrap();
+
+        match rx.recv_blocking().unwrap() {
+            CommandEnvelope::Generic { command, raw } => {
+                assert!(matches!(command, BrowserCommand::ForceShutdown));
+                assert!(matches!(raw, BrowserCommand::ForceShutdown));
+            }
+            CommandEnvelope::RawOnly { .. } => panic!("expected force shutdown command"),
+        }
+    }
+
+    #[test]
+    fn browser_session_drop_is_noop() {
+        let (tx, rx) = unbounded::<CommandEnvelope<MockBackend>>();
+        let session = super::BrowserSession::<MockBackend>::new(CommandSender::from_raw_sender(tx));
+
+        drop(session);
+
+        assert!(rx.is_empty());
     }
 }

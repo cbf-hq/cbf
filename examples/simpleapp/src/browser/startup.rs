@@ -1,22 +1,14 @@
-use cbf::{
-    browser::EventStream,
-    middleware::{
-        MiddlewareBuilder, error_guard::ErrorGuardLayer, lifecycle::LifecycleLayer,
-        logging::LoggingLayer,
-    },
+use cbf::middleware::{
+    MiddlewareBuilder, error_guard::ErrorGuardLayer, lifecycle::LifecycleLayer,
+    logging::LoggingLayer,
 };
-use cbf_chrome::{
-    backend::ChromiumBackend,
-    process::{ChromiumProcess, start_chromium},
-};
+use cbf_chrome::process::{ChromiumRuntime, start_chromium};
 use tracing::Level;
 
 use crate::cli::{Cli, chromium_options_from_cli};
 
 pub(crate) struct BrowserRuntime {
-    pub(crate) session: cbf::browser::BrowserSession<ChromiumBackend>,
-    pub(crate) events: EventStream<ChromiumBackend>,
-    pub(crate) process: ChromiumProcess,
+    pub(crate) browser: ChromiumRuntime,
 }
 
 pub(crate) fn start_browser(cli: &Cli) -> Result<BrowserRuntime, String> {
@@ -37,8 +29,6 @@ pub(crate) fn start_browser(cli: &Cli) -> Result<BrowserRuntime, String> {
         .map_err(|err| format!("failed to start chromium backend: {err}"))?;
 
     Ok(BrowserRuntime {
-        session,
-        events,
-        process,
+        browser: ChromiumRuntime::new(session, events, process),
     })
 }

@@ -26,6 +26,7 @@ async-process = "2.5"
 futures-lite = "2.6"
 oneshot = "0.1"
 tracing = "0.1"
+signal-hook = "0.4"
 block2 = "0.6.2"
 objc2 = "0.6.4"
 objc2-foundation = { version = "0.3.2", default-features = false }

@@ -24,6 +24,7 @@ futures-lite.workspace = true
 oneshot = { workspace = true, features = ["async", "std"] }
 tracing.workspace = true
 getrandom = { version = "0.3", features = ["std"] }
+signal-hook.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

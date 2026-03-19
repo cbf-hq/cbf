@@ -26,7 +26,7 @@ use crate::{
 
 struct AppRunner {
     controller: AppController,
-    process: cbf_chrome::process::ChromiumProcess,
+    browser: cbf_chrome::process::ChromiumRuntime,
     registry: window_registry::WindowRegistry,
     menu: Option<menu::MacMenu>,
     // JavaScript dialogs are driven by AppKit sheet callbacks, so user
@@ -78,7 +78,9 @@ impl ApplicationHandler<UserEvent> for AppRunner {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.controller.request_shutdown_once();
-        _ = self.process.kill();
+        _ = self
+            .browser
+            .shutdown(cbf_chrome::process::ShutdownMode::Force);
     }
 }
 
@@ -222,15 +224,17 @@ pub(crate) fn run() {
     };
     let proxy = event_loop.create_proxy();
     let menu = menu::MacMenu::new(proxy.clone()).ok();
-    spawn_browser_event_forwarder(runtime.events, proxy.clone());
+    let _ = runtime.browser.install_signal_handlers();
+    spawn_browser_event_forwarder(runtime.browser.events(), proxy.clone());
 
     let shared: SharedStateHandle = Arc::new(Mutex::new(SharedState::default()));
-    let controller = AppController::new(cli, runtime.session.handle(), Arc::clone(&shared));
-    let registry = window_registry::WindowRegistry::new(runtime.session.handle(), shared);
+    let controller =
+        AppController::new(cli, runtime.browser.session().handle(), Arc::clone(&shared));
+    let registry = window_registry::WindowRegistry::new(runtime.browser.session().handle(), shared);
 
     let mut runner = AppRunner {
         controller,
-        process: runtime.process,
+        browser: runtime.browser,
         registry,
         menu,
         executor: LocalExecutor::new(),

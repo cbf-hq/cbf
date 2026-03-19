@@ -1,0 +1,208 @@
+From 5698a37363965457b14b6e1f6480beb80b06fc9c Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 19 Mar 2026 20:22:59 +0900
+Subject: [PATCH 34/34] Terminate browser on host disconnect
+
+---
+ chrome/browser/cbf/cbf_browser_service.cc     | 26 ++++++++++++
+ chrome/browser/cbf/cbf_browser_service.h      |  7 ++++
+ .../cbf/cbf_browser_service_unittest.cc       | 40 +++++++++++++++++++
+ chrome/browser/cbf/cbf_service.cc             |  3 +-
+ chrome/browser/cbf/cbf_service.h              |  3 --
+ 5 files changed, 74 insertions(+), 5 deletions(-)
+
+diff --git a/chrome/browser/cbf/cbf_browser_service.cc b/chrome/browser/cbf/cbf_browser_service.cc
+index ba840503f3805..c5eb950cd496e 100644
+--- a/chrome/browser/cbf/cbf_browser_service.cc
++++ b/chrome/browser/cbf/cbf_browser_service.cc
+@@ -33,6 +33,14 @@ void CbfBrowserService::Authenticate(const std::string& token,
+   }
+ }
+ 
++void CbfBrowserService::BindReceiver(
++    mojo::PendingReceiver<mojom::CbfBrowserService> receiver) {
++  receiver_ = std::make_unique<mojo::Receiver<mojom::CbfBrowserService>>(
++      this, std::move(receiver));
++  receiver_->set_disconnect_handler(base::BindOnce(
++      &CbfBrowserService::OnHostDisconnected, weak_factory_.GetWeakPtr()));
++}
++
+ void CbfBrowserService::SetObserver(
+     mojo::PendingRemote<mojom::CbfBrowserObserver> observer) {
+   if (!authenticated_) { return; }
+@@ -194,6 +202,11 @@ void CbfBrowserService::CancelShutdownForTesting(uint64_t request_id) {
+   CancelShutdown(request_id);
+ }
+ 
++void CbfBrowserService::SetHostDisconnectCallbackForTesting(
++    base::RepeatingClosure callback) {
++  on_host_disconnect_for_testing_ = std::move(callback);
++}
++
+ void CbfBrowserService::NotifyTabClosed() {
+   if (!shutdown_in_progress_) {
+     return;
+@@ -370,6 +383,19 @@ void CbfBrowserService::MaybeFinalizeShutdownRequest() {
+   }
+ }
+ 
++void CbfBrowserService::OnHostDisconnected() {
++  if (!authenticated_) {
++    return;
++  }
++
++  if (on_host_disconnect_for_testing_) {
++    on_host_disconnect_for_testing_.Run();
++    return;
++  }
++
++  chrome::ExitIgnoreUnloadHandlers();
++}
++
+ bool CbfBrowserService::HasOpenWebPages() const {
+   for (const auto& entry : profile_services_) {
+     if (entry.second->GetTabCount() > 0) {
+diff --git a/chrome/browser/cbf/cbf_browser_service.h b/chrome/browser/cbf/cbf_browser_service.h
+index 35657c0bf2105..6d81674b27cbe 100644
+--- a/chrome/browser/cbf/cbf_browser_service.h
++++ b/chrome/browser/cbf/cbf_browser_service.h
+@@ -12,6 +12,7 @@
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+ #include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
++#include "mojo/public/cpp/bindings/receiver.h"
+ #include "mojo/public/cpp/bindings/remote.h"
+ 
+ class Profile;
+@@ -34,6 +35,8 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+ 
+   void Authenticate(const std::string& token,
+                     AuthenticateCallback callback) override;
++  void BindReceiver(
++      mojo::PendingReceiver<mojom::CbfBrowserService> receiver);
+   void SetObserver(
+       mojo::PendingRemote<mojom::CbfBrowserObserver> observer) override;
+   void GetProfiles(GetProfilesCallback callback) override;
+@@ -59,6 +62,7 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+   bool IsShutdownStartTaskPendingForTesting() const;
+   void ScheduleStartShutdownForTesting(uint64_t request_id);
+   void CancelShutdownForTesting(uint64_t request_id);
++  void SetHostDisconnectCallbackForTesting(base::RepeatingClosure callback);
+ 
+  private:
+   enum class ShutdownState {
+@@ -78,6 +82,7 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+   void RebuildProfileCache();
+   ::Profile* ResolveProfile(const std::string& profile_id,
+                             std::string* resolved_id);
++  void OnHostDisconnected();
+ 
+   std::string expected_token_;
+   bool authenticated_ = false;
+@@ -91,8 +96,10 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+   bool shutdown_start_task_pending_ = false;
+   base::flat_map<std::string, std::unique_ptr<CbfProfileService>>
+       profile_services_;
++  std::unique_ptr<mojo::Receiver<mojom::CbfBrowserService>> receiver_;
+   mojo::Remote<mojom::CbfBrowserObserver> observer_;
+   base::RepeatingCallback<void(uint64_t)> on_start_shutdown_for_testing_;
++  base::RepeatingClosure on_host_disconnect_for_testing_;
+   base::WeakPtrFactory<CbfBrowserService> weak_factory_{this};
+ };
+ 
+diff --git a/chrome/browser/cbf/cbf_browser_service_unittest.cc b/chrome/browser/cbf/cbf_browser_service_unittest.cc
+index 6b7a8fd6c3bfa..4692975988288 100644
+--- a/chrome/browser/cbf/cbf_browser_service_unittest.cc
++++ b/chrome/browser/cbf/cbf_browser_service_unittest.cc
+@@ -6,6 +6,7 @@
+ 
+ #include "base/functional/bind.h"
+ #include "base/test/task_environment.h"
++#include "mojo/public/cpp/bindings/remote.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+ namespace cbf {
+@@ -56,6 +57,45 @@ TEST_F(CbfBrowserServiceTest, AcceptsMatchingToken) {
+   EXPECT_TRUE(authenticated);
+ }
+ 
++TEST_F(CbfBrowserServiceTest,
++       HostDisconnectBeforeAuthenticationDoesNotForceShutdown) {
++  CbfBrowserService service("expected-token");
++  int disconnect_count = 0;
++  service.SetHostDisconnectCallbackForTesting(base::BindRepeating(
++      [](int* disconnect_count) { ++*disconnect_count; }, &disconnect_count));
++
++  mojo::Remote<mojom::CbfBrowserService> remote;
++  service.BindReceiver(remote.BindNewPipeAndPassReceiver());
++  remote.reset();
++  task_environment_.RunUntilIdle();
++
++  EXPECT_EQ(disconnect_count, 0);
++}
++
++TEST_F(CbfBrowserServiceTest,
++       HostDisconnectAfterAuthenticationForcesShutdownWithoutUnloadHandlers) {
++  CbfBrowserService service("expected-token");
++  int disconnect_count = 0;
++  service.SetHostDisconnectCallbackForTesting(base::BindRepeating(
++      [](int* disconnect_count) { ++*disconnect_count; }, &disconnect_count));
++
++  mojo::Remote<mojom::CbfBrowserService> remote;
++  service.BindReceiver(remote.BindNewPipeAndPassReceiver());
++
++  bool authenticated = false;
++  remote->Authenticate(
++      "expected-token",
++      base::BindOnce([](bool* authenticated, bool ok) { *authenticated = ok; },
++                     &authenticated));
++  task_environment_.RunUntilIdle();
++  ASSERT_TRUE(authenticated);
++
++  remote.reset();
++  task_environment_.RunUntilIdle();
++
++  EXPECT_EQ(disconnect_count, 1);
++}
++
+ TEST_F(CbfBrowserServiceTest, UnauthenticatedGetProfilesReturnsEmptyList) {
+   CbfBrowserService service("expected-token");
+ 
+diff --git a/chrome/browser/cbf/cbf_service.cc b/chrome/browser/cbf/cbf_service.cc
+index 6cfbe45c6b1b5..ee79462f534c7 100644
+--- a/chrome/browser/cbf/cbf_service.cc
++++ b/chrome/browser/cbf/cbf_service.cc
+@@ -54,8 +54,7 @@ void CbfService::StartIpcServer() {
+     return;
+   }
+ 
+-  ipc_receiver_ = std::make_unique<mojo::Receiver<mojom::CbfBrowserService>>(
+-      browser_service_.get(),
++  browser_service_->BindReceiver(
+       mojo::PendingReceiver<mojom::CbfBrowserService>(std::move(pipe)));
+ }
+ 
+diff --git a/chrome/browser/cbf/cbf_service.h b/chrome/browser/cbf/cbf_service.h
+index 2ef50fe45f005..a323a44fda319 100644
+--- a/chrome/browser/cbf/cbf_service.h
++++ b/chrome/browser/cbf/cbf_service.h
+@@ -4,8 +4,6 @@
+ #include <memory>
+ 
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+-#include "mojo/public/cpp/bindings/receiver.h"
+-
+ class BrowserProcess;
+ 
+ namespace cbf {
+@@ -25,7 +23,6 @@ class CbfService {
+ 
+  private:
+   std::unique_ptr<CbfBrowserService> browser_service_;
+-  std::unique_ptr<mojo::Receiver<mojom::CbfBrowserService>> ipc_receiver_;
+ };
+ 
+ }  // namespace cbf
+-- 
+2.50.1 (Apple Git-155)
+
