@@ -13,10 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SetBrowsingContextVisibility` command support for host-driven visibility changes.
 - Browser-generic background policy control for browsing contexts and transient browsing contexts.
 - `BackgroundPolicy` command support for host-driven opaque and transparent embedded surface behavior.
+- `BrowserSession::force_close()` for host-driven immediate shutdown without beforeunload confirmations.
 
 ### Changed
 
 - Reorganized native dialog implementation into `dialogs/` with a dedicated macOS module to reduce inline platform `cfg` usage and make future platform-specific presenters easier to add.
+- `BrowserSession::Drop` is now a no-op so session teardown no longer implicitly requests graceful shutdown.
+- `BackendStopped` now carries fact-only stop reasons; `BackendStopReason::ShutdownRequested` was removed in favor of runtime-local shutdown tracking.
 
 ## [0.1.0-alpha.1] - 2026-03-16
 

@@ -20,6 +20,7 @@ source-built use rather than a downloadable binary bundle.
 - macOS surface handle refresh after visibility recovery when the compositor CAContextID changes.
 - Host-driven browsing context background policy control through the bridge, profile service, and browser tests.
 - Transparent embedded surface handling that applies both page base background color and browser-side view background color for tabs and extension popups.
+- Host-disconnect shutdown handling that terminates the browser process without beforeunload once the authenticated Rust host disconnects from the Mojo bridge.
 
 ## [cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1] - 2026-03-17
 
