@@ -1,7 +1,7 @@
 //! Chrome-specific data types for IPC events and commands, with conversions to/from generic `cbf` data types.
 
-pub mod browsing_context_open;
 pub mod background;
+pub mod browsing_context_open;
 pub mod choice_menu;
 pub mod context_menu;
 pub mod download;

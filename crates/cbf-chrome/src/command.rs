@@ -620,8 +620,8 @@ mod tests {
     use cbf::{
         command::BrowserCommand,
         data::{
-            background::BackgroundPolicy,
             auxiliary_window::{AuxiliaryWindowId, AuxiliaryWindowResponse},
+            background::BackgroundPolicy,
             edit::EditAction,
             ids::{BrowsingContextId, TransientBrowsingContextId},
             visibility::BrowsingContextVisibility,

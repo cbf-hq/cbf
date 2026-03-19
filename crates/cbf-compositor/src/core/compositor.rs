@@ -3,9 +3,8 @@ use std::collections::{HashMap, HashSet};
 use cbf::{
     command::BrowserCommand,
     data::{
-        background::BackgroundPolicy as GenericBackgroundPolicy,
-        context_menu::ContextMenu, drag::DragStartRequest, ids::BrowsingContextId,
-        ime::ImeBoundsUpdate,
+        background::BackgroundPolicy as GenericBackgroundPolicy, context_menu::ContextMenu,
+        drag::DragStartRequest, ids::BrowsingContextId, ime::ImeBoundsUpdate,
     },
     event::{BrowserEvent, BrowsingContextEvent, TransientBrowsingContextEvent},
 };
@@ -15,7 +14,9 @@ use cbf_chrome::{data::choice_menu::ChromeChoiceMenu, event::ChromeEvent};
 use crate::{
     core::CompositionCommand,
     error::CompositorError,
-    model::{BackgroundPolicy, CompositionItemId, CompositionItemSpec, CompositorWindowId, SurfaceTarget},
+    model::{
+        BackgroundPolicy, CompositionItemId, CompositionItemSpec, CompositorWindowId, SurfaceTarget,
+    },
     platform::host::{
         PlatformSceneItem, PlatformSurfaceHandle, PlatformWindowHost, attach_window_host,
     },
@@ -387,10 +388,12 @@ impl Compositor {
                 });
             }
             SurfaceTarget::TransientBrowsingContext(transient_browsing_context_id) => {
-                emit(BrowserCommand::SetTransientBrowsingContextBackgroundPolicy {
-                    transient_browsing_context_id,
-                    policy,
-                });
+                emit(
+                    BrowserCommand::SetTransientBrowsingContextBackgroundPolicy {
+                        transient_browsing_context_id,
+                        policy,
+                    },
+                );
             }
         }
     }
