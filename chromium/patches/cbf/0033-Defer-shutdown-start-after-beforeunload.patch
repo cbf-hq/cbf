@@ -1,0 +1,348 @@
+From 8b6f8c682788db806d98feebb703780c6820b187 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 19 Mar 2026 18:23:25 +0900
+Subject: [PATCH 33/33] Defer shutdown start after beforeunload
+
+---
+ chrome/browser/cbf/cbf_browser_service.cc     |  79 ++++++++++++-
+ chrome/browser/cbf/cbf_browser_service.h      |  17 +++
+ .../cbf/cbf_browser_service_unittest.cc       | 109 +++++++++++++++++-
+ 3 files changed, 200 insertions(+), 5 deletions(-)
+
+diff --git a/chrome/browser/cbf/cbf_browser_service.cc b/chrome/browser/cbf/cbf_browser_service.cc
+index dabd3afefd63f..ba840503f3805 100644
+--- a/chrome/browser/cbf/cbf_browser_service.cc
++++ b/chrome/browser/cbf/cbf_browser_service.cc
+@@ -3,6 +3,9 @@
+ #include <utility>
+ #include <vector>
+ 
++#include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/task/single_thread_task_runner.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+@@ -144,7 +147,7 @@ void CbfBrowserService::ConfirmShutdown(uint64_t request_id, bool proceed) {
+   for (const auto& entry : profile_services_) {
+     entry.second->ResolveBeforeUnloadForShutdown(true);
+   }
+-  StartShutdown(request_id);
++  ScheduleStartShutdown(request_id);
+ }
+ 
+ void CbfBrowserService::ForceShutdown() {
+@@ -152,6 +155,45 @@ void CbfBrowserService::ForceShutdown() {
+   chrome::ExitIgnoreUnloadHandlers();
+ }
+ 
++void CbfBrowserService::SetStartShutdownCallbackForTesting(
++    base::RepeatingCallback<void(uint64_t)> callback) {
++  on_start_shutdown_for_testing_ = std::move(callback);
++}
++
++void CbfBrowserService::SetShutdownWaitingForBeforeUnloadForTesting(
++    uint64_t request_id,
++    std::set<TabId> pending_tab_ids) {
++  shutdown_state_ = ShutdownState::kWaitingBeforeUnload;
++  shutdown_request_id_ = request_id;
++  pending_beforeunload_pages_ = std::move(pending_tab_ids);
++  beforeunload_dialog_pages_.clear();
++  shutdown_in_progress_ = false;
++  shutdown_start_task_pending_ = false;
++}
++
++void CbfBrowserService::SetShutdownBlockedForTesting(
++    uint64_t request_id,
++    std::set<TabId> dialog_tab_ids) {
++  shutdown_state_ = ShutdownState::kBlocked;
++  shutdown_request_id_ = request_id;
++  pending_beforeunload_pages_.clear();
++  beforeunload_dialog_pages_ = std::move(dialog_tab_ids);
++  shutdown_in_progress_ = false;
++  shutdown_start_task_pending_ = false;
++}
++
++bool CbfBrowserService::IsShutdownStartTaskPendingForTesting() const {
++  return shutdown_start_task_pending_;
++}
++
++void CbfBrowserService::ScheduleStartShutdownForTesting(uint64_t request_id) {
++  ScheduleStartShutdown(request_id);
++}
++
++void CbfBrowserService::CancelShutdownForTesting(uint64_t request_id) {
++  CancelShutdown(request_id);
++}
++
+ void CbfBrowserService::NotifyTabClosed() {
+   if (!shutdown_in_progress_) {
+     return;
+@@ -161,7 +203,34 @@ void CbfBrowserService::NotifyTabClosed() {
+   }
+ }
+ 
++void CbfBrowserService::ScheduleStartShutdown(uint64_t request_id) {
++  if (shutdown_in_progress_ || shutdown_start_task_pending_) {
++    return;
++  }
++
++  shutdown_start_task_pending_ = true;
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&CbfBrowserService::RunScheduledStartShutdown,
++                     weak_factory_.GetWeakPtr(), request_id));
++}
++
++void CbfBrowserService::RunScheduledStartShutdown(uint64_t request_id) {
++  shutdown_start_task_pending_ = false;
++
++  if (shutdown_in_progress_ ||
++      (shutdown_state_ != ShutdownState::kWaitingBeforeUnload &&
++       shutdown_state_ != ShutdownState::kBlocked) ||
++      !shutdown_request_id_.has_value() ||
++      shutdown_request_id_.value() != request_id) {
++    return;
++  }
++
++  StartShutdown(request_id);
++}
++
+ void CbfBrowserService::StartShutdown(uint64_t request_id) {
++  shutdown_start_task_pending_ = false;
+   shutdown_state_ = ShutdownState::kProceeding;
+   shutdown_in_progress_ = true;
+   shutdown_request_id_.reset();
+@@ -176,6 +245,11 @@ void CbfBrowserService::StartShutdown(uint64_t request_id) {
+     observer_->OnShutdownProceeding(request_id);
+   }
+ 
++  if (on_start_shutdown_for_testing_) {
++    on_start_shutdown_for_testing_.Run(request_id);
++    return;
++  }
++
+   for (const auto& entry : profile_services_) {
+     entry.second->CloseAllTabs();
+   }
+@@ -190,6 +264,7 @@ void CbfBrowserService::CancelShutdown(uint64_t request_id) {
+     entry.second->ResolveBeforeUnloadForShutdown(false);
+     entry.second->SetShutdownDialogAutoConfirm(false);
+   }
++  shutdown_start_task_pending_ = false;
+   shutdown_state_ = ShutdownState::kIdle;
+   shutdown_request_id_.reset();
+   pending_beforeunload_pages_.clear();
+@@ -283,7 +358,7 @@ void CbfBrowserService::MaybeFinalizeShutdownRequest() {
+   }
+ 
+   if (beforeunload_dialog_pages_.empty()) {
+-    StartShutdown(shutdown_request_id_.value());
++    ScheduleStartShutdown(shutdown_request_id_.value());
+     return;
+   }
+ 
+diff --git a/chrome/browser/cbf/cbf_browser_service.h b/chrome/browser/cbf/cbf_browser_service.h
+index 37172b1c114ca..35657c0bf2105 100644
+--- a/chrome/browser/cbf/cbf_browser_service.h
++++ b/chrome/browser/cbf/cbf_browser_service.h
+@@ -8,7 +8,9 @@
+ 
+ #include "base/containers/flat_map.h"
+ #include "base/files/file_path.h"
++#include "base/functional/callback_forward.h"
+ #include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
+ #include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
+ #include "mojo/public/cpp/bindings/remote.h"
+ 
+@@ -47,6 +49,16 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+   void NotifyBeforeUnloadDialogRequested(TabId tab_id);
+   void NotifyBeforeUnloadFired(TabId tab_id, bool proceed);
+   CbfProfileService* GetProfileServiceForProfile(::Profile* profile);
++  void SetStartShutdownCallbackForTesting(
++      base::RepeatingCallback<void(uint64_t)> callback);
++  void SetShutdownWaitingForBeforeUnloadForTesting(
++      uint64_t request_id,
++      std::set<TabId> pending_tab_ids);
++  void SetShutdownBlockedForTesting(uint64_t request_id,
++                                    std::set<TabId> dialog_tab_ids);
++  bool IsShutdownStartTaskPendingForTesting() const;
++  void ScheduleStartShutdownForTesting(uint64_t request_id);
++  void CancelShutdownForTesting(uint64_t request_id);
+ 
+  private:
+   enum class ShutdownState {
+@@ -56,6 +68,8 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+     kProceeding,
+   };
+ 
++  void ScheduleStartShutdown(uint64_t request_id);
++  void RunScheduledStartShutdown(uint64_t request_id);
+   void StartShutdown(uint64_t request_id);
+   void CancelShutdown(uint64_t request_id);
+   void MarkBeforeUnloadDispatchComplete(TabId tab_id);
+@@ -74,9 +88,12 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+   std::set<TabId> pending_beforeunload_pages_;
+   std::set<TabId> beforeunload_dialog_pages_;
+   bool shutdown_in_progress_ = false;
++  bool shutdown_start_task_pending_ = false;
+   base::flat_map<std::string, std::unique_ptr<CbfProfileService>>
+       profile_services_;
+   mojo::Remote<mojom::CbfBrowserObserver> observer_;
++  base::RepeatingCallback<void(uint64_t)> on_start_shutdown_for_testing_;
++  base::WeakPtrFactory<CbfBrowserService> weak_factory_{this};
+ };
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_browser_service_unittest.cc b/chrome/browser/cbf/cbf_browser_service_unittest.cc
+index 32ab24bf5e41f..6b7a8fd6c3bfa 100644
+--- a/chrome/browser/cbf/cbf_browser_service_unittest.cc
++++ b/chrome/browser/cbf/cbf_browser_service_unittest.cc
+@@ -1,5 +1,7 @@
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+ 
++#include <optional>
++#include <set>
+ #include <vector>
+ 
+ #include "base/functional/bind.h"
+@@ -7,13 +9,14 @@
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+ namespace cbf {
+-namespace {
+ 
+ class CbfBrowserServiceTest : public testing::Test {
+  protected:
+   base::test::TaskEnvironment task_environment_;
+ };
+ 
++namespace {
++
+ TEST_F(CbfBrowserServiceTest, RejectsMismatchedTokenAndRemainsUnauthenticated) {
+   CbfBrowserService service("expected-token");
+ 
+@@ -72,11 +75,19 @@ TEST_F(CbfBrowserServiceTest, UnauthenticatedGetProfilesReturnsEmptyList) {
+ }
+ 
+ TEST_F(CbfBrowserServiceTest,
+-       ShutdownWithoutManagedTabsTransitionsToProceedingAndNotRequested) {
+-  CbfBrowserService service("expected-token");
++       ShutdownWithoutManagedTabsStartsImmediatelyAndNotRequested) {
++  CbfBrowserService service(std::string{});
++  std::optional<uint64_t> started_request_id;
++  service.SetStartShutdownCallbackForTesting(base::BindRepeating(
++      [](std::optional<uint64_t>* out_request_id, uint64_t request_id) {
++        *out_request_id = request_id;
++      },
++      &started_request_id));
+ 
+   service.RequestShutdown(/*request_id=*/1u);
+ 
++  ASSERT_TRUE(started_request_id.has_value());
++  EXPECT_EQ(started_request_id.value(), 1u);
+   EXPECT_FALSE(service.IsShutdownRequested());
+ }
+ 
+@@ -108,5 +119,97 @@ TEST_F(CbfBrowserServiceTest, RepeatedRequestShutdownAfterProceedingIsSafe) {
+   EXPECT_FALSE(service.IsShutdownRequested());
+ }
+ 
++TEST_F(CbfBrowserServiceTest,
++       FinalBeforeUnloadCompletionSchedulesShutdownForNextTask) {
++  CbfBrowserService service(std::string{});
++  std::vector<uint64_t> started_request_ids;
++  service.SetShutdownWaitingForBeforeUnloadForTesting(
++      /*request_id=*/7u, std::set<TabId>{42u});
++  service.SetStartShutdownCallbackForTesting(base::BindRepeating(
++      [](std::vector<uint64_t>* out_request_ids, uint64_t request_id) {
++        out_request_ids->push_back(request_id);
++      },
++      &started_request_ids));
++
++  service.NotifyBeforeUnloadFired(/*tab_id=*/42u, /*proceed=*/true);
++
++  EXPECT_TRUE(service.IsShutdownStartTaskPendingForTesting());
++  EXPECT_TRUE(started_request_ids.empty());
++
++  task_environment_.RunUntilIdle();
++
++  EXPECT_EQ(started_request_ids, std::vector<uint64_t>({7u}));
++  EXPECT_FALSE(service.IsShutdownStartTaskPendingForTesting());
++  EXPECT_FALSE(service.IsShutdownRequested());
++}
++
++TEST_F(CbfBrowserServiceTest,
++       ConfirmShutdownSchedulesShutdownForNextTask) {
++  CbfBrowserService service(std::string{});
++  std::vector<uint64_t> started_request_ids;
++  service.SetShutdownBlockedForTesting(/*request_id=*/9u,
++                                       std::set<TabId>{42u});
++  service.SetStartShutdownCallbackForTesting(base::BindRepeating(
++      [](std::vector<uint64_t>* out_request_ids, uint64_t request_id) {
++        out_request_ids->push_back(request_id);
++      },
++      &started_request_ids));
++
++  service.ConfirmShutdown(/*request_id=*/9u, /*proceed=*/true);
++
++  EXPECT_TRUE(service.IsShutdownStartTaskPendingForTesting());
++  EXPECT_TRUE(started_request_ids.empty());
++
++  task_environment_.RunUntilIdle();
++
++  EXPECT_EQ(started_request_ids, std::vector<uint64_t>({9u}));
++  EXPECT_FALSE(service.IsShutdownStartTaskPendingForTesting());
++  EXPECT_FALSE(service.IsShutdownRequested());
++}
++
++TEST_F(CbfBrowserServiceTest,
++       DuplicateShutdownSchedulingRunsStartOnlyOnce) {
++  CbfBrowserService service(std::string{});
++  std::vector<uint64_t> started_request_ids;
++  service.SetShutdownBlockedForTesting(/*request_id=*/11u,
++                                       std::set<TabId>{42u});
++  service.SetStartShutdownCallbackForTesting(base::BindRepeating(
++      [](std::vector<uint64_t>* out_request_ids, uint64_t request_id) {
++        out_request_ids->push_back(request_id);
++      },
++      &started_request_ids));
++
++  service.ConfirmShutdown(/*request_id=*/11u, /*proceed=*/true);
++  service.ScheduleStartShutdownForTesting(/*request_id=*/11u);
++
++  EXPECT_TRUE(service.IsShutdownStartTaskPendingForTesting());
++
++  task_environment_.RunUntilIdle();
++
++  EXPECT_EQ(started_request_ids, std::vector<uint64_t>({11u}));
++  EXPECT_FALSE(service.IsShutdownStartTaskPendingForTesting());
++}
++
++TEST_F(CbfBrowserServiceTest, CancelledShutdownSkipsScheduledStart) {
++  CbfBrowserService service(std::string{});
++  std::vector<uint64_t> started_request_ids;
++  service.SetShutdownBlockedForTesting(/*request_id=*/13u,
++                                       std::set<TabId>{42u});
++  service.SetStartShutdownCallbackForTesting(base::BindRepeating(
++      [](std::vector<uint64_t>* out_request_ids, uint64_t request_id) {
++        out_request_ids->push_back(request_id);
++      },
++      &started_request_ids));
++
++  service.ConfirmShutdown(/*request_id=*/13u, /*proceed=*/true);
++  service.CancelShutdownForTesting(/*request_id=*/13u);
++
++  task_environment_.RunUntilIdle();
++
++  EXPECT_TRUE(started_request_ids.empty());
++  EXPECT_FALSE(service.IsShutdownStartTaskPendingForTesting());
++  EXPECT_FALSE(service.IsShutdownRequested());
++}
++
+ }  // namespace
+ }  // namespace cbf
+-- 
+2.50.1 (Apple Git-155)
+
