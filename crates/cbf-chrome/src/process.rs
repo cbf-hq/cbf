@@ -8,7 +8,7 @@ use std::{
     process::ExitStatus,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -237,6 +237,49 @@ pub enum ShutdownMode {
     Force,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChromiumRuntimeShutdownState {
+    Idle,
+    Graceful,
+    Force,
+}
+
+impl ChromiumRuntimeShutdownState {
+    fn as_u8(self) -> u8 {
+        match self {
+            Self::Idle => 0,
+            Self::Graceful => 1,
+            Self::Force => 2,
+        }
+    }
+
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Graceful,
+            2 => Self::Force,
+            _ => Self::Idle,
+        }
+    }
+
+    fn from_mode(mode: ShutdownMode) -> Self {
+        match mode {
+            ShutdownMode::Graceful => Self::Graceful,
+            ShutdownMode::Force => Self::Force,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChromiumRuntimeShutdownStateReader {
+    state: Arc<AtomicU8>,
+}
+
+impl ChromiumRuntimeShutdownStateReader {
+    pub fn shutdown_state(&self) -> ChromiumRuntimeShutdownState {
+        ChromiumRuntimeShutdownState::from_u8(self.state.load(Ordering::Acquire))
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum InstallSignalHandlersError {
     #[error("signal handlers are already installed for a Chromium runtime")]
@@ -250,6 +293,7 @@ struct ShutdownController {
     browser: BrowserHandle<ChromiumBackend>,
     pid: u32,
     next_shutdown_request_id: AtomicU64,
+    shutdown_state: Arc<AtomicU8>,
     shutdown_started: AtomicBool,
 }
 
@@ -262,18 +306,39 @@ impl ShutdownController {
             browser,
             pid,
             next_shutdown_request_id: AtomicU64::new(1),
+            shutdown_state: Arc::new(AtomicU8::new(ChromiumRuntimeShutdownState::Idle.as_u8())),
             shutdown_started: AtomicBool::new(false),
         }
     }
 
-    fn begin_shutdown(&self) -> bool {
-        self.shutdown_started
+    fn begin_shutdown(&self, mode: ShutdownMode) -> bool {
+        if self
+            .shutdown_started
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
+        {
+            self.shutdown_state.store(
+                ChromiumRuntimeShutdownState::from_mode(mode).as_u8(),
+                Ordering::Release,
+            );
+            true
+        } else {
+            false
+        }
+    }
+
+    fn shutdown_state(&self) -> ChromiumRuntimeShutdownState {
+        ChromiumRuntimeShutdownState::from_u8(self.shutdown_state.load(Ordering::Acquire))
+    }
+
+    fn shutdown_state_reader(&self) -> ChromiumRuntimeShutdownStateReader {
+        ChromiumRuntimeShutdownStateReader {
+            state: Arc::clone(&self.shutdown_state),
+        }
     }
 
     fn shutdown_via_pid(&self, mode: ShutdownMode) {
-        if !self.begin_shutdown() {
+        if !self.begin_shutdown(mode) {
             return;
         }
 
@@ -347,6 +412,14 @@ impl ChromiumRuntime {
         &mut self.process
     }
 
+    pub fn shutdown_state(&self) -> ChromiumRuntimeShutdownState {
+        self.shutdown_controller.shutdown_state()
+    }
+
+    pub fn shutdown_state_reader(&self) -> ChromiumRuntimeShutdownStateReader {
+        self.shutdown_controller.shutdown_state_reader()
+    }
+
     pub fn install_signal_handlers(&self) -> Result<(), InstallSignalHandlersError> {
         if SIGNAL_HANDLERS_INSTALLED
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -372,7 +445,7 @@ impl ChromiumRuntime {
     }
 
     pub fn shutdown(&mut self, mode: ShutdownMode) -> std::io::Result<()> {
-        if !self.shutdown_controller.begin_shutdown() {
+        if !self.shutdown_controller.begin_shutdown(mode) {
             return Ok(());
         }
 

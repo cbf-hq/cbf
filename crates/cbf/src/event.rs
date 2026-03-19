@@ -194,8 +194,6 @@ pub enum BrowserEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendStopReason {
-    /// Stopped because an upstream shutdown was requested.
-    ShutdownRequested,
     /// Stopped because the command channel was closed or disconnected.
     Disconnected,
     /// Stopped due to a crash or fatal termination.

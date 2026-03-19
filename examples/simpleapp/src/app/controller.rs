@@ -18,7 +18,11 @@ use cbf::{
     event::{BackendStopReason, BrowserEvent, BrowsingContextEvent, TransientBrowsingContextEvent},
 };
 use cbf_chrome::{
-    backend::ChromiumBackend, browser::ChromiumBrowserHandleExt, event::ChromeEvent, ffi::IpcEvent,
+    backend::ChromiumBackend,
+    browser::ChromiumBrowserHandleExt,
+    event::ChromeEvent,
+    ffi::IpcEvent,
+    process::{ChromiumRuntimeShutdownState, ChromiumRuntimeShutdownStateReader},
 };
 use cbf_compositor::{
     core::{AttachWindowOptions, CompositionCommand, Compositor},
@@ -26,7 +30,7 @@ use cbf_compositor::{
     window::WindowHost,
 };
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use winit::event::WindowEvent;
 
 use crate::{
@@ -60,6 +64,7 @@ use crate::{
 pub(crate) struct AppController {
     cli: Cli,
     browser_handle: BrowserHandle<ChromiumBackend>,
+    shutdown_state: ChromiumRuntimeShutdownStateReader,
     compositor: Compositor,
     shared: SharedStateHandle,
     startup_requested: bool,
@@ -77,11 +82,13 @@ impl AppController {
     pub(crate) fn new(
         cli: Cli,
         browser_handle: BrowserHandle<ChromiumBackend>,
+        shutdown_state: ChromiumRuntimeShutdownStateReader,
         shared: SharedStateHandle,
     ) -> Self {
         Self {
             cli,
             browser_handle,
+            shutdown_state,
             compositor: Compositor::new(),
             shared,
             startup_requested: false,
@@ -192,10 +199,15 @@ impl AppController {
             }
             BrowserEvent::BackendStopped { reason } => {
                 match reason {
-                    BackendStopReason::ShutdownRequested => {
-                        info!("backend stopped: shutdown requested")
+                    BackendStopReason::Disconnected => {
+                        if self.shutdown_state.shutdown_state()
+                            != ChromiumRuntimeShutdownState::Idle
+                        {
+                            info!("backend stopped during shutdown: disconnected");
+                        } else {
+                            warn!("backend stopped: disconnected");
+                        }
                     }
-                    BackendStopReason::Disconnected => warn!("backend stopped: disconnected"),
                     BackendStopReason::Crashed => error!("backend stopped: crashed"),
                     BackendStopReason::Error(info) => error!("backend stopped with error: {info}"),
                 }
@@ -683,7 +695,13 @@ impl AppController {
         }
         self.shutdown_requested = true;
         if let Err(err) = self.browser_handle.request_shutdown(1) {
-            warn!("failed to request shutdown: {err}");
+            if matches!(err, cbf::error::Error::Disconnected)
+                && self.shutdown_state.shutdown_state() != ChromiumRuntimeShutdownState::Idle
+            {
+                debug!("shutdown request skipped because backend is already disconnecting: {err}");
+            } else {
+                warn!("failed to request shutdown: {err}");
+            }
         }
     }
 

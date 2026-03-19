@@ -77,10 +77,13 @@ impl ApplicationHandler<UserEvent> for AppRunner {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        self.controller.request_shutdown_once();
-        _ = self
-            .browser
-            .shutdown(cbf_chrome::process::ShutdownMode::Force);
+        if self.browser.shutdown_state() == cbf_chrome::process::ChromiumRuntimeShutdownState::Idle
+        {
+            self.controller.request_shutdown_once();
+            _ = self
+                .browser
+                .shutdown(cbf_chrome::process::ShutdownMode::Force);
+        }
     }
 }
 
@@ -224,12 +227,21 @@ pub(crate) fn run() {
     };
     let proxy = event_loop.create_proxy();
     let menu = menu::MacMenu::new(proxy.clone()).ok();
+    let shutdown_state = runtime.browser.shutdown_state_reader();
     let _ = runtime.browser.install_signal_handlers();
-    spawn_browser_event_forwarder(runtime.browser.events(), proxy.clone());
+    spawn_browser_event_forwarder(
+        runtime.browser.events(),
+        shutdown_state.clone(),
+        proxy.clone(),
+    );
 
     let shared: SharedStateHandle = Arc::new(Mutex::new(SharedState::default()));
-    let controller =
-        AppController::new(cli, runtime.browser.session().handle(), Arc::clone(&shared));
+    let controller = AppController::new(
+        cli,
+        runtime.browser.session().handle(),
+        shutdown_state,
+        Arc::clone(&shared),
+    );
     let registry = window_registry::WindowRegistry::new(runtime.browser.session().handle(), shared);
 
     let mut runner = AppRunner {

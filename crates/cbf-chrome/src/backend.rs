@@ -202,18 +202,6 @@ enum ShutdownState {
     },
 }
 
-fn normalize_stop_reason(
-    reason: BackendStopReason,
-    shutdown_state: ShutdownState,
-) -> BackendStopReason {
-    match (reason, shutdown_state) {
-        (BackendStopReason::Disconnected, ShutdownState::Proceeding { .. }) => {
-            BackendStopReason::ShutdownRequested
-        }
-        (reason, _) => reason,
-    }
-}
-
 fn update_shutdown_state(shutdown_state: &mut ShutdownState, event: &IpcEvent) {
     match event {
         IpcEvent::ShutdownProceeding { request_id } => {
@@ -540,7 +528,6 @@ impl ChromiumBackend {
             raw_delegate,
             shutdown_state,
         ) {
-            let stop_reason = normalize_stop_reason(stop_reason, *shutdown_state);
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
         }
@@ -563,7 +550,6 @@ impl ChromiumBackend {
             raw_delegate,
             shutdown_state,
         ) {
-            let stop_reason = normalize_stop_reason(stop_reason, *shutdown_state);
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
         }
@@ -571,7 +557,6 @@ impl ChromiumBackend {
         if matches!(wake, BackendWake::Stopped)
             && let Some(stop_reason) = event_loop.stop_reason()
         {
-            let stop_reason = normalize_stop_reason(stop_reason, *shutdown_state);
             Self::stop_backend(stop_reason, dispatcher, Some(client), event_tx);
             return false;
         }
@@ -1252,7 +1237,7 @@ mod tests {
         BackendInputWaiter, ChromeCommand, ChromeEvent, ChromiumBackend, ChromiumBackendEventLoop,
         ChromiumBackendOptions, DeadlineStatus, EventWaitResult, IpcClient, ShutdownState,
         WakeStateInner, classify_deadline, classify_ready_wake, classify_timeout_wake,
-        normalize_stop_reason, stop_reason_from_wake_state, update_shutdown_state,
+        stop_reason_from_wake_state, update_shutdown_state,
     };
     use crate::ffi::IpcEvent;
 
@@ -1506,25 +1491,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_stop_reason_preserves_disconnected_without_shutdown_proceeding() {
-        assert_eq!(
-            normalize_stop_reason(BackendStopReason::Disconnected, ShutdownState::Idle),
-            BackendStopReason::Disconnected
-        );
-    }
-
-    #[test]
-    fn normalize_stop_reason_maps_transport_disconnect_after_shutdown_proceeding() {
-        assert_eq!(
-            normalize_stop_reason(
-                BackendStopReason::Disconnected,
-                ShutdownState::Proceeding { request_id: 7 }
-            ),
-            BackendStopReason::ShutdownRequested
-        );
-    }
-
-    #[test]
     fn update_shutdown_state_tracks_proceeding_and_cancelled_events() {
         let mut shutdown_state = ShutdownState::Idle;
 
@@ -1568,7 +1534,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_backend_passes_normalized_shutdown_reason_to_teardown() {
+    fn stop_backend_passes_disconnected_reason_to_teardown() {
         let reasons = Arc::new(Mutex::new(Vec::new()));
         let delegate = RecordTeardownDelegate {
             reasons: Arc::clone(&reasons),
@@ -1577,16 +1543,13 @@ mod tests {
         let (event_tx, _event_rx) = async_channel::unbounded();
 
         ChromiumBackend::stop_backend(
-            normalize_stop_reason(
-                BackendStopReason::Disconnected,
-                ShutdownState::Proceeding { request_id: 1 },
-            ),
+            BackendStopReason::Disconnected,
             &mut dispatcher,
             None,
             &event_tx,
         );
 
         let recorded = reasons.lock().unwrap().clone();
-        assert_eq!(recorded, vec![BackendStopReason::ShutdownRequested]);
+        assert_eq!(recorded, vec![BackendStopReason::Disconnected]);
     }
 }
