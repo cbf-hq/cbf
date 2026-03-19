@@ -18,7 +18,18 @@ pub(crate) const MAIN_PAGE_CREATE_REQUEST_ID: u64 = 1;
 pub(crate) const TOOLBAR_CREATE_REQUEST_ID: u64 = 2;
 pub(crate) const OVERLAY_CREATE_REQUEST_ID: u64 = 3;
 
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingWindowBrowsingContextRole {
+    Page,
+    Toolbar,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PendingWindowBrowsingContextCreate {
+    pub(crate) window_id: HostWindowId,
+    pub(crate) role: PendingWindowBrowsingContextRole,
+}
+
 pub(crate) struct SharedState {
     pub(crate) primary_browsing_context_id: Option<BrowsingContextId>,
     pub(crate) toolbar_browsing_context_id: Option<BrowsingContextId>,
@@ -28,8 +39,34 @@ pub(crate) struct SharedState {
     pub(crate) browsing_context_to_window: HashMap<BrowsingContextId, HostWindowId>,
     pub(crate) window_to_browsing_contexts: HashMap<HostWindowId, HashSet<BrowsingContextId>>,
     pub(crate) pending_window_open_requests: HashMap<u64, HostWindowId>,
+    pub(crate) pending_window_browsing_context_creates:
+        HashMap<u64, PendingWindowBrowsingContextCreate>,
+    pub(crate) window_to_page_browsing_context: HashMap<HostWindowId, BrowsingContextId>,
+    pub(crate) window_to_toolbar_browsing_context: HashMap<HostWindowId, BrowsingContextId>,
+    pub(crate) next_browsing_context_request_id: u64,
     pub(crate) transient_to_window: HashMap<TransientBrowsingContextId, HostWindowId>,
     pub(crate) window_to_transient: HashMap<HostWindowId, TransientBrowsingContextId>,
+}
+
+impl Default for SharedState {
+    fn default() -> Self {
+        Self {
+            primary_browsing_context_id: None,
+            toolbar_browsing_context_id: None,
+            overlay_browsing_context_id: None,
+            devtools_browsing_context_id: None,
+            primary_host_window_id: None,
+            browsing_context_to_window: HashMap::new(),
+            window_to_browsing_contexts: HashMap::new(),
+            pending_window_open_requests: HashMap::new(),
+            pending_window_browsing_context_creates: HashMap::new(),
+            window_to_page_browsing_context: HashMap::new(),
+            window_to_toolbar_browsing_context: HashMap::new(),
+            next_browsing_context_request_id: 10_000,
+            transient_to_window: HashMap::new(),
+            window_to_transient: HashMap::new(),
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -297,16 +334,11 @@ pub(crate) fn devtools_browsing_context_id(
         .devtools_browsing_context_id
 }
 
-pub(crate) fn register_pending_window_open_request(
-    shared: &SharedStateHandle,
-    request_id: u64,
-    window_id: HostWindowId,
-) {
-    shared
-        .lock()
-        .expect("shared state lock poisoned")
-        .pending_window_open_requests
-        .insert(request_id, window_id);
+pub(crate) fn allocate_browsing_context_request_id(shared: &SharedStateHandle) -> u64 {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    let request_id = guard.next_browsing_context_request_id.max(10_000);
+    guard.next_browsing_context_request_id = request_id.saturating_add(1);
+    request_id
 }
 
 pub(crate) fn take_pending_window_open_request(
@@ -318,4 +350,115 @@ pub(crate) fn take_pending_window_open_request(
         .expect("shared state lock poisoned")
         .pending_window_open_requests
         .remove(&request_id)
+}
+
+pub(crate) fn register_pending_window_browsing_context_create(
+    shared: &SharedStateHandle,
+    request_id: u64,
+    pending: PendingWindowBrowsingContextCreate,
+) {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .pending_window_browsing_context_creates
+        .insert(request_id, pending);
+}
+
+pub(crate) fn take_pending_window_browsing_context_create(
+    shared: &SharedStateHandle,
+    request_id: u64,
+) -> Option<PendingWindowBrowsingContextCreate> {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .pending_window_browsing_context_creates
+        .remove(&request_id)
+}
+
+pub(crate) fn set_window_page_browsing_context(
+    shared: &SharedStateHandle,
+    window_id: HostWindowId,
+    browsing_context_id: Option<BrowsingContextId>,
+) {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    match browsing_context_id {
+        Some(browsing_context_id) => {
+            guard
+                .window_to_page_browsing_context
+                .insert(window_id, browsing_context_id);
+        }
+        None => {
+            guard.window_to_page_browsing_context.remove(&window_id);
+        }
+    }
+}
+
+pub(crate) fn page_browsing_context_id_for_window(
+    shared: &SharedStateHandle,
+    window_id: HostWindowId,
+) -> Option<BrowsingContextId> {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .window_to_page_browsing_context
+        .get(&window_id)
+        .copied()
+}
+
+pub(crate) fn window_id_for_page_browsing_context(
+    shared: &SharedStateHandle,
+    browsing_context_id: BrowsingContextId,
+) -> Option<HostWindowId> {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .window_to_page_browsing_context
+        .iter()
+        .find_map(|(window_id, candidate)| {
+            (*candidate == browsing_context_id).then_some(*window_id)
+        })
+}
+
+pub(crate) fn set_window_toolbar_browsing_context(
+    shared: &SharedStateHandle,
+    window_id: HostWindowId,
+    browsing_context_id: Option<BrowsingContextId>,
+) {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    match browsing_context_id {
+        Some(browsing_context_id) => {
+            guard
+                .window_to_toolbar_browsing_context
+                .insert(window_id, browsing_context_id);
+        }
+        None => {
+            guard.window_to_toolbar_browsing_context.remove(&window_id);
+        }
+    }
+}
+
+pub(crate) fn toolbar_browsing_context_id_for_window(
+    shared: &SharedStateHandle,
+    window_id: HostWindowId,
+) -> Option<BrowsingContextId> {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .window_to_toolbar_browsing_context
+        .get(&window_id)
+        .copied()
+}
+
+pub(crate) fn window_id_for_toolbar_browsing_context(
+    shared: &SharedStateHandle,
+    browsing_context_id: BrowsingContextId,
+) -> Option<HostWindowId> {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .window_to_toolbar_browsing_context
+        .iter()
+        .find_map(|(window_id, candidate)| {
+            (*candidate == browsing_context_id).then_some(*window_id)
+        })
 }

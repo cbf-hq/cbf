@@ -35,16 +35,21 @@ use crate::{
         state::{
             CoreAction, DEVTOOLS_HOST_WINDOW_ID, DownloadStatus, JavaScriptDialogTarget,
             MAIN_PAGE_CREATE_REQUEST_ID, OVERLAY_CREATE_REQUEST_ID, PRIMARY_HOST_WINDOW_ID,
+            PendingWindowBrowsingContextCreate, PendingWindowBrowsingContextRole,
             SharedStateHandle, TOOLBAR_CREATE_REQUEST_ID, TransientPopupState,
-            bind_browsing_context_to_window, browsing_context_ids_for_window,
-            devtools_browsing_context_id, has_bound_windows, overlay_browsing_context_id,
+            allocate_browsing_context_request_id, bind_browsing_context_to_window,
+            browsing_context_ids_for_window, devtools_browsing_context_id, has_bound_windows,
+            overlay_browsing_context_id, page_browsing_context_id_for_window,
             primary_browsing_context_id, primary_host_window_id,
-            register_pending_window_open_request, set_devtools_browsing_context_id,
+            register_pending_window_browsing_context_create, set_devtools_browsing_context_id,
             set_overlay_browsing_context_id, set_primary_browsing_context_id,
-            set_toolbar_browsing_context_id, take_pending_window_open_request,
-            toolbar_browsing_context_id, transient_browsing_context_id_for_window,
+            set_toolbar_browsing_context_id, set_window_page_browsing_context,
+            set_window_toolbar_browsing_context, take_pending_window_browsing_context_create,
+            take_pending_window_open_request, toolbar_browsing_context_id,
+            toolbar_browsing_context_id_for_window, transient_browsing_context_id_for_window,
             unbind_browsing_context, unbind_transient_browsing_context,
-            window_id_for_browsing_context, window_id_for_transient_browsing_context,
+            window_id_for_browsing_context, window_id_for_page_browsing_context,
+            window_id_for_toolbar_browsing_context, window_id_for_transient_browsing_context,
         },
     },
     cli::Cli,
@@ -259,7 +264,10 @@ impl AppController {
                 }
                 Vec::new()
             }
-            BrowserEvent::WindowOpenRequested { request, .. } => {
+            BrowserEvent::WindowOpenRequested {
+                profile_id,
+                request,
+            } => {
                 let kind = match request.requested_kind {
                     WindowKind::Popup => WindowKind::Popup,
                     _ => WindowKind::Normal,
@@ -278,17 +286,55 @@ impl AppController {
                         height: 900,
                     },
                 };
-                register_pending_window_open_request(
-                    &self.shared,
-                    request.request_id,
-                    window.window_id,
-                );
-                if let Err(err) = self.browser_handle.respond_window_open(
-                    request.request_id,
-                    WindowOpenResponse::AllowNewWindow { window },
-                ) {
+
+                if let Err(err) = self
+                    .browser_handle
+                    .respond_window_open(request.request_id, WindowOpenResponse::Deny)
+                {
                     warn!("failed to respond window open request: {err}");
                 }
+
+                let page_request_id = allocate_browsing_context_request_id(&self.shared);
+                register_pending_window_browsing_context_create(
+                    &self.shared,
+                    page_request_id,
+                    PendingWindowBrowsingContextCreate {
+                        window_id: window.window_id,
+                        role: PendingWindowBrowsingContextRole::Page,
+                    },
+                );
+                if let Err(err) = self.browser_handle.create_browsing_context(
+                    page_request_id,
+                    Some(
+                        request
+                            .target_url
+                            .clone()
+                            .unwrap_or_else(|| "about:blank".to_string()),
+                    ),
+                    profile_id.clone(),
+                ) {
+                    warn!("failed to create page browsing context for new window: {err}");
+                }
+
+                if kind == WindowKind::Normal {
+                    let toolbar_request_id = allocate_browsing_context_request_id(&self.shared);
+                    register_pending_window_browsing_context_create(
+                        &self.shared,
+                        toolbar_request_id,
+                        PendingWindowBrowsingContextCreate {
+                            window_id: window.window_id,
+                            role: PendingWindowBrowsingContextRole::Toolbar,
+                        },
+                    );
+                    if let Err(err) = self.browser_handle.create_browsing_context(
+                        toolbar_request_id,
+                        Some(toolbar_ui_url().unwrap_or_else(|_| "about:blank".to_string())),
+                        profile_id,
+                    ) {
+                        warn!("failed to create toolbar browsing context for new window: {err}");
+                    }
+                }
+
                 vec![CoreAction::EnsureHostWindow { window }]
             }
             BrowserEvent::WindowOpenResolved {
@@ -498,8 +544,10 @@ impl AppController {
         let browser_handle = self.browser_handle.clone();
         let result = if host_window_id == PRIMARY_HOST_WINDOW_ID {
             let overlay_id = overlay_browsing_context_id(&self.shared);
-            let toolbar_id = toolbar_browsing_context_id(&self.shared);
-            let page_id = primary_browsing_context_id(&self.shared);
+            let toolbar_id = toolbar_browsing_context_id_for_window(&self.shared, host_window_id)
+                .or_else(|| toolbar_browsing_context_id(&self.shared));
+            let page_id = page_browsing_context_id_for_window(&self.shared, host_window_id)
+                .or_else(|| primary_browsing_context_id(&self.shared));
             if let Some(overlay_id) = overlay_id {
                 self.resize_browsing_context(overlay_id, width, height);
             }
@@ -564,36 +612,64 @@ impl AppController {
                 },
                 |command| forward_compositor_command(&browser_handle, command),
             )
-        } else if let Some(browsing_context_id) =
-            browsing_context_ids_for_window(&self.shared, host_window_id)
-                .into_iter()
-                .find(|candidate| {
-                    Some(*candidate) != toolbar_browsing_context_id(&self.shared)
-                        && Some(*candidate) != devtools_browsing_context_id(&self.shared)
-                })
-        {
-            self.resize_browsing_context(browsing_context_id, width, height);
-            let browser_handle = browser_handle.clone();
-            self.compositor.apply(
-                CompositionCommand::SetWindowComposition {
-                    window_id: compositor_window_id,
-                    composition: composition::host_window_composition(
-                        browsing_context_id,
-                        width,
-                        height,
-                    ),
-                },
-                |command| forward_compositor_command(&browser_handle, command),
-            )
         } else {
+            let toolbar_id = toolbar_browsing_context_id_for_window(&self.shared, host_window_id);
+            let page_id = page_browsing_context_id_for_window(&self.shared, host_window_id)
+                .or_else(|| {
+                    browsing_context_ids_for_window(&self.shared, host_window_id)
+                        .into_iter()
+                        .find(|candidate| {
+                            Some(*candidate) != toolbar_id
+                                && Some(*candidate) != toolbar_browsing_context_id(&self.shared)
+                                && Some(*candidate) != devtools_browsing_context_id(&self.shared)
+                        })
+                });
+
+            if let Some(toolbar_id) = toolbar_id {
+                self.resize_browsing_context(toolbar_id, width, 56);
+            }
+
+            if let Some(page_id) = page_id {
+                let has_toolbar = toolbar_id.is_some();
+                self.resize_browsing_context(
+                    page_id,
+                    width,
+                    if has_toolbar {
+                        height.saturating_sub(56)
+                    } else {
+                        height
+                    },
+                );
+            }
+
             let browser_handle = browser_handle.clone();
-            self.compositor.apply(
-                CompositionCommand::SetWindowComposition {
-                    window_id: compositor_window_id,
-                    composition: Default::default(),
-                },
-                |command| forward_compositor_command(&browser_handle, command),
-            )
+            if toolbar_id.is_some() {
+                self.compositor.apply(
+                    CompositionCommand::SetWindowComposition {
+                        window_id: compositor_window_id,
+                        composition: composition::main_window_composition(
+                            None, toolbar_id, page_id, width, height,
+                        ),
+                    },
+                    |command| forward_compositor_command(&browser_handle, command),
+                )
+            } else if let Some(page_id) = page_id {
+                self.compositor.apply(
+                    CompositionCommand::SetWindowComposition {
+                        window_id: compositor_window_id,
+                        composition: composition::host_window_composition(page_id, width, height),
+                    },
+                    |command| forward_compositor_command(&browser_handle, command),
+                )
+            } else {
+                self.compositor.apply(
+                    CompositionCommand::SetWindowComposition {
+                        window_id: compositor_window_id,
+                        composition: Default::default(),
+                    },
+                    |command| forward_compositor_command(&browser_handle, command),
+                )
+            }
         };
 
         if let Err(err) = result {
@@ -669,13 +745,41 @@ impl AppController {
             BrowsingContextEvent::Created { request_id } => {
                 let host_window_id = if request_id == TOOLBAR_CREATE_REQUEST_ID {
                     set_toolbar_browsing_context_id(&self.shared, Some(browsing_context_id));
+                    set_window_toolbar_browsing_context(
+                        &self.shared,
+                        PRIMARY_HOST_WINDOW_ID,
+                        Some(browsing_context_id),
+                    );
                     Some(PRIMARY_HOST_WINDOW_ID)
                 } else if request_id == OVERLAY_CREATE_REQUEST_ID {
                     set_overlay_browsing_context_id(&self.shared, Some(browsing_context_id));
                     Some(PRIMARY_HOST_WINDOW_ID)
                 } else if request_id == MAIN_PAGE_CREATE_REQUEST_ID {
                     set_primary_browsing_context_id(&self.shared, Some(browsing_context_id));
+                    set_window_page_browsing_context(
+                        &self.shared,
+                        PRIMARY_HOST_WINDOW_ID,
+                        Some(browsing_context_id),
+                    );
                     Some(PRIMARY_HOST_WINDOW_ID)
+                } else if let Some(pending) =
+                    take_pending_window_browsing_context_create(&self.shared, request_id)
+                {
+                    match pending.role {
+                        PendingWindowBrowsingContextRole::Page => set_window_page_browsing_context(
+                            &self.shared,
+                            pending.window_id,
+                            Some(browsing_context_id),
+                        ),
+                        PendingWindowBrowsingContextRole::Toolbar => {
+                            set_window_toolbar_browsing_context(
+                                &self.shared,
+                                pending.window_id,
+                                Some(browsing_context_id),
+                            )
+                        }
+                    }
+                    Some(pending.window_id)
                 } else {
                     take_pending_window_open_request(&self.shared, request_id)
                 };
@@ -695,6 +799,8 @@ impl AppController {
             }
             BrowsingContextEvent::TitleUpdated { title } => {
                 if Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared)
+                    || window_id_for_toolbar_browsing_context(&self.shared, browsing_context_id)
+                        .is_some()
                     || Some(browsing_context_id) == overlay_browsing_context_id(&self.shared)
                 {
                     return Vec::new();
@@ -911,7 +1017,7 @@ impl AppController {
                     .remove(&transient_browsing_context_id);
                 self.blur_close_armed_transients
                     .remove(&transient_browsing_context_id);
-                
+
                 unbind_transient_browsing_context(&self.shared, transient_browsing_context_id)
                     .map(|window_id| CoreAction::CloseHostWindow { window_id })
                     .into_iter()
@@ -932,19 +1038,43 @@ impl AppController {
         let is_overlay = Some(browsing_context_id) == overlay_browsing_context_id(&self.shared);
         let is_primary = Some(browsing_context_id) == primary_browsing_context_id(&self.shared);
         let is_devtools = Some(browsing_context_id) == devtools_browsing_context_id(&self.shared);
+        let secondary_toolbar_window_id =
+            window_id_for_toolbar_browsing_context(&self.shared, browsing_context_id)
+                .filter(|window_id| *window_id != PRIMARY_HOST_WINDOW_ID);
+        let secondary_page_window_id =
+            window_id_for_page_browsing_context(&self.shared, browsing_context_id)
+                .filter(|window_id| *window_id != PRIMARY_HOST_WINDOW_ID);
 
         let window_id = unbind_browsing_context(&self.shared, browsing_context_id);
 
         if is_toolbar {
             set_toolbar_browsing_context_id(&self.shared, None);
+            set_window_toolbar_browsing_context(&self.shared, PRIMARY_HOST_WINDOW_ID, None);
         }
         if is_overlay {
             set_overlay_browsing_context_id(&self.shared, None);
         }
         if is_primary {
             set_primary_browsing_context_id(&self.shared, None);
+            set_window_page_browsing_context(&self.shared, PRIMARY_HOST_WINDOW_ID, None);
 
             if let Some(toolbar_id) = toolbar_browsing_context_id(&self.shared) {
+                _ = self
+                    .browser_handle
+                    .request_close_browsing_context(toolbar_id);
+            }
+        }
+        if let Some(window_id) = secondary_toolbar_window_id {
+            set_window_toolbar_browsing_context(&self.shared, window_id, None);
+            if let Some(page_id) = page_browsing_context_id_for_window(&self.shared, window_id) {
+                _ = self.browser_handle.request_close_browsing_context(page_id);
+            }
+        }
+        if let Some(window_id) = secondary_page_window_id {
+            set_window_page_browsing_context(&self.shared, window_id, None);
+            if let Some(toolbar_id) =
+                toolbar_browsing_context_id_for_window(&self.shared, window_id)
+            {
                 _ = self
                     .browser_handle
                     .request_close_browsing_context(toolbar_id);
@@ -958,7 +1088,12 @@ impl AppController {
         if let Some(window_id) = window_id {
             let remaining = browsing_context_ids_for_window(&self.shared, window_id);
 
-            if remaining.is_empty() || is_primary || is_devtools {
+            if remaining.is_empty()
+                || is_primary
+                || is_devtools
+                || secondary_toolbar_window_id.is_some()
+                || secondary_page_window_id.is_some()
+            {
                 self.window_base_titles.remove(&window_id);
                 actions.push(CoreAction::CloseHostWindow { window_id });
             } else {

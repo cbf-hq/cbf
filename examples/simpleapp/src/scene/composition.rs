@@ -5,10 +5,11 @@ use cbf_compositor::model::{
 
 use crate::scene::layout::{full_window_rect, main_page_rect, main_toolbar_rect};
 
-pub(crate) const MAIN_TOOLBAR_ITEM_ID: CompositionItemId = CompositionItemId::new(1);
-pub(crate) const MAIN_PAGE_ITEM_ID: CompositionItemId = CompositionItemId::new(2);
-pub(crate) const DEVTOOLS_ITEM_ID: CompositionItemId = CompositionItemId::new(3);
-pub(crate) const OVERLAY_ITEM_ID: CompositionItemId = CompositionItemId::new(4);
+const PAGE_ITEM_NAMESPACE: u64 = 1_000_000_000;
+const TRANSIENT_ITEM_NAMESPACE: u64 = 2_000_000_000;
+const TOOLBAR_ITEM_NAMESPACE: u64 = 3_000_000_000;
+const OVERLAY_ITEM_NAMESPACE: u64 = 4_000_000_000;
+const DEVTOOLS_ITEM_NAMESPACE: u64 = 5_000_000_000;
 
 pub(crate) fn main_window_composition(
     overlay_id: Option<BrowsingContextId>,
@@ -21,7 +22,7 @@ pub(crate) fn main_window_composition(
 
     if let Some(overlay_id) = overlay_id {
         items.push(CompositionItemSpec {
-            item_id: OVERLAY_ITEM_ID,
+            item_id: overlay_item_id(overlay_id),
             target: SurfaceTarget::BrowsingContext(overlay_id),
             bounds: full_window_rect(width, height),
             visible: true,
@@ -32,7 +33,7 @@ pub(crate) fn main_window_composition(
 
     if let Some(toolbar_id) = toolbar_id {
         items.push(CompositionItemSpec {
-            item_id: MAIN_TOOLBAR_ITEM_ID,
+            item_id: toolbar_item_id(toolbar_id),
             target: SurfaceTarget::BrowsingContext(toolbar_id),
             bounds: main_toolbar_rect(width, height),
             visible: true,
@@ -43,7 +44,7 @@ pub(crate) fn main_window_composition(
 
     if let Some(page_id) = page_id {
         items.push(CompositionItemSpec {
-            item_id: MAIN_PAGE_ITEM_ID,
+            item_id: page_item_id(page_id),
             target: SurfaceTarget::BrowsingContext(page_id),
             bounds: main_page_rect(width, height),
             visible: true,
@@ -62,7 +63,7 @@ pub(crate) fn devtools_window_composition(
 ) -> WindowCompositionSpec {
     WindowCompositionSpec {
         items: vec![CompositionItemSpec {
-            item_id: DEVTOOLS_ITEM_ID,
+            item_id: devtools_item_id(browsing_context_id),
             target: SurfaceTarget::BrowsingContext(browsing_context_id),
             bounds: full_window_rect(width, height),
             visible: true,
@@ -77,10 +78,9 @@ pub(crate) fn host_window_composition(
     width: u32,
     height: u32,
 ) -> WindowCompositionSpec {
-    let item_id = CompositionItemId::new(1_000_000_000 + browsing_context_id.get());
     WindowCompositionSpec {
         items: vec![CompositionItemSpec {
-            item_id,
+            item_id: page_item_id(browsing_context_id),
             target: SurfaceTarget::BrowsingContext(browsing_context_id),
             bounds: full_window_rect(width, height),
             visible: true,
@@ -95,10 +95,9 @@ pub(crate) fn transient_window_composition(
     width: u32,
     height: u32,
 ) -> WindowCompositionSpec {
-    let item_id = CompositionItemId::new(2_000_000_000 + transient_browsing_context_id.get());
     WindowCompositionSpec {
         items: vec![CompositionItemSpec {
-            item_id,
+            item_id: transient_item_id(transient_browsing_context_id),
             target: SurfaceTarget::TransientBrowsingContext(transient_browsing_context_id),
             bounds: full_window_rect(width, height),
             visible: true,
@@ -106,4 +105,26 @@ pub(crate) fn transient_window_composition(
             background: BackgroundPolicy::Opaque,
         }],
     }
+}
+
+const fn page_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
+    CompositionItemId::new(PAGE_ITEM_NAMESPACE + browsing_context_id.get())
+}
+
+const fn transient_item_id(
+    transient_browsing_context_id: TransientBrowsingContextId,
+) -> CompositionItemId {
+    CompositionItemId::new(TRANSIENT_ITEM_NAMESPACE + transient_browsing_context_id.get())
+}
+
+const fn toolbar_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
+    CompositionItemId::new(TOOLBAR_ITEM_NAMESPACE + browsing_context_id.get())
+}
+
+const fn overlay_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
+    CompositionItemId::new(OVERLAY_ITEM_NAMESPACE + browsing_context_id.get())
+}
+
+const fn devtools_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
+    CompositionItemId::new(DEVTOOLS_ITEM_NAMESPACE + browsing_context_id.get())
 }

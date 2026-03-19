@@ -12,7 +12,7 @@ Secondary host-managed windows are also created for:
 
 - popup windows backed by transient browsing contexts
 - dedicated DevTools windows
-- additional host-managed browsing context windows requested by the backend
+- additional host-managed browsing context windows opened with a local mock toolbar
 
 This sample remains macOS-only.
 
