@@ -37,6 +37,7 @@ use crate::data::{
         ChromeImeTextSpanType, ChromeImeTextSpanUnderlineStyle, ChromeTextSelectionBounds,
     },
     input::{ChromeKeyEvent, ChromeKeyEventType, ChromeMouseWheelEvent, ChromeScrollGranularity},
+    ipc::{TabIpcErrorCode, TabIpcMessageType, TabIpcPayload},
     lifecycle::ChromeBeforeUnloadReason,
     mouse::{ChromeMouseButton, ChromeMouseEvent, ChromeMouseEventType, ChromePointerType},
     prompt_ui::{
@@ -265,6 +266,21 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
             html: c_string_to_string(event.dom_html),
+        }),
+        CBF_EVENT_TAB_IPC_MESSAGE_RECEIVED => Ok(IpcEvent::TabIpcMessageReceived {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            channel: c_string_to_string(event.ipc_channel),
+            message_type: ipc_message_type_from_ffi(event.ipc_message_type),
+            request_id: event.request_id,
+            payload: ipc_payload_from_ffi(
+                event.ipc_payload_kind,
+                event.ipc_payload_text,
+                event.ipc_payload_binary,
+                event.ipc_payload_binary_len,
+            ),
+            content_type: optional_string_from_ffi(event.ipc_content_type),
+            error_code: ipc_error_code_from_ffi(event.ipc_error_code),
         }),
         CBF_EVENT_DRAG_START_REQUESTED => {
             let profile_id = c_string_to_string(event.profile_id);
@@ -774,6 +790,44 @@ fn javascript_dialog_type_from_ffi(value: u8) -> DialogType {
         CBF_JAVASCRIPT_DIALOG_PROMPT => DialogType::Prompt,
         CBF_JAVASCRIPT_DIALOG_BEFOREUNLOAD => DialogType::BeforeUnload,
         _ => DialogType::Alert,
+    }
+}
+
+fn ipc_message_type_from_ffi(value: u8) -> TabIpcMessageType {
+    match value {
+        CBF_IPC_MESSAGE_REQUEST => TabIpcMessageType::Request,
+        CBF_IPC_MESSAGE_RESPONSE => TabIpcMessageType::Response,
+        CBF_IPC_MESSAGE_EVENT => TabIpcMessageType::Event,
+        _ => TabIpcMessageType::Event,
+    }
+}
+
+fn ipc_payload_from_ffi(
+    kind: u8,
+    text: *mut std::ffi::c_char,
+    binary: *const u8,
+    binary_len: u32,
+) -> TabIpcPayload {
+    match kind {
+        CBF_IPC_PAYLOAD_BINARY if !binary.is_null() && binary_len > 0 => {
+            let bytes = unsafe { std::slice::from_raw_parts(binary, binary_len as usize) };
+            TabIpcPayload::Binary(bytes.to_vec())
+        }
+        _ => TabIpcPayload::Text(c_string_to_string(text)),
+    }
+}
+
+fn ipc_error_code_from_ffi(value: u8) -> Option<TabIpcErrorCode> {
+    match value {
+        CBF_IPC_ERROR_NONE => None,
+        CBF_IPC_ERROR_TIMEOUT => Some(TabIpcErrorCode::Timeout),
+        CBF_IPC_ERROR_ABORTED => Some(TabIpcErrorCode::Aborted),
+        CBF_IPC_ERROR_DISCONNECTED => Some(TabIpcErrorCode::Disconnected),
+        CBF_IPC_ERROR_IPC_DISABLED => Some(TabIpcErrorCode::IpcDisabled),
+        CBF_IPC_ERROR_CONTEXT_CLOSED => Some(TabIpcErrorCode::ContextClosed),
+        CBF_IPC_ERROR_REMOTE_ERROR => Some(TabIpcErrorCode::RemoteError),
+        CBF_IPC_ERROR_PROTOCOL_ERROR => Some(TabIpcErrorCode::ProtocolError),
+        _ => Some(TabIpcErrorCode::ProtocolError),
     }
 }
 

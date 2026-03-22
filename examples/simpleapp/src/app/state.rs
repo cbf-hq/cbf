@@ -462,3 +462,74 @@ pub(crate) fn window_id_for_toolbar_browsing_context(
             (*candidate == browsing_context_id).then_some(*window_id)
         })
 }
+
+pub(crate) fn page_browsing_context_id_for_toolbar_browsing_context(
+    shared: &SharedStateHandle,
+    toolbar_browsing_context_id: BrowsingContextId,
+) -> Option<BrowsingContextId> {
+    let guard = shared.lock().expect("shared state lock poisoned");
+    let window_id =
+        guard
+            .window_to_toolbar_browsing_context
+            .iter()
+            .find_map(|(window_id, candidate)| {
+                (*candidate == toolbar_browsing_context_id).then_some(*window_id)
+            })?;
+    guard
+        .window_to_page_browsing_context
+        .get(&window_id)
+        .copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_shared() -> SharedStateHandle {
+        Arc::new(Mutex::new(SharedState::default()))
+    }
+
+    #[test]
+    fn resolve_page_for_toolbar_in_single_window() {
+        let shared = make_shared();
+        let window_id = HostWindowId::new(10);
+        let toolbar = BrowsingContextId::new(11);
+        let page = BrowsingContextId::new(12);
+
+        set_window_toolbar_browsing_context(&shared, window_id, Some(toolbar));
+        set_window_page_browsing_context(&shared, window_id, Some(page));
+
+        let resolved = page_browsing_context_id_for_toolbar_browsing_context(&shared, toolbar);
+        assert_eq!(resolved, Some(page));
+    }
+
+    #[test]
+    fn resolve_page_for_toolbar_in_multi_window() {
+        let shared = make_shared();
+        let window_a = HostWindowId::new(20);
+        let window_b = HostWindowId::new(30);
+        let toolbar_a = BrowsingContextId::new(21);
+        let toolbar_b = BrowsingContextId::new(31);
+        let page_a = BrowsingContextId::new(22);
+        let page_b = BrowsingContextId::new(32);
+
+        set_window_toolbar_browsing_context(&shared, window_a, Some(toolbar_a));
+        set_window_page_browsing_context(&shared, window_a, Some(page_a));
+        set_window_toolbar_browsing_context(&shared, window_b, Some(toolbar_b));
+        set_window_page_browsing_context(&shared, window_b, Some(page_b));
+
+        let resolved = page_browsing_context_id_for_toolbar_browsing_context(&shared, toolbar_b);
+        assert_eq!(resolved, Some(page_b));
+    }
+
+    #[test]
+    fn resolve_page_for_toolbar_returns_none_when_page_missing() {
+        let shared = make_shared();
+        let window_id = HostWindowId::new(40);
+        let toolbar = BrowsingContextId::new(41);
+        set_window_toolbar_browsing_context(&shared, window_id, Some(toolbar));
+
+        let resolved = page_browsing_context_id_for_toolbar_browsing_context(&shared, toolbar);
+        assert_eq!(resolved, None);
+    }
+}

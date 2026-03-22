@@ -1,10 +1,14 @@
 use std::{
     ffi::{CStr, CString},
+    os::raw::c_char,
     ptr,
     time::Duration,
 };
 
-use cbf::data::{edit::EditAction, window_open::WindowOpenResponse};
+use cbf::data::{
+    edit::EditAction,
+    window_open::WindowOpenResponse,
+};
 use cbf_chrome_sys::ffi::*;
 use tracing::warn;
 
@@ -27,6 +31,7 @@ use crate::data::{
         ChromeTransientImeCommitText, ChromeTransientImeComposition,
     },
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+    ipc::{TabIpcConfig, TabIpcErrorCode, TabIpcMessage, TabIpcMessageType, TabIpcPayload},
     mouse::ChromeMouseEvent,
     profile::ChromeProfileInfo,
     prompt_ui::{PromptUiId, PromptUiResponse},
@@ -350,6 +355,114 @@ impl IpcClient {
 
         if unsafe {
             cbf_bridge_client_set_tab_visibility(self.inner, browsing_context_id.get(), visibility)
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Enable browsing context IPC with explicit origin allow list.
+    pub fn enable_tab_ipc(
+        &mut self,
+        browsing_context_id: TabId,
+        config: &TabIpcConfig,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let origin_cstrings: Result<Vec<CString>, _> = config
+            .allowed_origins
+            .iter()
+            .map(|origin| CString::new(origin.as_str()))
+            .collect();
+        let origin_cstrings = origin_cstrings.map_err(|_| Error::InvalidInput)?;
+        let origin_ptrs: Vec<*const c_char> = origin_cstrings.iter().map(|s| s.as_ptr()).collect();
+        let list = CbfCommandList {
+            items: if origin_ptrs.is_empty() {
+                ptr::null()
+            } else {
+                origin_ptrs.as_ptr()
+            },
+            len: origin_ptrs.len() as u32,
+        };
+
+        if unsafe { cbf_bridge_client_enable_tab_ipc(self.inner, browsing_context_id.get(), &list) }
+        {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Disable browsing context IPC.
+    pub fn disable_tab_ipc(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe { cbf_bridge_client_disable_tab_ipc(self.inner, browsing_context_id.get()) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Post host -> page IPC message.
+    pub fn post_tab_ipc_message(
+        &mut self,
+        browsing_context_id: TabId,
+        message: &TabIpcMessage,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let channel = CString::new(message.channel.as_str()).map_err(|_| Error::InvalidInput)?;
+        let content_type =
+            to_optional_cstring(&message.content_type).map_err(|_| Error::InvalidInput)?;
+        let payload_kind = match message.payload {
+            TabIpcPayload::Text(_) => CBF_IPC_PAYLOAD_TEXT,
+            TabIpcPayload::Binary(_) => CBF_IPC_PAYLOAD_BINARY,
+        };
+        let message_type = ipc_message_type_to_ffi(message.message_type);
+        let error_code = message
+            .error_code
+            .map(ipc_error_code_to_ffi)
+            .unwrap_or(CBF_IPC_ERROR_NONE);
+        let (payload_text, payload_binary) = match &message.payload {
+            TabIpcPayload::Text(text) => (
+                Some(CString::new(text.as_str()).map_err(|_| Error::InvalidInput)?),
+                Vec::new(),
+            ),
+            TabIpcPayload::Binary(binary) => (None, binary.clone()),
+        };
+
+        if unsafe {
+            cbf_bridge_client_post_tab_ipc_message(
+                self.inner,
+                browsing_context_id.get(),
+                channel.as_ptr(),
+                message_type,
+                message.request_id,
+                payload_kind,
+                payload_text
+                    .as_ref()
+                    .map(|value| value.as_ptr())
+                    .unwrap_or(ptr::null()),
+                if payload_binary.is_empty() {
+                    ptr::null()
+                } else {
+                    payload_binary.as_ptr()
+                },
+                payload_binary.len() as u32,
+                content_type
+                    .as_ref()
+                    .map(|value| value.as_ptr())
+                    .unwrap_or(ptr::null()),
+                error_code,
+            )
         } {
             Ok(())
         } else {
@@ -1671,6 +1784,26 @@ fn edit_action_to_ffi(action: EditAction) -> u8 {
         EditAction::Copy => CBF_EDIT_ACTION_COPY,
         EditAction::Paste => CBF_EDIT_ACTION_PASTE,
         EditAction::SelectAll => CBF_EDIT_ACTION_SELECT_ALL,
+    }
+}
+
+fn ipc_message_type_to_ffi(message_type: TabIpcMessageType) -> u8 {
+    match message_type {
+        TabIpcMessageType::Request => CBF_IPC_MESSAGE_REQUEST,
+        TabIpcMessageType::Response => CBF_IPC_MESSAGE_RESPONSE,
+        TabIpcMessageType::Event => CBF_IPC_MESSAGE_EVENT,
+    }
+}
+
+fn ipc_error_code_to_ffi(error_code: TabIpcErrorCode) -> u8 {
+    match error_code {
+        TabIpcErrorCode::Timeout => CBF_IPC_ERROR_TIMEOUT,
+        TabIpcErrorCode::Aborted => CBF_IPC_ERROR_ABORTED,
+        TabIpcErrorCode::Disconnected => CBF_IPC_ERROR_DISCONNECTED,
+        TabIpcErrorCode::IpcDisabled => CBF_IPC_ERROR_IPC_DISABLED,
+        TabIpcErrorCode::ContextClosed => CBF_IPC_ERROR_CONTEXT_CLOSED,
+        TabIpcErrorCode::RemoteError => CBF_IPC_ERROR_REMOTE_ERROR,
+        TabIpcErrorCode::ProtocolError => CBF_IPC_ERROR_PROTOCOL_ERROR,
     }
 }
 

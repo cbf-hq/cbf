@@ -11,6 +11,7 @@ use crate::data::{
     drag::{ChromeDragDrop, ChromeDragUpdate},
     extension::ChromeAuxiliaryWindowResponse,
     ids::{PopupId, TabId},
+    ipc::{TabIpcConfig, TabIpcMessage},
     ime::{
         ChromeConfirmCompositionBehavior, ChromeImeCommitText, ChromeImeComposition,
         ChromeTransientImeCommitText, ChromeTransientImeComposition,
@@ -112,6 +113,17 @@ pub enum ChromeCommand {
     SetTabVisibility {
         browsing_context_id: TabId,
         visibility: ChromeTabVisibility,
+    },
+    EnableTabIpc {
+        browsing_context_id: TabId,
+        config: TabIpcConfig,
+    },
+    DisableTabIpc {
+        browsing_context_id: TabId,
+    },
+    PostTabIpcMessage {
+        browsing_context_id: TabId,
+        message: TabIpcMessage,
     },
     SendKeyEvent {
         browsing_context_id: TabId,
@@ -406,6 +418,25 @@ impl From<BrowserCommand> for ChromeCommand {
             } => Self::SetTabVisibility {
                 browsing_context_id: browsing_context_id.into(),
                 visibility: visibility.into(),
+            },
+            BrowserCommand::EnableIpc {
+                browsing_context_id,
+                config,
+            } => Self::EnableTabIpc {
+                browsing_context_id: browsing_context_id.into(),
+                config: config.into(),
+            },
+            BrowserCommand::DisableIpc {
+                browsing_context_id,
+            } => Self::DisableTabIpc {
+                browsing_context_id: browsing_context_id.into(),
+            },
+            BrowserCommand::PostBrowsingContextIpcMessage {
+                browsing_context_id,
+                message,
+            } => Self::PostTabIpcMessage {
+                browsing_context_id: browsing_context_id.into(),
+                message: message.into(),
             },
             BrowserCommand::SendKeyEvent {
                 browsing_context_id,

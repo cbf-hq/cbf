@@ -10,6 +10,8 @@ mod browser;
 #[cfg(target_os = "macos")]
 mod cli;
 #[cfg(target_os = "macos")]
+mod ipc;
+#[cfg(target_os = "macos")]
 mod platform;
 #[cfg(target_os = "macos")]
 mod scene;

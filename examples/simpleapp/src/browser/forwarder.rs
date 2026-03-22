@@ -19,10 +19,10 @@ pub(crate) fn spawn_browser_event_forwarder(
         loop {
             match events.recv_blocking() {
                 Ok(event) => {
-                    if let Some(generic_event) = event.as_generic().cloned() {
-                        if proxy.send_event(UserEvent::Browser(generic_event)).is_err() {
-                            return;
-                        }
+                    if let Some(generic_event) = event.as_generic().cloned()
+                        && proxy.send_event(UserEvent::Browser(generic_event)).is_err()
+                    {
+                        return;
                     }
 
                     if proxy

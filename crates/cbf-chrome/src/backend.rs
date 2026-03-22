@@ -1166,6 +1166,23 @@ impl ChromiumBackend {
             } => client
                 .set_tab_visibility(*browsing_context_id, *visibility)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::EnableTabIpc {
+                browsing_context_id,
+                config,
+            } => client
+                .enable_tab_ipc(*browsing_context_id, config)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::DisableTabIpc {
+                browsing_context_id,
+            } => client
+                .disable_tab_ipc(*browsing_context_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::PostTabIpcMessage {
+                browsing_context_id,
+                message,
+            } => client
+                .post_tab_ipc_message(*browsing_context_id, message)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::OpenDefaultPromptUi {
                 profile_id,
                 request_id,

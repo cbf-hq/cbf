@@ -160,6 +160,7 @@ Design principles:
 - Event-driven and async by default.
 - Command/response boundaries are explicit.
 - Process crash/stop events are observable (`BackendReady`, `BackendStopped`, render crash events).
+- IPC channel names are part of the public contract and must be non-empty strings.
 
 ## Ownership and Lifecycle
 

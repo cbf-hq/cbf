@@ -1,0 +1,2151 @@
+From 3a9b50824911169b7ddb8e942b3dc875d5435f4a Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Sun, 22 Mar 2026 12:28:43 +0900
+Subject: [PATCH 35/35] Add browsing context IPC bridge flow
+
+---
+ chrome/browser/cbf/BUILD.gn                   |   3 +
+ chrome/browser/cbf/bridge/cbf_bridge.h        |  19 +
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |  12 +
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |  22 +
+ .../cbf/bridge/cbf_bridge_client_impl.h       |   3 +
+ .../cbf/bridge/cbf_bridge_event_wait_state.h  |   7 +
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  43 ++
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  47 ++
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc | 185 ++++++++
+ chrome/browser/cbf/cbf_page_ipc_host.cc       | 139 ++++++
+ chrome/browser/cbf/cbf_page_ipc_host.h        |  36 ++
+ chrome/browser/cbf/cbf_profile_service.cc     | 152 +++++-
+ chrome/browser/cbf/cbf_profile_service.h      |  16 +
+ .../cbf/cbf_profile_service_browsertest.cc    | 181 ++++++-
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  37 ++
+ .../cbf/test/cbf_test_profile_observer.cc     |  54 ++-
+ .../cbf/test/cbf_test_profile_observer.h      |  34 +-
+ .../chrome_browser_interface_binders.cc       |   3 +
+ chrome/common/BUILD.gn                        |   1 +
+ chrome/common/cbf_ipc.mojom                   |  39 ++
+ chrome/renderer/BUILD.gn                      |   2 +
+ chrome/renderer/cbf_ipc_extension.cc          | 442 ++++++++++++++++++
+ chrome/renderer/cbf_ipc_extension.h           |  43 ++
+ .../chrome_content_renderer_client.cc         |   2 +
+ 24 files changed, 1511 insertions(+), 11 deletions(-)
+ create mode 100644 chrome/browser/cbf/cbf_page_ipc_host.cc
+ create mode 100644 chrome/browser/cbf/cbf_page_ipc_host.h
+ create mode 100644 chrome/common/cbf_ipc.mojom
+ create mode 100644 chrome/renderer/cbf_ipc_extension.cc
+ create mode 100644 chrome/renderer/cbf_ipc_extension.h
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index 85e234bdf93a3..224cda805e19c 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -17,6 +17,8 @@ source_set("cbf") {
+     "cbf_extension_uninstall_dialog.h",
+     "cbf_features.cc",
+     "cbf_features.h",
++    "cbf_page_ipc_host.cc",
++    "cbf_page_ipc_host.h",
+     "cbf_service.cc",
+     "cbf_service.h",
+     "cbf_browser_service.cc",
+@@ -192,6 +194,7 @@ source_set("cbf_tests") {
+ source_set("cbf_browser_tests") {
+   testonly = true
+   defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
++  check_includes = false
+ 
+   sources = [
+     "cbf_settings_browsertest.cc",
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index b0fac2f7cf486..bd10db17bf0cf 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -160,6 +160,25 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_activate_extension_action(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+     const char* extension_id);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_enable_tab_ipc(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id,
++    const CbfCommandList* allowed_origins);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_disable_tab_ipc(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_post_tab_ipc_message(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id,
++    const char* channel,
++    uint8_t message_type,
++    uint64_t request_id,
++    uint8_t payload_kind,
++    const char* payload_text,
++    const uint8_t* payload_binary,
++    uint32_t payload_binary_len,
++    const char* content_type,
++    uint8_t error_code);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_extension_popup_size(
+     CbfBridgeClientHandle* client,
+     uint64_t popup_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index 435654412a64e..8605f51b97a1c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -3,6 +3,7 @@
+ 
+ #include <memory>
+ #include <string>
++#include <vector>
+ 
+ #include "chrome/browser/cbf/bridge/cbf_bridge_ffi.h"
+ 
+@@ -30,6 +31,17 @@ class CbfBridgeClient {
+   bool SetTabBackgroundPolicy(uint64_t tab_id, bool transparent);
+   bool SetTabFocus(uint64_t tab_id, bool focused);
+   bool SetTabVisibility(uint64_t tab_id, uint8_t visibility);
++  bool EnableTabIpc(uint64_t tab_id, const CbfCommandList* allowed_origins);
++  bool DisableTabIpc(uint64_t tab_id);
++  bool PostTabIpcMessage(uint64_t tab_id,
++                         const std::string& channel,
++                         uint8_t message_type,
++                         uint64_t request_id,
++                         uint8_t payload_kind,
++                         const std::string& payload_text,
++                         const std::vector<uint8_t>& payload_binary,
++                         const std::string& content_type,
++                         uint8_t error_code);
+   bool SendKeyEvent(const CbfKeyEvent* event, const CbfCommandList* commands);
+   bool SendMouseEvent(const CbfMouseEvent* event);
+   bool SendMouseWheelEvent(const CbfMouseWheelEvent* event);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index e2e668e1089ba..e688d633f704c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -629,6 +629,28 @@ void CbfBridgeClientImpl::Observer::OnTabDomHtmlRead(uint64_t tab_id,
+   impl_->events.push(std::move(event));
+ }
+ 
++void CbfBridgeClientImpl::Observer::OnTabIpcMessageReceived(
++    uint64_t tab_id,
++    cbf::mojom::CbfIpcMessagePtr message) {
++  if (!message) {
++    return;
++  }
++  CbfBridgeEventData event;
++  event.kind = kEventTabIpcMessageReceived;
++  event.tab_id = tab_id;
++  event.request_id = message->request_id;
++  event.profile_id = profile_id_;
++  event.ipc_channel = message->channel;
++  event.ipc_message_type = static_cast<uint8_t>(message->message_type);
++  event.ipc_payload_kind = static_cast<uint8_t>(message->payload_kind);
++  event.ipc_payload_text = message->payload_text;
++  event.ipc_payload_binary = std::move(message->payload_binary);
++  event.ipc_content_type = message->content_type;
++  event.ipc_error_code = static_cast<uint8_t>(message->error_code);
++  std::lock_guard<std::mutex> lock(impl_->events_mutex);
++  impl_->events.push(std::move(event));
++}
++
+ void CbfBridgeClientImpl::Observer::OnDragStartRequested(
+     cbf::mojom::CbfDragStartRequestPtr request) {
+   if (!request) {
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+index 0173565c3cb06..6351a642e497f 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+@@ -158,6 +158,9 @@ struct CbfBridgeClientImpl {
+     void OnTabDomHtmlRead(uint64_t tab_id,
+                               uint64_t request_id,
+                               const std::string& html) override;
++    void OnTabIpcMessageReceived(
++        uint64_t tab_id,
++        cbf::mojom::CbfIpcMessagePtr message) override;
+     void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
+     void OnExtensionsListed(
+         const std::string& profile_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+index 7df6df060ffa5..854811d78fac9 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+@@ -96,6 +96,13 @@ struct CbfBridgeEventData {
+   bool has_target_tab_id = false;
+   uint64_t target_tab_id = 0;
+   uint8_t tab_open_result = kCbfTabOpenResultAborted;
++  std::string ipc_channel;
++  uint8_t ipc_message_type = kCbfIpcMessageEvent;
++  uint8_t ipc_payload_kind = kCbfIpcPayloadText;
++  std::string ipc_payload_text;
++  std::vector<uint8_t> ipc_payload_binary;
++  std::string ipc_content_type;
++  uint8_t ipc_error_code = kCbfIpcErrorNone;
+ 
+   struct ImeCompositionBoundsData {
+     ImeCompositionBoundsData();
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index b446b7c88b6cb..b5b6f8a899ede 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -389,6 +389,14 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+   out_event->tab_open_result_kind = kCbfTabOpenResultAborted;
+   out_event->tab_open_has_target = false;
+   out_event->tab_open_target_tab_id = 0;
++  out_event->ipc_channel = nullptr;
++  out_event->ipc_message_type = kCbfIpcMessageEvent;
++  out_event->ipc_payload_kind = kCbfIpcPayloadText;
++  out_event->ipc_payload_text = nullptr;
++  out_event->ipc_payload_binary = nullptr;
++  out_event->ipc_payload_binary_len = 0;
++  out_event->ipc_content_type = nullptr;
++  out_event->ipc_error_code = kCbfIpcErrorNone;
+ 
+   if (event.kind == kEventImeBoundsUpdated ||
+       event.kind == kEventExtensionPopupImeBoundsUpdated) {
+@@ -687,6 +695,30 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     out_event->tab_open_target_tab_id =
+         event.target_tab_id;
+   }
++  if (event.kind == kEventTabIpcMessageReceived) {
++    out_event->ipc_channel = event.ipc_channel.empty()
++                                 ? nullptr
++                                 : CopyCString(event.ipc_channel);
++    out_event->ipc_message_type = event.ipc_message_type;
++    out_event->ipc_payload_kind = event.ipc_payload_kind;
++    out_event->ipc_payload_text = event.ipc_payload_text.empty()
++                                      ? nullptr
++                                      : CopyCString(event.ipc_payload_text);
++    if (!event.ipc_payload_binary.empty()) {
++      const size_t payload_len = event.ipc_payload_binary.size();
++      uint8_t* bytes = new uint8_t[payload_len];
++      auto out_bytes = UNSAFE_BUFFERS(base::span(bytes, payload_len));
++      for (size_t i = 0; i < out_bytes.size(); ++i) {
++        out_bytes[i] = event.ipc_payload_binary[i];
++      }
++      out_event->ipc_payload_binary = bytes;
++      out_event->ipc_payload_binary_len = static_cast<uint32_t>(payload_len);
++    }
++    out_event->ipc_content_type = event.ipc_content_type.empty()
++                                      ? nullptr
++                                      : CopyCString(event.ipc_content_type);
++    out_event->ipc_error_code = event.ipc_error_code;
++  }
+   return true;
+ }
+ 
+@@ -833,6 +865,17 @@ extern "C" void cbf_bridge_event_free(CbfBridgeEvent* event) {
+   event->download_suggested_path = nullptr;
+   delete[] event->download_destination_path;
+   event->download_destination_path = nullptr;
++  delete[] event->ipc_channel;
++  event->ipc_channel = nullptr;
++  delete[] event->ipc_payload_text;
++  event->ipc_payload_text = nullptr;
++  if (event->ipc_payload_binary) {
++    delete[] event->ipc_payload_binary;
++    event->ipc_payload_binary = nullptr;
++  }
++  event->ipc_payload_binary_len = 0;
++  delete[] event->ipc_content_type;
++  event->ipc_content_type = nullptr;
+   FreeStringList(event->permission_names);
+   event->permission_names.items = nullptr;
+   event->permission_names.len = 0;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index ab930a3b7b763..348848f27bf03 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -63,6 +63,7 @@ enum CbfEventKind {
+   kEventJavaScriptDialogRequested = 43,
+   kEventChoiceMenuRequested = 44,
+   kEventExtensionPopupChoiceMenuRequested = 45,
++  kEventTabIpcMessageReceived = 46,
+   kEventTabCreated = kEventWebPageCreated,
+   kEventNewTabRequested = kEventNewWebPageRequested,
+   kEventTabClosed = kEventWebPageClosed,
+@@ -345,6 +346,28 @@ enum CbfChoiceMenuTextDirection {
+   kCbfChoiceMenuTextDirectionRightToLeft = 1,
+ };
+ 
++enum CbfIpcPayloadKind {
++  kCbfIpcPayloadText = 0,
++  kCbfIpcPayloadBinary = 1,
++};
++
++enum CbfIpcMessageType {
++  kCbfIpcMessageRequest = 0,
++  kCbfIpcMessageResponse = 1,
++  kCbfIpcMessageEvent = 2,
++};
++
++enum CbfIpcErrorCode {
++  kCbfIpcErrorNone = 0,
++  kCbfIpcErrorTimeout = 1,
++  kCbfIpcErrorAborted = 2,
++  kCbfIpcErrorDisconnected = 3,
++  kCbfIpcErrorIpcDisabled = 4,
++  kCbfIpcErrorContextClosed = 5,
++  kCbfIpcErrorRemoteError = 6,
++  kCbfIpcErrorProtocolError = 7,
++};
++
+ typedef struct CbfSurfaceHandle {
+   uint8_t kind;
+   uint32_t ca_context_id;
+@@ -720,6 +743,14 @@ typedef struct CbfBridgeEvent {
+   uint8_t tab_open_result_kind;
+   bool tab_open_has_target;
+   uint64_t tab_open_target_tab_id;
++  char* ipc_channel;
++  uint8_t ipc_message_type;
++  uint8_t ipc_payload_kind;
++  char* ipc_payload_text;
++  const uint8_t* ipc_payload_binary;
++  uint32_t ipc_payload_binary_len;
++  char* ipc_content_type;
++  uint8_t ipc_error_code;
+ } CbfBridgeEvent;
+ 
+ typedef struct CbfImeTextSpan {
+@@ -858,6 +889,22 @@ bool cbf_bridge_client_set_web_page_focus(CbfBridgeClientHandle* client,
+ bool cbf_bridge_client_set_tab_visibility(CbfBridgeClientHandle* client,
+                                           uint64_t tab_id,
+                                           uint8_t visibility);
++bool cbf_bridge_client_enable_tab_ipc(CbfBridgeClientHandle* client,
++                                      uint64_t tab_id,
++                                      const CbfCommandList* allowed_origins);
++bool cbf_bridge_client_disable_tab_ipc(CbfBridgeClientHandle* client,
++                                       uint64_t tab_id);
++bool cbf_bridge_client_post_tab_ipc_message(CbfBridgeClientHandle* client,
++                                            uint64_t tab_id,
++                                            const char* channel,
++                                            uint8_t message_type,
++                                            uint64_t request_id,
++                                            uint8_t payload_kind,
++                                            const char* payload_text,
++                                            const uint8_t* payload_binary,
++                                            uint32_t payload_binary_len,
++                                            const char* content_type,
++                                            uint8_t error_code);
+ bool cbf_bridge_client_set_tab_background_policy(CbfBridgeClientHandle* client,
+                                                  uint64_t tab_id,
+                                                  bool transparent);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index c29f83992d23a..91a2d858760b7 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -4,6 +4,7 @@
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+ #include "base/location.h"
++#include "base/containers/span.h"
+ #include "chrome/browser/cbf/bridge/cbf_bridge_client_impl.h"
+ #include "chrome/browser/cbf/bridge/cbf_bridge_support.h"
+ 
+@@ -221,6 +222,143 @@ bool CbfBridgeClient::SetTabVisibility(const uint64_t tab_id,
+   return true;
+ }
+ 
++bool CbfBridgeClient::EnableTabIpc(const uint64_t tab_id,
++                                   const CbfCommandList* allowed_origins) {
++  if (!impl_ || !allowed_origins) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++
++  std::vector<std::string> origins;
++  if (allowed_origins->items && allowed_origins->len > 0) {
++    auto items = UNSAFE_BUFFERS(
++        base::span(allowed_origins->items, allowed_origins->len));
++    origins.reserve(items.size());
++    for (const char* item : items) {
++      origins.emplace_back(item ? item : "");
++    }
++  }
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id,
++             std::vector<std::string> origins) {
++            if (!impl->browser_remote.is_bound()) {
++              return;
++            }
++            auto it = impl->web_page_profiles.find(tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->EnableTabIpc(tab_id, std::move(origins));
++          },
++          impl, tab_id, std::move(origins)));
++  return true;
++}
++
++bool CbfBridgeClient::DisableTabIpc(const uint64_t tab_id) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id) {
++            if (!impl->browser_remote.is_bound()) {
++              return;
++            }
++            auto it = impl->web_page_profiles.find(tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->DisableTabIpc(tab_id);
++          },
++          impl, tab_id));
++  return true;
++}
++
++bool CbfBridgeClient::PostTabIpcMessage(
++    const uint64_t tab_id,
++    const std::string& channel,
++    const uint8_t message_type,
++    const uint64_t request_id,
++    const uint8_t payload_kind,
++    const std::string& payload_text,
++    const std::vector<uint8_t>& payload_binary,
++    const std::string& content_type,
++    const uint8_t error_code) {
++  if (!impl_ || channel.empty()) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id, std::string channel,
++             uint8_t message_type, uint64_t request_id, uint8_t payload_kind,
++             std::string payload_text, std::vector<uint8_t> payload_binary,
++             std::string content_type, uint8_t error_code) {
++            if (!impl->browser_remote.is_bound()) {
++              return;
++            }
++            auto it = impl->web_page_profiles.find(tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            auto message = cbf::mojom::CbfIpcMessage::New();
++            message->channel = std::move(channel);
++            message->message_type =
++                static_cast<cbf::mojom::CbfIpcMessageType>(message_type);
++            message->request_id = request_id;
++            message->payload_kind =
++                static_cast<cbf::mojom::CbfIpcPayloadKind>(payload_kind);
++            message->payload_text = std::move(payload_text);
++            message->payload_binary = std::move(payload_binary);
++            message->content_type = std::move(content_type);
++            message->error_code =
++                static_cast<cbf::mojom::CbfIpcErrorCode>(error_code);
++            remote_it->second.remote->PostTabIpcMessage(tab_id,
++                                                        std::move(message));
++          },
++          impl, tab_id, channel, message_type, request_id, payload_kind,
++          payload_text, payload_binary, content_type, error_code));
++  return true;
++}
++
+ bool CbfBridgeClient::RequestCloseTab(const uint64_t tab_id) {
+   if (!impl_) {
+     return false;
+@@ -1178,6 +1316,53 @@ extern "C" bool cbf_bridge_client_set_tab_visibility(
+       ->SetTabVisibility(tab_id, visibility);
+ }
+ 
++extern "C" bool cbf_bridge_client_enable_tab_ipc(
++    CbfBridgeClientHandle* client,
++    const uint64_t tab_id,
++    const CbfCommandList* allowed_origins) {
++  if (!client || !allowed_origins) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->EnableTabIpc(tab_id, allowed_origins);
++}
++
++extern "C" bool cbf_bridge_client_disable_tab_ipc(
++    CbfBridgeClientHandle* client,
++    const uint64_t tab_id) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->DisableTabIpc(tab_id);
++}
++
++extern "C" bool cbf_bridge_client_post_tab_ipc_message(
++    CbfBridgeClientHandle* client,
++    const uint64_t tab_id,
++    const char* channel,
++    const uint8_t message_type,
++    const uint64_t request_id,
++    const uint8_t payload_kind,
++    const char* payload_text,
++    const uint8_t* payload_binary,
++    const uint32_t payload_binary_len,
++    const char* content_type,
++    const uint8_t error_code) {
++  if (!client || !channel || channel[0] == '\0') {
++    return false;
++  }
++  std::vector<uint8_t> binary;
++  if (payload_binary && payload_binary_len > 0) {
++    auto source = UNSAFE_BUFFERS(base::span(payload_binary, payload_binary_len));
++    binary.assign(source.begin(), source.end());
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->PostTabIpcMessage(tab_id, channel, message_type, request_id,
++                          payload_kind, payload_text ? payload_text : "",
++                          binary, content_type ? content_type : "", error_code);
++}
++
+ extern "C" bool cbf_bridge_client_confirm_beforeunload(
+     CbfBridgeClientHandle* client,
+     const uint64_t tab_id,
+diff --git a/chrome/browser/cbf/cbf_page_ipc_host.cc b/chrome/browser/cbf/cbf_page_ipc_host.cc
+new file mode 100644
+index 0000000000000..07dbc55f4cad2
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_page_ipc_host.cc
+@@ -0,0 +1,139 @@
++#include "chrome/browser/cbf/cbf_page_ipc_host.h"
++
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "chrome/browser/cbf/cbf_browser_service.h"
++#include "chrome/browser/cbf/cbf_profile_service.h"
++#include "chrome/browser/cbf/cbf_service.h"
++#include "chrome/browser/profiles/profile.h"
++#include "content/public/browser/web_contents.h"
++#include "url/origin.h"
++
++namespace cbf {
++
++namespace {
++
++mojom::CbfIpcPayloadKind ToCbfPayloadKind(
++    chrome::mojom::CbfPageIpcPayloadKind payload_kind) {
++  switch (payload_kind) {
++    case chrome::mojom::CbfPageIpcPayloadKind::kText:
++      return mojom::CbfIpcPayloadKind::kText;
++    case chrome::mojom::CbfPageIpcPayloadKind::kBinary:
++      return mojom::CbfIpcPayloadKind::kBinary;
++  }
++}
++
++chrome::mojom::CbfPageIpcErrorCode ToPageErrorCode(
++    cbf::mojom::CbfIpcErrorCode error_code) {
++  switch (error_code) {
++    case cbf::mojom::CbfIpcErrorCode::kNone:
++      return chrome::mojom::CbfPageIpcErrorCode::kNone;
++    case cbf::mojom::CbfIpcErrorCode::kTimeout:
++      return chrome::mojom::CbfPageIpcErrorCode::kTimeout;
++    case cbf::mojom::CbfIpcErrorCode::kAborted:
++      return chrome::mojom::CbfPageIpcErrorCode::kAborted;
++    case cbf::mojom::CbfIpcErrorCode::kDisconnected:
++      return chrome::mojom::CbfPageIpcErrorCode::kDisconnected;
++    case cbf::mojom::CbfIpcErrorCode::kIpcDisabled:
++      return chrome::mojom::CbfPageIpcErrorCode::kIpcDisabled;
++    case cbf::mojom::CbfIpcErrorCode::kContextClosed:
++      return chrome::mojom::CbfPageIpcErrorCode::kContextClosed;
++    case cbf::mojom::CbfIpcErrorCode::kRemoteError:
++      return chrome::mojom::CbfPageIpcErrorCode::kRemoteError;
++    case cbf::mojom::CbfIpcErrorCode::kProtocolError:
++      return chrome::mojom::CbfPageIpcErrorCode::kProtocolError;
++  }
++}
++
++}  // namespace
++
++// static
++void CbfPageIpcHost::Create(
++    content::RenderFrameHost* render_frame_host,
++    mojo::PendingReceiver<chrome::mojom::CbfPageIpcHost> receiver) {
++  if (!render_frame_host) {
++    return;
++  }
++  new CbfPageIpcHost(render_frame_host, std::move(receiver));
++}
++
++CbfPageIpcHost::CbfPageIpcHost(
++    content::RenderFrameHost* render_frame_host,
++    mojo::PendingReceiver<chrome::mojom::CbfPageIpcHost> receiver)
++    : render_frame_host_(render_frame_host), receiver_(this, std::move(receiver)) {
++  receiver_.set_disconnect_handler(
++      base::BindOnce([](CbfPageIpcHost* self) { delete self; }, this));
++}
++
++CbfPageIpcHost::~CbfPageIpcHost() = default;
++
++void CbfPageIpcHost::Invoke(chrome::mojom::CbfPageIpcInvokeRequestPtr request,
++                            InvokeCallback callback) {
++  auto result = chrome::mojom::CbfPageIpcInvokeResult::New();
++  result->accepted = false;
++  result->error_code = chrome::mojom::CbfPageIpcErrorCode::kContextClosed;
++
++  if (!request || !render_frame_host_) {
++    result->error_code = chrome::mojom::CbfPageIpcErrorCode::kProtocolError;
++    std::move(callback).Run(std::move(result));
++    return;
++  }
++
++  content::WebContents* web_contents =
++      content::WebContents::FromRenderFrameHost(render_frame_host_);
++  if (!web_contents || web_contents->GetPrimaryMainFrame() != render_frame_host_) {
++    result->error_code = chrome::mojom::CbfPageIpcErrorCode::kIpcDisabled;
++    std::move(callback).Run(std::move(result));
++    return;
++  }
++
++  Profile* profile =
++      Profile::FromBrowserContext(render_frame_host_->GetBrowserContext());
++  CbfService* cbf_service = CbfService::GetForProcess();
++  CbfBrowserService* browser_service =
++      cbf_service ? cbf_service->browser_service() : nullptr;
++  CbfProfileService* profile_service =
++      browser_service ? browser_service->GetProfileServiceForProfile(profile)
++                      : nullptr;
++  if (!profile_service) {
++    profile_service = CbfProfileService::GetForProfile(profile);
++  }
++  if (!profile_service) {
++    result->error_code = chrome::mojom::CbfPageIpcErrorCode::kDisconnected;
++    std::move(callback).Run(std::move(result));
++    return;
++  }
++
++  const TabId tab_id = profile_service->GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
++    result->error_code = chrome::mojom::CbfPageIpcErrorCode::kContextClosed;
++    std::move(callback).Run(std::move(result));
++    return;
++  }
++
++  auto message = mojom::CbfIpcMessage::New();
++  message->channel = request->channel;
++  message->message_type = mojom::CbfIpcMessageType::kRequest;
++  message->request_id = request->request_id;
++  message->payload_kind = ToCbfPayloadKind(request->payload_kind);
++  message->payload_text = request->payload_text;
++  message->payload_binary = std::move(request->payload_binary);
++  message->content_type = request->content_type;
++  message->error_code = mojom::CbfIpcErrorCode::kNone;
++
++  mojom::CbfIpcErrorCode error_code = mojom::CbfIpcErrorCode::kNone;
++  if (!profile_service->DispatchTabIpcInvoke(
++          tab_id, render_frame_host_->GetLastCommittedOrigin(),
++          std::move(message), &error_code)) {
++    result->error_code = ToPageErrorCode(error_code);
++    std::move(callback).Run(std::move(result));
++    return;
++  }
++
++  result->accepted = true;
++  result->error_code = chrome::mojom::CbfPageIpcErrorCode::kNone;
++  std::move(callback).Run(std::move(result));
++}
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_page_ipc_host.h b/chrome/browser/cbf/cbf_page_ipc_host.h
+new file mode 100644
+index 0000000000000..fd6ab081c3f76
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_page_ipc_host.h
+@@ -0,0 +1,36 @@
++#ifndef CHROME_BROWSER_CBF_CBF_PAGE_IPC_HOST_H_
++#define CHROME_BROWSER_CBF_CBF_PAGE_IPC_HOST_H_
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/common/cbf_ipc.mojom.h"
++#include "content/public/browser/render_frame_host.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++
++namespace cbf {
++
++class CbfPageIpcHost : public chrome::mojom::CbfPageIpcHost {
++ public:
++  static void Create(
++      content::RenderFrameHost* render_frame_host,
++      mojo::PendingReceiver<chrome::mojom::CbfPageIpcHost> receiver);
++
++  CbfPageIpcHost(const CbfPageIpcHost&) = delete;
++  CbfPageIpcHost& operator=(const CbfPageIpcHost&) = delete;
++  ~CbfPageIpcHost() override;
++
++  void Invoke(chrome::mojom::CbfPageIpcInvokeRequestPtr request,
++              InvokeCallback callback) override;
++
++ private:
++  explicit CbfPageIpcHost(
++      content::RenderFrameHost* render_frame_host,
++      mojo::PendingReceiver<chrome::mojom::CbfPageIpcHost> receiver);
++
++  raw_ptr<content::RenderFrameHost> render_frame_host_;
++  mojo::Receiver<chrome::mojom::CbfPageIpcHost> receiver_;
++};
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_CBF_PAGE_IPC_HOST_H_
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index a60c3309e7745..2bd1410bd112f 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -10,7 +10,12 @@
+ #include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
++#include "base/json/string_escape.h"
+ #include "base/logging.h"
++#include "base/base64.h"
++#include "base/no_destructor.h"
++#include "base/strings/strcat.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/task/single_thread_task_runner.h"
+@@ -81,6 +86,7 @@
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "extensions/common/manifest.h"
+ #include "extensions/common/manifest_handlers/icons_handler.h"
++#include "url/origin.h"
+ #include "extensions/common/permissions/permissions_data.h"
+ #include "mojo/public/cpp/bindings/clone_traits.h"
+ #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+@@ -96,6 +102,10 @@ constexpr int kMaxExtensionPopupPollAttempts = 50;
+ constexpr gfx::Size kExtensionPopupMinSize(25, 25);
+ constexpr gfx::Size kExtensionPopupMaxSize(800, 600);
+ std::atomic_uint64_t g_next_extension_popup_id{1};
++std::map<Profile*, CbfProfileService*>& GetProfileServiceRegistry() {
++  static base::NoDestructor<std::map<Profile*, CbfProfileService*>> registry;
++  return *registry;
++}
+ 
+ content::RenderWidgetHost* ResolveInputRenderWidgetHost(
+     content::WebContents* web_contents) {
+@@ -161,6 +171,31 @@ gfx::Size ClampExtensionPopupBounds(gfx::Size size) {
+   return size;
+ }
+ 
++std::string BuildHostIpcDispatchScript(const mojom::CbfIpcMessage& message) {
++  const std::string payload_binary_b64 =
++      message.payload_binary.empty()
++          ? std::string()
++          : base::Base64Encode(base::span<const uint8_t>(message.payload_binary));
++  const std::string event_payload_json = base::StrCat(
++      {"{\"channel\":", base::GetQuotedJSONString(message.channel), ",",
++       "\"message_type\":",
++       base::NumberToString(static_cast<int>(message.message_type)), ",",
++       "\"request_id\":", base::NumberToString(message.request_id), ",",
++       "\"payload_kind\":",
++       base::NumberToString(static_cast<int>(message.payload_kind)), ",",
++       "\"payload_text\":", base::GetQuotedJSONString(message.payload_text), ",",
++       "\"payload_binary_base64\":",
++       base::GetQuotedJSONString(payload_binary_b64), ",",
++       "\"content_type\":", base::GetQuotedJSONString(message.content_type), ",",
++       "\"error_code\":",
++       base::NumberToString(static_cast<int>(message.error_code)), "}"});
++  return base::StrCat(
++      {"(function(){if(!window||!window.document){return;}window.document."
++       "dispatchEvent(new "
++       "CustomEvent('__cbfHostIpc',{detail:",
++       base::GetQuotedJSONString(event_payload_json), "}));})();"});
++}
++
+ class CbfExtensionPopupHostView final : public extensions::ExtensionView {
+  public:
+   using LoadedCallback = base::RepeatingClosure;
+@@ -754,6 +789,9 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+       devtools_controller_(std::make_unique<CbfProfileDevToolsController>(
+           service_context_.get())),
+       print_preview_web_contents_collection_(this) {
++  if (profile_) {
++    GetProfileServiceRegistry()[profile_] = this;
++  }
+   if (profile_) {
+     profile_observation_.Observe(profile_);
+     PrefService* prefs = profile_->GetPrefs();
+@@ -824,6 +862,13 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+ }
+ 
+ CbfProfileService::~CbfProfileService() {
++  if (profile_) {
++    auto& registry = GetProfileServiceRegistry();
++    auto it = registry.find(profile_);
++    if (it != registry.end() && it->second == this) {
++      registry.erase(it);
++    }
++  }
+   profile_observation_.Reset();
+   if (download_coordinator_ && download_coordinator_->GetNotifier()) {
+     download_coordinator_->GetNotifier()->RemoveObserver(this);
+@@ -858,10 +903,24 @@ CbfProfileService::~CbfProfileService() {
+     ime_controller_->OnTabClosed(tab_id);
+     drag_controller_->OnTabClosed(tab_id);
+     devtools_controller_->OnTabClosed(tab_id);
++    tab_ipc_allowed_origins_.erase(tab_id);
+   }
+   CloseAllTabs();
+ }
+ 
++// static
++CbfProfileService* CbfProfileService::GetForProfile(::Profile* profile) {
++  if (!profile) {
++    return nullptr;
++  }
++  auto& registry = GetProfileServiceRegistry();
++  auto it = registry.find(profile);
++  if (it == registry.end()) {
++    return nullptr;
++  }
++  return it->second;
++}
++
+ void CbfProfileService::BindReceiver(
+     mojo::PendingReceiver<mojom::CbfProfileService> receiver) {
+   receivers_.Add(this, std::move(receiver));
+@@ -1081,6 +1140,69 @@ void CbfProfileService::SetTabVisibility(uint64_t tab_id,
+   navigation_controller_->SetTabVisibility(tab_id, visibility);
+ }
+ 
++void CbfProfileService::EnableTabIpc(
++    uint64_t tab_id,
++    const std::vector<std::string>& allowed_origins) {
++  tab_ipc_allowed_origins_[tab_id] = allowed_origins;
++}
++
++void CbfProfileService::DisableTabIpc(uint64_t tab_id) {
++  tab_ipc_allowed_origins_.erase(tab_id);
++}
++
++void CbfProfileService::PostTabIpcMessage(uint64_t tab_id,
++                                          mojom::CbfIpcMessagePtr message) {
++  if (!message ||
++      tab_ipc_allowed_origins_.find(tab_id) == tab_ipc_allowed_origins_.end()) {
++    return;
++  }
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
++  if (!web_contents) {
++    return;
++  }
++  content::RenderFrameHost* main_frame = web_contents->GetPrimaryMainFrame();
++  if (!main_frame || !main_frame->IsRenderFrameLive()) {
++    return;
++  }
++  main_frame->ExecuteJavaScriptInIsolatedWorld(
++      base::UTF8ToUTF16(BuildHostIpcDispatchScript(*message)), base::DoNothing(),
++      content::ISOLATED_WORLD_ID_CONTENT_END);
++}
++
++bool CbfProfileService::DispatchTabIpcInvoke(
++    uint64_t tab_id,
++    const url::Origin& origin,
++    mojom::CbfIpcMessagePtr message,
++    mojom::CbfIpcErrorCode* error_code) {
++  auto set_error = [&](mojom::CbfIpcErrorCode code) {
++    if (error_code) {
++      *error_code = code;
++    }
++  };
++
++  if (!message) {
++    set_error(mojom::CbfIpcErrorCode::kProtocolError);
++    return false;
++  }
++  if (tab_ipc_allowed_origins_.find(tab_id) == tab_ipc_allowed_origins_.end()) {
++    set_error(mojom::CbfIpcErrorCode::kIpcDisabled);
++    return false;
++  }
++  if (!IsTabIpcOriginAllowed(tab_id, origin)) {
++    set_error(mojom::CbfIpcErrorCode::kIpcDisabled);
++    return false;
++  }
++  if (!observer_) {
++    set_error(mojom::CbfIpcErrorCode::kDisconnected);
++    return false;
++  }
++
++  message->message_type = mojom::CbfIpcMessageType::kRequest;
++  NotifyTabIpcMessageReceived(tab_id, std::move(message));
++  set_error(mojom::CbfIpcErrorCode::kNone);
++  return true;
++}
++
+ void CbfProfileService::CloseExtensionPopup(uint64_t popup_id) {
+   CloseExtensionPopupById(popup_id);
+ }
+@@ -2114,6 +2236,15 @@ void CbfProfileService::NotifyChoiceMenuRequested(
+   observer_->OnChoiceMenuRequested(tab_id, request_id, std::move(menu));
+ }
+ 
++void CbfProfileService::NotifyTabIpcMessageReceived(
++    uint64_t tab_id,
++    mojom::CbfIpcMessagePtr message) {
++  if (!observer_ || !message) {
++    return;
++  }
++  observer_->OnTabIpcMessageReceived(tab_id, std::move(message));
++}
++
+ void CbfProfileService::NotifyExtensionPopupJavaScriptDialogRequested(
+     TabId tab_id,
+     uint64_t popup_id,
+@@ -2170,7 +2301,7 @@ void CbfProfileService::NotifyCursorChanged(content::WebContents* web_contents,
+ void CbfProfileService::NotifyNavigationStateChanged(
+     content::WebContents* web_contents,
+     bool is_loading) {
+-  if (!web_contents || !observer_) {
++  if (!web_contents) {
+     return;
+   }
+ 
+@@ -2179,6 +2310,10 @@ void CbfProfileService::NotifyNavigationStateChanged(
+     return;
+   }
+ 
++  if (!observer_) {
++    return;
++  }
++
+   content::NavigationController& controller = web_contents->GetController();
+   observer_->OnNavigationStateChanged(
+       tab_id, web_contents->GetVisibleURL().spec(), controller.CanGoBack(),
+@@ -2538,6 +2673,21 @@ CbfProfileService::GetActiveExtensionPopup(content::WebContents* web_contents) {
+   return nullptr;
+ }
+ 
++bool CbfProfileService::IsTabIpcOriginAllowed(uint64_t tab_id,
++                                              const url::Origin& origin) const {
++  auto it = tab_ipc_allowed_origins_.find(tab_id);
++  if (it == tab_ipc_allowed_origins_.end()) {
++    return false;
++  }
++  const std::string serialized_origin = origin.Serialize();
++  for (const std::string& allowed_origin : it->second) {
++    if (allowed_origin == serialized_origin) {
++      return true;
++    }
++  }
++  return false;
++}
++
+ void CbfProfileService::CloseExtensionPopupById(uint64_t popup_id) {
+   auto it = active_extension_popups_.find(popup_id);
+   if (it == active_extension_popups_.end()) {
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 14d74181acd59..37f2600595276 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -45,6 +45,9 @@
+ 
+ class Profile;
+ class GURL;
++namespace url {
++class Origin;
++}
+ 
+ namespace content {
+ class RenderWidgetHost;
+@@ -81,6 +84,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+   CbfProfileService& operator=(const CbfProfileService&) = delete;
+   ~CbfProfileService() override;
+ 
++  static CbfProfileService* GetForProfile(::Profile* profile);
++
+   void BindReceiver(
+       mojo::PendingReceiver<mojom::CbfProfileService> receiver);
+ 
+@@ -130,6 +135,10 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void SetTabFocus(uint64_t tab_id, bool focused) override;
+   void SetTabVisibility(uint64_t tab_id,
+                         mojom::CbfTabVisibility visibility) override;
++  void EnableTabIpc(uint64_t tab_id,
++                    const std::vector<std::string>& allowed_origins) override;
++  void DisableTabIpc(uint64_t tab_id) override;
++  void PostTabIpcMessage(uint64_t tab_id, mojom::CbfIpcMessagePtr message) override;
+   void CloseExtensionPopup(uint64_t popup_id) override;
+   void SetExtensionPopupSize(uint64_t popup_id,
+                              uint32_t width,
+@@ -309,6 +318,11 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void NotifyChoiceMenuRequested(content::WebContents* web_contents,
+                                  uint64_t request_id,
+                                  mojom::CbfChoiceMenuPtr menu);
++  void NotifyTabIpcMessageReceived(uint64_t tab_id, mojom::CbfIpcMessagePtr message);
++  bool DispatchTabIpcInvoke(uint64_t tab_id,
++                            const url::Origin& origin,
++                            mojom::CbfIpcMessagePtr message,
++                            mojom::CbfIpcErrorCode* error_code);
+ 
+  private:
+   friend class CbfDownloadManagerDelegate;
+@@ -316,6 +330,7 @@ class CbfProfileService : public mojom::CbfProfileService,
+   ActiveExtensionPopup* GetActiveExtensionPopup(uint64_t popup_id);
+   ActiveExtensionPopup* GetActiveExtensionPopup(
+       content::WebContents* web_contents);
++  bool IsTabIpcOriginAllowed(uint64_t tab_id, const url::Origin& origin) const;
+ 
+   struct PendingExtensionInstallPrompt {
+     PendingExtensionInstallPrompt();
+@@ -555,6 +570,7 @@ class CbfProfileService : public mojom::CbfProfileService,
+   std::unique_ptr<CbfProfileServiceContext> service_context_;
+   std::unique_ptr<CbfProfilePageController> page_controller_;
+   std::unique_ptr<CbfProfileNavigationController> navigation_controller_;
++  std::map<uint64_t, std::vector<std::string>> tab_ipc_allowed_origins_;
+   std::unique_ptr<CbfProfilePopupController> popup_controller_;
+   std::unique_ptr<CbfProfileChoiceMenuController> choice_menu_controller_;
+   std::unique_ptr<CbfProfileContextMenuController> context_menu_controller_;
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index d558be7068439..b0a23f86a18d5 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -39,6 +39,7 @@
+ #include "components/history/core/browser/history_service.h"
+ #include "components/history/core/browser/history_types.h"
+ #include "components/tabs/public/tab_interface.h"
++#include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/browser/web_contents/web_contents_impl.h"
+ #include "content/public/test/browser_test.h"
+@@ -50,6 +51,7 @@
+ #include "extensions/common/constants.h"
+ #include "extensions/common/extension_builder.h"
+ #include "mojo/public/cpp/bindings/receiver.h"
++#include "mojo/public/cpp/bindings/remote.h"
+ #include "net/http/http_status_code.h"
+ #include "net/test/embedded_test_server/http_request.h"
+ #include "net/test/embedded_test_server/http_response.h"
+@@ -59,6 +61,7 @@
+ #include "testing/gtest/include/gtest/gtest.h"
+ #include "ui/gfx/codec/png_codec.h"
+ #include "ui/gfx/geometry/point.h"
++#include "url/origin.h"
+ 
+ namespace cbf {
+ namespace {
+@@ -171,8 +174,12 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+   void SetUpOnMainThread() override {
+     InProcessBrowserTest::SetUpOnMainThread();
+     ASSERT_TRUE(download_temp_dir_.CreateUniqueTempDir());
++    browser_service_ = std::make_unique<CbfBrowserService>(/*session_token=*/"");
++    browser_service_->BindProfileService(
++        CanonicalProfileId(), profile_service_remote_.BindNewPipeAndPassReceiver());
+     profile_service_ =
+-        std::make_unique<CbfProfileService>(browser()->profile(), nullptr);
++        browser_service_->GetProfileServiceForProfile(browser()->profile());
++    ASSERT_NE(profile_service_, nullptr);
+     profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
+   }
+ 
+@@ -184,8 +191,10 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+       }
+       profile_service_->CloseAllTabs();
+       base::RunLoop().RunUntilIdle();
+-      profile_service_.reset();
++      profile_service_ = nullptr;
+     }
++    profile_service_remote_.reset();
++    browser_service_.reset();
+ 
+     InProcessBrowserTest::TearDownOnMainThread();
+   }
+@@ -238,6 +247,15 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     ASSERT_TRUE(content::WaitForLoadStop(web_contents));
+   }
+ 
++  void AllowMainFrameJavaScriptInjection(TabId tab_id) {
++    content::WebContents* web_contents =
++        profile_service_->GetWebContentsForTesting(tab_id);
++    ASSERT_NE(web_contents, nullptr);
++    content::RenderFrameHost* main_frame = web_contents->GetPrimaryMainFrame();
++    ASSERT_NE(main_frame, nullptr);
++    main_frame->AllowInjectingJavaScript();
++  }
++
+   void InstallSelectMenuPage(content::WebContents* web_contents) {
+     ASSERT_NE(web_contents, nullptr);
+     web_contents->UpdateWebContentsVisibility(content::Visibility::VISIBLE);
+@@ -346,6 +364,13 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     download_server_started_ = true;
+   }
+ 
++  void EnsureEmbeddedServerStarted() {
++    if (embedded_test_server()->Started()) {
++      return;
++    }
++    ASSERT_TRUE(embedded_test_server()->Start());
++  }
++
+   base::FilePath MakeDownloadDestination(const std::string& file_name_prefix) {
+     ++download_destination_index_;
+     return download_temp_dir_.GetPath().AppendASCII(
+@@ -508,7 +533,9 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     return LoadActionExtension(name, /*with_default_popup=*/false);
+   }
+ 
+-  std::unique_ptr<CbfProfileService> profile_service_;
++  std::unique_ptr<CbfBrowserService> browser_service_;
++  mojo::Remote<mojom::CbfProfileService> profile_service_remote_;
++  raw_ptr<CbfProfileService> profile_service_ = nullptr;
+   cbf::test::CbfTestProfileObserver observer_;
+   base::ScopedTempDir download_temp_dir_;
+   bool download_server_started_ = false;
+@@ -674,6 +701,148 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   base::RunLoop().RunUntilIdle();
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       TabIpcInvokeAllowedOriginReachesHostObserver) {
++  EnsureEmbeddedServerStarted();
++  const GURL allowed_url = embedded_test_server()->GetURL("127.0.0.1", "/title1.html");
++
++  const TabId tab_id = CreatePage(allowed_url.spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  AllowMainFrameJavaScriptInjection(tab_id);
++  profile_service_->EnableTabIpc(
++      tab_id, {url::Origin::Create(allowed_url).Serialize()});
++  base::RunLoop().RunUntilIdle();
++
++  ASSERT_TRUE(ExecJs(web_contents, R"(
++    window.cbf.invoke('host.echo', 'hello from page').catch(() => {});
++    true;
++  )"));
++
++  observer_.WaitForTabIpcMessageCount(1);
++  ASSERT_EQ(observer_.tab_ipc_message_events().size(), 1u);
++  const auto& event = observer_.tab_ipc_message_events().front();
++  EXPECT_EQ(event.tab_id, tab_id);
++  EXPECT_EQ(event.channel, "host.echo");
++  EXPECT_EQ(event.message_type, mojom::CbfIpcMessageType::kRequest);
++  EXPECT_EQ(event.payload_kind, mojom::CbfIpcPayloadKind::kText);
++  EXPECT_EQ(event.payload_text, "hello from page");
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       TabIpcInvokeRejectsWhenOriginDoesNotMatchAllowList) {
++  EnsureEmbeddedServerStarted();
++  const GURL allowed_url = embedded_test_server()->GetURL("127.0.0.1", "/title1.html");
++  const GURL denied_url = embedded_test_server()->GetURL("localhost", "/title1.html");
++
++  const TabId tab_id = CreatePage(denied_url.spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  AllowMainFrameJavaScriptInjection(tab_id);
++  profile_service_->EnableTabIpc(
++      tab_id, {url::Origin::Create(allowed_url).Serialize()});
++  base::RunLoop().RunUntilIdle();
++
++  EXPECT_EQ("IPC_DISABLED",
++            EvalJs(web_contents, R"(
++              (async () => {
++                try {
++                  await window.cbf.invoke('host.reject', 'payload');
++                  return 'OK';
++                } catch (e) {
++                  return (e && e.code) ? e.code : 'UNKNOWN';
++                }
++              })();
++            )"));
++
++  base::RunLoop().RunUntilIdle();
++  EXPECT_TRUE(observer_.tab_ipc_message_events().empty());
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       TabIpcHostEventDeliveredToPageListenHandler) {
++  EnsureEmbeddedServerStarted();
++  const GURL page_url = embedded_test_server()->GetURL("127.0.0.1", "/title1.html");
++
++  const TabId tab_id = CreatePage(page_url.spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  AllowMainFrameJavaScriptInjection(tab_id);
++  profile_service_->EnableTabIpc(
++      tab_id, {url::Origin::Create(page_url).Serialize()});
++  base::RunLoop().RunUntilIdle();
++
++  ASSERT_TRUE(ExecJs(web_contents, R"(
++    window.__cbfHostEvent = new Promise((resolve) => {
++      const off = window.cbf.listen((message) => {
++        off();
++        resolve(`${message.channel}:${message.payload}`);
++      });
++    });
++    true;
++  )"));
++
++  auto message = mojom::CbfIpcMessage::New();
++  message->channel = "host.event";
++  message->message_type = mojom::CbfIpcMessageType::kEvent;
++  message->request_id = 0;
++  message->payload_kind = mojom::CbfIpcPayloadKind::kText;
++  message->payload_text = "from-host";
++  message->content_type = "text/plain";
++  message->error_code = mojom::CbfIpcErrorCode::kNone;
++  profile_service_->PostTabIpcMessage(tab_id, std::move(message));
++
++  EXPECT_EQ("host.event:from-host", EvalJs(web_contents, "window.__cbfHostEvent;"));
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       TabIpcInvokeRejectsWhenIpcDisabled) {
++  EnsureEmbeddedServerStarted();
++  const GURL page_url = embedded_test_server()->GetURL("127.0.0.1", "/title1.html");
++
++  const TabId tab_id = CreatePage(page_url.spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  AllowMainFrameJavaScriptInjection(tab_id);
++  profile_service_->EnableTabIpc(
++      tab_id, {url::Origin::Create(page_url).Serialize()});
++  base::RunLoop().RunUntilIdle();
++  profile_service_->DisableTabIpc(tab_id);
++  base::RunLoop().RunUntilIdle();
++
++  EXPECT_EQ("IPC_DISABLED",
++            EvalJs(web_contents, R"(
++              (async () => {
++                try {
++                  await window.cbf.invoke('host.disabled', 'payload');
++                  return 'OK';
++                } catch (e) {
++                  return (e && e.code) ? e.code : 'UNKNOWN';
++                }
++              })();
++            )"));
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        ActivateExtensionActionIgnoresExtensionWithoutPopup) {
+   auto extension = LoadActionExtensionWithoutPopup("Action Without Popup");
+@@ -1225,7 +1394,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   TestExtensionUninstallDialogDelegate delegate;
+   auto dialog = std::make_unique<CbfExtensionUninstallDialog>(
+       browser()->profile(), browser()->window()->GetNativeWindow(),
+-      profile_service_.get(), &delegate);
++      profile_service_, &delegate);
+   dialog->ConfirmUninstallByExtension(
+       target_extension, triggering_extension,
+       extensions::UNINSTALL_REASON_MANAGEMENT_API,
+@@ -1276,7 +1445,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   TestExtensionUninstallDialogDelegate delegate;
+   auto dialog = std::make_unique<CbfExtensionUninstallDialog>(
+       browser()->profile(), browser()->window()->GetNativeWindow(),
+-      profile_service_.get(), &delegate);
++      profile_service_, &delegate);
+   dialog->ConfirmUninstall(target_extension,
+                            extensions::UNINSTALL_REASON_MANAGEMENT_API,
+                            extensions::UNINSTALL_SOURCE_EXTENSION);
+@@ -1323,7 +1492,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   TestExtensionUninstallDialogDelegate delegate;
+   auto dialog = std::make_unique<CbfExtensionUninstallDialog>(
+       browser()->profile(), browser()->window()->GetNativeWindow(),
+-      profile_service_.get(), &delegate);
++      profile_service_, &delegate);
+   dialog->ConfirmUninstall(target_extension,
+                            extensions::UNINSTALL_REASON_MANAGEMENT_API,
+                            extensions::UNINSTALL_SOURCE_EXTENSION);
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 457516e219426..82bed40751a36 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -336,6 +336,39 @@ enum CbfTabVisibility {
+   kHidden,
+ };
+ 
++enum CbfIpcPayloadKind {
++  kText,
++  kBinary,
++};
++
++enum CbfIpcMessageType {
++  kRequest,
++  kResponse,
++  kEvent,
++};
++
++enum CbfIpcErrorCode {
++  kNone,
++  kTimeout,
++  kAborted,
++  kDisconnected,
++  kIpcDisabled,
++  kContextClosed,
++  kRemoteError,
++  kProtocolError,
++};
++
++struct CbfIpcMessage {
++  string channel;
++  CbfIpcMessageType message_type;
++  uint64 request_id;
++  CbfIpcPayloadKind payload_kind;
++  string payload_text;
++  array<uint8> payload_binary;
++  string content_type;
++  CbfIpcErrorCode error_code;
++};
++
+ enum CbfBeforeUnloadReason {
+   kUnknown,
+   kCloseTab,
+@@ -735,6 +768,7 @@ interface CbfProfileObserver {
+                            bool can_go_forward,
+                            bool is_loading);
+   OnTabDomHtmlRead(uint64 tab_id, uint64 request_id, string html);
++  OnTabIpcMessageReceived(uint64 tab_id, CbfIpcMessage message);
+   OnDragStartRequested(CbfDragStartRequest request);
+   OnExtensionsListed(string profile_id, array<CbfExtensionInfo> extensions);
+   OnAuxiliaryWindowOpenRequested(CbfAuxiliaryWindowRequest request);
+@@ -788,6 +822,9 @@ interface CbfProfileService {
+   InspectElement(uint64 tab_id, int32 x, int32 y);
+   SetTabFocus(uint64 tab_id, bool focused);
+   SetTabVisibility(uint64 tab_id, CbfTabVisibility visibility);
++  EnableTabIpc(uint64 tab_id, array<string> allowed_origins);
++  DisableTabIpc(uint64 tab_id);
++  PostTabIpcMessage(uint64 tab_id, CbfIpcMessage message);
+   CloseExtensionPopup(uint64 popup_id);
+   SetExtensionPopupSize(uint64 popup_id, uint32 width, uint32 height) => ();
+   SetExtensionPopupBackgroundPolicy(uint64 popup_id, bool transparent);
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index 1d007b3cec4d8..09e498e9da305 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -169,6 +169,19 @@ CbfTestProfileObserver::ExtensionPopupCloseRequestedEvent&
+ CbfTestProfileObserver::ExtensionPopupCloseRequestedEvent::operator=(
+     ExtensionPopupCloseRequestedEvent&&) = default;
+ 
++CbfTestProfileObserver::TabIpcMessageEvent::TabIpcMessageEvent() = default;
++CbfTestProfileObserver::TabIpcMessageEvent::~TabIpcMessageEvent() = default;
++CbfTestProfileObserver::TabIpcMessageEvent::TabIpcMessageEvent(
++    const TabIpcMessageEvent&) = default;
++CbfTestProfileObserver::TabIpcMessageEvent&
++CbfTestProfileObserver::TabIpcMessageEvent::operator=(
++    const TabIpcMessageEvent&) = default;
++CbfTestProfileObserver::TabIpcMessageEvent::TabIpcMessageEvent(
++    TabIpcMessageEvent&&) = default;
++CbfTestProfileObserver::TabIpcMessageEvent&
++CbfTestProfileObserver::TabIpcMessageEvent::operator=(TabIpcMessageEvent&&) =
++    default;
++
+ CbfTestProfileObserver::CbfTestProfileObserver() = default;
+ CbfTestProfileObserver::~CbfTestProfileObserver() = default;
+ 
+@@ -480,6 +493,18 @@ void CbfTestProfileObserver::WaitForExtensionPopupChoiceMenuCount(
+   quit_wait_loop_.Reset();
+ }
+ 
++void CbfTestProfileObserver::WaitForTabIpcMessageCount(size_t expected_count) {
++  ResetWaitTargets();
++  wait_tab_ipc_message_count_ = expected_count;
++  if (tab_ipc_message_events_.size() >= wait_tab_ipc_message_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
+ void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t tab_id,
+                                                     uint32_t ca_context_id) {
+   surface_events_.push_back(
+@@ -701,8 +726,27 @@ void CbfTestProfileObserver::OnNavigationStateChanged(uint64_t tab_id,
+                                                       bool is_loading) {}
+ 
+ void CbfTestProfileObserver::OnTabDomHtmlRead(uint64_t tab_id,
+-                                                  uint64_t request_id,
+-                                                  const std::string& html) {}
++                                              uint64_t request_id,
++                                              const std::string& html) {}
++
++void CbfTestProfileObserver::OnTabIpcMessageReceived(
++    uint64_t tab_id,
++    cbf::mojom::CbfIpcMessagePtr message) {
++  TabIpcMessageEvent event;
++  event.tab_id = tab_id;
++  if (message) {
++    event.channel = message->channel;
++    event.message_type = message->message_type;
++    event.request_id = message->request_id;
++    event.payload_kind = message->payload_kind;
++    event.payload_text = message->payload_text;
++    event.payload_binary = std::move(message->payload_binary);
++    event.content_type = message->content_type;
++    event.error_code = message->error_code;
++  }
++  tab_ipc_message_events_.push_back(std::move(event));
++  MaybeQuitWaitLoop();
++}
+ 
+ void CbfTestProfileObserver::OnDragStartRequested(
+     cbf::mojom::CbfDragStartRequestPtr request) {}
+@@ -984,6 +1028,11 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
+       extension_popup_choice_menu_events_.size() >=
+           wait_extension_popup_choice_menu_count_) {
+     quit_wait_loop_.Run();
++    return;
++  }
++  if (wait_tab_ipc_message_count_ > 0 &&
++      tab_ipc_message_events_.size() >= wait_tab_ipc_message_count_) {
++    quit_wait_loop_.Run();
+   }
+ }
+ 
+@@ -1011,6 +1060,7 @@ void CbfTestProfileObserver::ResetWaitTargets() {
+   wait_extension_popup_close_requested_count_ = 0;
+   wait_choice_menu_count_ = 0;
+   wait_extension_popup_choice_menu_count_ = 0;
++  wait_tab_ipc_message_count_ = 0;
+ }
+ 
+ }  // namespace cbf::test
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index e0dbe011415da..bcbb1fc59c1aa 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -291,6 +291,28 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+     int32_t selected_item = -1;
+   };
+ 
++  struct TabIpcMessageEvent {
++    TabIpcMessageEvent();
++    ~TabIpcMessageEvent();
++    TabIpcMessageEvent(const TabIpcMessageEvent&);
++    TabIpcMessageEvent& operator=(const TabIpcMessageEvent&);
++    TabIpcMessageEvent(TabIpcMessageEvent&&);
++    TabIpcMessageEvent& operator=(TabIpcMessageEvent&&);
++
++    uint64_t tab_id = 0;
++    std::string channel;
++    cbf::mojom::CbfIpcMessageType message_type =
++        cbf::mojom::CbfIpcMessageType::kEvent;
++    uint64_t request_id = 0;
++    cbf::mojom::CbfIpcPayloadKind payload_kind =
++        cbf::mojom::CbfIpcPayloadKind::kText;
++    std::string payload_text;
++    std::vector<uint8_t> payload_binary;
++    std::string content_type;
++    cbf::mojom::CbfIpcErrorCode error_code =
++        cbf::mojom::CbfIpcErrorCode::kNone;
++  };
++
+   enum class DownloadEventKind {
+     kCreated,
+     kUpdated,
+@@ -388,6 +410,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   extension_popup_choice_menu_events() const {
+     return extension_popup_choice_menu_events_;
+   }
++  const std::vector<TabIpcMessageEvent>& tab_ipc_message_events() const {
++    return tab_ipc_message_events_;
++  }
+   const std::vector<DownloadEventKind>& download_event_order() const {
+     return download_event_order_;
+   }
+@@ -415,6 +440,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void WaitForExtensionPopupCloseRequestedCount(size_t expected_count);
+   void WaitForChoiceMenuCount(size_t expected_count);
+   void WaitForExtensionPopupChoiceMenuCount(size_t expected_count);
++  void WaitForTabIpcMessageCount(size_t expected_count);
+ 
+   // cbf::mojom::CbfProfileObserver
+   void OnSurfaceHandleUpdated(uint64_t tab_id,
+@@ -506,8 +532,10 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+                                 bool can_go_forward,
+                                 bool is_loading) override;
+   void OnTabDomHtmlRead(uint64_t tab_id,
+-                            uint64_t request_id,
+-                            const std::string& html) override;
++                        uint64_t request_id,
++                        const std::string& html) override;
++  void OnTabIpcMessageReceived(uint64_t tab_id,
++                               cbf::mojom::CbfIpcMessagePtr message) override;
+   void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
+   void OnExtensionsListed(
+       const std::string& profile_id,
+@@ -568,6 +596,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+       extension_popup_close_requested_events_;
+   std::vector<ChoiceMenuEvent> choice_menu_events_;
+   std::vector<ExtensionPopupChoiceMenuEvent> extension_popup_choice_menu_events_;
++  std::vector<TabIpcMessageEvent> tab_ipc_message_events_;
+   std::vector<DownloadEventKind> download_event_order_;
+ 
+   size_t wait_web_page_closed_count_ = 0;
+@@ -593,6 +622,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   size_t wait_extension_popup_close_requested_count_ = 0;
+   size_t wait_choice_menu_count_ = 0;
+   size_t wait_extension_popup_choice_menu_count_ = 0;
++  size_t wait_tab_ipc_message_count_ = 0;
+   base::RepeatingClosure quit_wait_loop_;
+ };
+ 
+diff --git a/chrome/browser/chrome_browser_interface_binders.cc b/chrome/browser/chrome_browser_interface_binders.cc
+index 3e072fb6c3a95..d92fcad2d972e 100644
+--- a/chrome/browser/chrome_browser_interface_binders.cc
++++ b/chrome/browser/chrome_browser_interface_binders.cc
+@@ -14,6 +14,7 @@
+ #include "chrome/browser/accessibility/accessibility_labels_service_factory.h"
+ #include "chrome/browser/actor/actor_script_tool_receiver.h"
+ #include "chrome/browser/buildflags.h"
++#include "chrome/browser/cbf/cbf_page_ipc_host.h"
+ #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
+ #include "chrome/browser/navigation_predictor/navigation_predictor.h"
+ #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
+@@ -473,6 +474,8 @@ void PopulateChromeFrameBinders(
+ 
+   map->Add<blink::mojom::CredentialManager>(&BindCredentialManager);
+ 
++  map->Add<chrome::mojom::CbfPageIpcHost>(&cbf::CbfPageIpcHost::Create);
++
+   map->Add<chrome::mojom::OpenSearchDescriptionDocumentHandler>(
+       base::BindRepeating(
+           &SearchEngineTabHelper::BindOpenSearchDescriptionDocumentHandler));
+diff --git a/chrome/common/BUILD.gn b/chrome/common/BUILD.gn
+index c64007c87236e..ecc6f020f107f 100644
+--- a/chrome/common/BUILD.gn
++++ b/chrome/common/BUILD.gn
+@@ -667,6 +667,7 @@ mojom("mojo_bindings") {
+ 
+   sources = [
+     "actor.mojom",
++    "cbf_ipc.mojom",
+     "chrome_render_frame.mojom",
+     "google_accounts_private_api_extension.mojom",
+     "media/webrtc_logging.mojom",
+diff --git a/chrome/common/cbf_ipc.mojom b/chrome/common/cbf_ipc.mojom
+new file mode 100644
+index 0000000000000..18abe5635cde1
+--- /dev/null
++++ b/chrome/common/cbf_ipc.mojom
+@@ -0,0 +1,39 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++module chrome.mojom;
++
++enum CbfPageIpcPayloadKind {
++  kText = 0,
++  kBinary = 1,
++};
++
++enum CbfPageIpcErrorCode {
++  kNone = 0,
++  kTimeout = 1,
++  kAborted = 2,
++  kDisconnected = 3,
++  kIpcDisabled = 4,
++  kContextClosed = 5,
++  kRemoteError = 6,
++  kProtocolError = 7,
++};
++
++struct CbfPageIpcInvokeRequest {
++  string channel;
++  uint64 request_id;
++  CbfPageIpcPayloadKind payload_kind;
++  string payload_text;
++  array<uint8> payload_binary;
++  string content_type;
++};
++
++struct CbfPageIpcInvokeResult {
++  bool accepted;
++  CbfPageIpcErrorCode error_code;
++};
++
++interface CbfPageIpcHost {
++  Invoke(CbfPageIpcInvokeRequest request) => (CbfPageIpcInvokeResult result);
++};
+diff --git a/chrome/renderer/BUILD.gn b/chrome/renderer/BUILD.gn
+index ccc22d2c56330..786836298ff37 100644
+--- a/chrome/renderer/BUILD.gn
++++ b/chrome/renderer/BUILD.gn
+@@ -72,6 +72,8 @@ static_library("renderer") {
+     "benchmarking_extension.h",
+     "browser_exposed_renderer_interfaces.cc",
+     "browser_exposed_renderer_interfaces.h",
++    "cbf_ipc_extension.cc",
++    "cbf_ipc_extension.h",
+     "chrome_content_renderer_client.cc",
+     "chrome_content_renderer_client.h",
+     "chrome_content_settings_agent_delegate.cc",
+diff --git a/chrome/renderer/cbf_ipc_extension.cc b/chrome/renderer/cbf_ipc_extension.cc
+new file mode 100644
+index 0000000000000..44c6a5ecf08a1
+--- /dev/null
++++ b/chrome/renderer/cbf_ipc_extension.cc
+@@ -0,0 +1,442 @@
++#include "chrome/renderer/cbf_ipc_extension.h"
++
++#include <utility>
++
++#include "base/compiler_specific.h"
++#include "base/functional/bind.h"
++#include "content/public/common/isolated_world_ids.h"
++#include "content/public/renderer/chrome_object_extensions_utils.h"
++#include "content/public/renderer/render_frame.h"
++#include "gin/arguments.h"
++#include "gin/function_template.h"
++#include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
++#include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
++#include "third_party/blink/public/web/web_local_frame.h"
++#include "v8/include/v8-array-buffer.h"
++#include "v8/include/v8-context.h"
++#include "v8/include/v8-function.h"
++#include "v8/include/v8-microtask-queue.h"
++#include "v8/include/v8-object.h"
++#include "v8/include/v8-primitive.h"
++#include "v8/include/v8-script.h"
++
++namespace {
++
++constexpr char kCbfIpcBootstrapScript[] = R"(
++(function() {
++  if (window !== window.top) {
++    return;
++  }
++  if (window.__cbfIpcV1Installed) {
++    return;
++  }
++  window.__cbfIpcV1Installed = true;
++  const IPC_MESSAGE_RESPONSE = 1;
++  const IPC_MESSAGE_EVENT = 2;
++  const IPC_PAYLOAD_TEXT = 0;
++  const IPC_PAYLOAD_BINARY = 1;
++  const IPC_ERROR_NONE = 0;
++  const IPC_ERROR_TIMEOUT = 1;
++  const IPC_ERROR_ABORTED = 2;
++  const IPC_ERROR_DISCONNECTED = 3;
++  const IPC_ERROR_IPC_DISABLED = 4;
++  const IPC_ERROR_CONTEXT_CLOSED = 5;
++  const IPC_ERROR_REMOTE_ERROR = 6;
++  const IPC_ERROR_PROTOCOL_ERROR = 7;
++  const ERROR_CODE_MAP = {
++    [IPC_ERROR_TIMEOUT]: 'TIMEOUT',
++    [IPC_ERROR_ABORTED]: 'ABORTED',
++    [IPC_ERROR_DISCONNECTED]: 'DISCONNECTED',
++    [IPC_ERROR_IPC_DISABLED]: 'IPC_DISABLED',
++    [IPC_ERROR_CONTEXT_CLOSED]: 'CONTEXT_CLOSED',
++    [IPC_ERROR_REMOTE_ERROR]: 'REMOTE_ERROR',
++    [IPC_ERROR_PROTOCOL_ERROR]: 'PROTOCOL_ERROR',
++  };
++  const listeners = new Set();
++  const pendingInvokes = new Map();
++  let nextRequestId = 1;
++  function normalizeErrorCode(errorCode) {
++    return ERROR_CODE_MAP[errorCode] || 'PROTOCOL_ERROR';
++  }
++  function toArrayBufferFromBase64(base64Text) {
++    if (!base64Text) {
++      return new ArrayBuffer(0);
++    }
++    const decoded = atob(base64Text);
++    const out = new Uint8Array(decoded.length);
++    for (let i = 0; i < decoded.length; i += 1) {
++      out[i] = decoded.charCodeAt(i);
++    }
++    return out.buffer;
++  }
++  function normalizeIncomingPayload(message) {
++    if (!message) {
++      return '';
++    }
++    if (message.payload_kind === IPC_PAYLOAD_BINARY) {
++      return toArrayBufferFromBase64(message.payload_binary_base64 || '');
++    }
++    return typeof message.payload_text === 'string' ? message.payload_text : '';
++  }
++  function rejectPending(requestId, code) {
++    const pending = pendingInvokes.get(requestId);
++    if (!pending) {
++      return;
++    }
++    pendingInvokes.delete(requestId);
++    if (pending.abortCleanup) {
++      pending.abortCleanup();
++    }
++    if (pending.timeoutId !== null) {
++      clearTimeout(pending.timeoutId);
++    }
++    pending.reject({ code });
++  }
++  window.__cbfReceiveHostIpc = function(message) {
++    if (!message) {
++      return;
++    }
++    if (message.message_type === IPC_MESSAGE_RESPONSE) {
++      const pending = pendingInvokes.get(message.request_id);
++      if (!pending) {
++        return;
++      }
++      pendingInvokes.delete(message.request_id);
++      if (pending.abortCleanup) {
++        pending.abortCleanup();
++      }
++      if (pending.timeoutId !== null) {
++        clearTimeout(pending.timeoutId);
++      }
++      if (message.error_code && message.error_code !== IPC_ERROR_NONE) {
++        pending.reject({ code: normalizeErrorCode(message.error_code) });
++        return;
++      }
++      pending.resolve(normalizeIncomingPayload(message));
++      return;
++    }
++    if (message.message_type !== IPC_MESSAGE_EVENT) {
++      return;
++    }
++    const eventMessage = {
++      channel: typeof message.channel === 'string' ? message.channel : '',
++      message_type: message.message_type,
++      request_id: message.request_id || 0,
++      payload_kind: message.payload_kind,
++      payload: normalizeIncomingPayload(message),
++      content_type:
++          typeof message.content_type === 'string' ? message.content_type : '',
++      error_code: message.error_code || IPC_ERROR_NONE,
++    };
++    listeners.forEach((handler) => {
++      try {
++        handler(eventMessage);
++      } catch (_) {}
++    });
++  };
++  document.addEventListener('__cbfHostIpc', (event) => {
++    if (!event || typeof event.detail !== 'string') {
++      return;
++    }
++    let message = null;
++    try {
++      message = JSON.parse(event.detail);
++    } catch (_) {
++      return;
++    }
++    window.__cbfReceiveHostIpc(message);
++  });
++  window.cbf = window.cbf || {};
++  window.cbf.listen = function(handler) {
++    if (typeof handler !== 'function') {
++      return function() {};
++    }
++    listeners.add(handler);
++    return function() {
++      listeners.delete(handler);
++    };
++  };
++  window.cbf.invoke = function(channel, payload, options) {
++    if (typeof channel !== 'string' || !channel) {
++      return Promise.reject({ code: 'PROTOCOL_ERROR' });
++    }
++    if (typeof window.__cbfInvokeNative !== 'function') {
++      return Promise.reject({ code: 'DISCONNECTED' });
++    }
++    const resolvedOptions = options || {};
++    const requestId = nextRequestId;
++    nextRequestId += 1;
++    const timeoutMs =
++        typeof resolvedOptions.timeout_ms === 'number' &&
++            resolvedOptions.timeout_ms > 0
++            ? resolvedOptions.timeout_ms
++            : null;
++    let payloadKind = IPC_PAYLOAD_TEXT;
++    let payloadText = '';
++    let payloadBinary = new ArrayBuffer(0);
++    if (payload instanceof ArrayBuffer) {
++      payloadKind = IPC_PAYLOAD_BINARY;
++      payloadBinary = payload;
++    } else if (ArrayBuffer.isView(payload)) {
++      payloadKind = IPC_PAYLOAD_BINARY;
++      const view = new Uint8Array(payload.buffer, payload.byteOffset,
++                                  payload.byteLength);
++      const binaryCopy = new Uint8Array(view.byteLength);
++      binaryCopy.set(view);
++      payloadBinary = binaryCopy.buffer;
++    } else if (typeof payload === 'string') {
++      payloadText = payload;
++    } else if (payload === null || payload === undefined) {
++      payloadText = '';
++    } else {
++      payloadText = String(payload);
++    }
++    const contentType =
++        typeof resolvedOptions.content_type === 'string'
++            ? resolvedOptions.content_type
++            : '';
++
++    return new Promise((resolve, reject) => {
++      const pending = {
++        resolve,
++        reject,
++        timeoutId: null,
++        abortCleanup: null,
++      };
++      if (timeoutMs !== null) {
++        pending.timeoutId = setTimeout(() => {
++          rejectPending(requestId, 'TIMEOUT');
++        }, timeoutMs);
++      }
++      if (resolvedOptions.signal &&
++          typeof resolvedOptions.signal.addEventListener === 'function') {
++        const onAbort = function() {
++          rejectPending(requestId, 'ABORTED');
++        };
++        if (resolvedOptions.signal.aborted) {
++          reject({ code: 'ABORTED' });
++          return;
++        }
++        resolvedOptions.signal.addEventListener('abort', onAbort, {
++          once: true,
++        });
++        pending.abortCleanup = function() {
++          resolvedOptions.signal.removeEventListener('abort', onAbort);
++        };
++      }
++      pendingInvokes.set(requestId, pending);
++      try {
++        window.__cbfInvokeNative(
++            channel, requestId, payloadKind, payloadText, payloadBinary,
++            contentType, function(result) {
++              if (!result || !result.accepted) {
++                const code = normalizeErrorCode(result ? result.error_code : 0);
++                rejectPending(requestId, code);
++              }
++            });
++      } catch (_) {
++        rejectPending(requestId, 'DISCONNECTED');
++      }
++    });
++  };
++})();
++)";
++
++chrome::mojom::CbfPageIpcPayloadKind ParsePayloadKind(int32_t payload_kind) {
++  return payload_kind == 1 ? chrome::mojom::CbfPageIpcPayloadKind::kBinary
++                           : chrome::mojom::CbfPageIpcPayloadKind::kText;
++}
++
++}  // namespace
++
++// static
++void CbfIpcExtension::Create(content::RenderFrame* frame) {
++  new CbfIpcExtension(frame);
++}
++
++CbfIpcExtension::CbfIpcExtension(content::RenderFrame* frame)
++    : content::RenderFrameObserver(frame) {}
++
++CbfIpcExtension::~CbfIpcExtension() = default;
++
++void CbfIpcExtension::OnDestruct() {
++  delete this;
++}
++
++void CbfIpcExtension::DidCreateScriptContext(v8::Local<v8::Context> v8_context,
++                                             int32_t world_id) {
++  if (!render_frame() || world_id != content::ISOLATED_WORLD_ID_GLOBAL ||
++      !render_frame()->IsMainFrame()) {
++    return;
++  }
++  Install();
++}
++
++void CbfIpcExtension::Install() {
++  DCHECK(render_frame());
++  blink::WebLocalFrame* web_frame = render_frame()->GetWebFrame();
++  if (!web_frame) {
++    return;
++  }
++
++  v8::Isolate* isolate = web_frame->GetAgentGroupScheduler()->Isolate();
++  v8::HandleScope handle_scope(isolate);
++  v8::Local<v8::Context> context = web_frame->MainWorldScriptContext();
++  if (context.IsEmpty()) {
++    return;
++  }
++
++  v8::Context::Scope context_scope(context);
++  v8::Local<v8::Object> window =
++      content::GetOrCreateObject(isolate, context, "window");
++  v8::Local<v8::Value> existing;
++  if (window
++          ->Get(context, gin::StringToSymbol(isolate, "__cbfInvokeNative"))
++          .ToLocal(&existing) &&
++      existing->IsFunction()) {
++    return;
++  }
++
++  window
++      ->Set(context, gin::StringToSymbol(isolate, "__cbfInvokeNative"),
++            gin::CreateFunctionTemplate(
++                isolate, base::BindRepeating(&CbfIpcExtension::InvokeNative,
++                                             weak_ptr_factory_.GetWeakPtr()))
++                ->GetFunction(context)
++                .ToLocalChecked())
++      .Check();
++
++  v8::Local<v8::String> bootstrap_source;
++  if (!v8::String::NewFromUtf8(isolate, kCbfIpcBootstrapScript,
++                               v8::NewStringType::kNormal)
++           .ToLocal(&bootstrap_source)) {
++    return;
++  }
++  v8::Local<v8::Script> bootstrap_script;
++  if (!v8::Script::Compile(context, bootstrap_source)
++           .ToLocal(&bootstrap_script)) {
++    return;
++  }
++  (void)bootstrap_script->Run(context);
++}
++
++void CbfIpcExtension::InvokeNative(gin::Arguments* args) {
++  if (!render_frame() || !render_frame()->IsMainFrame()) {
++    args->ThrowError();
++    return;
++  }
++
++  std::string channel;
++  if (!args->GetNext(&channel)) {
++    args->ThrowError();
++    return;
++  }
++
++  uint32_t request_id = 0;
++  if (!args->GetNext(&request_id)) {
++    args->ThrowError();
++    return;
++  }
++
++  int32_t payload_kind = 0;
++  if (!args->GetNext(&payload_kind)) {
++    args->ThrowError();
++    return;
++  }
++
++  std::string payload_text;
++  if (!args->GetNext(&payload_text)) {
++    args->ThrowError();
++    return;
++  }
++
++  v8::Local<v8::Value> payload_binary_value;
++  if (!args->GetNext(&payload_binary_value) ||
++      !payload_binary_value->IsArrayBuffer()) {
++    args->ThrowError();
++    return;
++  }
++  v8::Local<v8::ArrayBuffer> payload_binary_buffer =
++      payload_binary_value.As<v8::ArrayBuffer>();
++  const auto backing_store = payload_binary_buffer->GetBackingStore();
++  std::vector<uint8_t> payload_binary;
++  if (backing_store->ByteLength() > 0) {
++    const auto* binary_start =
++        static_cast<const uint8_t*>(backing_store->Data());
++    payload_binary = UNSAFE_BUFFERS(std::vector<uint8_t>(
++        binary_start, binary_start + backing_store->ByteLength()));
++  }
++
++  std::string content_type;
++  if (!args->GetNext(&content_type)) {
++    args->ThrowError();
++    return;
++  }
++
++  v8::Local<v8::Function> callback;
++  if (!args->GetNext(&callback)) {
++    args->ThrowError();
++    return;
++  }
++
++  if (!remote_.is_bound()) {
++    render_frame()->GetBrowserInterfaceBroker().GetInterface(
++        remote_.BindNewPipeAndPassReceiver());
++  }
++
++  auto request = chrome::mojom::CbfPageIpcInvokeRequest::New();
++  request->channel = std::move(channel);
++  request->request_id = request_id;
++  request->payload_kind = ParsePayloadKind(payload_kind);
++  request->payload_text = std::move(payload_text);
++  request->payload_binary = std::move(payload_binary);
++  request->content_type = std::move(content_type);
++
++  remote_->Invoke(
++      std::move(request),
++      base::BindOnce(&CbfIpcExtension::OnInvokeResult,
++                     weak_ptr_factory_.GetWeakPtr(),
++                     std::make_unique<v8::Global<v8::Function>>(args->isolate(),
++                                                                 callback)));
++}
++
++void CbfIpcExtension::OnInvokeResult(
++    std::unique_ptr<v8::Global<v8::Function>> callback,
++    chrome::mojom::CbfPageIpcInvokeResultPtr result) {
++  if (!render_frame() || !callback) {
++    return;
++  }
++  blink::WebLocalFrame* web_frame = render_frame()->GetWebFrame();
++  if (!web_frame) {
++    return;
++  }
++  v8::Isolate* isolate = web_frame->GetAgentGroupScheduler()->Isolate();
++  v8::HandleScope handle_scope(isolate);
++  v8::Local<v8::Context> context = web_frame->MainWorldScriptContext();
++  if (context.IsEmpty()) {
++    return;
++  }
++  v8::Context::Scope context_scope(context);
++  v8::MicrotasksScope microtasks_scope(
++      isolate, context->GetMicrotaskQueue(),
++      v8::MicrotasksScope::kDoNotRunMicrotasks);
++
++  v8::Local<v8::Object> response = v8::Object::New(isolate);
++  response
++      ->Set(context, gin::StringToSymbol(isolate, "accepted"),
++            v8::Boolean::New(isolate, result && result->accepted))
++      .Check();
++  response
++      ->Set(
++          context, gin::StringToSymbol(isolate, "error_code"),
++          v8::Integer::New(
++              isolate,
++              static_cast<int>(result ? result->error_code
++                                      : chrome::mojom::CbfPageIpcErrorCode::
++                                            kDisconnected)))
++      .Check();
++
++  v8::Local<v8::Function> local_callback = callback->Get(isolate);
++  v8::Local<v8::Value> argv[] = {response};
++  (void)local_callback->Call(context, context->Global(), 1, argv);
++}
+diff --git a/chrome/renderer/cbf_ipc_extension.h b/chrome/renderer/cbf_ipc_extension.h
+new file mode 100644
+index 0000000000000..14cf0b012d7ca
+--- /dev/null
++++ b/chrome/renderer/cbf_ipc_extension.h
+@@ -0,0 +1,43 @@
++#ifndef CHROME_RENDERER_CBF_IPC_EXTENSION_H_
++#define CHROME_RENDERER_CBF_IPC_EXTENSION_H_
++
++#include <memory>
++#include <vector>
++
++#include "base/memory/weak_ptr.h"
++#include "chrome/common/cbf_ipc.mojom.h"
++#include "content/public/renderer/render_frame_observer.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "v8/include/v8-forward.h"
++#include "v8/include/v8-persistent-handle.h"
++
++namespace gin {
++class Arguments;
++}  // namespace gin
++
++class CbfIpcExtension : public content::RenderFrameObserver {
++ public:
++  static void Create(content::RenderFrame* frame);
++
++  CbfIpcExtension(const CbfIpcExtension&) = delete;
++  CbfIpcExtension& operator=(const CbfIpcExtension&) = delete;
++
++  ~CbfIpcExtension() override;
++
++  void OnDestruct() override;
++  void DidCreateScriptContext(v8::Local<v8::Context> v8_context,
++                              int32_t world_id) override;
++
++ private:
++  explicit CbfIpcExtension(content::RenderFrame* frame);
++
++  void Install();
++  void InvokeNative(gin::Arguments* args);
++  void OnInvokeResult(std::unique_ptr<v8::Global<v8::Function>> callback,
++                      chrome::mojom::CbfPageIpcInvokeResultPtr result);
++
++  mojo::Remote<chrome::mojom::CbfPageIpcHost> remote_;
++  base::WeakPtrFactory<CbfIpcExtension> weak_ptr_factory_{this};
++};
++
++#endif  // CHROME_RENDERER_CBF_IPC_EXTENSION_H_
+diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
+index a9d53bb566fab..f0373307a01b3 100644
+--- a/chrome/renderer/chrome_content_renderer_client.cc
++++ b/chrome/renderer/chrome_content_renderer_client.cc
+@@ -52,6 +52,7 @@
+ #include "chrome/grit/renderer_resources.h"
+ #include "chrome/renderer/benchmarking_extension.h"
+ #include "chrome/renderer/browser_exposed_renderer_interfaces.h"
++#include "chrome/renderer/cbf_ipc_extension.h"
+ #include "chrome/renderer/chrome_content_settings_agent_delegate.h"
+ #include "chrome/renderer/chrome_render_frame_observer.h"
+ #include "chrome/renderer/chrome_render_thread_observer.h"
+@@ -639,6 +640,7 @@ void ChromeContentRendererClient::RenderFrameCreated(
+ 
+   TrustedVaultEncryptionKeysExtension::Create(render_frame);
+   GoogleAccountsPrivateApiExtension::Create(render_frame);
++  CbfIpcExtension::Create(render_frame);
+ 
+   if (render_frame->IsMainFrame())
+     new webapps::WebPageMetadataAgent(render_frame);
+-- 
+2.50.1 (Apple Git-155)
+

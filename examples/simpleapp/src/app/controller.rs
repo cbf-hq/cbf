@@ -2,12 +2,14 @@ use std::collections::{HashMap, HashSet};
 
 use cbf::{
     browser::BrowserHandle,
+    command::BrowserCommand,
     data::{
         auxiliary_window::{AuxiliaryWindowKind, AuxiliaryWindowResponse, PermissionPromptType},
         browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResponse},
         dialog::{BeforeUnloadReason, DialogResponse, DialogType, JavaScriptDialogRequest},
         download::{DownloadId, DownloadOutcome, DownloadPromptActionHint, DownloadState},
         ids::{BrowsingContextId, TransientBrowsingContextId, WindowId as HostWindowId},
+        ipc::{IpcConfig, IpcErrorCode},
         profile::ProfileInfo,
         transient_browsing_context::TransientBrowsingContextKind,
         window_open::{
@@ -43,20 +45,24 @@ use crate::{
             SharedStateHandle, TOOLBAR_CREATE_REQUEST_ID, TransientPopupState,
             allocate_browsing_context_request_id, bind_browsing_context_to_window,
             browsing_context_ids_for_window, devtools_browsing_context_id, has_bound_windows,
-            overlay_browsing_context_id, page_browsing_context_id_for_window,
-            primary_browsing_context_id, primary_host_window_id,
-            register_pending_window_browsing_context_create, set_devtools_browsing_context_id,
-            set_overlay_browsing_context_id, set_primary_browsing_context_id,
-            set_toolbar_browsing_context_id, set_window_page_browsing_context,
-            set_window_toolbar_browsing_context, take_pending_window_browsing_context_create,
-            take_pending_window_open_request, toolbar_browsing_context_id,
-            toolbar_browsing_context_id_for_window, transient_browsing_context_id_for_window,
-            unbind_browsing_context, unbind_transient_browsing_context,
-            window_id_for_browsing_context, window_id_for_page_browsing_context,
-            window_id_for_toolbar_browsing_context, window_id_for_transient_browsing_context,
+            overlay_browsing_context_id, page_browsing_context_id_for_toolbar_browsing_context,
+            page_browsing_context_id_for_window, primary_browsing_context_id,
+            primary_host_window_id, register_pending_window_browsing_context_create,
+            set_devtools_browsing_context_id, set_overlay_browsing_context_id,
+            set_primary_browsing_context_id, set_toolbar_browsing_context_id,
+            set_window_page_browsing_context, set_window_toolbar_browsing_context,
+            take_pending_window_browsing_context_create, take_pending_window_open_request,
+            toolbar_browsing_context_id, toolbar_browsing_context_id_for_window,
+            transient_browsing_context_id_for_window, unbind_browsing_context,
+            unbind_transient_browsing_context, window_id_for_browsing_context,
+            window_id_for_page_browsing_context, window_id_for_toolbar_browsing_context,
+            window_id_for_transient_browsing_context,
         },
     },
     cli::Cli,
+    ipc::toolbar::{
+        handler as toolbar_handler, protocol as toolbar_protocol, publisher as toolbar_publisher,
+    },
     scene::composition,
     scene::ui_url::{overlay_test_ui_url, toolbar_ui_url},
 };
@@ -76,6 +82,7 @@ pub(crate) struct AppController {
     blur_close_armed_transients: HashSet<TransientBrowsingContextId>,
     resolved_profile_id: Option<String>,
     extensions_loading: bool,
+    navigation_state_by_page: HashMap<BrowsingContextId, toolbar_protocol::NavigationState>,
 }
 
 impl AppController {
@@ -100,6 +107,7 @@ impl AppController {
             blur_close_armed_transients: HashSet::new(),
             resolved_profile_id: None,
             extensions_loading: false,
+            navigation_state_by_page: HashMap::new(),
         }
     }
 
@@ -705,6 +713,183 @@ impl AppController {
         }
     }
 
+    fn try_enable_toolbar_ipc(&self, toolbar_browsing_context_id: BrowsingContextId) {
+        let Some(allowed_origin) = toolbar_allowed_origin() else {
+            warn!("failed to derive toolbar allowed origin; skipping IPC enable");
+            return;
+        };
+        let command = BrowserCommand::EnableIpc {
+            browsing_context_id: toolbar_browsing_context_id,
+            config: IpcConfig {
+                allowed_origins: vec![allowed_origin],
+            },
+        };
+        if let Err(err) = self.browser_handle.send(command) {
+            warn!("failed to enable toolbar ipc: {err}");
+        }
+    }
+
+    fn post_toolbar_ipc_message(
+        &self,
+        toolbar_browsing_context_id: BrowsingContextId,
+        message: cbf::data::ipc::BrowsingContextIpcMessage,
+    ) {
+        if let Err(err) = self
+            .browser_handle
+            .send(BrowserCommand::PostBrowsingContextIpcMessage {
+                browsing_context_id: toolbar_browsing_context_id,
+                message,
+            })
+        {
+            warn!("failed to post toolbar ipc message: {err}");
+        }
+    }
+
+    fn publish_navigation_state_to_toolbar(
+        &self,
+        toolbar_browsing_context_id: BrowsingContextId,
+        page_browsing_context_id: BrowsingContextId,
+    ) {
+        let Some(state) = self.navigation_state_by_page.get(&page_browsing_context_id) else {
+            return;
+        };
+        let message = toolbar_publisher::navigation_state_event_message(state);
+        self.post_toolbar_ipc_message(toolbar_browsing_context_id, message);
+    }
+
+    fn handle_toolbar_ipc_request(
+        &mut self,
+        toolbar_browsing_context_id: BrowsingContextId,
+        message: cbf::data::ipc::BrowsingContextIpcMessage,
+    ) {
+        let response_channel = message.channel.clone();
+        let (request_id, request) = match toolbar_handler::decode_request(&message) {
+            Ok(decoded) => decoded,
+            Err(err) => {
+                let response = toolbar_publisher::response_error_message(
+                    &response_channel,
+                    message.request_id,
+                    IpcErrorCode::ProtocolError,
+                    "PROTOCOL_ERROR",
+                    &format!("invalid request: {err:?}"),
+                );
+                self.post_toolbar_ipc_message(toolbar_browsing_context_id, response);
+                return;
+            }
+        };
+
+        let Some(page_browsing_context_id) = page_browsing_context_id_for_toolbar_browsing_context(
+            &self.shared,
+            toolbar_browsing_context_id,
+        ) else {
+            let response = toolbar_publisher::response_error_message(
+                &response_channel,
+                request_id,
+                IpcErrorCode::ContextClosed,
+                "CONTEXT_CLOSED",
+                "target page context not found",
+            );
+            self.post_toolbar_ipc_message(toolbar_browsing_context_id, response);
+            return;
+        };
+
+        let response = match request {
+            toolbar_protocol::ToolbarRequest::Open { url } => {
+                let normalized_url = toolbar_handler::normalize_url(&url);
+                match self
+                    .browser_handle
+                    .navigate(page_browsing_context_id, normalized_url.clone())
+                {
+                    Ok(()) => toolbar_publisher::response_success_message(
+                        &response_channel,
+                        request_id,
+                        serde_json::json!({ "url": normalized_url }),
+                    ),
+                    Err(err) => toolbar_publisher::response_error_message(
+                        &response_channel,
+                        request_id,
+                        IpcErrorCode::ContextClosed,
+                        "CONTEXT_CLOSED",
+                        &format!("failed to navigate: {err}"),
+                    ),
+                }
+            }
+            toolbar_protocol::ToolbarRequest::Back => {
+                match self.browser_handle.go_back(page_browsing_context_id) {
+                    Ok(()) => toolbar_publisher::response_success_message(
+                        &response_channel,
+                        request_id,
+                        serde_json::json!({}),
+                    ),
+                    Err(err) => toolbar_publisher::response_error_message(
+                        &response_channel,
+                        request_id,
+                        IpcErrorCode::ContextClosed,
+                        "CONTEXT_CLOSED",
+                        &format!("failed to go back: {err}"),
+                    ),
+                }
+            }
+            toolbar_protocol::ToolbarRequest::Forward => {
+                match self.browser_handle.go_forward(page_browsing_context_id) {
+                    Ok(()) => toolbar_publisher::response_success_message(
+                        &response_channel,
+                        request_id,
+                        serde_json::json!({}),
+                    ),
+                    Err(err) => toolbar_publisher::response_error_message(
+                        &response_channel,
+                        request_id,
+                        IpcErrorCode::ContextClosed,
+                        "CONTEXT_CLOSED",
+                        &format!("failed to go forward: {err}"),
+                    ),
+                }
+            }
+            toolbar_protocol::ToolbarRequest::Reload { ignore_cache } => {
+                match self
+                    .browser_handle
+                    .reload(page_browsing_context_id, ignore_cache)
+                {
+                    Ok(()) => toolbar_publisher::response_success_message(
+                        &response_channel,
+                        request_id,
+                        serde_json::json!({}),
+                    ),
+                    Err(err) => toolbar_publisher::response_error_message(
+                        &response_channel,
+                        request_id,
+                        IpcErrorCode::ContextClosed,
+                        "CONTEXT_CLOSED",
+                        &format!("failed to reload: {err}"),
+                    ),
+                }
+            }
+            toolbar_protocol::ToolbarRequest::StateRequest => {
+                if let Some(state) = self.navigation_state_by_page.get(&page_browsing_context_id) {
+                    toolbar_publisher::response_success_message(
+                        &response_channel,
+                        request_id,
+                        serde_json::to_value(state).unwrap_or_else(|_| serde_json::json!({})),
+                    )
+                } else {
+                    toolbar_publisher::response_success_message(
+                        &response_channel,
+                        request_id,
+                        serde_json::json!({
+                            "url": "",
+                            "can_go_back": false,
+                            "can_go_forward": false,
+                            "is_loading": false
+                        }),
+                    )
+                }
+            }
+        };
+
+        self.post_toolbar_ipc_message(toolbar_browsing_context_id, response);
+    }
+
     fn handle_profiles_listed(&mut self, profiles: Vec<ProfileInfo>) -> Vec<CoreAction> {
         let Some(profile_id) = profiles
             .iter()
@@ -761,6 +946,7 @@ impl AppController {
     ) -> Vec<CoreAction> {
         match event {
             BrowsingContextEvent::Created { request_id } => {
+                let mut created_toolbar = false;
                 let host_window_id = if request_id == TOOLBAR_CREATE_REQUEST_ID {
                     set_toolbar_browsing_context_id(&self.shared, Some(browsing_context_id));
                     set_window_toolbar_browsing_context(
@@ -768,6 +954,7 @@ impl AppController {
                         PRIMARY_HOST_WINDOW_ID,
                         Some(browsing_context_id),
                     );
+                    created_toolbar = true;
                     Some(PRIMARY_HOST_WINDOW_ID)
                 } else if request_id == OVERLAY_CREATE_REQUEST_ID {
                     set_overlay_browsing_context_id(&self.shared, Some(browsing_context_id));
@@ -790,6 +977,7 @@ impl AppController {
                             Some(browsing_context_id),
                         ),
                         PendingWindowBrowsingContextRole::Toolbar => {
+                            created_toolbar = true;
                             set_window_toolbar_browsing_context(
                                 &self.shared,
                                 pending.window_id,
@@ -808,6 +996,17 @@ impl AppController {
                         browsing_context_id,
                         host_window_id,
                     );
+                    if created_toolbar {
+                        self.try_enable_toolbar_ipc(browsing_context_id);
+                        if let Some(page_browsing_context_id) =
+                            page_browsing_context_id_for_window(&self.shared, host_window_id)
+                        {
+                            self.publish_navigation_state_to_toolbar(
+                                browsing_context_id,
+                                page_browsing_context_id,
+                            );
+                        }
+                    }
                     vec![CoreAction::SyncWindowScene {
                         window_id: host_window_id,
                     }]
@@ -901,10 +1100,55 @@ impl AppController {
                 Vec::new()
             }
             BrowsingContextEvent::Closed => {
+                self.navigation_state_by_page.remove(&browsing_context_id);
                 self.handle_closed_browsing_context(browsing_context_id)
             }
-            BrowsingContextEvent::NavigationStateChanged { .. }
-            | BrowsingContextEvent::FaviconUrlUpdated { .. }
+            BrowsingContextEvent::NavigationStateChanged {
+                url,
+                can_go_back,
+                can_go_forward,
+                is_loading,
+            } => {
+                if window_id_for_toolbar_browsing_context(&self.shared, browsing_context_id)
+                    .is_some()
+                    || Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared)
+                    || Some(browsing_context_id) == overlay_browsing_context_id(&self.shared)
+                {
+                    return Vec::new();
+                }
+
+                self.navigation_state_by_page.insert(
+                    browsing_context_id,
+                    toolbar_protocol::NavigationState {
+                        url,
+                        can_go_back,
+                        can_go_forward,
+                        is_loading,
+                    },
+                );
+
+                if let Some(window_id) =
+                    window_id_for_page_browsing_context(&self.shared, browsing_context_id)
+                    && let Some(toolbar_browsing_context_id) =
+                        toolbar_browsing_context_id_for_window(&self.shared, window_id)
+                {
+                    self.publish_navigation_state_to_toolbar(
+                        toolbar_browsing_context_id,
+                        browsing_context_id,
+                    );
+                }
+                Vec::new()
+            }
+            BrowsingContextEvent::IpcMessageReceived { message } => {
+                if window_id_for_toolbar_browsing_context(&self.shared, browsing_context_id)
+                    .is_some()
+                    || Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared)
+                {
+                    self.handle_toolbar_ipc_request(browsing_context_id, message);
+                }
+                Vec::new()
+            }
+            BrowsingContextEvent::FaviconUrlUpdated { .. }
             | BrowsingContextEvent::UpdateTargetUrl { .. }
             | BrowsingContextEvent::FullscreenToggled { .. }
             | BrowsingContextEvent::ImeBoundsUpdated { .. }
@@ -1531,6 +1775,20 @@ fn download_prompt_response_for_simpleapp(
             }
         }
     }
+}
+
+fn toolbar_allowed_origin() -> Option<String> {
+    let toolbar_url = toolbar_ui_url().ok()?;
+    if toolbar_url.starts_with("file://") {
+        return Some("file://".to_string());
+    }
+
+    let (scheme, rest) = toolbar_url.split_once("://")?;
+    let authority = rest.split('/').next().unwrap_or_default();
+    if authority.is_empty() {
+        return None;
+    }
+    Some(format!("{scheme}://{authority}"))
 }
 
 fn forward_compositor_command(

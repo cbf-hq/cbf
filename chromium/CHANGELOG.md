@@ -21,6 +21,16 @@ source-built use rather than a downloadable binary bundle.
 - Host-driven browsing context background policy control through the bridge, profile service, and browser tests.
 - Transparent embedded surface handling that applies both page base background color and browser-side view background color for tabs and extension popups.
 - Host-disconnect shutdown handling that terminates the browser process without beforeunload once the authenticated Rust host disconnects from the Mojo bridge.
+- Browsing-context IPC v1 bridge flow across Chromium browser/renderer boundary, including:
+  - context-scoped IPC enable/disable control
+  - page->host invoke delivery through dedicated Mojo path
+  - host->page notification delivery with text/binary envelope support
+  - origin allow-list enforcement via `allowed_origins` and deny-all default when empty
+  - browser-test coverage for allow/deny, navigation re-evaluation, and lifecycle failure paths
+
+### Changed
+
+- Moved `window.cbf` IPC bootstrap to renderer-side extension install and replaced browser-side navigation-time main-world script execution with isolated-world event dispatch for host->page IPC delivery.
 
 ## [cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1] - 2026-03-17
 

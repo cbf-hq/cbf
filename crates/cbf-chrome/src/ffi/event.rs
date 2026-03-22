@@ -10,6 +10,7 @@ use crate::data::{
     extension::ChromeExtensionInfo,
     ids::{PopupId, TabId},
     ime::ChromeImeBoundsUpdate,
+    ipc::{TabIpcErrorCode, TabIpcMessageType, TabIpcPayload},
     lifecycle::ChromeBeforeUnloadReason,
     prompt_ui::{PromptUiCloseReason, PromptUiId, PromptUiKind, PromptUiResolution},
     surface::SurfaceHandle,
@@ -258,6 +259,17 @@ pub enum IpcEvent {
         browsing_context_id: TabId,
         request_id: u64,
         html: String,
+    },
+    /// Browsing context IPC message from page to host.
+    TabIpcMessageReceived {
+        profile_id: String,
+        browsing_context_id: TabId,
+        channel: String,
+        message_type: TabIpcMessageType,
+        request_id: u64,
+        payload: TabIpcPayload,
+        content_type: Option<String>,
+        error_code: Option<TabIpcErrorCode>,
     },
     /// Host-owned drag start request from renderer.
     ///

@@ -128,12 +128,154 @@
 
 <body>
   <div class="toolbar">
-    <button aria-label="Back">&larr;</button>
-    <button aria-label="Forward">&rarr;</button>
-    <button aria-label="Reload">&#8635;</button>
-    <input aria-label="Address bar" value="https://www.google.com">
-    <button class="primary">Open</button>
+    <button id="back" aria-label="Back">&larr;</button>
+    <button id="forward" aria-label="Forward">&rarr;</button>
+    <button id="reload" aria-label="Reload">&#8635;</button>
+    <input id="address" aria-label="Address bar" value="https://www.google.com">
+    <button id="open" class="primary">Open</button>
   </div>
+  <div id="status" class="hint" style="padding: 8px 14px;">Connecting…</div>
+
+  <script>
+    (function () {
+      const CHANNELS = {
+        OPEN: 'simpleapp.nav.open',
+        BACK: 'simpleapp.nav.back',
+        FORWARD: 'simpleapp.nav.forward',
+        RELOAD: 'simpleapp.nav.reload',
+        STATE_REQUEST: 'simpleapp.state.request',
+        STATE_NAVIGATION: 'simpleapp.state.navigation',
+      };
+
+      const backButton = document.getElementById('back');
+      const forwardButton = document.getElementById('forward');
+      const reloadButton = document.getElementById('reload');
+      const openButton = document.getElementById('open');
+      const addressInput = document.getElementById('address');
+      const statusNode = document.getElementById('status');
+
+      function setStatus(text) {
+        statusNode.textContent = text;
+      }
+
+      function normalizeUrl(raw) {
+        const value = (raw || '').trim();
+        if (!value) return 'about:blank';
+        if (
+          value.startsWith('http://') ||
+          value.startsWith('https://') ||
+          value.startsWith('about:') ||
+          value.startsWith('file://')
+        ) {
+          return value;
+        }
+        return `https://${value}`;
+      }
+
+      async function invokeJson(channel, payload) {
+        if (!window.cbf || typeof window.cbf.invoke !== 'function') {
+          throw new Error('IPC is not available');
+        }
+        const raw = await window.cbf.invoke(
+          channel,
+          JSON.stringify(payload || {}),
+          { content_type: 'application/json' }
+        );
+        if (!raw) return { ok: true, value: {} };
+        try {
+          return JSON.parse(raw);
+        } catch (_) {
+          return { ok: true, value: {} };
+        }
+      }
+
+      function applyNavigationState(state) {
+        if (!state || typeof state !== 'object') return;
+        if (typeof state.url === 'string' && state.url.length > 0) {
+          addressInput.value = state.url;
+        }
+        backButton.disabled = !state.can_go_back;
+        forwardButton.disabled = !state.can_go_forward;
+        setStatus(state.is_loading ? 'Loading…' : 'Ready');
+      }
+
+      async function requestState() {
+        try {
+          const response = await invokeJson(CHANNELS.STATE_REQUEST, {});
+          if (response && response.ok) {
+            applyNavigationState(response.value);
+          }
+        } catch (error) {
+          const code = error && error.code ? error.code : 'UNKNOWN';
+          setStatus(`State sync failed (${code})`);
+        }
+      }
+
+      async function navigateOpen() {
+        const url = normalizeUrl(addressInput.value);
+        addressInput.value = url;
+        try {
+          const response = await invokeJson(CHANNELS.OPEN, { url });
+          if (!response || !response.ok) {
+            const code = response && response.code ? response.code : 'UNKNOWN';
+            setStatus(`Open failed (${code})`);
+            return;
+          }
+          setStatus('Navigating…');
+        } catch (error) {
+          const code = error && error.code ? error.code : 'UNKNOWN';
+          setStatus(`Open failed (${code})`);
+        }
+      }
+
+      async function invokeWithoutPayload(channel) {
+        try {
+          const response = await invokeJson(channel, {});
+          if (!response || !response.ok) {
+            const code = response && response.code ? response.code : 'UNKNOWN';
+            setStatus(`Action failed (${code})`);
+          }
+        } catch (error) {
+          const code = error && error.code ? error.code : 'UNKNOWN';
+          setStatus(`Action failed (${code})`);
+        }
+      }
+
+      backButton.addEventListener('click', () => invokeWithoutPayload(CHANNELS.BACK));
+      forwardButton.addEventListener('click', () => invokeWithoutPayload(CHANNELS.FORWARD));
+      reloadButton.addEventListener('click', () => invokeWithoutPayload(CHANNELS.RELOAD));
+      openButton.addEventListener('click', navigateOpen);
+      addressInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          navigateOpen();
+        }
+      });
+
+      if (window.cbf && typeof window.cbf.listen === 'function') {
+        window.cbf.listen((message) => {
+          if (!message || message.channel !== CHANNELS.STATE_NAVIGATION) {
+            return;
+          }
+          let payload = null;
+          if (typeof message.payload === 'string') {
+            try {
+              payload = JSON.parse(message.payload);
+            } catch (_) {
+              return;
+            }
+          } else {
+            payload = message.payload;
+          }
+          applyNavigationState(payload);
+        });
+      } else {
+        setStatus('IPC unavailable');
+      }
+
+      requestState();
+    })();
+  </script>
 </body>
 
 </html>

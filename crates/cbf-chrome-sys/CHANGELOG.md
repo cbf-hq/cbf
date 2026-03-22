@@ -10,11 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - FFI support for Chromium tab and extension popup background policy commands in the bridge client ABI.
-
-## [146.1.0-alpha.2] - 2026-03-17
-
-### Added
-
+- FFI support for browsing-context IPC commands and envelope fields in the bridge ABI, including channel, request/response metadata, text/binary payloads, and structured IPC error codes.
+- Bridge event ABI extensions for page->host IPC notifications and corresponding Rust-side mapping support.
 - FFI support for Chromium tab visibility commands in the bridge client ABI.
 
 ## [146.1.0-alpha.1] - 2026-03-16

@@ -13,6 +13,7 @@ use crate::data::{
     edit::EditAction,
     ids::{BrowsingContextId, TransientBrowsingContextId},
     ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
+    ipc::{BrowsingContextIpcMessage, IpcConfig},
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
     transient_browsing_context::{TransientImeCommitText, TransientImeComposition},
@@ -152,6 +153,22 @@ pub enum BrowserCommand {
     SetBrowsingContextVisibility {
         browsing_context_id: BrowsingContextId,
         visibility: BrowsingContextVisibility,
+    },
+    /// Enable browsing context IPC with explicit config.
+    EnableIpc {
+        browsing_context_id: BrowsingContextId,
+        config: IpcConfig,
+    },
+    /// Disable browsing context IPC.
+    DisableIpc {
+        browsing_context_id: BrowsingContextId,
+    },
+    /// Post a host -> page IPC message.
+    ///
+    /// `message.channel` must be a non-empty string.
+    PostBrowsingContextIpcMessage {
+        browsing_context_id: BrowsingContextId,
+        message: BrowsingContextIpcMessage,
     },
 
     // --- Input ---
@@ -317,6 +334,9 @@ pub enum BrowserOperation {
     SetBrowsingContextFocus,
     SetTransientBrowsingContextFocus,
     SetBrowsingContextVisibility,
+    EnableIpc,
+    DisableIpc,
+    PostBrowsingContextIpcMessage,
     SendKeyEvent,
     ExecuteEditAction,
     SendKeyEventToTransientBrowsingContext,
@@ -389,6 +409,11 @@ impl BrowserOperation {
             }
             BrowserCommand::SetBrowsingContextVisibility { .. } => {
                 Self::SetBrowsingContextVisibility
+            }
+            BrowserCommand::EnableIpc { .. } => Self::EnableIpc,
+            BrowserCommand::DisableIpc { .. } => Self::DisableIpc,
+            BrowserCommand::PostBrowsingContextIpcMessage { .. } => {
+                Self::PostBrowsingContextIpcMessage
             }
             BrowserCommand::SendKeyEvent { .. } => Self::SendKeyEvent,
             BrowserCommand::ExecuteEditAction { .. } => Self::ExecuteEditAction,
@@ -465,6 +490,9 @@ impl std::fmt::Display for BrowserOperation {
             Self::SetBrowsingContextFocus => "set_browsing_context_focus",
             Self::SetTransientBrowsingContextFocus => "set_transient_browsing_context_focus",
             Self::SetBrowsingContextVisibility => "set_browsing_context_visibility",
+            Self::EnableIpc => "enable_ipc",
+            Self::DisableIpc => "disable_ipc",
+            Self::PostBrowsingContextIpcMessage => "post_browsing_context_ipc_message",
             Self::SendKeyEvent => "send_key_event",
             Self::ExecuteEditAction => "execute_edit_action",
             Self::SendKeyEventToTransientBrowsingContext => {
@@ -516,6 +544,7 @@ mod tests {
     use crate::data::{
         edit::EditAction,
         ids::{BrowsingContextId, TransientBrowsingContextId},
+        ipc::IpcConfig,
         visibility::BrowsingContextVisibility,
     };
 
@@ -589,5 +618,21 @@ mod tests {
             BrowserOperation::SetBrowsingContextVisibility.to_string(),
             "set_browsing_context_visibility"
         );
+    }
+
+    #[test]
+    fn operation_from_command_covers_enable_ipc_command() {
+        let command = BrowserCommand::EnableIpc {
+            browsing_context_id: BrowsingContextId::new(7),
+            config: IpcConfig {
+                allowed_origins: vec!["https://example.com".to_string()],
+            },
+        };
+
+        assert_eq!(
+            BrowserOperation::from_command(&command),
+            BrowserOperation::EnableIpc
+        );
+        assert_eq!(BrowserOperation::EnableIpc.to_string(), "enable_ipc");
     }
 }

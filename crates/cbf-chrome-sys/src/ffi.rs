@@ -53,6 +53,7 @@ pub const CBF_EVENT_EXTENSION_POPUP_RENDER_PROCESS_GONE: u8 = 42;
 pub const CBF_EVENT_JAVASCRIPT_DIALOG_REQUESTED: u8 = 43;
 pub const CBF_EVENT_CHOICE_MENU_REQUESTED: u8 = 44;
 pub const CBF_EVENT_EXTENSION_POPUP_CHOICE_MENU_REQUESTED: u8 = 45;
+pub const CBF_EVENT_TAB_IPC_MESSAGE_RECEIVED: u8 = 46;
 
 pub const CBF_BRIDGE_EVENT_WAIT_STATUS_EVENT_AVAILABLE: i32 = 0;
 pub const CBF_BRIDGE_EVENT_WAIT_STATUS_TIMED_OUT: i32 = 1;
@@ -311,6 +312,22 @@ pub const CBF_CHOICE_MENU_ITEM_SUB_MENU: u8 = 4;
 pub const CBF_CHOICE_MENU_TEXT_DIRECTION_LEFT_TO_RIGHT: u8 = 0;
 pub const CBF_CHOICE_MENU_TEXT_DIRECTION_RIGHT_TO_LEFT: u8 = 1;
 
+pub const CBF_IPC_PAYLOAD_TEXT: u8 = 0;
+pub const CBF_IPC_PAYLOAD_BINARY: u8 = 1;
+
+pub const CBF_IPC_MESSAGE_REQUEST: u8 = 0;
+pub const CBF_IPC_MESSAGE_RESPONSE: u8 = 1;
+pub const CBF_IPC_MESSAGE_EVENT: u8 = 2;
+
+pub const CBF_IPC_ERROR_NONE: u8 = 0;
+pub const CBF_IPC_ERROR_TIMEOUT: u8 = 1;
+pub const CBF_IPC_ERROR_ABORTED: u8 = 2;
+pub const CBF_IPC_ERROR_DISCONNECTED: u8 = 3;
+pub const CBF_IPC_ERROR_IPC_DISABLED: u8 = 4;
+pub const CBF_IPC_ERROR_CONTEXT_CLOSED: u8 = 5;
+pub const CBF_IPC_ERROR_REMOTE_ERROR: u8 = 6;
+pub const CBF_IPC_ERROR_PROTOCOL_ERROR: u8 = 7;
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfSurfaceHandle {
@@ -396,6 +413,14 @@ pub struct CbfBridgeEvent {
     pub tab_open_result_kind: u8,
     pub tab_open_has_target: bool,
     pub tab_open_target_tab_id: u64,
+    pub ipc_channel: *mut c_char,
+    pub ipc_message_type: u8,
+    pub ipc_payload_kind: u8,
+    pub ipc_payload_text: *mut c_char,
+    pub ipc_payload_binary: *const u8,
+    pub ipc_payload_binary_len: u32,
+    pub ipc_content_type: *mut c_char,
+    pub ipc_error_code: u8,
 }
 
 #[repr(C)]
@@ -883,6 +908,28 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
         visibility: u8,
+    ) -> bool;
+    pub fn cbf_bridge_client_enable_tab_ipc(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        allowed_origins: *const CbfCommandList,
+    ) -> bool;
+    pub fn cbf_bridge_client_disable_tab_ipc(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_post_tab_ipc_message(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        channel: *const c_char,
+        message_type: u8,
+        request_id: u64,
+        payload_kind: u8,
+        payload_text: *const c_char,
+        payload_binary: *const u8,
+        payload_binary_len: u32,
+        content_type: *const c_char,
+        error_code: u8,
     ) -> bool;
     pub fn cbf_bridge_client_set_extension_popup_focus(
         client: *mut CbfBridgeClientHandle,

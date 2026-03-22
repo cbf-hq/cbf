@@ -10,6 +10,7 @@ pub mod extension;
 pub mod ids;
 pub mod ime;
 pub mod input;
+pub mod ipc;
 pub mod lifecycle;
 pub mod mouse;
 pub mod profile;

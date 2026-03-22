@@ -14,6 +14,7 @@ pub mod edit;
 pub mod extension;
 pub mod ids;
 pub mod ime;
+pub mod ipc;
 pub mod key;
 pub mod mouse;
 pub mod permission;

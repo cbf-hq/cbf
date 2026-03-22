@@ -18,6 +18,7 @@ use crate::data::{
     extension::ExtensionInfo,
     ids::{BrowsingContextId, TransientBrowsingContextId},
     ime::ImeBoundsUpdate,
+    ipc::BrowsingContextIpcMessage,
     permission::PermissionType,
     profile::ProfileInfo,
     transient_browsing_context::{
@@ -258,6 +259,12 @@ pub enum BrowsingContextEvent {
 
     /// A context menu display was requested.
     ContextMenuRequested { menu: ContextMenu },
+
+    /// A browsing context IPC message was received.
+    ///
+    /// `message.channel` follows the same contract as command payloads and is
+    /// always non-empty.
+    IpcMessageReceived { message: BrowsingContextIpcMessage },
 
     // --- Dialogs & Permissions (Response Required) ---
     /// A JavaScript dialog (alert/confirm/prompt) was requested.

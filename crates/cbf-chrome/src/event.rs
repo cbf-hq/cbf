@@ -40,6 +40,7 @@ use crate::data::{
     download::ChromeDownloadPromptResult,
     extension::ChromeExtensionInfo,
     ids::PopupId,
+    ipc::TabIpcMessage,
     lifecycle::{ChromeBackendErrorInfo, ChromeBackendStopReason},
     profile::ChromeProfileInfo,
     prompt_ui::{
@@ -480,6 +481,30 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 html: html.clone(),
             }),
         }),
+        IpcEvent::TabIpcMessageReceived {
+            profile_id,
+            browsing_context_id,
+            channel,
+            message_type,
+            request_id,
+            payload,
+            content_type,
+            error_code,
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(BrowsingContextEvent::IpcMessageReceived {
+                message: TabIpcMessage {
+                    channel: channel.clone(),
+                    message_type: *message_type,
+                    request_id: *request_id,
+                    payload: payload.clone(),
+                    content_type: content_type.clone(),
+                    error_code: *error_code,
+                }
+                .into(),
+            }),
+        }),
         IpcEvent::DragStartRequested {
             profile_id,
             browsing_context_id,
@@ -824,6 +849,7 @@ mod tests {
             download::DownloadPromptActionHint,
             extension::{ExtensionInstallPromptResult, ExtensionUninstallPromptResult},
             ids::{BrowsingContextId, TransientBrowsingContextId},
+            ipc::{IpcErrorCode, IpcMessageType, IpcPayload},
             transient_browsing_context::{
                 TransientBrowsingContextCloseReason, TransientBrowsingContextKind,
             },
@@ -836,6 +862,7 @@ mod tests {
         data::{
             download::ChromeDownloadPromptReason,
             ids::{PopupId, TabId},
+            ipc::{TabIpcErrorCode, TabIpcMessageType, TabIpcPayload},
             prompt_ui::{
                 PromptUiCloseReason, PromptUiExtensionInstallResult,
                 PromptUiExtensionUninstallResult, PromptUiId, PromptUiKind, PromptUiResolution,
@@ -908,6 +935,40 @@ mod tests {
                         kind: TransientBrowsingContextKind::Popup,
                         title: Some(ref title),
                     } if title == "Popup"
+                )
+        ));
+    }
+
+    #[test]
+    fn tab_ipc_message_received_maps_into_browsing_context_event() {
+        let event = IpcEvent::TabIpcMessageReceived {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(9),
+            channel: "app.rpc".to_string(),
+            message_type: TabIpcMessageType::Request,
+            request_id: 100,
+            payload: TabIpcPayload::Text("{\"ok\":true}".to_string()),
+            content_type: Some("application/json".to_string()),
+            error_code: Some(TabIpcErrorCode::ProtocolError),
+        };
+
+        let mapped = map_ipc_event_to_generic(&event).unwrap();
+        assert!(matches!(
+            mapped,
+            BrowserEvent::BrowsingContext {
+                browsing_context_id,
+                event,
+                ..
+            } if browsing_context_id == BrowsingContextId::new(9)
+                && matches!(
+                    *event,
+                    BrowsingContextEvent::IpcMessageReceived { ref message }
+                        if message.channel == "app.rpc"
+                        && message.request_id == 100
+                        && message.content_type.as_deref() == Some("application/json")
+                        && matches!(message.message_type, IpcMessageType::Request)
+                        && matches!(message.payload, IpcPayload::Text(ref payload) if payload == "{\"ok\":true}")
+                        && matches!(message.error_code, Some(IpcErrorCode::ProtocolError))
                 )
         ));
     }
