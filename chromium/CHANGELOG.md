@@ -30,10 +30,16 @@ source-built use rather than a downloadable binary bundle.
   - host->page notification delivery with text/binary envelope support
   - origin allow-list enforcement via `allowed_origins` and deny-all default when empty
   - browser-test coverage for allow/deny, navigation re-evaluation, and lifecycle failure paths
+- Same-document `NavigationStateChanged` emission coverage for SPA-style history updates (`pushState`/`replaceState`/same-document back-forward traversal) with dedicated browser-test assertions.
 
 ### Changed
 
 - Moved `window.cbf` IPC bootstrap to renderer-side extension install and replaced browser-side navigation-time main-world script execution with isolated-world event dispatch for host->page IPC delivery.
+- Updated navigation-state observer behavior to emit same-document history updates while suppressing duplicate `NavigationStateChanged` payloads via snapshot diffing.
+
+### Fixed
+
+- Profile teardown stability in `CbfProfileService` by restoring download-prompt prefs before shutdown and removing stale profile-service registry entries during `OnProfileWillBeDestroyed`.
 
 ## [cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1] - 2026-03-17
 

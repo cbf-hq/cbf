@@ -211,7 +211,16 @@ pub enum BrowsingContextEvent {
     Created { request_id: u64 },
 
     // --- Navigation & History ---
-    /// Navigation state changed (back/forward availability and loading state).
+    /// Navigation state changed (URL, history capabilities, and loading state).
+    ///
+    /// Emitted when a browsing context's visible URL or history capabilities
+    /// (`can_go_back`, `can_go_forward`) change, including same-document history
+    /// updates such as `pushState`, `replaceState`, and same-document
+    /// back-forward traversal.
+    ///
+    /// `is_loading` reflects document-navigation loading state only. Backend
+    /// implementations should not toggle it for page-internal data fetches
+    /// (for example, XHR/fetch without a document navigation).
     NavigationStateChanged {
         /// Current page URL.
         url: String,

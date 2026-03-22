@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BrowserSession::Drop` is now a no-op so session teardown no longer implicitly requests graceful shutdown.
 - `BackendStopped` now carries fact-only stop reasons; `BackendStopReason::ShutdownRequested` was removed in favor of runtime-local shutdown tracking.
 - Documented IPC channel-name contract as non-empty in public API docs.
+- Clarified `BrowsingContextEvent::NavigationStateChanged` semantics to explicitly cover same-document history updates (`pushState`/`replaceState`/same-document traversal), and documented that `is_loading` represents document-navigation loading state only.
 
 ## [0.1.0-alpha.1] - 2026-03-16
 

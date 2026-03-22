@@ -1,0 +1,386 @@
+From 8d30f0044cfd2aa8ab6c1188866dee787428365d Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Sun, 22 Mar 2026 15:37:36 +0900
+Subject: [PATCH 37/37] Emit same-document navigation updates and harden
+ profile teardown
+
+---
+ .../browser/cbf/cbf_ca_context_id_observer.cc | 34 ++++++++-
+ .../browser/cbf/cbf_ca_context_id_observer.h  | 11 +++
+ chrome/browser/cbf/cbf_profile_service.cc     | 29 +++++--
+ .../cbf/cbf_profile_service_browsertest.cc    | 76 +++++++++++++++++++
+ .../cbf/test/cbf_test_profile_observer.cc     | 31 +++++++-
+ .../cbf/test/cbf_test_profile_observer.h      | 15 ++++
+ 6 files changed, 184 insertions(+), 12 deletions(-)
+
+diff --git a/chrome/browser/cbf/cbf_ca_context_id_observer.cc b/chrome/browser/cbf/cbf_ca_context_id_observer.cc
+index 8adcf022be76c..a2ddcbaa56a8b 100644
+--- a/chrome/browser/cbf/cbf_ca_context_id_observer.cc
++++ b/chrome/browser/cbf/cbf_ca_context_id_observer.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/cbf/cbf_surface_provider_mac.h"
+ #include "base/logging.h"
+ #include "content/public/browser/navigation_handle.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "third_party/blink/public/mojom/favicon/favicon_url.mojom.h"
+ 
+ namespace cbf {
+@@ -40,7 +41,7 @@ void CbfCaContextIdObserver::DidStartNavigation(
+       navigation_handle->IsSameDocument()) {
+     return;
+   }
+-  profile_service_->NotifyNavigationStateChanged(web_contents(), true);
++  NotifyNavigationStateChangedIfNeeded(/*is_loading=*/true);
+ }
+ 
+ void CbfCaContextIdObserver::DidFinishNavigation(
+@@ -48,11 +49,10 @@ void CbfCaContextIdObserver::DidFinishNavigation(
+   if (!profile_service_ || !web_contents() || !navigation_handle) {
+     return;
+   }
+-  if (!navigation_handle->IsInPrimaryMainFrame() ||
+-      navigation_handle->IsSameDocument()) {
++  if (!navigation_handle->IsInPrimaryMainFrame()) {
+     return;
+   }
+-  profile_service_->NotifyNavigationStateChanged(web_contents(), false);
++  NotifyNavigationStateChangedIfNeeded(/*is_loading=*/false);
+ }
+ 
+ void CbfCaContextIdObserver::OnVisibilityChanged(
+@@ -104,6 +104,32 @@ void CbfCaContextIdObserver::WebContentsDestroyed() {
+   poll_timer_.Stop();
+ }
+ 
++void CbfCaContextIdObserver::NotifyNavigationStateChangedIfNeeded(
++    bool is_loading) {
++  if (!profile_service_ || !web_contents()) {
++    return;
++  }
++
++  content::NavigationController& controller = web_contents()->GetController();
++  NavigationStateSnapshot next_state{
++      .url = web_contents()->GetVisibleURL().spec(),
++      .can_go_back = controller.CanGoBack(),
++      .can_go_forward = controller.CanGoForward(),
++      .is_loading = is_loading,
++  };
++
++  if (last_navigation_state_.has_value() &&
++      last_navigation_state_->url == next_state.url &&
++      last_navigation_state_->can_go_back == next_state.can_go_back &&
++      last_navigation_state_->can_go_forward == next_state.can_go_forward &&
++      last_navigation_state_->is_loading == next_state.is_loading) {
++    return;
++  }
++
++  last_navigation_state_ = next_state;
++  profile_service_->NotifyNavigationStateChanged(web_contents(), is_loading);
++}
++
+ void CbfCaContextIdObserver::StartPollingIfNeeded() {
+   if (poll_timer_.IsRunning()) {
+     return;
+diff --git a/chrome/browser/cbf/cbf_ca_context_id_observer.h b/chrome/browser/cbf/cbf_ca_context_id_observer.h
+index d19fb26d43b9f..d958f79ddc356 100644
+--- a/chrome/browser/cbf/cbf_ca_context_id_observer.h
++++ b/chrome/browser/cbf/cbf_ca_context_id_observer.h
+@@ -2,6 +2,8 @@
+ #define CHROME_BROWSER_CBF_CBF_CA_CONTEXT_ID_OBSERVER_H_
+ 
+ #include <cstdint>
++#include <optional>
++#include <string>
+ #include <vector>
+ 
+ #include "base/memory/raw_ptr.h"
+@@ -50,12 +52,21 @@ class CbfCaContextIdObserver
+                          CbfProfileService* profile_service);
+   friend class content::WebContentsUserData<CbfCaContextIdObserver>;
+ 
++  struct NavigationStateSnapshot {
++    std::string url;
++    bool can_go_back = false;
++    bool can_go_forward = false;
++    bool is_loading = false;
++  };
++
++  void NotifyNavigationStateChangedIfNeeded(bool is_loading);
+   void StartPollingIfNeeded();
+   void PollOnce();
+ 
+   base::RepeatingTimer poll_timer_;
+   int poll_attempts_ = 0;
+   std::uint32_t last_logged_context_id_ = 0;
++  std::optional<NavigationStateSnapshot> last_navigation_state_;
+   raw_ptr<CbfProfileService> profile_service_;
+ 
+   WEB_CONTENTS_USER_DATA_KEY_DECL();
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 141471b3f20e3..f114ad27b1c7f 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -113,6 +113,18 @@ std::map<Profile*, CbfProfileService*>& GetProfileServiceRegistry() {
+   return *registry;
+ }
+ 
++void RemoveProfileServiceRegistryEntry(Profile* profile,
++                                       CbfProfileService* service) {
++  if (!profile) {
++    return;
++  }
++  auto& registry = GetProfileServiceRegistry();
++  auto it = registry.find(profile);
++  if (it != registry.end() && it->second == service) {
++    registry.erase(it);
++  }
++}
++
+ content::RenderWidgetHost* ResolveInputRenderWidgetHost(
+     content::WebContents* web_contents) {
+   if (!web_contents) {
+@@ -958,13 +970,7 @@ CbfProfileService::CbfProfileService(::Profile* profile,
+ }
+ 
+ CbfProfileService::~CbfProfileService() {
+-  if (profile_) {
+-    auto& registry = GetProfileServiceRegistry();
+-    auto it = registry.find(profile_);
+-    if (it != registry.end() && it->second == this) {
+-      registry.erase(it);
+-    }
+-  }
++  RemoveProfileServiceRegistryEntry(profile_, this);
+   profile_observation_.Reset();
+   if (download_coordinator_ && download_coordinator_->GetNotifier()) {
+     download_coordinator_->GetNotifier()->RemoveObserver(this);
+@@ -3419,6 +3425,13 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
+   }
+ 
+   profile_observation_.Reset();
++  if (saved_prompt_for_download_pref_.has_value()) {
++    if (PrefService* prefs = profile_->GetPrefs()) {
++      prefs->SetBoolean(prefs::kPromptForDownload,
++                        saved_prompt_for_download_pref_.value());
++    }
++    saved_prompt_for_download_pref_.reset();
++  }
+   for (auto it = pending_extension_uninstall_prompts_.begin();
+        it != pending_extension_uninstall_prompts_.end();) {
+     const uint64_t request_id = it->first;
+@@ -3435,6 +3448,8 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
+   ResolvePendingFormResubmissionPromptsForShutdown(
+       mojom::CbfPromptUiResolutionResult::kAborted);
+   CloseAllTabs();
++  RemoveProfileServiceRegistryEntry(profile_, this);
++  profile_ = nullptr;
+ }
+ 
+ void CbfProfileService::OnObserverDisconnected() {
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 280c14403aa14..dfa8575f94d20 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -2201,6 +2201,82 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   )"));
+ }
+ 
++IN_PROC_BROWSER_TEST_F(
++    CbfProfileServiceBrowserTest,
++    NavigationStateChangedEmitsForSameDocumentHistoryUpdates) {
++  embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
++      [](const net::test_server::HttpRequest& request)
++          -> std::unique_ptr<net::test_server::HttpResponse> {
++        if (request.relative_url != "/cbf-nav-state-spa") {
++          return nullptr;
++        }
++        auto response = std::make_unique<net::test_server::BasicHttpResponse>();
++        response->set_code(net::HTTP_OK);
++        response->set_content_type("text/html");
++        response->set_content("<!doctype html><title>cbf-nav-state-spa</title>");
++        return response;
++      }));
++  ASSERT_TRUE(embedded_test_server()->Start());
++
++  const GURL initial_url = embedded_test_server()->GetURL("/cbf-nav-state-spa");
++  const TabId tab_id = CreatePage(initial_url.spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  const size_t baseline_event_count =
++      observer_.navigation_state_changed_events().size();
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  ASSERT_TRUE(content::ExecJs(web_contents, R"(
++    history.pushState({}, '', '/cbf-nav-state-spa-step1');
++  )"));
++  observer_.WaitForNavigationStateChangedCount(baseline_event_count + 1);
++
++  ASSERT_TRUE(content::ExecJs(web_contents, R"(
++    history.replaceState({}, '', '/cbf-nav-state-spa-step2');
++  )"));
++  observer_.WaitForNavigationStateChangedCount(baseline_event_count + 2);
++
++  ASSERT_TRUE(content::ExecJs(web_contents, R"(
++    history.back();
++  )"));
++  observer_.WaitForNavigationStateChangedCount(baseline_event_count + 3);
++
++  ASSERT_TRUE(content::ExecJs(web_contents, R"(
++    history.forward();
++  )"));
++  observer_.WaitForNavigationStateChangedCount(baseline_event_count + 4);
++
++  const auto& navigation_events = observer_.navigation_state_changed_events();
++  ASSERT_GE(navigation_events.size(), baseline_event_count + 4);
++
++  const auto& push_state_event = navigation_events[baseline_event_count];
++  EXPECT_EQ(push_state_event.tab_id, tab_id);
++  EXPECT_EQ(GURL(push_state_event.url).path(), "/cbf-nav-state-spa-step1");
++  EXPECT_TRUE(push_state_event.can_go_back);
++  EXPECT_FALSE(push_state_event.is_loading);
++
++  const auto& replace_state_event = navigation_events[baseline_event_count + 1];
++  EXPECT_EQ(replace_state_event.tab_id, tab_id);
++  EXPECT_EQ(GURL(replace_state_event.url).path(), "/cbf-nav-state-spa-step2");
++  EXPECT_TRUE(replace_state_event.can_go_back);
++  EXPECT_FALSE(replace_state_event.is_loading);
++
++  const auto& back_event = navigation_events[baseline_event_count + 2];
++  EXPECT_EQ(back_event.tab_id, tab_id);
++  EXPECT_EQ(GURL(back_event.url).path(), "/cbf-nav-state-spa");
++  EXPECT_TRUE(back_event.can_go_forward);
++  EXPECT_FALSE(back_event.is_loading);
++
++  const auto& forward_event = navigation_events[baseline_event_count + 3];
++  EXPECT_EQ(forward_event.tab_id, tab_id);
++  EXPECT_EQ(GURL(forward_event.url).path(), "/cbf-nav-state-spa-step2");
++  EXPECT_TRUE(forward_event.can_go_back);
++  EXPECT_FALSE(forward_event.is_loading);
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        HistoryContainsVisitedUrlFromCbfManagedTab) {
+   embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index 0424855b458da..c5431e4dd42c8 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -505,6 +505,20 @@ void CbfTestProfileObserver::WaitForTabIpcMessageCount(size_t expected_count) {
+   quit_wait_loop_.Reset();
+ }
+ 
++void CbfTestProfileObserver::WaitForNavigationStateChangedCount(
++    size_t expected_count) {
++  ResetWaitTargets();
++  wait_navigation_state_changed_count_ = expected_count;
++  if (navigation_state_changed_events_.size() >=
++      wait_navigation_state_changed_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
+ void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t tab_id,
+                                                     uint32_t ca_context_id) {
+   surface_events_.push_back(
+@@ -723,7 +737,15 @@ void CbfTestProfileObserver::OnNavigationStateChanged(uint64_t tab_id,
+                                                       const std::string& url,
+                                                       bool can_go_back,
+                                                       bool can_go_forward,
+-                                                      bool is_loading) {}
++                                                      bool is_loading) {
++  navigation_state_changed_events_.push_back(
++      {.tab_id = tab_id,
++       .url = url,
++       .can_go_back = can_go_back,
++       .can_go_forward = can_go_forward,
++       .is_loading = is_loading});
++  MaybeQuitWaitLoop();
++}
+ 
+ void CbfTestProfileObserver::OnTabDomHtmlRead(uint64_t tab_id,
+                                               uint64_t request_id,
+@@ -1037,6 +1059,12 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
+   if (wait_tab_ipc_message_count_ > 0 &&
+       tab_ipc_message_events_.size() >= wait_tab_ipc_message_count_) {
+     quit_wait_loop_.Run();
++    return;
++  }
++  if (wait_navigation_state_changed_count_ > 0 &&
++      navigation_state_changed_events_.size() >=
++          wait_navigation_state_changed_count_) {
++    quit_wait_loop_.Run();
+   }
+ }
+ 
+@@ -1065,6 +1093,7 @@ void CbfTestProfileObserver::ResetWaitTargets() {
+   wait_choice_menu_count_ = 0;
+   wait_extension_popup_choice_menu_count_ = 0;
+   wait_tab_ipc_message_count_ = 0;
++  wait_navigation_state_changed_count_ = 0;
+ }
+ 
+ }  // namespace cbf::test
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index caaf83d65d61f..e932fa0ce9325 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -319,6 +319,14 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+         cbf::mojom::CbfIpcErrorCode::kNone;
+   };
+ 
++  struct NavigationStateChangedEvent {
++    uint64_t tab_id = 0;
++    std::string url;
++    bool can_go_back = false;
++    bool can_go_forward = false;
++    bool is_loading = false;
++  };
++
+   enum class DownloadEventKind {
+     kCreated,
+     kUpdated,
+@@ -419,6 +427,10 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   const std::vector<TabIpcMessageEvent>& tab_ipc_message_events() const {
+     return tab_ipc_message_events_;
+   }
++  const std::vector<NavigationStateChangedEvent>&
++  navigation_state_changed_events() const {
++    return navigation_state_changed_events_;
++  }
+   const std::vector<DownloadEventKind>& download_event_order() const {
+     return download_event_order_;
+   }
+@@ -447,6 +459,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void WaitForChoiceMenuCount(size_t expected_count);
+   void WaitForExtensionPopupChoiceMenuCount(size_t expected_count);
+   void WaitForTabIpcMessageCount(size_t expected_count);
++  void WaitForNavigationStateChangedCount(size_t expected_count);
+ 
+   // cbf::mojom::CbfProfileObserver
+   void OnSurfaceHandleUpdated(uint64_t tab_id,
+@@ -603,6 +616,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   std::vector<ChoiceMenuEvent> choice_menu_events_;
+   std::vector<ExtensionPopupChoiceMenuEvent> extension_popup_choice_menu_events_;
+   std::vector<TabIpcMessageEvent> tab_ipc_message_events_;
++  std::vector<NavigationStateChangedEvent> navigation_state_changed_events_;
+   std::vector<DownloadEventKind> download_event_order_;
+ 
+   size_t wait_web_page_closed_count_ = 0;
+@@ -629,6 +643,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   size_t wait_choice_menu_count_ = 0;
+   size_t wait_extension_popup_choice_menu_count_ = 0;
+   size_t wait_tab_ipc_message_count_ = 0;
++  size_t wait_navigation_state_changed_count_ = 0;
+   base::RepeatingClosure quit_wait_loop_;
+ };
+ 
+-- 
+2.50.1 (Apple Git-155)
+

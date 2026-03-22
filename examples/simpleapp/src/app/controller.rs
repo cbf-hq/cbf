@@ -1120,6 +1120,15 @@ impl AppController {
                     return Vec::new();
                 }
 
+                debug!(
+                    browsing_context_id = ?browsing_context_id,
+                    url = %url,
+                    can_go_back,
+                    can_go_forward,
+                    is_loading,
+                    "navigation_state_changed"
+                );
+
                 self.navigation_state_by_page.insert(
                     browsing_context_id,
                     toolbar_protocol::NavigationState {
