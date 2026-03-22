@@ -23,6 +23,15 @@ pub enum PermissionPromptResult {
     Unknown,
 }
 
+/// Browser-generic reason for form resubmission prompts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormResubmissionPromptReason {
+    Reload,
+    BackForward,
+    Other,
+    Unknown,
+}
+
 /// Stable id for a backend-managed auxiliary dialog/window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AuxiliaryWindowId(u64);
@@ -67,6 +76,10 @@ pub enum AuxiliaryWindowKind {
         action_hint: DownloadPromptActionHint,
     },
     PrintPreviewDialog,
+    FormResubmissionPrompt {
+        reason: FormResubmissionPromptReason,
+        target_url: Option<String>,
+    },
     Unknown,
 }
 
@@ -86,6 +99,9 @@ pub enum AuxiliaryWindowResponse {
     DownloadPrompt {
         allow: bool,
         destination_path: Option<String>,
+    },
+    FormResubmissionPrompt {
+        proceed: bool,
     },
     Unknown,
 }
@@ -112,6 +128,11 @@ pub enum AuxiliaryWindowResolution {
         download_id: DownloadId,
         result: DownloadPromptResult,
         destination_path: Option<String>,
+    },
+    FormResubmissionPrompt {
+        reason: FormResubmissionPromptReason,
+        target_url: Option<String>,
+        result: PermissionPromptResult,
     },
     Unknown,
 }

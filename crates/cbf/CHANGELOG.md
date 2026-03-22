@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Browser-generic browsing-context IPC command surface with `EnableIpc`, `DisableIpc`, and `PostBrowsingContextIpcMessage`.
 - Browser-generic IPC data models in `cbf::data::ipc` for config, payload, message type, error code, and message envelope.
 - Browsing-context IPC inbound event `BrowsingContextEvent::IpcMessageReceived`.
+- Browser-generic form-resubmission prompt support through `AuxiliaryWindowKind::FormResubmissionPrompt`, `AuxiliaryWindowResponse::FormResubmissionPrompt`, and `AuxiliaryWindowResolution::FormResubmissionPrompt`.
+- Browser-generic repost reason model `FormResubmissionPromptReason` for reload/back-forward/other/unknown flows.
 
 ### Changed
 
