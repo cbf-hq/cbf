@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - FFI support for browsing-context IPC commands and envelope fields in the bridge ABI, including channel, request/response metadata, text/binary payloads, and structured IPC error codes.
 - Bridge event ABI extensions for page->host IPC notifications and corresponding Rust-side mapping support.
 - FFI support for Chromium tab visibility commands in the bridge client ABI.
+- FFI constants and bridge event fields for form-resubmission prompt transport:
+  - auxiliary/prompt-ui kind value for form resubmission
+  - repost reason enum values
+  - repost reason and repost target URL fields on `CbfBridgeEvent`.
 
 ## [146.1.0-alpha.1] - 2026-03-16
 

@@ -101,6 +101,7 @@ pub const CBF_AUXILIARY_WINDOW_KIND_UNKNOWN: u8 = 0;
 pub const CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT: u8 = 1;
 pub const CBF_AUXILIARY_WINDOW_KIND_EXTENSION_UNINSTALL_PROMPT: u8 = 2;
 pub const CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG: u8 = 3;
+pub const CBF_AUXILIARY_WINDOW_KIND_FORM_RESUBMISSION_PROMPT: u8 = 4;
 
 pub const CBF_PROMPT_UI_KIND_UNKNOWN: u8 = 0;
 pub const CBF_PROMPT_UI_KIND_PERMISSION_PROMPT: u8 = 1;
@@ -109,6 +110,12 @@ pub const CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT: u8 = 2;
 pub const CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT: u8 = 3;
 pub const CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT: u8 = 4;
 pub const CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG: u8 = 5;
+pub const CBF_PROMPT_UI_KIND_FORM_RESUBMISSION_PROMPT: u8 = 6;
+
+pub const CBF_FORM_RESUBMISSION_REASON_UNKNOWN: u8 = 0;
+pub const CBF_FORM_RESUBMISSION_REASON_RELOAD: u8 = 1;
+pub const CBF_FORM_RESUBMISSION_REASON_BACK_FORWARD: u8 = 2;
+pub const CBF_FORM_RESUBMISSION_REASON_OTHER: u8 = 3;
 
 pub const CBF_PROMPT_UI_CLOSE_REASON_UNKNOWN: u8 = 0;
 pub const CBF_PROMPT_UI_CLOSE_REASON_USER_CANCELED: u8 = 1;
@@ -391,6 +398,8 @@ pub struct CbfBridgeEvent {
     pub prompt_ui_permission: u8,
     pub prompt_ui_result: u8,
     pub prompt_ui_permission_key: *mut c_char,
+    pub prompt_ui_repost_reason: u8,
+    pub prompt_ui_repost_target_url: *mut c_char,
     pub download_reason: u8,
     pub download_id: u64,
     pub download_has_source_tab_id: bool,
