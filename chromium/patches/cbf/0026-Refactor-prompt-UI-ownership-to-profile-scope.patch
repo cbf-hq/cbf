@@ -1,7 +1,7 @@
 From 497c116b0d10e68ec064aaefaf9b5a3224255344 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 15 Mar 2026 14:37:52 +0900
-Subject: [PATCH 26/35] Refactor prompt UI ownership to profile scope
+Subject: [PATCH 26/36] Refactor prompt UI ownership to profile scope
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.h        |  11 +-

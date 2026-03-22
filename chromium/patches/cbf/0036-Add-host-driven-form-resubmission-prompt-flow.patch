@@ -1,0 +1,995 @@
+From b297e308a30558448b1559354d4b95844644e9c8 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Sun, 22 Mar 2026 14:23:07 +0900
+Subject: [PATCH 36/36] Add host-driven form resubmission prompt flow
+
+---
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |   5 +
+ .../cbf/bridge/cbf_bridge_event_wait_state.h  |   2 +
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  14 +
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  11 +
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc |   8 +
+ chrome/browser/cbf/cbf_profile_service.cc     | 325 +++++++++++++++++-
+ chrome/browser/cbf/cbf_profile_service.h      |  46 ++-
+ .../cbf/cbf_profile_service_browsertest.cc    |  97 ++++++
+ .../browser/cbf/cbf_web_contents_delegate.cc  |  14 +
+ .../browser/cbf/cbf_web_contents_delegate.h   |   1 +
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  13 +
+ .../cbf/test/cbf_test_profile_observer.cc     |   4 +
+ .../cbf/test/cbf_test_profile_observer.h      |   6 +
+ 13 files changed, 542 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index e688d633f704c..97d90b2b586d5 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -740,6 +740,8 @@ void CbfBridgeClientImpl::Observer::OnPromptUiRequested(
+   event.prompt_ui_kind = static_cast<uint8_t>(request->kind);
+   event.prompt_ui_permission = static_cast<uint8_t>(request->permission);
+   event.prompt_ui_permission_key = request->permission_key;
++  event.prompt_ui_repost_reason = static_cast<uint8_t>(request->repost_reason);
++  event.prompt_ui_repost_target_url = request->repost_target_url;
+   event.download_reason = static_cast<uint8_t>(request->download_reason);
+   event.download_id = request->download_id;
+   event.download_file_name = request->file_name;
+@@ -776,6 +778,9 @@ void CbfBridgeClientImpl::Observer::OnPromptUiResolved(
+   event.prompt_ui_permission = static_cast<uint8_t>(resolution->permission);
+   event.prompt_ui_result = static_cast<uint8_t>(resolution->result);
+   event.prompt_ui_permission_key = resolution->permission_key;
++  event.prompt_ui_repost_reason =
++      static_cast<uint8_t>(resolution->repost_reason);
++  event.prompt_ui_repost_target_url = resolution->repost_target_url;
+   event.extension_id = resolution->extension_id;
+   event.extension_install_prompt_result =
+       static_cast<uint8_t>(resolution->extension_install_result);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+index 854811d78fac9..b8e8b770bfcb2 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+@@ -74,6 +74,8 @@ struct CbfBridgeEventData {
+   uint8_t prompt_ui_permission = kCbfPromptUiPermissionTypeUnknown;
+   uint8_t prompt_ui_result = kCbfPromptUiResolutionResultUnknown;
+   std::string prompt_ui_permission_key;
++  uint8_t prompt_ui_repost_reason = kCbfFormResubmissionReasonUnknown;
++  std::string prompt_ui_repost_target_url;
+   uint8_t download_reason = kCbfDownloadPromptReasonUnknown;
+   uint64_t download_id = 0;
+   bool download_has_source_tab_id = false;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index b5b6f8a899ede..9b209aff56a7f 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -367,6 +367,8 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+   out_event->prompt_ui_permission = kCbfPromptUiPermissionTypeUnknown;
+   out_event->prompt_ui_result = kCbfPromptUiResolutionResultUnknown;
+   out_event->prompt_ui_permission_key = nullptr;
++  out_event->prompt_ui_repost_reason = kCbfFormResubmissionReasonUnknown;
++  out_event->prompt_ui_repost_target_url = nullptr;
+   out_event->download_reason = kCbfDownloadPromptReasonUnknown;
+   out_event->download_id = 0;
+   out_event->download_has_source_tab_id = false;
+@@ -609,6 +611,11 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     out_event->prompt_ui_permission_key = event.prompt_ui_permission_key.empty()
+                                              ? nullptr
+                                              : CopyCString(event.prompt_ui_permission_key);
++    out_event->prompt_ui_repost_reason = event.prompt_ui_repost_reason;
++    out_event->prompt_ui_repost_target_url =
++        event.prompt_ui_repost_target_url.empty()
++            ? nullptr
++            : CopyCString(event.prompt_ui_repost_target_url);
+     out_event->download_reason = event.download_reason;
+     out_event->download_id = event.download_id;
+     out_event->download_file_name = event.download_file_name.empty()
+@@ -640,6 +647,11 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     out_event->prompt_ui_permission_key = event.prompt_ui_permission_key.empty()
+                                              ? nullptr
+                                              : CopyCString(event.prompt_ui_permission_key);
++    out_event->prompt_ui_repost_reason = event.prompt_ui_repost_reason;
++    out_event->prompt_ui_repost_target_url =
++        event.prompt_ui_repost_target_url.empty()
++            ? nullptr
++            : CopyCString(event.prompt_ui_repost_target_url);
+     out_event->extension_id =
+         event.extension_id.empty() ? nullptr : CopyCString(event.extension_id);
+     out_event->extension_install_prompt_result =
+@@ -857,6 +869,8 @@ extern "C" void cbf_bridge_event_free(CbfBridgeEvent* event) {
+   event->auxiliary_window_title = nullptr;
+   delete[] event->prompt_ui_permission_key;
+   event->prompt_ui_permission_key = nullptr;
++  delete[] event->prompt_ui_repost_target_url;
++  event->prompt_ui_repost_target_url = nullptr;
+   delete[] event->download_file_name;
+   event->download_file_name = nullptr;
+   delete[] event->download_target_path;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index 348848f27bf03..95652a84dc7c2 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -97,6 +97,7 @@ enum CbfAuxiliaryWindowKind {
+   kCbfAuxiliaryWindowKindExtensionInstallPrompt = 1,
+   kCbfAuxiliaryWindowKindExtensionUninstallPrompt = 2,
+   kCbfAuxiliaryWindowKindPrintPreviewDialog = 3,
++  kCbfAuxiliaryWindowKindFormResubmissionPrompt = 4,
+ };
+ 
+ enum CbfAuxiliaryWindowCloseReason {
+@@ -113,6 +114,14 @@ enum CbfPromptUiKind {
+   kCbfPromptUiKindExtensionInstallPrompt = 3,
+   kCbfPromptUiKindExtensionUninstallPrompt = 4,
+   kCbfPromptUiKindPrintPreviewDialog = 5,
++  kCbfPromptUiKindFormResubmissionPrompt = 6,
++};
++
++enum CbfFormResubmissionReason {
++  kCbfFormResubmissionReasonUnknown = 0,
++  kCbfFormResubmissionReasonReload = 1,
++  kCbfFormResubmissionReasonBackForward = 2,
++  kCbfFormResubmissionReasonOther = 3,
+ };
+ 
+ enum CbfPromptUiPermissionType {
+@@ -721,6 +730,8 @@ typedef struct CbfBridgeEvent {
+   uint8_t prompt_ui_permission;
+   uint8_t prompt_ui_result;
+   char* prompt_ui_permission_key;
++  uint8_t prompt_ui_repost_reason;
++  char* prompt_ui_repost_target_url;
+   uint8_t download_reason;
+   uint64_t download_id;
+   bool download_has_source_tab_id;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index 91a2d858760b7..404bbbd810256 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -974,6 +974,10 @@ bool CbfBridgeClient::RespondPromptUi(const std::string& profile_id,
+                 response->kind =
+                     cbf::mojom::CbfPromptUiKind::kPrintPreviewDialog;
+                 break;
++              case kCbfPromptUiKindFormResubmissionPrompt:
++                response->kind =
++                    cbf::mojom::CbfPromptUiKind::kFormResubmissionPrompt;
++                break;
+               case kCbfPromptUiKindUnknown:
+               default:
+                 response->kind = cbf::mojom::CbfPromptUiKind::kUnknown;
+@@ -1041,6 +1045,10 @@ bool CbfBridgeClient::RespondPromptUiForTab(uint64_t tab_id,
+                 response->kind =
+                     cbf::mojom::CbfPromptUiKind::kPrintPreviewDialog;
+                 break;
++              case kCbfPromptUiKindFormResubmissionPrompt:
++                response->kind =
++                    cbf::mojom::CbfPromptUiKind::kFormResubmissionPrompt;
++                break;
+               case kCbfPromptUiKindUnknown:
+               default:
+                 response->kind = cbf::mojom::CbfPromptUiKind::kUnknown;
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 2bd1410bd112f..141471b3f20e3 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -59,6 +59,8 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+ #include "chrome/browser/profiles/profile_key.h"
++#include "chrome/browser/ui/tab_modal_confirm_dialog.h"
++#include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
+ #include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "chrome/common/pref_names.h"
+ #include "components/content_settings/core/browser/host_content_settings_map.h"
+@@ -67,10 +69,12 @@
+ #include "components/download/public/common/download_item.h"
+ #include "components/permissions/resolvers/permission_prompt_options.h"
+ #include "components/prefs/pref_service.h"
++#include "components/strings/grit/components_strings.h"
+ #include "components/sessions/content/session_tab_helper.h"
+ #include "content/browser/renderer_host/render_widget_host_impl.h"
+ #include "content/public/browser/download_item_utils.h"
+ #include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/navigation_entry.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/render_view_host.h"
+ #include "content/public/browser/render_widget_host.h"
+@@ -91,6 +95,8 @@
+ #include "mojo/public/cpp/bindings/clone_traits.h"
+ #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+ #include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
++#include "ui/base/l10n/l10n_util.h"
++#include "ui/base/page_transition_types.h"
+ #include "ui/views/widget/widget.h"
+ #include "url/gurl.h"
+ 
+@@ -171,6 +177,86 @@ gfx::Size ClampExtensionPopupBounds(gfx::Size size) {
+   return size;
+ }
+ 
++mojom::CbfFormResubmissionReason ToFormResubmissionReason(
++    content::NavigationController& controller) {
++  const content::NavigationEntry* pending_entry = controller.GetPendingEntry();
++  if (!pending_entry) {
++    return mojom::CbfFormResubmissionReason::kUnknown;
++  }
++
++  const ui::PageTransition transition = pending_entry->GetTransitionType();
++  if ((transition & ui::PAGE_TRANSITION_FORWARD_BACK) != 0) {
++    return mojom::CbfFormResubmissionReason::kBackForward;
++  }
++  if (ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_RELOAD)) {
++    return mojom::CbfFormResubmissionReason::kReload;
++  }
++  return mojom::CbfFormResubmissionReason::kOther;
++}
++
++class CbfFormResubmissionPromptController final
++    : public TabModalConfirmDialogDelegate {
++ public:
++  CbfFormResubmissionPromptController(
++      content::WebContents* web_contents,
++      base::OnceCallback<void(mojom::CbfPromptUiResolutionResult)>
++          resolution_callback)
++      : TabModalConfirmDialogDelegate(web_contents),
++        resolution_callback_(std::move(resolution_callback)) {}
++
++  CbfFormResubmissionPromptController(
++      const CbfFormResubmissionPromptController&) = delete;
++  CbfFormResubmissionPromptController& operator=(
++      const CbfFormResubmissionPromptController&) = delete;
++  ~CbfFormResubmissionPromptController() override = default;
++
++ private:
++  std::u16string GetTitle() override {
++    return l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING_TITLE);
++  }
++
++  std::u16string GetDialogMessage() override {
++    return l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING);
++  }
++
++  std::u16string GetAcceptButtonTitle() override {
++    return l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING_RESEND);
++  }
++
++  void OnAccepted() override {
++    if (web_contents()) {
++      web_contents()->GetController().ContinuePendingReload();
++    }
++    Resolve(mojom::CbfPromptUiResolutionResult::kAllowed);
++  }
++
++  void OnCanceled() override {
++    if (web_contents()) {
++      web_contents()->GetController().CancelPendingReload();
++    }
++    Resolve(mojom::CbfPromptUiResolutionResult::kDenied);
++  }
++
++  void OnClosed() override {
++    if (web_contents()) {
++      web_contents()->GetController().CancelPendingReload();
++    }
++    Resolve(mojom::CbfPromptUiResolutionResult::kAborted);
++  }
++
++  void BeforeFormRepostWarningShow() override { Cancel(); }
++
++  void Resolve(mojom::CbfPromptUiResolutionResult result) {
++    if (!resolution_callback_) {
++      return;
++    }
++    std::move(resolution_callback_).Run(result);
++  }
++
++  base::OnceCallback<void(mojom::CbfPromptUiResolutionResult)>
++      resolution_callback_;
++};
++
+ std::string BuildHostIpcDispatchScript(const mojom::CbfIpcMessage& message) {
+   const std::string payload_binary_b64 =
+       message.payload_binary.empty()
+@@ -757,6 +843,16 @@ CbfProfileService::PendingDownloadPrompt&
+ CbfProfileService::PendingDownloadPrompt::operator=(PendingDownloadPrompt&&) =
+     default;
+ 
++CbfProfileService::PendingFormResubmissionPrompt::
++    PendingFormResubmissionPrompt() = default;
++CbfProfileService::PendingFormResubmissionPrompt::
++    ~PendingFormResubmissionPrompt() = default;
++CbfProfileService::PendingFormResubmissionPrompt::
++    PendingFormResubmissionPrompt(PendingFormResubmissionPrompt&&) = default;
++CbfProfileService::PendingFormResubmissionPrompt&
++CbfProfileService::PendingFormResubmissionPrompt::operator=(
++    PendingFormResubmissionPrompt&&) = default;
++
+ CbfProfileService::CbfProfileService(::Profile* profile,
+                                      CbfBrowserService* browser_service)
+     : profile_(profile),
+@@ -892,6 +988,8 @@ CbfProfileService::~CbfProfileService() {
+       mojom::CbfPromptUiResolutionResult::kAborted);
+   ResolvePendingDownloadPromptsForShutdown(
+       mojom::CbfPromptUiResolutionResult::kAborted);
++  ResolvePendingFormResubmissionPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult::kAborted);
+   const std::vector<TabId> tab_ids = GetAllTabIds();
+   for (const TabId tab_id : tab_ids) {
+     if (tab_id == kInvalidTabId) {
+@@ -932,6 +1030,8 @@ void CbfProfileService::SetObserver(
+     observer_.reset();
+   }
+   observer_.Bind(std::move(observer));
++  observer_.set_disconnect_handler(base::BindOnce(
++      &CbfProfileService::OnObserverDisconnected, weak_factory_.GetWeakPtr()));
+ }
+ 
+ void CbfProfileService::CreateTab(const std::string& initial_url,
+@@ -1569,6 +1669,46 @@ bool CbfProfileService::RequestPermissionPromptForWebContents(
+   return true;
+ }
+ 
++bool CbfProfileService::RequestFormResubmissionPromptForWebContents(
++    content::WebContents* web_contents) {
++  if (!web_contents || !observer_) {
++    return false;
++  }
++
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
++    return false;
++  }
++
++  ResolvePendingFormResubmissionPromptsForTab(
++      tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
++
++  PendingFormResubmissionPrompt pending;
++  pending.source_tab_id = tab_id;
++  pending.request_id = next_prompt_ui_request_id_++;
++  pending.web_contents = web_contents->GetWeakPtr();
++  pending.reason = ToFormResubmissionReason(web_contents->GetController());
++  if (const content::NavigationEntry* pending_entry =
++          web_contents->GetController().GetPendingEntry()) {
++    pending.target_url = pending_entry->GetURL().spec();
++  } else {
++    pending.target_url = web_contents->GetLastCommittedURL().spec();
++  }
++
++  const uint64_t request_id = pending.request_id;
++  const mojom::CbfFormResubmissionReason reason = pending.reason;
++  const std::string target_url = pending.target_url;
++  pending_form_resubmission_prompts_[request_id] = std::move(pending);
++
++  NotifyPromptUiRequested(
++      std::optional<TabId>(tab_id), request_id,
++      mojom::CbfPromptUiKind::kFormResubmissionPrompt,
++      mojom::CbfPromptUiPermissionType::kUnknown, std::string(),
++      mojom::CbfDownloadPromptReason::kUnknown, 0, std::string(), std::nullopt,
++      std::nullopt, reason, target_url);
++  return true;
++}
++
+ std::optional<uint64_t> CbfProfileService::RequestExtensionUninstallPrompt(
+     base::WeakPtr<CbfExtensionUninstallDialog> dialog,
+     const extensions::Extension* extension,
+@@ -1691,6 +1831,12 @@ void CbfProfileService::OpenDefaultAuxiliaryWindow(const std::string& profile_id
+     return;
+   }
+ 
++  auto repost_it = pending_form_resubmission_prompts_.find(request_id);
++  if (repost_it != pending_form_resubmission_prompts_.end()) {
++    OpenDefaultFormResubmissionPromptImpl(request_id);
++    return;
++  }
++
+   auto download_it = pending_download_prompts_.find(request_id);
+   if (download_it == pending_download_prompts_.end()) {
+     return;
+@@ -1781,6 +1927,22 @@ void CbfProfileService::RespondPromptUi(
+     }
+     return;
+   }
++
++  if (response->kind == mojom::CbfPromptUiKind::kFormResubmissionPrompt) {
++    auto it = pending_form_resubmission_prompts_.find(request_id);
++    if (it == pending_form_resubmission_prompts_.end()) {
++      return;
++    }
++
++    PendingFormResubmissionPrompt pending = std::move(it->second);
++    pending_form_resubmission_prompts_.erase(it);
++    ResolvePendingFormResubmissionPrompt(
++        std::move(pending),
++        response->allow ? mojom::CbfPromptUiResolutionResult::kAllowed
++                        : mojom::CbfPromptUiResolutionResult::kDenied);
++    return;
++  }
++
+   if (response->kind != mojom::CbfPromptUiKind::kPermissionPrompt) {
+     return;
+   }
+@@ -2022,6 +2184,8 @@ void CbfProfileService::NotifyTabClosed(TabId tab_id) {
+         tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
+     ResolvePendingDownloadPromptsForTab(
+         tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
++    ResolvePendingFormResubmissionPromptsForTab(
++        tab_id, mojom::CbfPromptUiResolutionResult::kAborted);
+     context_menu_controller_->OnTabClosed(tab_id);
+     choice_menu_controller_->OnTabClosed(tab_id);
+     input_controller_->OnTabClosed(tab_id);
+@@ -2715,7 +2879,9 @@ void CbfProfileService::NotifyPromptUiRequested(
+     uint64_t download_id,
+     const std::string& file_name,
+     std::optional<uint64_t> total_bytes,
+-    const std::optional<std::string>& suggested_path) {
++    const std::optional<std::string>& suggested_path,
++    mojom::CbfFormResubmissionReason repost_reason,
++    const std::string& repost_target_url) {
+   if (!observer_) {
+     return;
+   }
+@@ -2730,6 +2896,8 @@ void CbfProfileService::NotifyPromptUiRequested(
+   request->file_name = file_name;
+   request->total_bytes = total_bytes;
+   request->suggested_path = suggested_path;
++  request->repost_reason = repost_reason;
++  request->repost_target_url = repost_target_url;
+   observer_->OnPromptUiRequested(std::move(request));
+ }
+ 
+@@ -2741,7 +2909,9 @@ void CbfProfileService::NotifyPromptUiResolved(
+     const std::string& permission_key,
+     mojom::CbfPromptUiResolutionResult result,
+     uint64_t download_id,
+-    const std::optional<std::string>& destination_path) {
++    const std::optional<std::string>& destination_path,
++    mojom::CbfFormResubmissionReason repost_reason,
++    const std::string& repost_target_url) {
+   if (!observer_) {
+     return;
+   }
+@@ -2754,6 +2924,8 @@ void CbfProfileService::NotifyPromptUiResolved(
+   resolution->result = result;
+   resolution->download_id = download_id;
+   resolution->destination_path = destination_path;
++  resolution->repost_reason = repost_reason;
++  resolution->repost_target_url = repost_target_url;
+   observer_->OnPromptUiResolved(std::move(resolution));
+ }
+ 
+@@ -2882,6 +3054,55 @@ bool CbfProfileService::OpenDefaultDownloadPromptImpl(uint64_t request_id) {
+   return true;
+ }
+ 
++bool CbfProfileService::OpenDefaultFormResubmissionPromptImpl(
++    uint64_t request_id) {
++  auto it = pending_form_resubmission_prompts_.find(request_id);
++  if (it == pending_form_resubmission_prompts_.end()) {
++    return false;
++  }
++
++  content::WebContents* web_contents = it->second.web_contents.get();
++  if (!web_contents) {
++    PendingFormResubmissionPrompt pending = std::move(it->second);
++    pending_form_resubmission_prompts_.erase(it);
++    ResolvePendingFormResubmissionPrompt(
++        std::move(pending), mojom::CbfPromptUiResolutionResult::kAborted);
++    return false;
++  }
++
++  auto* dialog = TabModalConfirmDialog::Create(
++      std::make_unique<CbfFormResubmissionPromptController>(
++          web_contents,
++          base::BindOnce(
++              [](base::WeakPtr<CbfProfileService> self, uint64_t request_id,
++                 mojom::CbfPromptUiResolutionResult result) {
++                if (!self) {
++                  return;
++                }
++                auto pending_it =
++                    self->pending_form_resubmission_prompts_.find(request_id);
++                if (pending_it ==
++                    self->pending_form_resubmission_prompts_.end()) {
++                  return;
++                }
++                PendingFormResubmissionPrompt pending =
++                    std::move(pending_it->second);
++                self->pending_form_resubmission_prompts_.erase(pending_it);
++                self->ResolvePendingFormResubmissionPrompt(std::move(pending),
++                                                           result);
++              },
++              weak_factory_.GetWeakPtr(), request_id)),
++      web_contents);
++  if (!dialog) {
++    PendingFormResubmissionPrompt pending = std::move(it->second);
++    pending_form_resubmission_prompts_.erase(it);
++    ResolvePendingFormResubmissionPrompt(
++        std::move(pending), mojom::CbfPromptUiResolutionResult::kAborted);
++    return false;
++  }
++  return true;
++}
++
+ void CbfProfileService::ResolvePendingDownloadPrompt(
+     PendingDownloadPrompt pending,
+     DownloadConfirmationResult confirmation_result,
+@@ -2909,6 +3130,73 @@ void CbfProfileService::ResolvePendingDownloadPrompt(
+                          destination_path);
+ }
+ 
++void CbfProfileService::ResolvePendingFormResubmissionPrompt(
++    PendingFormResubmissionPrompt pending,
++    mojom::CbfPromptUiResolutionResult result) {
++  content::WebContents* web_contents = pending.web_contents.get();
++  if (web_contents) {
++    if (result == mojom::CbfPromptUiResolutionResult::kAllowed) {
++      web_contents->GetController().ContinuePendingReload();
++    } else {
++      web_contents->GetController().CancelPendingReload();
++    }
++  }
++
++  NotifyPromptUiResolved(
++      pending.source_tab_id, pending.request_id,
++      mojom::CbfPromptUiKind::kFormResubmissionPrompt,
++      mojom::CbfPromptUiPermissionType::kUnknown, std::string(), result, 0,
++      std::nullopt, pending.reason, pending.target_url);
++}
++
++void CbfProfileService::ResolvePendingFormResubmissionPromptsForTab(
++    TabId tab_id,
++    mojom::CbfPromptUiResolutionResult result) {
++  if (tab_id == kInvalidTabId) {
++    return;
++  }
++
++  for (auto it = pending_form_resubmission_prompts_.begin();
++       it != pending_form_resubmission_prompts_.end();) {
++    if (it->second.source_tab_id != std::optional<TabId>(tab_id)) {
++      ++it;
++      continue;
++    }
++    PendingFormResubmissionPrompt pending = std::move(it->second);
++    it = pending_form_resubmission_prompts_.erase(it);
++    ResolvePendingFormResubmissionPrompt(std::move(pending), result);
++  }
++}
++
++void CbfProfileService::ResolvePendingFormResubmissionPromptsForShutdown(
++    mojom::CbfPromptUiResolutionResult result) {
++  for (auto it = pending_form_resubmission_prompts_.begin();
++       it != pending_form_resubmission_prompts_.end();) {
++    PendingFormResubmissionPrompt pending = std::move(it->second);
++    it = pending_form_resubmission_prompts_.erase(it);
++    ResolvePendingFormResubmissionPrompt(std::move(pending), result);
++  }
++}
++
++void CbfProfileService::ResolvePendingFormResubmissionPromptsForWebContents(
++    content::WebContents* web_contents,
++    mojom::CbfPromptUiResolutionResult result) {
++  if (!web_contents) {
++    return;
++  }
++
++  for (auto it = pending_form_resubmission_prompts_.begin();
++       it != pending_form_resubmission_prompts_.end();) {
++    if (it->second.web_contents.get() != web_contents) {
++      ++it;
++      continue;
++    }
++    PendingFormResubmissionPrompt pending = std::move(it->second);
++    it = pending_form_resubmission_prompts_.erase(it);
++    ResolvePendingFormResubmissionPrompt(std::move(pending), result);
++  }
++}
++
+ void CbfProfileService::ResolvePendingDownloadPromptsForTab(
+     TabId tab_id,
+     mojom::CbfPromptUiResolutionResult result) {
+@@ -3144,11 +3432,44 @@ void CbfProfileService::OnProfileWillBeDestroyed(Profile* profile) {
+       mojom::CbfPromptUiResolutionResult::kAborted);
+   ResolvePendingDownloadPromptsForShutdown(
+       mojom::CbfPromptUiResolutionResult::kAborted);
++  ResolvePendingFormResubmissionPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult::kAborted);
+   CloseAllTabs();
+ }
+ 
++void CbfProfileService::OnObserverDisconnected() {
++  observer_.reset();
++
++  for (auto it = pending_extension_prompts_.begin();
++       it != pending_extension_prompts_.end();) {
++    const uint64_t request_id = it->first;
++    ++it;
++    ResolveExtensionInstallPrompt(
++        request_id, mojom::CbfExtensionInstallPromptResult::kAborted,
++        std::string());
++  }
++  for (auto it = pending_extension_uninstall_prompts_.begin();
++       it != pending_extension_uninstall_prompts_.end();) {
++    const uint64_t request_id = it->first;
++    ++it;
++    ResolveExtensionUninstallPrompt(
++        request_id, mojom::CbfExtensionUninstallPromptResult::kAborted,
++        std::string(), false,
++        mojom::CbfAuxiliaryWindowCloseReason::kSystemDismissed);
++  }
++  ResolvePendingPermissionPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult::kAborted);
++  ResolvePendingDownloadPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult::kAborted);
++  ResolvePendingFormResubmissionPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult::kAborted);
++}
++
+ void CbfProfileService::WebContentsDestroyed(
+     content::WebContents* web_contents) {
++  ResolvePendingFormResubmissionPromptsForWebContents(
++      web_contents, mojom::CbfPromptUiResolutionResult::kAborted);
++
+   auto it = print_preview_dialog_to_window_.find(web_contents);
+   if (it == print_preview_dialog_to_window_.end()) {
+     return;
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 37f2600595276..566c5f15a484f 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -197,6 +197,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+       mojom::CbfPromptUiPermissionType permission,
+       const std::string& permission_key,
+       base::WeakPtr<permissions::PermissionPrompt::Delegate> delegate);
++  bool RequestFormResubmissionPromptForWebContents(
++      content::WebContents* web_contents);
+   std::optional<uint64_t> RequestExtensionUninstallPrompt(
+       base::WeakPtr<CbfExtensionUninstallDialog> dialog,
+       const extensions::Extension* extension,
+@@ -410,6 +412,23 @@ class CbfProfileService : public mojom::CbfProfileService,
+     base::WeakPtr<CbfDownloadManagerDelegate> delegate;
+   };
+ 
++  struct PendingFormResubmissionPrompt {
++    PendingFormResubmissionPrompt();
++    ~PendingFormResubmissionPrompt();
++    PendingFormResubmissionPrompt(PendingFormResubmissionPrompt&&);
++    PendingFormResubmissionPrompt& operator=(PendingFormResubmissionPrompt&&);
++    PendingFormResubmissionPrompt(const PendingFormResubmissionPrompt&) = delete;
++    PendingFormResubmissionPrompt& operator=(
++        const PendingFormResubmissionPrompt&) = delete;
++
++    std::optional<TabId> source_tab_id;
++    uint64_t request_id = 0;
++    base::WeakPtr<content::WebContents> web_contents;
++    mojom::CbfFormResubmissionReason reason =
++        mojom::CbfFormResubmissionReason::kUnknown;
++    std::string target_url;
++  };
++
+   struct ActiveDownload {
+     uint64_t download_id = 0;
+     std::string guid;
+@@ -442,6 +461,18 @@ class CbfProfileService : public mojom::CbfProfileService,
+       mojom::CbfPromptUiResolutionResult result);
+   void ResolvePendingDownloadPromptsForShutdown(
+       mojom::CbfPromptUiResolutionResult result);
++  bool OpenDefaultFormResubmissionPromptImpl(uint64_t request_id);
++  void ResolvePendingFormResubmissionPrompt(
++      PendingFormResubmissionPrompt pending,
++      mojom::CbfPromptUiResolutionResult result);
++  void ResolvePendingFormResubmissionPromptsForTab(
++      TabId tab_id,
++      mojom::CbfPromptUiResolutionResult result);
++  void ResolvePendingFormResubmissionPromptsForShutdown(
++      mojom::CbfPromptUiResolutionResult result);
++  void ResolvePendingFormResubmissionPromptsForWebContents(
++      content::WebContents* web_contents,
++      mojom::CbfPromptUiResolutionResult result);
+   download::DownloadItem* FindDownloadByGuid(const std::string& guid) const;
+   download::DownloadItem* FindDownloadById(uint64_t download_id) const;
+   void TrackDownload(uint64_t download_id,
+@@ -516,7 +547,11 @@ class CbfProfileService : public mojom::CbfProfileService,
+                                const std::string& file_name = std::string(),
+                                std::optional<uint64_t> total_bytes = std::nullopt,
+                                const std::optional<std::string>& suggested_path =
+-                                   std::nullopt);
++                                   std::nullopt,
++                               mojom::CbfFormResubmissionReason repost_reason =
++                                   mojom::CbfFormResubmissionReason::kUnknown,
++                               const std::string& repost_target_url =
++                                   std::string());
+   void NotifyPromptUiResolved(std::optional<TabId> source_tab_id,
+                               uint64_t request_id,
+                               mojom::CbfPromptUiKind kind,
+@@ -525,7 +560,11 @@ class CbfProfileService : public mojom::CbfProfileService,
+                               mojom::CbfPromptUiResolutionResult result,
+                               uint64_t download_id = 0,
+                               const std::optional<std::string>& destination_path =
+-                                  std::nullopt);
++                                  std::nullopt,
++                              mojom::CbfFormResubmissionReason repost_reason =
++                                  mojom::CbfFormResubmissionReason::kUnknown,
++                              const std::string& repost_target_url =
++                                  std::string());
+   void ResolvePendingPermissionPromptsForTab(
+       TabId tab_id,
+       mojom::CbfPromptUiResolutionResult result);
+@@ -537,6 +576,7 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void ResolvePrintPreviewWindowClosed(
+       uint64_t window_id,
+       mojom::CbfAuxiliaryWindowCloseReason reason);
++  void OnObserverDisconnected();
+ 
+   // views::WidgetObserver:
+   void OnWidgetClosing(views::Widget* widget) override;
+@@ -587,6 +627,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+       pending_extension_uninstall_prompts_;
+   std::map<uint64_t, PendingPermissionPrompt> pending_permission_prompts_;
+   std::map<uint64_t, PendingDownloadPrompt> pending_download_prompts_;
++  std::map<uint64_t, PendingFormResubmissionPrompt>
++      pending_form_resubmission_prompts_;
+   std::map<uint64_t, std::unique_ptr<ActiveExtensionPopup>>
+       active_extension_popups_;
+   std::map<uint64_t, ActiveDownload> active_downloads_;
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index b0a23f86a18d5..280c14403aa14 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -41,6 +41,7 @@
+ #include "components/tabs/public/tab_interface.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "content/browser/web_contents/web_contents_impl.h"
+ #include "content/public/test/browser_test.h"
+ #include "content/public/test/browser_test_utils.h"
+@@ -55,6 +56,7 @@
+ #include "net/http/http_status_code.h"
+ #include "net/test/embedded_test_server/http_request.h"
+ #include "net/test/embedded_test_server/http_response.h"
++#include "services/network/public/cpp/resource_request_body.h"
+ #include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "third_party/skia/include/core/SkBitmap.h"
+@@ -391,6 +393,46 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+                                       request_id, std::move(response));
+   }
+ 
++  std::unique_ptr<net::test_server::HttpResponse>
++  HandleFormResubmissionRequest(const net::test_server::HttpRequest& request) {
++    if (request.relative_url == "/cbf-form-resubmit") {
++      auto response = std::make_unique<net::test_server::BasicHttpResponse>();
++      response->set_code(net::HTTP_OK);
++      response->set_content_type("text/html");
++      response->set_content(
++          "<!doctype html><title>repost-form</title>"
++          "<form id='repost-form' method='post' action='/cbf-form-submit'>"
++          "<input id='payload' name='payload' value='hello'>"
++          "<button id='send' type='submit'>submit</button>"
++          "</form>");
++      return response;
++    }
++
++    if (request.relative_url.rfind("/cbf-form-submit", 0) == 0) {
++      if (request.method == net::test_server::METHOD_POST) {
++        ++form_submit_count_;
++      }
++      auto response = std::make_unique<net::test_server::BasicHttpResponse>();
++      response->set_code(net::HTTP_OK);
++      response->set_content_type("text/html");
++      response->set_content("<!doctype html><title>submitted</title>");
++      return response;
++    }
++
++    return nullptr;
++  }
++
++  void EnsureFormResubmissionServerStarted() {
++    if (form_resubmission_server_started_) {
++      return;
++    }
++    embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
++        &CbfProfileServiceBrowserTest::HandleFormResubmissionRequest,
++        base::Unretained(this)));
++    ASSERT_TRUE(embedded_test_server()->Start());
++    form_resubmission_server_started_ = true;
++  }
++
+   std::vector<mojom::CbfExtensionInfoPtr> ListExtensions() {
+     std::vector<mojom::CbfExtensionInfoPtr> extensions;
+     base::RunLoop run_loop;
+@@ -539,6 +581,8 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+   cbf::test::CbfTestProfileObserver observer_;
+   base::ScopedTempDir download_temp_dir_;
+   bool download_server_started_ = false;
++  bool form_resubmission_server_started_ = false;
++  int form_submit_count_ = 0;
+   int download_destination_index_ = 0;
+   std::vector<std::unique_ptr<base::ScopedTempDir>> extension_dirs_;
+ };
+@@ -1536,6 +1580,59 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+             mojom::CbfExtensionUninstallPromptResult::kAborted);
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       ReloadPostPageRequestsFormResubmissionPromptAndDenyCancels) {
++  EnsureFormResubmissionServerStarted();
++
++  const TabId tab_id = CreatePage("about:blank");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  const GURL post_url = embedded_test_server()->GetURL("/cbf-form-submit");
++  content::NavigationController::LoadURLParams load_params(post_url);
++  load_params.load_type = content::NavigationController::LOAD_TYPE_HTTP_POST;
++  load_params.extra_headers = "Content-Type: application/x-www-form-urlencoded";
++  const std::vector<uint8_t> post_data_bytes{
++      'p', 'a', 'y', 'l', 'o', 'a', 'd', '=', 'h', 'e', 'l', 'l', 'o'};
++  load_params.post_data =
++      network::ResourceRequestBody::CreateFromCopyOfBytes(post_data_bytes);
++  web_contents->GetController().LoadURLWithParams(load_params);
++  WaitForLoad(tab_id);
++  ASSERT_EQ(form_submit_count_, 1);
++
++  profile_service_->Reload(tab_id, /*ignore_cache=*/false);
++
++  observer_.WaitForPromptUiRequestedCount(1);
++  ASSERT_FALSE(observer_.prompt_ui_requested_events().empty());
++  const auto& request = observer_.prompt_ui_requested_events().back();
++  EXPECT_EQ(request.kind, mojom::CbfPromptUiKind::kFormResubmissionPrompt);
++  EXPECT_TRUE(request.repost_reason == mojom::CbfFormResubmissionReason::kReload ||
++              request.repost_reason == mojom::CbfFormResubmissionReason::kUnknown);
++  EXPECT_FALSE(request.repost_target_url.empty());
++
++  auto response = mojom::CbfPromptUiResponse::New();
++  response->kind = mojom::CbfPromptUiKind::kFormResubmissionPrompt;
++  response->allow = false;
++  profile_service_->RespondPromptUi(CanonicalProfileId(), request.request_id,
++                                    std::move(response));
++
++  observer_.WaitForPromptUiResolvedCount(1);
++  ASSERT_FALSE(observer_.prompt_ui_resolved_events().empty());
++  const auto& resolution = observer_.prompt_ui_resolved_events().back();
++  EXPECT_EQ(resolution.request_id, request.request_id);
++  EXPECT_EQ(resolution.kind, mojom::CbfPromptUiKind::kFormResubmissionPrompt);
++  EXPECT_EQ(resolution.result, mojom::CbfPromptUiResolutionResult::kDenied);
++  EXPECT_EQ(resolution.repost_reason, request.repost_reason);
++  EXPECT_FALSE(resolution.repost_target_url.empty());
++
++  base::RunLoop().RunUntilIdle();
++  EXPECT_EQ(form_submit_count_, 1);
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        BrowserServiceListsCanonicalProfilesWithDefaultFlag) {
+   CbfBrowserService browser_service{std::string()};
+diff --git a/chrome/browser/cbf/cbf_web_contents_delegate.cc b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+index 18bb4e0201136..efccb0ba9d228 100644
+--- a/chrome/browser/cbf/cbf_web_contents_delegate.cc
++++ b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+@@ -180,6 +180,20 @@ bool CbfWebContentsDelegate::HandleRendererDragStart(
+   return true;
+ }
+ 
++void CbfWebContentsDelegate::ShowRepostFormWarningDialog(
++    content::WebContents* source) {
++  if (!profile_service_ || !source) {
++    if (source) {
++      source->GetController().CancelPendingReload();
++    }
++    return;
++  }
++
++  if (!profile_service_->RequestFormResubmissionPromptForWebContents(source)) {
++    source->GetController().CancelPendingReload();
++  }
++}
++
+ void CbfWebContentsDelegate::OnCursorChanged(
+     content::WebContents* source,
+     ui::mojom::CursorType cursor_type) {
+diff --git a/chrome/browser/cbf/cbf_web_contents_delegate.h b/chrome/browser/cbf/cbf_web_contents_delegate.h
+index 55f77662c142d..754d0e942ba6d 100644
+--- a/chrome/browser/cbf/cbf_web_contents_delegate.h
++++ b/chrome/browser/cbf/cbf_web_contents_delegate.h
+@@ -73,6 +73,7 @@ class CbfWebContentsDelegate final : public content::WebContentsDelegate {
+                                const gfx::Rect& drag_obj_rect_in_dip,
+                                const blink::mojom::DragEventSourceInfo& event_info,
+                                content::RenderWidgetHost* source_rwh) override;
++  void ShowRepostFormWarningDialog(content::WebContents* source) override;
+   void OnCursorChanged(content::WebContents* source,
+                        ui::mojom::CursorType cursor_type) override;
+ 
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 82bed40751a36..97f8342f3147a 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -52,6 +52,7 @@ enum CbfAuxiliaryWindowKind {
+   kExtensionInstallPrompt,
+   kExtensionUninstallPrompt,
+   kPrintPreviewDialog,
++  kFormResubmissionPrompt,
+ };
+ 
+ struct CbfAuxiliaryWindowRequest {
+@@ -95,6 +96,14 @@ enum CbfPromptUiKind {
+   kExtensionInstallPrompt,
+   kExtensionUninstallPrompt,
+   kPrintPreviewDialog,
++  kFormResubmissionPrompt,
++};
++
++enum CbfFormResubmissionReason {
++  kUnknown,
++  kReload,
++  kBackForward,
++  kOther,
+ };
+ 
+ enum CbfPromptUiPermissionType {
+@@ -141,6 +150,8 @@ struct CbfPromptUiRequest {
+   string triggering_extension_name;
+   bool can_report_abuse;
+   array<string> permission_names;
++  CbfFormResubmissionReason repost_reason;
++  string repost_target_url;
+ };
+ 
+ struct CbfPromptUiResponse {
+@@ -164,6 +175,8 @@ struct CbfPromptUiResolution {
+   CbfExtensionUninstallPromptResult extension_uninstall_result;
+   string detail;
+   bool report_abuse;
++  CbfFormResubmissionReason repost_reason;
++  string repost_target_url;
+ };
+ 
+ enum CbfDownloadState {
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index 09e498e9da305..0424855b458da 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -798,6 +798,8 @@ void CbfTestProfileObserver::OnPromptUiRequested(
+   event.file_name = request->file_name;
+   event.total_bytes = request->total_bytes;
+   event.suggested_path = request->suggested_path;
++  event.repost_reason = request->repost_reason;
++  event.repost_target_url = request->repost_target_url;
+   prompt_ui_requested_events_.push_back(std::move(event));
+   MaybeQuitWaitLoop();
+ }
+@@ -815,6 +817,8 @@ void CbfTestProfileObserver::OnPromptUiResolved(
+   event.result = resolution->result;
+   event.download_id = resolution->download_id;
+   event.destination_path = resolution->destination_path;
++  event.repost_reason = resolution->repost_reason;
++  event.repost_target_url = resolution->repost_target_url;
+   prompt_ui_resolved_events_.push_back(std::move(event));
+   MaybeQuitWaitLoop();
+ }
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index bcbb1fc59c1aa..caaf83d65d61f 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -77,6 +77,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+     std::string file_name;
+     std::optional<uint64_t> total_bytes;
+     std::optional<std::string> suggested_path;
++    cbf::mojom::CbfFormResubmissionReason repost_reason =
++        cbf::mojom::CbfFormResubmissionReason::kUnknown;
++    std::string repost_target_url;
+   };
+ 
+   struct PromptUiResolutionEvent {
+@@ -99,6 +102,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+         cbf::mojom::CbfPromptUiResolutionResult::kUnknown;
+     uint64_t download_id = 0;
+     std::optional<std::string> destination_path;
++    cbf::mojom::CbfFormResubmissionReason repost_reason =
++        cbf::mojom::CbfFormResubmissionReason::kUnknown;
++    std::string repost_target_url;
+   };
+ 
+   struct AuxiliaryWindowOpenedEvent {
+-- 
+2.50.1 (Apple Git-155)
+

@@ -21,6 +21,9 @@ source-built use rather than a downloadable binary bundle.
 - Host-driven browsing context background policy control through the bridge, profile service, and browser tests.
 - Transparent embedded surface handling that applies both page base background color and browser-side view background color for tabs and extension popups.
 - Host-disconnect shutdown handling that terminates the browser process without beforeunload once the authenticated Rust host disconnects from the Mojo bridge.
+- Host-driven form resubmission prompt flow that replaces direct Chromium repost dialog usage in `ShowRepostFormWarningDialog` with Prompt UI / Auxiliary Window control.
+- Form-resubmission prompt metadata transport (reason and target URL) across Chromium Mojo observer events and bridge FFI events.
+- Browser-test coverage for POST reload resubmission prompt request/deny flow in `CbfProfileServiceBrowserTest`.
 - Browsing-context IPC v1 bridge flow across Chromium browser/renderer boundary, including:
   - context-scoped IPC enable/disable control
   - page->host invoke delivery through dedicated Mojo path
