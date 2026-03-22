@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chrome-transport IPC data models in `cbf-chrome::data::ipc` (`TabIpcMessage`, payload/type/error/config) with conversions to/from browser-generic `cbf::data::ipc`.
 - Chromium backend command/event transport wiring for browsing-context IPC (`EnableTabIpc`, `DisableTabIpc`, `PostTabIpcMessage`, and IPC event mapping).
 - Browser-test coverage for IPC enabled/disabled behavior, `allowed_origins` checks, host->page notification delivery, and binary/text envelope paths.
+- Chromium Prompt UI transport support for host-driven form resubmission confirmation, including:
+  - `PromptUiKind::FormResubmissionPrompt`
+  - repost reason mapping
+  - repost target URL mapping
+  - `PromptUiResponse::FormResubmissionPrompt` response wiring
+- Generic conversion support between Chrome Prompt UI and browser-generic auxiliary window models for form resubmission flows.
 
 ### Changed
 

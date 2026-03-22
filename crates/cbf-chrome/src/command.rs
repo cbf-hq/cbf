@@ -11,12 +11,12 @@ use crate::data::{
     drag::{ChromeDragDrop, ChromeDragUpdate},
     extension::ChromeAuxiliaryWindowResponse,
     ids::{PopupId, TabId},
-    ipc::{TabIpcConfig, TabIpcMessage},
     ime::{
         ChromeConfirmCompositionBehavior, ChromeImeCommitText, ChromeImeComposition,
         ChromeTransientImeCommitText, ChromeTransientImeComposition,
     },
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
+    ipc::{TabIpcConfig, TabIpcMessage},
     mouse::ChromeMouseEvent,
     prompt_ui::{PromptUiId, PromptUiResponse},
     visibility::ChromeTabVisibility,
@@ -615,6 +615,13 @@ impl From<BrowserCommand> for ChromeCommand {
                         report_abuse,
                     },
                 },
+                ChromeAuxiliaryWindowResponse::FormResubmissionPrompt { proceed } => {
+                    Self::RespondPromptUi {
+                        profile_id,
+                        request_id,
+                        response: PromptUiResponse::FormResubmissionPrompt { proceed },
+                    }
+                }
                 ChromeAuxiliaryWindowResponse::Unknown => Self::RespondPromptUi {
                     profile_id,
                     request_id,

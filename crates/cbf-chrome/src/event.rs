@@ -19,7 +19,8 @@
 use cbf::data::{
     auxiliary_window::{
         AuxiliaryWindowCloseReason, AuxiliaryWindowId, AuxiliaryWindowKind,
-        AuxiliaryWindowResolution, PermissionPromptResult, PermissionPromptType,
+        AuxiliaryWindowResolution, FormResubmissionPromptReason, PermissionPromptResult,
+        PermissionPromptType,
     },
     dialog::DialogType,
     download::DownloadPromptResult,
@@ -45,8 +46,8 @@ use crate::data::{
     profile::ChromeProfileInfo,
     prompt_ui::{
         PromptUiCloseReason, PromptUiDialogResult, PromptUiExtensionInstallResult,
-        PromptUiExtensionUninstallResult, PromptUiId, PromptUiKind, PromptUiPermissionType,
-        PromptUiResolution, PromptUiResolutionResult,
+        PromptUiExtensionUninstallResult, PromptUiFormResubmissionReason, PromptUiId, PromptUiKind,
+        PromptUiPermissionType, PromptUiResolution, PromptUiResolutionResult,
     },
     tab_open::{TabOpenHint, TabOpenResult},
 };
@@ -736,6 +737,12 @@ fn prompt_ui_kind_to_auxiliary_window_kind(kind: &PromptUiKind) -> AuxiliaryWind
             can_report_abuse: *can_report_abuse,
         },
         PromptUiKind::PrintPreviewDialog => AuxiliaryWindowKind::PrintPreviewDialog,
+        PromptUiKind::FormResubmissionPrompt { reason, target_url } => {
+            AuxiliaryWindowKind::FormResubmissionPrompt {
+                reason: prompt_ui_form_resubmission_reason_to_auxiliary_window_reason(reason),
+                target_url: target_url.clone(),
+            }
+        }
         PromptUiKind::Unknown => AuxiliaryWindowKind::Unknown,
     }
 }
@@ -819,7 +826,32 @@ fn prompt_ui_resolution_to_auxiliary_window_resolution(
             PromptUiDialogResult::Aborted => AuxiliaryWindowResolution::Unknown,
             PromptUiDialogResult::Unknown => AuxiliaryWindowResolution::Unknown,
         },
+        PromptUiResolution::FormResubmissionPrompt {
+            reason,
+            target_url,
+            result,
+        } => AuxiliaryWindowResolution::FormResubmissionPrompt {
+            reason: prompt_ui_form_resubmission_reason_to_auxiliary_window_reason(reason),
+            target_url: target_url.clone(),
+            result: match result {
+                PromptUiResolutionResult::Allowed => PermissionPromptResult::Allowed,
+                PromptUiResolutionResult::Denied => PermissionPromptResult::Denied,
+                PromptUiResolutionResult::Aborted => PermissionPromptResult::Aborted,
+                PromptUiResolutionResult::Unknown => PermissionPromptResult::Unknown,
+            },
+        },
         PromptUiResolution::Unknown => AuxiliaryWindowResolution::Unknown,
+    }
+}
+
+fn prompt_ui_form_resubmission_reason_to_auxiliary_window_reason(
+    reason: &PromptUiFormResubmissionReason,
+) -> FormResubmissionPromptReason {
+    match reason {
+        PromptUiFormResubmissionReason::Reload => FormResubmissionPromptReason::Reload,
+        PromptUiFormResubmissionReason::BackForward => FormResubmissionPromptReason::BackForward,
+        PromptUiFormResubmissionReason::Other => FormResubmissionPromptReason::Other,
+        PromptUiFormResubmissionReason::Unknown => FormResubmissionPromptReason::Unknown,
     }
 }
 

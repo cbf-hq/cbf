@@ -21,6 +21,9 @@ pub enum ChromeAuxiliaryWindowResponse {
         allow: bool,
         destination_path: Option<String>,
     },
+    FormResubmissionPrompt {
+        proceed: bool,
+    },
     Unknown,
 }
 
@@ -45,6 +48,9 @@ impl From<AuxiliaryWindowResponse> for ChromeAuxiliaryWindowResponse {
                 allow,
                 destination_path,
             },
+            AuxiliaryWindowResponse::FormResubmissionPrompt { proceed } => {
+                Self::FormResubmissionPrompt { proceed }
+            }
             AuxiliaryWindowResponse::Unknown => Self::Unknown,
         }
     }

@@ -5,10 +5,7 @@ use std::{
     time::Duration,
 };
 
-use cbf::data::{
-    edit::EditAction,
-    window_open::WindowOpenResponse,
-};
+use cbf::data::{edit::EditAction, window_open::WindowOpenResponse};
 use cbf_chrome_sys::ffi::*;
 use tracing::warn;
 
@@ -765,6 +762,12 @@ impl IpcClient {
                 None,
                 false,
             ),
+            PromptUiResponse::FormResubmissionPrompt { proceed } => (
+                CBF_PROMPT_UI_KIND_FORM_RESUBMISSION_PROMPT,
+                *proceed,
+                None,
+                false,
+            ),
             PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None, false),
         };
         if unsafe {
@@ -826,6 +829,12 @@ impl IpcClient {
             ),
             PromptUiResponse::PrintPreviewDialog { proceed } => (
                 CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG,
+                *proceed,
+                None,
+                false,
+            ),
+            PromptUiResponse::FormResubmissionPrompt { proceed } => (
+                CBF_PROMPT_UI_KIND_FORM_RESUBMISSION_PROMPT,
                 *proceed,
                 None,
                 false,

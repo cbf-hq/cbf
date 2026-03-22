@@ -14,6 +14,15 @@ pub enum PromptUiPermissionType {
     Unknown,
 }
 
+/// Chrome-specific reason for form resubmission prompts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptUiFormResubmissionReason {
+    Reload,
+    BackForward,
+    Other,
+    Unknown,
+}
+
 /// Stable id for a backend-managed prompt UI surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PromptUiId(u64);
@@ -54,6 +63,10 @@ pub enum PromptUiKind {
         can_report_abuse: bool,
     },
     PrintPreviewDialog,
+    FormResubmissionPrompt {
+        reason: PromptUiFormResubmissionReason,
+        target_url: Option<String>,
+    },
     Unknown,
 }
 
@@ -75,6 +88,9 @@ pub enum PromptUiResponse {
         report_abuse: bool,
     },
     PrintPreviewDialog {
+        proceed: bool,
+    },
+    FormResubmissionPrompt {
         proceed: bool,
     },
     Unknown,
@@ -142,6 +158,11 @@ pub enum PromptUiResolution {
     },
     PrintPreviewDialog {
         result: PromptUiDialogResult,
+    },
+    FormResubmissionPrompt {
+        reason: PromptUiFormResubmissionReason,
+        target_url: Option<String>,
+        result: PromptUiResolutionResult,
     },
     Unknown,
 }
