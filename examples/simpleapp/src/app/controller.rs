@@ -4,7 +4,10 @@ use cbf::{
     browser::BrowserHandle,
     command::BrowserCommand,
     data::{
-        auxiliary_window::{AuxiliaryWindowKind, AuxiliaryWindowResponse, PermissionPromptType},
+        auxiliary_window::{
+            AuxiliaryWindowKind, AuxiliaryWindowResponse, FormResubmissionPromptReason,
+            PermissionPromptType,
+        },
         browsing_context_open::{BrowsingContextOpenHint, BrowsingContextOpenResponse},
         dialog::{BeforeUnloadReason, DialogResponse, DialogType, JavaScriptDialogRequest},
         download::{DownloadId, DownloadOutcome, DownloadPromptActionHint, DownloadState},
@@ -1514,6 +1517,16 @@ impl AppController {
             return;
         }
 
+        if let AuxiliaryWindowKind::FormResubmissionPrompt { reason, target_url } = &kind {
+            let proceed = show_form_resubmission_prompt_dialog(*reason, target_url.as_deref());
+            _ = self.browser_handle.respond_auxiliary_window(
+                profile_id,
+                request_id,
+                AuxiliaryWindowResponse::FormResubmissionPrompt { proceed },
+            );
+            return;
+        }
+
         if let Err(err) = self
             .browser_handle
             .open_default_auxiliary_window(profile_id, request_id)
@@ -1739,6 +1752,39 @@ fn show_extension_uninstall_prompt_dialog(
     let result = MessageDialog::new()
         .set_level(MessageLevel::Warning)
         .set_title("Remove Extension")
+        .set_description(&message)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+
+    matches!(result, MessageDialogResult::Yes)
+}
+
+fn show_form_resubmission_prompt_dialog(
+    reason: FormResubmissionPromptReason,
+    target_url: Option<&str>,
+) -> bool {
+    let reason_message = match reason {
+        FormResubmissionPromptReason::Reload => {
+            "Reloading this page will resend the previous form data."
+        }
+        FormResubmissionPromptReason::BackForward => {
+            "Moving back or forward will resend the previous form data."
+        }
+        FormResubmissionPromptReason::Other => "Continuing will resend the previous form data.",
+        FormResubmissionPromptReason::Unknown => {
+            "The page needs to resend previously submitted form data."
+        }
+    };
+
+    let mut message = reason_message.to_string();
+    if let Some(url) = target_url.filter(|value| !value.is_empty()) {
+        message.push_str(&format!("\n\nTarget:\n{url}"));
+    }
+    message.push_str("\n\nResend form data?");
+
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Warning)
+        .set_title("Confirm Form Resubmission")
         .set_description(&message)
         .set_buttons(MessageButtons::YesNo)
         .show();
