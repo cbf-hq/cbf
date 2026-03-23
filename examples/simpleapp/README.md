@@ -5,7 +5,7 @@
 It uses `cbf-compositor` to compose multiple browser-managed surfaces in a
 single [winit](https://github.com/rust-windowing/winit) window:
 
-- a toolbar UI browsing context loaded from `src/ui.html`
+- a toolbar UI browsing context loaded from `app://simpleapp/ui.html`
 - a normal page browsing context rendered below the toolbar
 
 Secondary host-managed windows are also created for:
@@ -16,6 +16,7 @@ Secondary host-managed windows are also created for:
 
 This sample remains macOS-only.
 
-The toolbar UI is currently static HTML loaded from `src/ui.html` through a
-`file://` URL. Back/forward/reload/address-bar controls are visual placeholders
-until IPC-backed host integration is added to CBF.
+The toolbar and overlay UI are served from embedded assets through
+`app://simpleapp/...` using the Chrome-specific custom scheme responder in
+`cbf-chrome`. This keeps the sample on the same URL model in development and in
+bundled builds without resolving `file://` paths from the Cargo manifest tree.

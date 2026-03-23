@@ -33,7 +33,7 @@ pub(crate) fn normalize_url(input: &str) -> String {
     if trimmed.starts_with("about:")
         || trimmed.starts_with("http://")
         || trimmed.starts_with("https://")
-        || trimmed.starts_with("file://")
+        || trimmed.starts_with("app://")
     {
         return trimmed.to_string();
     }
@@ -62,5 +62,13 @@ mod tests {
     #[test]
     fn normalize_url_adds_https() {
         assert_eq!(normalize_url("example.com"), "https://example.com");
+    }
+
+    #[test]
+    fn normalize_url_keeps_app_scheme() {
+        assert_eq!(
+            normalize_url("app://simpleapp/ui.html"),
+            "app://simpleapp/ui.html"
+        );
     }
 }

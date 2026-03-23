@@ -2,11 +2,14 @@ use std::path::PathBuf;
 
 use cbf_chrome::{
     backend::ChromiumBackendOptions,
+    data::custom_scheme::ChromeCustomSchemeRegistration,
     process::{
         ChromiumProcessOptions, RuntimeSelection, StartChromiumOptions, resolve_chromium_executable,
     },
 };
 use clap::Parser;
+
+use crate::scene::embedded_assets::{APP_HOST, APP_SCHEME};
 
 #[derive(Debug, Parser)]
 #[command(name = "simpleapp", about = "CBF compositor sample app")]
@@ -62,6 +65,14 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOption
                 .to_owned()
         })?;
 
+    let mut backend = ChromiumBackendOptions::new();
+    backend
+        .custom_scheme_registrations
+        .push(ChromeCustomSchemeRegistration {
+            scheme: APP_SCHEME.to_string(),
+            host: APP_HOST.to_string(),
+        });
+
     Ok(StartChromiumOptions {
         process: ChromiumProcessOptions {
             runtime: cli.runtime,
@@ -83,7 +94,7 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOption
             vmodule: None,
             extra_args: cli.chromium_args.clone(),
         },
-        backend: ChromiumBackendOptions::new(),
+        backend,
     })
 }
 

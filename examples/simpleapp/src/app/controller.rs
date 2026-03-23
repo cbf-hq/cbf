@@ -25,6 +25,7 @@ use cbf::{
 use cbf_chrome::{
     backend::ChromiumBackend,
     browser::ChromiumBrowserHandleExt,
+    command::ChromeCommand,
     event::ChromeEvent,
     ffi::IpcEvent,
     process::{ChromiumRuntimeShutdownState, ChromiumRuntimeShutdownStateReader},
@@ -67,6 +68,7 @@ use crate::{
         handler as toolbar_handler, protocol as toolbar_protocol, publisher as toolbar_publisher,
     },
     scene::composition,
+    scene::embedded_assets::{APP_ORIGIN, respond_to_request},
     scene::ui_url::{overlay_test_ui_url, toolbar_ui_url},
 };
 
@@ -520,6 +522,16 @@ impl AppController {
                         menu,
                     ) {
                         warn!("failed to show popup choice menu: {err}");
+                    }
+                    Vec::new()
+                }
+                IpcEvent::CustomSchemeRequestReceived { request } => {
+                    let response = respond_to_request(&request);
+                    if let Err(err) = self
+                        .browser_handle
+                        .send_raw(ChromeCommand::RespondCustomSchemeRequest { response })
+                    {
+                        warn!("failed to respond to custom scheme request: {err}");
                     }
                     Vec::new()
                 }
@@ -1833,17 +1845,8 @@ fn download_prompt_response_for_simpleapp(
 }
 
 fn toolbar_allowed_origin() -> Option<String> {
-    let toolbar_url = toolbar_ui_url().ok()?;
-    if toolbar_url.starts_with("file://") {
-        return Some("file://".to_string());
-    }
-
-    let (scheme, rest) = toolbar_url.split_once("://")?;
-    let authority = rest.split('/').next().unwrap_or_default();
-    if authority.is_empty() {
-        return None;
-    }
-    Some(format!("{scheme}://{authority}"))
+    let _ = toolbar_ui_url().ok()?;
+    Some(APP_ORIGIN.to_string())
 }
 
 fn forward_compositor_command(
