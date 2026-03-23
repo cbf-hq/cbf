@@ -27,7 +27,7 @@ fn run() -> Result<()> {
                 println!("Created bundle: {}", output.app_path.display());
                 println!("Executable: {}", output.executable_path.display());
                 println!("Bridge: {}", output.bridge_path.display());
-                println!("Chromium: {}", output.chromium_path.display());
+                println!("Runtime: {}", output.runtime_path.display());
             }
         },
     }

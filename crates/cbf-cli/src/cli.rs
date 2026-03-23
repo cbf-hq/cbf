@@ -53,6 +53,18 @@ pub struct MacosBundleArgs {
     #[arg(long)]
     pub icon: Option<PathBuf>,
 
+    /// Runtime application display name
+    #[arg(long)]
+    pub runtime_app_name: Option<String>,
+
+    /// Runtime CFBundleIdentifier
+    #[arg(long)]
+    pub runtime_bundle_identifier: Option<String>,
+
+    /// Path to runtime .icns file
+    #[arg(long)]
+    pub runtime_icon: Option<PathBuf>,
+
     /// Output directory where <AppName>.app is created
     #[arg(long, default_value = "dist")]
     pub out_dir: PathBuf,

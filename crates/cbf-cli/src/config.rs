@@ -26,6 +26,9 @@ struct MacosBundleMetadata {
     app_name: Option<String>,
     bundle_identifier: Option<String>,
     icon: Option<PathBuf>,
+    runtime_app_name: Option<String>,
+    runtime_bundle_identifier: Option<String>,
+    runtime_icon: Option<PathBuf>,
     category: Option<String>,
     minimum_system_version: Option<String>,
 }
@@ -37,7 +40,10 @@ pub struct ResolvedConfig {
     pub executable_source_path: PathBuf,
     pub chromium_app_source_path: PathBuf,
     pub bridge_dylib_source_path: PathBuf,
-    pub icon_source_path: Option<PathBuf>,
+    pub app_icon_source_path: Option<PathBuf>,
+    pub runtime_app_name: String,
+    pub runtime_bundle_identifier: String,
+    pub runtime_icon_source_path: Option<PathBuf>,
     pub out_dir: PathBuf,
     pub bundle_identifier: String,
     pub bundle_version: String,
@@ -93,7 +99,7 @@ impl ResolvedConfig {
         let bridge_dylib_source_path = bridge_lib_dir.join(BRIDGE_DYLIB_NAME);
         assert_file(&bridge_dylib_source_path)?;
 
-        let icon_source_path = match args.icon.or(macos_meta.icon) {
+        let app_icon_source_path = match args.icon.or(macos_meta.icon.clone()) {
             Some(icon) => {
                 let resolved =
                     resolve_path_from_manifest_dir(package.manifest_path.as_std_path(), &icon);
@@ -123,7 +129,27 @@ impl ResolvedConfig {
             }
         };
 
-        if icon_source_path.is_none() {
+        let runtime_app_name = args
+            .runtime_app_name
+            .or(macos_meta.runtime_app_name)
+            .unwrap_or_else(|| format!("{app_name} Engine"));
+
+        let runtime_bundle_identifier = args
+            .runtime_bundle_identifier
+            .or(macos_meta.runtime_bundle_identifier)
+            .unwrap_or_else(|| format!("{bundle_identifier}.runtime"));
+
+        let runtime_icon_source_path = match args.runtime_icon.or(macos_meta.runtime_icon) {
+            Some(icon) => {
+                let resolved =
+                    resolve_path_from_manifest_dir(package.manifest_path.as_std_path(), &icon);
+                assert_file(&resolved)?;
+                Some(resolved)
+            }
+            None => app_icon_source_path.clone(),
+        };
+
+        if app_icon_source_path.is_none() {
             warnings
                 .push("icon was not provided; bundle will not contain CFBundleIconFile".to_owned());
         }
@@ -134,7 +160,10 @@ impl ResolvedConfig {
             executable_source_path,
             chromium_app_source_path,
             bridge_dylib_source_path,
-            icon_source_path,
+            app_icon_source_path,
+            runtime_app_name,
+            runtime_bundle_identifier,
+            runtime_icon_source_path,
             out_dir,
             bundle_identifier,
             bundle_version: package.version.to_string(),
@@ -278,5 +307,13 @@ mod tests {
             "io.github.cbf.sample"
         );
         assert_eq!(generate_bundle_identifier("---"), "io.github.cbf-app");
+    }
+
+    #[test]
+    fn runtime_bundle_identifier_defaults_from_host_identifier() {
+        assert_eq!(
+            format!("{}.runtime", "com.example.myapp"),
+            "com.example.myapp.runtime"
+        );
     }
 }

@@ -12,6 +12,8 @@ publish = false
 [package.metadata.cbf.macos-bundle]
 app-name = "CBF SimpleApp"
 bundle-identifier = "io.github.tasuren.cbf.simpleapp"
+runtime-app-name = "CBF SimpleApp Engine"
+runtime-bundle-identifier = "io.github.tasuren.cbf.simpleapp.runtime"
 category = "public.app-category.developer-tools"
 minimum-system-version = "13.0"
 

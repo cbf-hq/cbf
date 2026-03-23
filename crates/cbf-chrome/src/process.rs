@@ -34,7 +34,7 @@ use crate::{
 /// 1. Explicit path (for example CLI argument)
 /// 2. `CBF_CHROMIUM_EXECUTABLE` environment variable
 /// 3. Path relative to current app bundle:
-///    `../Frameworks/Chromium.app/Contents/MacOS/Chromium`
+///    `../CBF Runtime/<RuntimeName>.app/Contents/MacOS/<RuntimeName>`
 ///
 /// Returns `None` when no candidate can be resolved.
 pub fn resolve_chromium_executable(explicit_path: Option<PathBuf>) -> Option<PathBuf> {
@@ -52,14 +52,27 @@ fn resolve_chromium_executable_from_bundle() -> Option<PathBuf> {
         return None;
     }
 
-    let candidate = contents_dir
-        .join("Frameworks")
-        .join("Chromium.app")
-        .join("Contents")
-        .join("MacOS")
-        .join("Chromium");
+    resolve_chromium_executable_from_runtime_dir(contents_dir.join("CBF Runtime"))
+}
 
-    candidate.is_file().then_some(candidate)
+fn resolve_chromium_executable_from_runtime_dir(runtime_dir: PathBuf) -> Option<PathBuf> {
+    let mut candidates = std::fs::read_dir(runtime_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("app"))
+        .filter_map(|app_path| {
+            let app_name = app_path.file_stem()?.to_str()?.to_owned();
+            let executable_path = app_path.join("Contents").join("MacOS").join(app_name);
+            executable_path.is_file().then_some(executable_path)
+        });
+
+    let first = candidates.next()?;
+    if candidates.next().is_some() {
+        return None;
+    }
+
+    Some(first)
 }
 
 /// Runtime selection for Chromium-backed startup.
@@ -128,7 +141,7 @@ pub struct ChromiumProcessOptions {
     /// The default is `chrome`. `alloy` is currently reserved and will be
     /// rejected by `start_chromium` until that runtime exists.
     pub runtime: RuntimeSelection,
-    /// Path to the browser executable (e.g. "Chromium.app/Contents/MacOS/Chromium").
+    /// Path to the browser executable (e.g. "<Runtime>.app/Contents/MacOS/<Runtime>").
     pub executable_path: PathBuf,
     /// Path to the user data directory.
     /// If provided, passed as `--user-data-dir=<path>`.
@@ -827,5 +840,48 @@ mod tests {
             .unwrap()
             .expect("terminated process should exit");
         assert!(!status.success());
+    }
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("cbf-chrome-{name}-{unique}"))
+    }
+
+    #[test]
+    fn resolve_chromium_executable_from_runtime_dir_finds_single_runtime() {
+        let runtime_dir = temp_path("single-runtime");
+        let executable_path = runtime_dir
+            .join("Sample Engine.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("Sample Engine");
+        std::fs::create_dir_all(executable_path.parent().unwrap()).unwrap();
+        std::fs::write(&executable_path, b"binary").unwrap();
+
+        let resolved = resolve_chromium_executable_from_runtime_dir(runtime_dir.clone());
+        assert_eq!(resolved.as_deref(), Some(executable_path.as_path()));
+
+        let _ = std::fs::remove_dir_all(runtime_dir);
+    }
+
+    #[test]
+    fn resolve_chromium_executable_from_runtime_dir_rejects_multiple_runtimes() {
+        let runtime_dir = temp_path("multiple-runtimes");
+        for name in ["One Engine", "Two Engine"] {
+            let executable_path = runtime_dir
+                .join(format!("{name}.app"))
+                .join("Contents")
+                .join("MacOS")
+                .join(name);
+            std::fs::create_dir_all(executable_path.parent().unwrap()).unwrap();
+            std::fs::write(executable_path, b"binary").unwrap();
+        }
+
+        assert!(resolve_chromium_executable_from_runtime_dir(runtime_dir.clone()).is_none());
+
+        let _ = std::fs::remove_dir_all(runtime_dir);
     }
 }

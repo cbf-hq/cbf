@@ -151,11 +151,16 @@ This is the recommended way to declare app identity, as it is committed alongsid
 app-name = "My App"
 bundle-identifier = "com.example.myapp"
 icon = "assets/icon.icns"          # relative to Cargo.toml
+runtime-app-name = "My App Engine"
+runtime-bundle-identifier = "com.example.myapp.runtime"
+runtime-icon = "assets/runtime.icns" # defaults to `icon` when omitted
 category = "public.app-category.developer-tools"
 minimum-system-version = "13.0"
 ```
 
 `bundle-version` is taken automatically from `[package] version`.
+`cbf-cli` uses `runtime` terminology in config and implementation, while the
+default user-visible bundled runtime branding still uses `Engine`.
 
 ### Run the bundler
 
@@ -182,7 +187,21 @@ CLI arguments take priority over Cargo metadata values when both are present:
 | `app-name`            | `--app-name`             |
 | `bundle-identifier`   | `--bundle-identifier`    |
 | `icon`                | `--icon`                 |
+| `runtime-app-name`    | `--runtime-app-name`     |
+| `runtime-bundle-identifier` | `--runtime-bundle-identifier` |
+| `runtime-icon`        | `--runtime-icon`         |
 
 `category` and `minimum-system-version` are metadata-only (no CLI equivalent).
 
 Additional CLI-only options: `--out-dir` (default: `dist`), `--codesign-identity`, `--package` (for workspaces).
+
+The bundled runtime is placed under:
+
+```text
+<App>.app/Contents/CBF Runtime/<RuntimeAppName>.app
+```
+
+Branding changes are applied before signing. If you pass `--codesign-identity`,
+`cbf-cli` will sign the final app bundle and validate it with `codesign` and
+`spctl`. MVP runtime branding support currently targets release-style Chromium
+runtime bundles (`is_component_build = false`).
