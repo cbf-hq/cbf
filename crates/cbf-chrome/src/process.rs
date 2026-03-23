@@ -132,6 +132,9 @@ pub struct ChromiumProcessOptions {
     pub executable_path: PathBuf,
     /// Path to the user data directory.
     /// If provided, passed as `--user-data-dir=<path>`.
+    /// Crashpad dump storage is also redirected under
+    /// `<path>/Crashpad` via `--breakpad-dump-location=<path>/Crashpad`
+    /// so crash-related artifacts stay within the same app data root.
     /// Prefer setting this explicitly unless you have a strong reason not to.
     /// If `None`, Chromium may use a default profile location, which can conflict
     /// with normal Chromium usage and risk profile data issues (for example,
@@ -642,6 +645,11 @@ pub fn start_chromium(
 
     if let Some(user_data_dir) = &user_data_dir {
         command.arg(format!("--user-data-dir={}", user_data_dir));
+        let crashpad_dir = PathBuf::from(user_data_dir).join("Crashpad");
+        command.arg(format!(
+            "--breakpad-dump-location={}",
+            crashpad_dir.to_string_lossy()
+        ));
     }
 
     if let Some(enable_logging) = enable_logging {

@@ -165,6 +165,9 @@ The following switches are required and are always set by `start_chromium`:
 Common optional flags controlled by `StartChromiumOptions` include:
 
 - `--user-data-dir=...`
+  - When `user_data_dir` is set, `start_chromium` also injects
+    `--breakpad-dump-location=<user_data_dir>/Crashpad` so Crashpad data stays
+    under the same application data root on macOS.
 - `--enable-logging=...`
 - `--log-file=...`
 - `--v=...` / `--vmodule=...`
