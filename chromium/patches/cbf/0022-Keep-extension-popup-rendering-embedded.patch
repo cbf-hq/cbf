@@ -1,7 +1,7 @@
 From 31ce0d7e9db05d486109ca9b37474385e46ed4a0 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 10 Mar 2026 14:00:00 +0900
-Subject: [PATCH 22/37] Keep extension popup rendering embedded
+Subject: [PATCH 22/38] Keep extension popup rendering embedded
 
 ---
  chrome/browser/cbf/cbf_profile_service.cc | 978 +++++++++++++++++-----

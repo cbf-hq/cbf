@@ -16,6 +16,9 @@ source-built use rather than a downloadable binary bundle.
 
 ### Added
 
+- Host-driven custom scheme responder flow for `app://...` resources across the Chromium bridge, browser service, and loader pipeline, including response metadata for body bytes, MIME type, CSP, and `Access-Control-Allow-Origin`.
+- Launch-time custom scheme registration that classifies configured schemes as standard, secure, CORS-enabled, and web-safe origins across browser, renderer, and storage policy setup.
+- Browser-test coverage for top-level `app://` navigation rendering and same-origin subresource fetches through the custom scheme responder.
 - Host-driven browsing context visibility control in the Chromium runtime bridge and profile service.
 - macOS surface handle refresh after visibility recovery when the compositor CAContextID changes.
 - Host-driven browsing context background policy control through the bridge, profile service, and browser tests.
@@ -39,6 +42,8 @@ source-built use rather than a downloadable binary bundle.
 
 ### Fixed
 
+- Custom-scheme HTML documents now commit and render as web content instead of source text by providing Chromium with the expected response metadata and first-class scheme registration.
+- Non-cryptographic custom-scheme subresource fetches no longer trigger renderer-side bad Mojo failures from unnecessary `SubresourceResponseStarted` IPC.
 - Profile teardown stability in `CbfProfileService` by restoring download-prompt prefs before shutdown and removing stale profile-service registry entries during `OnProfileWillBeDestroyed`.
 
 ## [cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1] - 2026-03-17

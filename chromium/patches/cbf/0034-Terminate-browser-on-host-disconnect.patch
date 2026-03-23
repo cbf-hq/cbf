@@ -1,7 +1,7 @@
 From 5698a37363965457b14b6e1f6480beb80b06fc9c Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Mar 2026 20:22:59 +0900
-Subject: [PATCH 34/37] Terminate browser on host disconnect
+Subject: [PATCH 34/38] Terminate browser on host disconnect
 
 ---
  chrome/browser/cbf/cbf_browser_service.cc     | 26 ++++++++++++
