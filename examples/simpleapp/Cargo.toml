@@ -6,7 +6,7 @@ authors.workspace = true
 description = "Compositor-based CBF sample app"
 repository.workspace = true
 keywords.workspace = true
-license.workspace = true
+license = "0BSD"
 publish = false
 
 [package.metadata.cbf.macos-bundle]

@@ -20,3 +20,10 @@ The toolbar and overlay UI are served from embedded assets through
 `app://simpleapp/...` using the Chrome-specific custom scheme responder in
 `cbf-chrome`. This keeps the sample on the same URL model in development and in
 bundled builds without resolving `file://` paths from the Cargo manifest tree.
+
+## License
+
+This project is licensed under the BSD Zero Clause License.
+You may use, copy, modify, and distribute this example without restriction.
+It is provided as-is, without warranty or liability.
+See the [LICENSE](./LICENSE) file for details.
