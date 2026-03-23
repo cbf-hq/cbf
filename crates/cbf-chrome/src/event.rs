@@ -567,6 +567,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
             source_browsing_context_id: source_tab_id.map(|tab_id| tab_id.to_browsing_context_id()),
             resolution: prompt_ui_resolution_to_auxiliary_window_resolution(resolution),
         }),
+        IpcEvent::CustomSchemeRequestReceived { .. } => None,
         IpcEvent::ExtensionRuntimeWarning {
             profile_id,
             browsing_context_id,

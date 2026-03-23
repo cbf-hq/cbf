@@ -19,6 +19,7 @@ use super::{Error, IpcEvent};
 use crate::data::{
     background::ChromeBackgroundPolicy,
     browsing_context_open::ChromeBrowsingContextOpenResponse,
+    custom_scheme::{ChromeCustomSchemeResponse, ChromeCustomSchemeResponseResult},
     download::ChromeDownloadId,
     drag::{ChromeDragDrop, ChromeDragUpdate},
     extension::ChromeExtensionInfo,
@@ -235,6 +236,80 @@ impl IpcClient {
 
         unsafe { cbf_bridge_extension_list_free(&mut list) };
         Ok(result)
+    }
+
+    pub fn register_custom_scheme_handler(
+        &mut self,
+        scheme: &str,
+        host: &str,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let scheme = CString::new(scheme).map_err(|_| Error::InvalidInput)?;
+        let host = CString::new(host).map_err(|_| Error::InvalidInput)?;
+        if unsafe {
+            cbf_bridge_client_register_custom_scheme_handler(
+                self.inner,
+                scheme.as_ptr(),
+                host.as_ptr(),
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    pub fn respond_custom_scheme_request(
+        &mut self,
+        response: &ChromeCustomSchemeResponse,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let mime_type =
+            CString::new(response.mime_type.as_str()).map_err(|_| Error::InvalidInput)?;
+        let content_security_policy = to_optional_cstring(&response.content_security_policy)
+            .map_err(|_| Error::InvalidInput)?;
+        let access_control_allow_origin =
+            to_optional_cstring(&response.access_control_allow_origin)
+                .map_err(|_| Error::InvalidInput)?;
+        let result = match response.result {
+            ChromeCustomSchemeResponseResult::Ok => CBF_CUSTOM_SCHEME_RESPONSE_RESULT_OK,
+            ChromeCustomSchemeResponseResult::NotFound => {
+                CBF_CUSTOM_SCHEME_RESPONSE_RESULT_NOT_FOUND
+            }
+            ChromeCustomSchemeResponseResult::Aborted => CBF_CUSTOM_SCHEME_RESPONSE_RESULT_ABORTED,
+        };
+        let body_ptr = if response.body.is_empty() {
+            ptr::null()
+        } else {
+            response.body.as_ptr()
+        };
+
+        if unsafe {
+            cbf_bridge_client_respond_custom_scheme_request(
+                self.inner,
+                response.request_id,
+                result,
+                mime_type.as_ptr(),
+                content_security_policy
+                    .as_ref()
+                    .map_or(ptr::null(), |value| value.as_ptr()),
+                access_control_allow_origin
+                    .as_ref()
+                    .map_or(ptr::null(), |value| value.as_ptr()),
+                body_ptr,
+                response.body.len() as u32,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
     }
 
     pub fn activate_extension_action(

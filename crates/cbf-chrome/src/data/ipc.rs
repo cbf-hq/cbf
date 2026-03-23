@@ -157,9 +157,7 @@ impl From<TabIpcMessage> for cbf::data::ipc::BrowsingContextIpcMessage {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        TabIpcConfig, TabIpcErrorCode, TabIpcMessage, TabIpcMessageType, TabIpcPayload,
-    };
+    use super::{TabIpcConfig, TabIpcErrorCode, TabIpcMessage, TabIpcMessageType, TabIpcPayload};
 
     #[test]
     fn tab_ipc_config_round_trip_with_generic() {

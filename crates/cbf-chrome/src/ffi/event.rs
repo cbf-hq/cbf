@@ -5,6 +5,7 @@ use cbf::data::dialog::DialogType;
 use crate::data::{
     choice_menu::ChromeChoiceMenu,
     context_menu::ChromeContextMenu,
+    custom_scheme::ChromeCustomSchemeRequest,
     download::{ChromeDownloadCompletion, ChromeDownloadProgress, ChromeDownloadSnapshot},
     drag::ChromeDragStartRequest,
     extension::ChromeExtensionInfo,
@@ -315,6 +316,8 @@ pub enum IpcEvent {
         request_id: u64,
         resolution: PromptUiResolution,
     },
+    /// A registered custom scheme request requires a host response.
+    CustomSchemeRequestReceived { request: ChromeCustomSchemeRequest },
     /// Non-fatal extension runtime warning.
     ///
     /// Maps to `BrowsingContextEvent::ExtensionRuntimeWarning`.

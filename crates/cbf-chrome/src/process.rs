@@ -3,6 +3,7 @@ use cbf_chrome_sys::ffi::{cbf_bridge_client_create, cbf_bridge_client_destroy};
 use futures_lite::future::block_on;
 use signal_hook::iterator::Signals;
 use std::{
+    collections::BTreeSet,
     env,
     path::PathBuf,
     process::ExitStatus,
@@ -23,6 +24,7 @@ use cbf::{
 
 use crate::{
     backend::{ChromiumBackend, ChromiumBackendOptions},
+    data::custom_scheme::ChromeCustomSchemeRegistration,
     ffi::IpcClient,
 };
 
@@ -167,6 +169,29 @@ pub struct StartChromiumOptions {
     pub process: ChromiumProcessOptions,
     /// Options for backend IPC connection behavior.
     pub backend: ChromiumBackendOptions,
+}
+
+fn build_custom_schemes_switch_value(
+    registrations: &[ChromeCustomSchemeRegistration],
+) -> Result<Option<String>, CbfError> {
+    let mut scheme_names = BTreeSet::new();
+    for registration in registrations {
+        let scheme = registration.scheme.trim().to_ascii_lowercase();
+        if scheme.is_empty() {
+            return Err(CbfError::BackendFailure(BackendErrorInfo {
+                kind: ApiErrorKind::InvalidInput,
+                operation: None,
+                detail: Some("custom scheme registration contains an empty scheme".to_owned()),
+            }));
+        }
+        scheme_names.insert(scheme);
+    }
+
+    if scheme_names.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(scheme_names.into_iter().collect::<Vec<_>>().join(",")))
+    }
 }
 
 /// A handle to the running Chromium process.
@@ -548,6 +573,8 @@ pub fn start_chromium(
     CbfError,
 > {
     let StartChromiumOptions { process, backend } = options;
+    let custom_schemes_switch_value =
+        build_custom_schemes_switch_value(&backend.custom_scheme_registrations)?;
 
     let ChromiumProcessOptions {
         runtime,
@@ -598,6 +625,11 @@ pub fn start_chromium(
     command.arg("--enable-features=Cbf");
     command.arg(&switch_arg);
     command.arg(format!("--cbf-session-token={session_token}"));
+    if let Some(custom_schemes_switch_value) = custom_schemes_switch_value {
+        command.arg(format!(
+            "--cbf-custom-schemes={custom_schemes_switch_value}"
+        ));
+    }
 
     // Clear FD_CLOEXEC on the remote endpoint fd so it is inherited by the child.
     #[cfg(unix)]
@@ -676,6 +708,7 @@ pub fn start_chromium(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::custom_scheme::ChromeCustomSchemeRegistration;
     use async_process::Command;
 
     #[test]
@@ -704,6 +737,50 @@ mod tests {
     fn runtime_selection_parses_known_values() {
         assert_eq!("chrome".parse(), Ok(RuntimeSelection::Chrome));
         assert_eq!("alloy".parse(), Ok(RuntimeSelection::Alloy));
+    }
+
+    #[test]
+    fn build_custom_schemes_switch_value_dedupes_and_normalizes() {
+        let registrations = vec![
+            ChromeCustomSchemeRegistration {
+                scheme: "App".to_string(),
+                host: "simpleapp".to_string(),
+            },
+            ChromeCustomSchemeRegistration {
+                scheme: " app ".to_string(),
+                host: "other".to_string(),
+            },
+            ChromeCustomSchemeRegistration {
+                scheme: "Tool".to_string(),
+                host: "simpleapp".to_string(),
+            },
+        ];
+
+        let value = build_custom_schemes_switch_value(&registrations)
+            .expect("switch value should be built");
+
+        assert_eq!(value.as_deref(), Some("app,tool"));
+    }
+
+    #[test]
+    fn build_custom_schemes_switch_value_rejects_empty_scheme() {
+        let registrations = vec![ChromeCustomSchemeRegistration {
+            scheme: "   ".to_string(),
+            host: "simpleapp".to_string(),
+        }];
+
+        let err = build_custom_schemes_switch_value(&registrations).unwrap_err();
+
+        match err {
+            CbfError::BackendFailure(info) => {
+                assert_eq!(info.kind, ApiErrorKind::InvalidInput);
+                assert_eq!(
+                    info.detail.as_deref(),
+                    Some("custom scheme registration contains an empty scheme")
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[cfg(unix)]

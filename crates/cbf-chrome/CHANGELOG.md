@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Chrome-specific custom scheme registration and response transport for host-provided `app://...` resources, including:
+  - launch-time custom scheme classification through `ChromiumBackendOptions`
+  - `ChromeEvent::CustomSchemeRequestReceived`
+  - `ChromeCommand::RespondCustomSchemeRequest`
+  - response metadata for body bytes, MIME type, CSP, and `Access-Control-Allow-Origin`
 - Chromium backend wiring for browsing context visibility commands through the Rust API and FFI client.
 - macOS surface handle refresh after visibility recovery when the underlying CAContextID changes.
 - Chromium backend wiring for browsing context and extension popup background policy commands.
@@ -27,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `simpleapp` now serves embedded toolbar assets over `app://simpleapp/...` instead of resolving `file://` URLs from the Cargo manifest location, so the same UI loading path works in development and packaged builds.
 - Hardened shutdown flow to use explicit force-close handling, staged process termination, and best-effort cleanup instead of relying on session drop side effects.
 - `BackendStopped` emission now preserves fact-only disconnect reasons; shutdown intent is tracked locally in `ChromiumRuntime` rather than inferred from transport teardown.
 - `simpleapp` now suppresses shutdown-time disconnect warnings and avoids duplicate shutdown requests by consulting `ChromiumRuntime` state.

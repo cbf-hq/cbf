@@ -20,6 +20,7 @@ use crate::data::{
         ChromeContextMenu, ChromeContextMenuAccelerator, ChromeContextMenuIcon,
         ChromeContextMenuItem, ChromeContextMenuItemType,
     },
+    custom_scheme::{ChromeCustomSchemeRequest, ChromeCustomSchemeRequestMethod},
     download::{
         ChromeDownloadCompletion, ChromeDownloadId, ChromeDownloadOutcome, ChromeDownloadProgress,
         ChromeDownloadPromptReason, ChromeDownloadPromptResult, ChromeDownloadSnapshot,
@@ -376,6 +377,18 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.prompt_ui_repost_reason,
                 event.prompt_ui_repost_target_url,
             ),
+        }),
+        CBF_EVENT_CUSTOM_SCHEME_REQUEST_RECEIVED => Ok(IpcEvent::CustomSchemeRequestReceived {
+            request: ChromeCustomSchemeRequest {
+                request_id: event.request_id,
+                profile_id: c_string_to_string(event.profile_id),
+                url: c_string_to_string(event.url),
+                scheme: c_string_to_string(event.custom_scheme_scheme),
+                host: c_string_to_string(event.custom_scheme_host),
+                path: c_string_to_string(event.custom_scheme_path),
+                query: optional_string_from_ffi(event.custom_scheme_query),
+                method: custom_scheme_request_method_from_ffi(event.custom_scheme_method),
+            },
         }),
         CBF_EVENT_EXTENSION_RUNTIME_WARNING => Ok(IpcEvent::ExtensionRuntimeWarning {
             profile_id: c_string_to_string(event.profile_id),
@@ -841,6 +854,15 @@ fn ipc_error_code_from_ffi(value: u8) -> Option<TabIpcErrorCode> {
         CBF_IPC_ERROR_REMOTE_ERROR => Some(TabIpcErrorCode::RemoteError),
         CBF_IPC_ERROR_PROTOCOL_ERROR => Some(TabIpcErrorCode::ProtocolError),
         _ => Some(TabIpcErrorCode::ProtocolError),
+    }
+}
+
+fn custom_scheme_request_method_from_ffi(
+    value: *mut std::ffi::c_char,
+) -> ChromeCustomSchemeRequestMethod {
+    match c_string_to_string(value).as_str() {
+        "GET" => ChromeCustomSchemeRequestMethod::Get,
+        other => ChromeCustomSchemeRequestMethod::Other(other.to_string()),
     }
 }
 

@@ -7,6 +7,7 @@ use cbf::{
 use crate::data::{
     background::ChromeBackgroundPolicy,
     browsing_context_open::ChromeBrowsingContextOpenResponse,
+    custom_scheme::ChromeCustomSchemeResponse,
     download::ChromeDownloadId,
     drag::{ChromeDragDrop, ChromeDragUpdate},
     extension::ChromeAuxiliaryWindowResponse,
@@ -65,6 +66,9 @@ pub enum ChromeCommand {
         profile_id: String,
     },
     ListProfiles,
+    RespondCustomSchemeRequest {
+        response: ChromeCustomSchemeResponse,
+    },
     RequestCloseTab {
         browsing_context_id: TabId,
     },

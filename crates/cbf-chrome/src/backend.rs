@@ -21,7 +21,7 @@ use cbf::{
 
 use crate::{
     command::ChromeCommand,
-    data::prompt_ui::PromptUiResponse,
+    data::{custom_scheme::ChromeCustomSchemeRegistration, prompt_ui::PromptUiResponse},
     event::{ChromeEvent, to_generic_event},
     ffi::{Error as IpcError, EventWaitResult, IpcClient, IpcEvent, IpcEventWaitHandle},
 };
@@ -29,13 +29,15 @@ use crate::{
 /// Backend implementation that speaks the Chromium IPC protocol.
 #[derive(Debug)]
 pub struct ChromiumBackend {
-    _options: ChromiumBackendOptions,
+    options: ChromiumBackendOptions,
     client: IpcClient,
 }
 
 /// Options for controlling the Chromium backend.
 #[derive(Debug, Default, Clone)]
-pub struct ChromiumBackendOptions {}
+pub struct ChromiumBackendOptions {
+    pub custom_scheme_registrations: Vec<ChromeCustomSchemeRegistration>,
+}
 
 impl ChromiumBackendOptions {
     /// Create default backend options.
@@ -442,14 +444,18 @@ impl Backend for ChromiumBackend {
     ) -> Result<(CommandSender<Self>, EventStream<Self>), Error> {
         let (command_tx, command_rx) = async_channel::unbounded::<CommandEnvelope<Self>>();
         let (event_tx, event_rx) = async_channel::unbounded::<ChromeEvent>();
-        let ChromiumBackend {
-            _options: _,
-            client,
-        } = self;
+        let ChromiumBackend { options, client } = self;
         let raw_delegate = raw_delegate.unwrap_or_else(|| Box::<NoopRawDelegate>::default());
 
         thread::spawn(move || {
-            Self::run_communication(client, command_rx, event_tx, delegate, raw_delegate)
+            Self::run_communication(
+                options,
+                client,
+                command_rx,
+                event_tx,
+                delegate,
+                raw_delegate,
+            )
         });
 
         Ok((
@@ -462,13 +468,11 @@ impl Backend for ChromiumBackend {
 impl ChromiumBackend {
     /// Create a backend from a pre-connected IPC client.
     pub fn new(options: ChromiumBackendOptions, client: IpcClient) -> Self {
-        Self {
-            _options: options,
-            client,
-        }
+        Self { options, client }
     }
 
     fn run_communication(
+        options: ChromiumBackendOptions,
         client: IpcClient,
         command_rx: Receiver<CommandEnvelope<Self>>,
         event_tx: Sender<ChromeEvent>,
@@ -478,7 +482,8 @@ impl ChromiumBackend {
         let mut dispatcher = DelegateDispatcher::new(delegate);
 
         // Client is already connected; emit BackendReady and start the event loop.
-        let Some(mut client) = Self::start_connection(client, &event_tx, &mut dispatcher) else {
+        let Some(mut client) = Self::start_connection(options, client, &event_tx, &mut dispatcher)
+        else {
             return;
         };
         let event_loop = ChromiumBackendEventLoop::new(command_rx, client.event_wait_handle());
@@ -495,10 +500,31 @@ impl ChromiumBackend {
     }
 
     fn start_connection(
+        options: ChromiumBackendOptions,
         mut client: IpcClient,
         event_tx: &Sender<ChromeEvent>,
         dispatcher: &mut DelegateDispatcher<impl BackendDelegate>,
     ) -> Option<IpcClient> {
+        for registration in &options.custom_scheme_registrations {
+            if let Err(err) =
+                client.register_custom_scheme_handler(&registration.scheme, &registration.host)
+            {
+                let info = backend_error_event(err);
+                let terminal_hint = backend_error_terminal_hint(info.kind);
+                if let Some(stop_reason) = Self::handle_raw_event_with_delegate_gate(
+                    dispatcher,
+                    event_tx,
+                    ChromeEvent::BackendError {
+                        info,
+                        terminal_hint,
+                    },
+                ) {
+                    Self::stop_backend(stop_reason, dispatcher, Some(&mut client), event_tx);
+                    return None;
+                }
+            }
+        }
+
         // Notify that the backend is ready. The connection is already established.
         if let Some(stop_reason) = Self::handle_raw_event_with_delegate_gate(
             dispatcher,
@@ -980,6 +1006,9 @@ impl ChromiumBackend {
                     )
                 })
             }
+            ChromeCommand::RespondCustomSchemeRequest { response } => client
+                .respond_custom_scheme_request(response)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::ActivateExtensionAction {
                 browsing_context_id,
                 extension_id,

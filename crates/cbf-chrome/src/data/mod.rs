@@ -4,6 +4,7 @@ pub mod background;
 pub mod browsing_context_open;
 pub mod choice_menu;
 pub mod context_menu;
+pub mod custom_scheme;
 pub mod download;
 pub mod drag;
 pub mod extension;
