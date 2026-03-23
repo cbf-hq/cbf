@@ -54,6 +54,7 @@ pub const CBF_EVENT_JAVASCRIPT_DIALOG_REQUESTED: u8 = 43;
 pub const CBF_EVENT_CHOICE_MENU_REQUESTED: u8 = 44;
 pub const CBF_EVENT_EXTENSION_POPUP_CHOICE_MENU_REQUESTED: u8 = 45;
 pub const CBF_EVENT_TAB_IPC_MESSAGE_RECEIVED: u8 = 46;
+pub const CBF_EVENT_CUSTOM_SCHEME_REQUEST_RECEIVED: u8 = 47;
 
 pub const CBF_BRIDGE_EVENT_WAIT_STATUS_EVENT_AVAILABLE: i32 = 0;
 pub const CBF_BRIDGE_EVENT_WAIT_STATUS_TIMED_OUT: i32 = 1;
@@ -195,6 +196,10 @@ pub const CBF_TAB_OPEN_RESULT_ABORTED: u8 = 3;
 
 pub const CBF_TAB_VISIBILITY_VISIBLE: u8 = 0;
 pub const CBF_TAB_VISIBILITY_HIDDEN: u8 = 1;
+
+pub const CBF_CUSTOM_SCHEME_RESPONSE_RESULT_OK: u8 = 0;
+pub const CBF_CUSTOM_SCHEME_RESPONSE_RESULT_NOT_FOUND: u8 = 1;
+pub const CBF_CUSTOM_SCHEME_RESPONSE_RESULT_ABORTED: u8 = 2;
 
 pub const CBF_SURFACE_HANDLE_NONE: u8 = 0;
 pub const CBF_SURFACE_HANDLE_MAC_CA_CONTEXT_ID: u8 = 1;
@@ -430,6 +435,11 @@ pub struct CbfBridgeEvent {
     pub ipc_payload_binary_len: u32,
     pub ipc_content_type: *mut c_char,
     pub ipc_error_code: u8,
+    pub custom_scheme_scheme: *mut c_char,
+    pub custom_scheme_host: *mut c_char,
+    pub custom_scheme_path: *mut c_char,
+    pub custom_scheme_query: *mut c_char,
+    pub custom_scheme_method: *mut c_char,
 }
 
 #[repr(C)]
@@ -1136,6 +1146,21 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         profile_id: *const c_char,
         request_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_register_custom_scheme_handler(
+        client: *mut CbfBridgeClientHandle,
+        scheme: *const c_char,
+        host: *const c_char,
+    ) -> bool;
+    pub fn cbf_bridge_client_respond_custom_scheme_request(
+        client: *mut CbfBridgeClientHandle,
+        request_id: u64,
+        result: u8,
+        mime_type: *const c_char,
+        content_security_policy: *const c_char,
+        access_control_allow_origin: *const c_char,
+        body: *const u8,
+        body_len: u32,
     ) -> bool;
     pub fn cbf_bridge_client_respond_prompt_ui(
         client: *mut CbfBridgeClientHandle,
