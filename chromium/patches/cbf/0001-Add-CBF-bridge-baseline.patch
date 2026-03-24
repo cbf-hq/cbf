@@ -1,7 +1,7 @@
-From cffc317afd47b26ee4c96d0224b28a46aa372e06 Mon Sep 17 00:00:00 2001
+From f1a9c16475943112aba85dd5c52e41dc7e9a8b79 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Feb 2026 09:47:06 +0900
-Subject: [PATCH 01/38] Add CBF bridge baseline
+Subject: [PATCH 01/39] Add CBF bridge baseline
 
 ---
  chrome/browser/BUILD.gn                       |    2 +
@@ -113,7 +113,7 @@ Subject: [PATCH 01/38] Add CBF bridge baseline
  create mode 100644 content/public/browser/render_widget_host_view.cc
 
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index 2fc3a991d8909..5b6199531f677 100644
+index a2a14349d40ce..11f3199a330ab 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
 @@ -1542,6 +1542,7 @@ static_library("browser") {
@@ -8370,7 +8370,7 @@ index f43d0d97cedb7..d0ee364478aea 100644
  #if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
    std::unique_ptr<installer_downloader::InstallerDownloaderController>
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index dac5e9152bb28..19b7445c58a58 100644
+index c82c6fc5847e3..348ec036daac7 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
 @@ -275,6 +275,7 @@ static_library("ui") {

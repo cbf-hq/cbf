@@ -1,7 +1,7 @@
-From f4189da682cffe7999dadc001d549f709b5b97c4 Mon Sep 17 00:00:00 2001
+From 59f47439caac240ed5a3ade2d1991e9dbd504839 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 23 Feb 2026 17:16:20 +0900
-Subject: [PATCH 04/38] Add browser and unit tests for profile controllers
+Subject: [PATCH 04/39] Add browser and unit tests for profile controllers
 
 ---
  chrome/browser/cbf/BUILD.gn                   |  43 +++++++
@@ -627,7 +627,7 @@ index 0000000000000..f7103d73fff5a
 +
 +#endif  // CHROME_BROWSER_CBF_TEST_CBF_TEST_PROFILE_OBSERVER_H_
 diff --git a/chrome/test/BUILD.gn b/chrome/test/BUILD.gn
-index dbe8f32f53ff9..0eb708ff73c1a 100644
+index 40ea51f97470e..fd053eb966d23 100644
 --- a/chrome/test/BUILD.gn
 +++ b/chrome/test/BUILD.gn
 @@ -2498,6 +2498,7 @@ if (!is_android) {
@@ -638,7 +638,7 @@ index dbe8f32f53ff9..0eb708ff73c1a 100644
        "//chrome/browser/chooser_controller:browser_tests",
        "//chrome/browser/client_hints:browser_tests",
        "//chrome/browser/content_extraction",
-@@ -7038,6 +7039,7 @@ test("unit_tests") {
+@@ -7042,6 +7043,7 @@ test("unit_tests") {
      "//chrome/browser/breadcrumbs:unit_tests",
      "//chrome/browser/browsing_data:constants",
      "//chrome/browser/btm:unit_tests",

@@ -1,7 +1,7 @@
-From 8b6f8c682788db806d98feebb703780c6820b187 Mon Sep 17 00:00:00 2001
+From cfdf4d791b4f59d13fa0a2391d4d4a8b1add7c15 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Mar 2026 18:23:25 +0900
-Subject: [PATCH 33/38] Defer shutdown start after beforeunload
+Subject: [PATCH 33/39] Defer shutdown start after beforeunload
 
 ---
  chrome/browser/cbf/cbf_browser_service.cc     |  79 ++++++++++++-

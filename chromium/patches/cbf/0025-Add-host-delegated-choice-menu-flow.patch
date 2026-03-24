@@ -1,7 +1,7 @@
-From d25e65aa95e2ba51ed8d822ff54e4ef9d6484270 Mon Sep 17 00:00:00 2001
+From b724a6f2854c55d75dc1eea8c49e14f542fe7633 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 15 Mar 2026 10:28:59 +0900
-Subject: [PATCH 25/38] Add host-delegated choice menu flow
+Subject: [PATCH 25/39] Add host-delegated choice menu flow
 
 ---
  chrome/browser/cbf/BUILD.gn                   |  10 +
@@ -1387,7 +1387,7 @@ index 4828f1bbbfbde..d2888790f95ad 100644
  };
  
 diff --git a/content/browser/renderer_host/render_frame_host_impl.cc b/content/browser/renderer_host/render_frame_host_impl.cc
-index be7a71030dc5e..e48edf7c24d75 100644
+index 2d8a70f5fc0f6..76ec7e8b79374 100644
 --- a/content/browser/renderer_host/render_frame_host_impl.cc
 +++ b/content/browser/renderer_host/render_frame_host_impl.cc
 @@ -38,6 +38,7 @@
@@ -1406,7 +1406,7 @@ index be7a71030dc5e..e48edf7c24d75 100644
  #include "content/public/browser/web_ui_url_loader_factory.h"
  #include "content/public/common/alternative_error_page_override_info.mojom.h"
  #include "content/public/common/bindings_policy.h"
-@@ -9411,18 +9413,30 @@ void RenderFrameHostImpl::ShowPopupMenu(
+@@ -9412,18 +9414,30 @@ void RenderFrameHostImpl::ShowPopupMenu(
      return;
    }
  

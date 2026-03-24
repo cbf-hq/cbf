@@ -1,7 +1,7 @@
-From 94256b005ffff8323f68750fce1602116cf904dc Mon Sep 17 00:00:00 2001
+From 0819d2f21ae4996b30846f6494a5a80388ee1a48 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 4 Mar 2026 12:31:16 +0900
-Subject: [PATCH 12/38] Replace named channel bootstrap with inherited endpoint
+Subject: [PATCH 12/39] Replace named channel bootstrap with inherited endpoint
 
 Switch the CBF IPC bootstrap from NamedMojoIpcServer (named Unix
 domain socket) to a Mojo PlatformChannel with inherited endpoint:
