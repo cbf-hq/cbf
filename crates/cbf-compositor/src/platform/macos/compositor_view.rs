@@ -54,7 +54,7 @@ use objc2_app_kit::{
     NSDraggingSession, NSDraggingSource, NSEvent, NSEventModifierFlags, NSEventType, NSImage,
     NSMenu, NSMenuItem, NSMenuItemBadge, NSPasteboardTypeFileURL, NSPasteboardTypeHTML,
     NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardTypeURL, NSPasteboardWriting,
-    NSResponder, NSTextInputClient, NSView,
+    NSResponder, NSTextInputClient, NSTrackingArea, NSTrackingAreaOptions, NSView,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
@@ -126,6 +126,13 @@ struct ExternalDragSessionState {
     data: DragData,
     allowed_operations: DragOperations,
     operation: DragOperation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HoverDispatch {
+    Leave(CompositionItemId),
+    Enter(CompositionItemId),
+    Move(CompositionItemId),
 }
 
 define_class!(
@@ -325,6 +332,11 @@ define_class!(
         #[unsafe(method(otherMouseDragged:))]
         fn other_mouse_dragged(&self, event: &NSEvent) {
             self.forward_mouse_event(event, MouseEventType::Move);
+        }
+
+        #[unsafe(method(mouseExited:))]
+        fn mouse_exited(&self, event: &NSEvent) {
+            self.clear_hover_target(event);
         }
 
         #[unsafe(method(scrollWheel:))]
@@ -715,6 +727,7 @@ impl CompositorViewMac {
                 | NSAutoresizingMaskOptions::ViewHeightSizable,
         );
         this.setWantsLayer(true);
+        this.install_tracking_area();
         let dragged_types = unsafe {
             NSArray::from_slice(&[
                 NSPasteboardTypeFileURL,
@@ -1107,6 +1120,9 @@ impl CompositorViewMac {
         if input_state.active_item_id == Some(item_id) {
             input_state.active_item_id = None;
         }
+        if input_state.hover_item_id == Some(item_id) {
+            input_state.hover_item_id = None;
+        }
         if input_state.pointer_capture_item_id == Some(item_id) {
             input_state.pointer_capture_item_id = None;
         }
@@ -1393,14 +1409,22 @@ impl CompositorViewMac {
     }
 
     fn forward_mouse_event(&self, event: &NSEvent, event_type: MouseEventType) {
+        if event_type == MouseEventType::Move
+            && self
+                .ivars()
+                .input_state
+                .borrow()
+                .pointer_capture_item_id
+                .is_none()
+        {
+            self.forward_hover_move_event(event);
+            return;
+        }
+
         let mouse_down = event_type == MouseEventType::Down;
         let Some((item_id, target)) = self.mouse_target(event, mouse_down) else {
             return;
         };
-
-        let mut mouse_event = self.convert_mouse_event(event);
-        mouse_event.type_ = event_type;
-        self.translate_mouse_event(item_id, &mut mouse_event);
 
         if mouse_down {
             self.focus_item(item_id, target);
@@ -1415,7 +1439,7 @@ impl CompositorViewMac {
             }
         }
 
-        self.send_mouse_event(target, mouse_event);
+        self.send_translated_mouse_event(item_id, target, event, event_type);
     }
 
     fn mouse_target(
@@ -1448,6 +1472,84 @@ impl CompositorViewMac {
         }
 
         Some(target)
+    }
+
+    fn hover_target(&self, event: &NSEvent) -> Option<(CompositionItemId, SurfaceTarget)> {
+        let point = self.local_point(event);
+        self.target_at_point(point)
+    }
+
+    fn target_at_point(&self, point: CGPoint) -> Option<(CompositionItemId, SurfaceTarget)> {
+        let slots = self.ivars().slots.borrow();
+        let order = self.ivars().order.borrow();
+        let item_id = topmost_item_at_point(&order, &slots, point)?;
+        slots.get(&item_id).map(|slot| (item_id, slot.target))
+    }
+
+    fn forward_hover_move_event(&self, event: &NSEvent) {
+        let previous_item_id = self.ivars().input_state.borrow().hover_item_id;
+        let next = self.hover_target(event);
+        let next_item_id = next.map(|(item_id, _)| item_id);
+
+        for dispatch in hover_transition(previous_item_id, next_item_id) {
+            match dispatch {
+                HoverDispatch::Leave(item_id) => {
+                    if let Some((_, target)) = self.item_target(item_id) {
+                        self.send_translated_mouse_event(
+                            item_id,
+                            target,
+                            event,
+                            MouseEventType::Leave,
+                        );
+                    }
+                }
+                HoverDispatch::Enter(item_id) => {
+                    if let Some((next_item_id, target)) = next
+                        && next_item_id == item_id
+                    {
+                        self.send_translated_mouse_event(
+                            item_id,
+                            target,
+                            event,
+                            MouseEventType::Enter,
+                        );
+                    }
+                }
+                HoverDispatch::Move(item_id) => {
+                    if let Some((next_item_id, target)) = next
+                        && next_item_id == item_id
+                    {
+                        self.send_translated_mouse_event(
+                            item_id,
+                            target,
+                            event,
+                            MouseEventType::Move,
+                        );
+                    }
+                }
+            }
+        }
+
+        self.ivars().input_state.borrow_mut().hover_item_id = next_item_id;
+    }
+
+    fn clear_hover_target(&self, event: &NSEvent) {
+        if self
+            .ivars()
+            .input_state
+            .borrow()
+            .pointer_capture_item_id
+            .is_some()
+        {
+            return;
+        }
+
+        let previous_item_id = self.ivars().input_state.borrow_mut().hover_item_id.take();
+        if let Some(item_id) = previous_item_id
+            && let Some((_, target)) = self.item_target(item_id)
+        {
+            self.send_translated_mouse_event(item_id, target, event, MouseEventType::Leave);
+        }
     }
 
     fn local_point(&self, event: &NSEvent) -> CGPoint {
@@ -1700,6 +1802,19 @@ impl CompositorViewMac {
         convert_nsevent_to_mouse_wheel_event(0, nsevent_ptr, nsview_ptr)
     }
 
+    fn send_translated_mouse_event(
+        &self,
+        item_id: CompositionItemId,
+        target: SurfaceTarget,
+        event: &NSEvent,
+        event_type: MouseEventType,
+    ) {
+        let mut mouse_event = self.convert_mouse_event(event);
+        mouse_event.type_ = event_type;
+        self.translate_mouse_event(item_id, &mut mouse_event);
+        self.send_mouse_event(target, mouse_event);
+    }
+
     fn translate_mouse_event(&self, item_id: CompositionItemId, event: &mut MouseEvent) {
         if let Some(slot) = self.ivars().slots.borrow().get(&item_id) {
             event.position_in_widget_x -= slot.bounds.origin.x as f32;
@@ -1717,6 +1832,30 @@ impl CompositorViewMac {
     fn slot_top_offset(&self, slot: &SurfaceSlot) -> f64 {
         let bounds = self.bounds();
         (bounds.size.height - (slot.bounds.origin.y + slot.bounds.size.height)).max(0.0)
+    }
+
+    fn install_tracking_area(&self) {
+        let tracking_areas = self.trackingAreas();
+        for index in 0..tracking_areas.count() {
+            let tracking_area = tracking_areas.objectAtIndex(index);
+            self.removeTrackingArea(&tracking_area);
+        }
+
+        let options = NSTrackingAreaOptions::MouseEnteredAndExited
+            | NSTrackingAreaOptions::MouseMoved
+            | NSTrackingAreaOptions::ActiveInKeyWindow
+            | NSTrackingAreaOptions::InVisibleRect
+            | NSTrackingAreaOptions::EnabledDuringMouseDrag;
+        let tracking_area = unsafe {
+            NSTrackingArea::initWithRect_options_owner_userInfo(
+                NSTrackingArea::alloc(),
+                self.bounds(),
+                options,
+                Some(self),
+                None,
+            )
+        };
+        self.addTrackingArea(&tracking_area);
     }
 
     fn ime_candidate_rect(&self, range: NSRange) -> CGRect {
@@ -2169,6 +2308,25 @@ fn extract_insert_text(value: &AnyObject) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+fn hover_transition(
+    previous: Option<CompositionItemId>,
+    next: Option<CompositionItemId>,
+) -> Vec<HoverDispatch> {
+    if previous == next {
+        return next.into_iter().map(HoverDispatch::Move).collect();
+    }
+
+    let mut dispatches = Vec::with_capacity(3);
+    if let Some(item_id) = previous {
+        dispatches.push(HoverDispatch::Leave(item_id));
+    }
+    if let Some(item_id) = next {
+        dispatches.push(HoverDispatch::Enter(item_id));
+        dispatches.push(HoverDispatch::Move(item_id));
+    }
+    dispatches
+}
+
 // Chromium-derived VKEY constants mirrored for the marked-text accelerator
 // guard. `convert_nsevent_to_key_event` fills `KeyEvent.key_code` with
 // Chromium-compatible virtual-key values, so this guard must compare against
@@ -2214,7 +2372,11 @@ mod tests {
     use objc2::rc::Retained;
     use objc2_foundation::NSString;
 
-    use super::{build_char_event, extract_insert_text, synthesized_char_text};
+    use super::{
+        HoverDispatch, build_char_event, extract_insert_text, hover_transition,
+        synthesized_char_text,
+    };
+    use crate::model::CompositionItemId;
 
     #[test]
     fn synthesized_char_text_prefers_event_text() {
@@ -2233,5 +2395,50 @@ mod tests {
     fn extract_insert_text_accepts_plain_string() {
         let text: Retained<NSString> = NSString::from_str("hello");
         assert_eq!(extract_insert_text(&text).as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn hover_transition_emits_leave_enter_move_between_items() {
+        let toolbar = CompositionItemId::new(1);
+        let page = CompositionItemId::new(2);
+
+        assert_eq!(
+            hover_transition(Some(toolbar), Some(page)),
+            vec![
+                HoverDispatch::Leave(toolbar),
+                HoverDispatch::Enter(page),
+                HoverDispatch::Move(page),
+            ]
+        );
+    }
+
+    #[test]
+    fn hover_transition_does_not_repeat_enter_or_leave_within_same_item() {
+        let item = CompositionItemId::new(7);
+
+        assert_eq!(
+            hover_transition(Some(item), Some(item)),
+            vec![HoverDispatch::Move(item)]
+        );
+    }
+
+    #[test]
+    fn hover_transition_emits_leave_when_pointer_exits_surface() {
+        let item = CompositionItemId::new(9);
+
+        assert_eq!(
+            hover_transition(Some(item), None),
+            vec![HoverDispatch::Leave(item)]
+        );
+    }
+
+    #[test]
+    fn hover_transition_emits_enter_then_move_on_initial_hover() {
+        let item = CompositionItemId::new(11);
+
+        assert_eq!(
+            hover_transition(None, Some(item)),
+            vec![HoverDispatch::Enter(item), HoverDispatch::Move(item)]
+        );
     }
 }

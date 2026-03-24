@@ -20,6 +20,7 @@ pub(crate) enum PlatformSurfaceHandle {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct PlatformInputState {
     pub(crate) active_item_id: Option<CompositionItemId>,
+    pub(crate) hover_item_id: Option<CompositionItemId>,
     pub(crate) pointer_capture_item_id: Option<CompositionItemId>,
 }
 
