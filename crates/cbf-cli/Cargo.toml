@@ -16,7 +16,9 @@ path = "src/main.rs"
 [dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
 thiserror.workspace = true
-cargo_metadata = "0.23"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-plist = "1.8"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+cargo_metadata.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+plist.workspace = true

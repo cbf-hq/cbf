@@ -15,7 +15,7 @@ chrome = ["dep:cbf-chrome"]
 winit = ["dep:winit"]
 
 [dependencies]
-cbf = { path = "../cbf" }
+cbf.path = "../cbf"
 cbf-chrome = { path = "../cbf-chrome", optional = true }
 raw-window-handle.workspace = true
 thiserror.workspace = true

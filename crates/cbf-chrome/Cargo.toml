@@ -14,8 +14,8 @@ default = ["macos-choice-menu-default"]
 macos-choice-menu-default = []
 
 [dependencies]
-cbf = { version = "0.1.0-alpha.2", path = "../cbf" }
-cbf-chrome-sys = { version = "146.1.0-alpha.2", path = "../cbf-chrome-sys" }
+cbf.path = "../cbf"
+cbf-chrome-sys.path = "../cbf-chrome-sys"
 thiserror.workspace = true
 cursor-icon = { workspace = true }
 async-channel.workspace = true
@@ -23,17 +23,19 @@ async-process.workspace = true
 futures-lite.workspace = true
 oneshot = { workspace = true, features = ["async", "std"] }
 tracing.workspace = true
-getrandom = { version = "0.3", features = ["std"] }
+getrandom = { workspace = true, features = ["std"] }
 signal-hook.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }
 objc2-core-foundation = { workspace = true, features = ["CFCGTypes"] }
 objc2-quartz-core = { workspace = true, features = [
-  "CALayer", "CATransaction", "objc2-core-foundation"
+  "CALayer",
+  "CATransaction",
+  "objc2-core-foundation",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-foundation]
@@ -47,7 +49,7 @@ features = [
   "NSRange",
   "NSString",
   "NSGeometry",
-  "objc2-core-foundation"
+  "objc2-core-foundation",
 ]
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
@@ -69,7 +71,7 @@ features = [
   "NSTextInputClient",
   "NSView",
   "NSWindow",
-  "objc2-quartz-core"
+  "objc2-quartz-core",
 ]
 
 [package.metadata.docs.rs]

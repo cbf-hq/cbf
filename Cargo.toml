@@ -20,6 +20,8 @@ repository = "https://github.com/cbf-hq/cbf"
 
 [workspace.dependencies]
 thiserror = "2"
+libc = "0.2"
+getrandom = "0.3"
 cursor-icon = "1.2"
 async-channel = "2.5"
 async-process = "2.5"
@@ -27,16 +29,25 @@ futures-lite = "2.6"
 oneshot = "0.1"
 tracing = "0.1"
 signal-hook = "0.4"
+rfd = "0.15"
 block2 = "0.6.2"
 objc2 = "0.6.4"
 objc2-foundation = { version = "0.3.2", default-features = false }
 objc2-core-foundation = { version = "0.3.2", default-features = false }
 objc2-app-kit = { version = "0.3.2", default-features = false }
 objc2-quartz-core = { version = "0.3.2", default-features = false }
+cargo_metadata = "0.23"
+clap = "4.5"
+serde = "1"
+serde_json = "1"
+plist = "1.8"
 
 # Example dependencies
-clap = "4.5"
 tracing-subscriber = "0.3.22"
 winit = "0.30.12"
 raw-window-handle = "0.6"
 dirs = "6"
+async-executor = "1.13"
+image = "0.25"
+rust-embed = "8.11"
+muda = "0.17"

@@ -11,32 +11,30 @@ publish = false
 
 [package.metadata.cbf.macos-bundle]
 app-name = "CBF SimpleApp"
-bundle-identifier = "io.github.tasuren.cbf.simpleapp"
+bundle-identifier = "io.github.cbf-hq.cbf.simpleapp"
 runtime-app-name = "CBF SimpleApp Engine"
-runtime-bundle-identifier = "io.github.tasuren.cbf.simpleapp.runtime"
+runtime-bundle-identifier = "io.github.cbf-hq.cbf.simpleapp.runtime"
 category = "public.app-category.developer-tools"
 minimum-system-version = "13.0"
 
 [dependencies]
-cbf = { version = "0.1.0-alpha.2", path = "../../crates/cbf", features = [
-    "native-dialogs",
-] }
-cbf-chrome = { version = "0.1.0-alpha.2", path = "../../crates/cbf-chrome" }
-cbf-compositor = { version = "0.1.0-alpha.1", path = "../../crates/cbf-compositor" }
+cbf = { path = "../../crates/cbf", features = ["native-dialogs"] }
+cbf-chrome.path = "../../crates/cbf-chrome"
+cbf-compositor = { path = "../../crates/cbf-compositor" }
 clap = { workspace = true, features = ["derive"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 winit.workspace = true
 futures-lite.workspace = true
-async-executor = "1.13"
+async-executor.workspace = true
 raw-window-handle.workspace = true
 dirs.workspace = true
+rfd.workspace = true
 cursor-icon.workspace = true
-rfd = "0.15"
-image = "0.25"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-rust-embed = { version = "8.11", features = ["include-exclude"] }
+image.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+rust-embed = { workspace = true, features = ["include-exclude"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { workspace = true }
@@ -48,7 +46,7 @@ objc2-foundation = { workspace = true, features = [
     "NSString",
     "block2",
 ] }
-muda = "0.17"
+muda.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
 workspace = true
