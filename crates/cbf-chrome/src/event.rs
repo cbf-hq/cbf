@@ -517,6 +517,17 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 request: request.clone().into(),
             }),
         }),
+        IpcEvent::ExternalDragOperationChanged {
+            profile_id,
+            browsing_context_id,
+            operation,
+        } => Some(BrowserEvent::BrowsingContext {
+            profile_id: profile_id.clone(),
+            browsing_context_id: browsing_context_id.to_browsing_context_id(),
+            event: Box::new(BrowsingContextEvent::ExternalDragOperationChanged {
+                operation: *operation,
+            }),
+        }),
         IpcEvent::ShutdownBlocked {
             request_id,
             dirty_browsing_context_ids,

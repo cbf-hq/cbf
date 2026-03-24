@@ -1084,6 +1084,20 @@ impl ChromiumBackend {
             } => client
                 .send_drag_cancel(*session_id, *browsing_context_id)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::SendExternalDragEnter { event } => client
+                .send_external_drag_enter(event)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SendExternalDragUpdate { event } => client
+                .send_external_drag_update(event)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SendExternalDragLeave {
+                browsing_context_id,
+            } => client
+                .send_external_drag_leave(*browsing_context_id)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::SendExternalDragDrop { event } => client
+                .send_external_drag_drop(event)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::SetImeComposition { composition } => client
                 .set_composition(composition)
                 .map(|_| (None, Vec::new())),

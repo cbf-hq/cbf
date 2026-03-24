@@ -9,7 +9,10 @@ use crate::data::{
     browsing_context_open::ChromeBrowsingContextOpenResponse,
     custom_scheme::ChromeCustomSchemeResponse,
     download::ChromeDownloadId,
-    drag::{ChromeDragDrop, ChromeDragUpdate},
+    drag::{
+        ChromeDragDrop, ChromeDragUpdate, ChromeExternalDragDrop, ChromeExternalDragEnter,
+        ChromeExternalDragUpdate,
+    },
     extension::ChromeAuxiliaryWindowResponse,
     ids::{PopupId, TabId},
     ime::{
@@ -155,6 +158,18 @@ pub enum ChromeCommand {
     SendDragCancel {
         session_id: u64,
         browsing_context_id: TabId,
+    },
+    SendExternalDragEnter {
+        event: ChromeExternalDragEnter,
+    },
+    SendExternalDragUpdate {
+        event: ChromeExternalDragUpdate,
+    },
+    SendExternalDragLeave {
+        browsing_context_id: TabId,
+    },
+    SendExternalDragDrop {
+        event: ChromeExternalDragDrop,
     },
     SetImeComposition {
         composition: ChromeImeComposition,
@@ -512,6 +527,20 @@ impl From<BrowserCommand> for ChromeCommand {
             } => Self::SendDragCancel {
                 session_id,
                 browsing_context_id: browsing_context_id.into(),
+            },
+            BrowserCommand::SendExternalDragEnter { event } => Self::SendExternalDragEnter {
+                event: event.into(),
+            },
+            BrowserCommand::SendExternalDragUpdate { event } => Self::SendExternalDragUpdate {
+                event: event.into(),
+            },
+            BrowserCommand::SendExternalDragLeave {
+                browsing_context_id,
+            } => Self::SendExternalDragLeave {
+                browsing_context_id: browsing_context_id.into(),
+            },
+            BrowserCommand::SendExternalDragDrop { event } => Self::SendExternalDragDrop {
+                event: event.into(),
             },
             BrowserCommand::SetComposition { composition } => Self::SetImeComposition {
                 composition: composition.into(),

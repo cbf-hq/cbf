@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ChromeEvent::CustomSchemeRequestReceived`
   - `ChromeCommand::RespondCustomSchemeRequest`
   - response metadata for body bytes, MIME type, CSP, and `Access-Control-Allow-Origin`
+- Chromium backend support for host-driven external native drag destinations on macOS, including:
+  - external drag enter/update/leave/drop command transport
+  - negotiated drag-operation observer events
+  - native view and compositor routing for webpage drop targets
 - Chromium backend wiring for browsing context visibility commands through the Rust API and FFI client.
 - macOS surface handle refresh after visibility recovery when the underlying CAContextID changes.
 - Chromium backend wiring for browsing context and extension popup background policy commands.
@@ -37,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BackendStopped` emission now preserves fact-only disconnect reasons; shutdown intent is tracked locally in `ChromiumRuntime` rather than inferred from transport teardown.
 - `simpleapp` now suppresses shutdown-time disconnect warnings and avoids duplicate shutdown requests by consulting `ChromiumRuntime` state.
 - IPC bootstrap moved to renderer-side `window.cbf` installation and host->page delivery now uses isolated-world event dispatch to avoid navigation-time JS execution crashes.
+- macOS external drag pasteboard conversion now follows Chromium's normalized `DropData` population instead of exposing raw platform pasteboard flavor strings through webpage-visible drag data.
+
+### Fixed
+
+- Chrome drag-operation bitmask conversion now maps `Move` to Chromium/AppKit value `16`, restoring external-drop handling for `dropEffect = "move"` targets.
 
 ## [0.1.0-alpha.1] - 2026-03-16
 

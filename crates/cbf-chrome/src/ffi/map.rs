@@ -292,6 +292,11 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 request,
             })
         }
+        CBF_EVENT_EXTERNAL_DRAG_OPERATION_CHANGED => Ok(IpcEvent::ExternalDragOperationChanged {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            operation: drag_operation_from_ffi(event.drag_operation),
+        }),
         CBF_EVENT_EXTENSIONS_LISTED => Ok(IpcEvent::ExtensionsListed {
             profile_id: c_string_to_string(event.profile_id),
             extensions: parse_extension_list(event.extensions),
@@ -504,6 +509,15 @@ fn parse_drag_start_request(request: CbfDragStartRequest) -> ChromeDragStartRequ
             custom_data: parse_string_pair_list(request.data.custom_data),
         },
         image: parse_drag_image(request.image),
+    }
+}
+
+fn drag_operation_from_ffi(operation: u32) -> cbf::data::drag::DragOperation {
+    match operation {
+        1 => cbf::data::drag::DragOperation::Copy,
+        2 => cbf::data::drag::DragOperation::Link,
+        16 => cbf::data::drag::DragOperation::Move,
+        _ => cbf::data::drag::DragOperation::None,
     }
 }
 
@@ -959,6 +973,7 @@ fn prompt_ui_kind_from_ffi(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prompt_ui_kind_from_auxiliary_window_ffi(
     kind: u8,
     extension_id: *mut std::ffi::c_char,
@@ -1070,6 +1085,7 @@ fn prompt_ui_resolution_from_ffi(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prompt_ui_resolution_from_auxiliary_window_ffi(
     kind: u8,
     extension_id: *mut std::ffi::c_char,

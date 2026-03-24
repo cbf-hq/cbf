@@ -21,7 +21,10 @@ use crate::data::{
     browsing_context_open::ChromeBrowsingContextOpenResponse,
     custom_scheme::{ChromeCustomSchemeResponse, ChromeCustomSchemeResponseResult},
     download::ChromeDownloadId,
-    drag::{ChromeDragDrop, ChromeDragUpdate},
+    drag::{
+        ChromeDragData, ChromeDragDrop, ChromeDragUpdate, ChromeExternalDragDrop,
+        ChromeExternalDragEnter, ChromeExternalDragUpdate,
+    },
     extension::ChromeExtensionInfo,
     ids::{PopupId, TabId},
     ime::{
@@ -1376,6 +1379,97 @@ impl IpcClient {
         }
     }
 
+    /// Send an external drag enter event for a native drag destination.
+    pub fn send_external_drag_enter(
+        &mut self,
+        event: &ChromeExternalDragEnter,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let mut owned_data = OwnedDragData::new(&event.data)?;
+        let ffi_event = CbfExternalDragEnter {
+            tab_id: event.browsing_context_id.get(),
+            data: owned_data.as_ffi(),
+            allowed_operations: event.allowed_operations.bits(),
+            modifiers: event.modifiers,
+            position_in_widget_x: event.position_in_widget_x,
+            position_in_widget_y: event.position_in_widget_y,
+            position_in_screen_x: event.position_in_screen_x,
+            position_in_screen_y: event.position_in_screen_y,
+        };
+
+        if unsafe { cbf_bridge_client_send_external_drag_enter(self.inner, &ffi_event) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Send an external drag update event for a native drag destination.
+    pub fn send_external_drag_update(
+        &mut self,
+        event: &ChromeExternalDragUpdate,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let ffi_event = CbfExternalDragUpdate {
+            tab_id: event.browsing_context_id.get(),
+            allowed_operations: event.allowed_operations.bits(),
+            modifiers: event.modifiers,
+            position_in_widget_x: event.position_in_widget_x,
+            position_in_widget_y: event.position_in_widget_y,
+            position_in_screen_x: event.position_in_screen_x,
+            position_in_screen_y: event.position_in_screen_y,
+        };
+
+        if unsafe { cbf_bridge_client_send_external_drag_update(self.inner, &ffi_event) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Notify the backend that the active external drag left the page.
+    pub fn send_external_drag_leave(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe {
+            cbf_bridge_client_send_external_drag_leave(self.inner, browsing_context_id.get())
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    /// Send an external drag drop event for a native drag destination.
+    pub fn send_external_drag_drop(&mut self, event: &ChromeExternalDragDrop) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let ffi_event = CbfExternalDragDrop {
+            tab_id: event.browsing_context_id.get(),
+            modifiers: event.modifiers,
+            position_in_widget_x: event.position_in_widget_x,
+            position_in_widget_y: event.position_in_widget_y,
+            position_in_screen_x: event.position_in_screen_x,
+            position_in_screen_y: event.position_in_screen_y,
+        };
+
+        if unsafe { cbf_bridge_client_send_external_drag_drop(self.inner, &ffi_event) } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
     /// Update the IME composition state.
     pub fn set_composition(&mut self, composition: &ChromeImeComposition) -> Result<(), Error> {
         if self.inner.is_null() {
@@ -1868,6 +1962,153 @@ fn edit_action_to_ffi(action: EditAction) -> u8 {
         EditAction::Copy => CBF_EDIT_ACTION_COPY,
         EditAction::Paste => CBF_EDIT_ACTION_PASTE,
         EditAction::SelectAll => CBF_EDIT_ACTION_SELECT_ALL,
+    }
+}
+
+fn as_ffi_string_ptr(value: &CString) -> *mut c_char {
+    value.as_ptr().cast_mut()
+}
+
+struct OwnedStringList {
+    strings: Vec<CString>,
+    ptrs: Vec<*mut c_char>,
+}
+
+impl OwnedStringList {
+    fn new(values: &[String]) -> Result<Self, Error> {
+        let strings = values
+            .iter()
+            .map(|value| CString::new(value.as_str()).map_err(|_| Error::InvalidInput))
+            .collect::<Result<Vec<_>, _>>()?;
+        let ptrs = strings.iter().map(as_ffi_string_ptr).collect::<Vec<_>>();
+        Ok(Self { strings, ptrs })
+    }
+
+    fn as_ffi(&mut self) -> CbfStringList {
+        let _ = &self.strings;
+        CbfStringList {
+            items: if self.ptrs.is_empty() {
+                ptr::null_mut()
+            } else {
+                self.ptrs.as_mut_ptr()
+            },
+            len: self.ptrs.len() as u32,
+        }
+    }
+}
+
+struct OwnedDragUrlList {
+    strings: Vec<(CString, CString)>,
+    items: Vec<CbfDragUrlInfo>,
+}
+
+impl OwnedDragUrlList {
+    fn new(values: &[crate::data::drag::ChromeDragUrlInfo]) -> Result<Self, Error> {
+        let strings = values
+            .iter()
+            .map(|value| {
+                Ok((
+                    CString::new(value.url.as_str()).map_err(|_| Error::InvalidInput)?,
+                    CString::new(value.title.as_str()).map_err(|_| Error::InvalidInput)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let items = strings
+            .iter()
+            .map(|(url, title)| CbfDragUrlInfo {
+                url: as_ffi_string_ptr(url),
+                title: as_ffi_string_ptr(title),
+            })
+            .collect();
+        Ok(Self { strings, items })
+    }
+
+    fn as_ffi(&self) -> CbfDragUrlInfoList {
+        let _ = &self.strings;
+        CbfDragUrlInfoList {
+            items: if self.items.is_empty() {
+                ptr::null()
+            } else {
+                self.items.as_ptr()
+            },
+            len: self.items.len() as u32,
+        }
+    }
+}
+
+struct OwnedStringPairList {
+    strings: Vec<(CString, CString)>,
+    items: Vec<CbfStringPair>,
+}
+
+impl OwnedStringPairList {
+    fn new(values: &std::collections::BTreeMap<String, String>) -> Result<Self, Error> {
+        let strings = values
+            .iter()
+            .map(|(key, value)| {
+                Ok((
+                    CString::new(key.as_str()).map_err(|_| Error::InvalidInput)?,
+                    CString::new(value.as_str()).map_err(|_| Error::InvalidInput)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let items = strings
+            .iter()
+            .map(|(key, value)| CbfStringPair {
+                key: as_ffi_string_ptr(key),
+                value: as_ffi_string_ptr(value),
+            })
+            .collect();
+        Ok(Self { strings, items })
+    }
+
+    fn as_ffi(&mut self) -> CbfStringPairList {
+        let _ = &self.strings;
+        CbfStringPairList {
+            items: if self.items.is_empty() {
+                ptr::null_mut()
+            } else {
+                self.items.as_mut_ptr()
+            },
+            len: self.items.len() as u32,
+        }
+    }
+}
+
+struct OwnedDragData {
+    text: CString,
+    html: CString,
+    html_base_url: CString,
+    url_infos: OwnedDragUrlList,
+    filenames: OwnedStringList,
+    file_mime_types: OwnedStringList,
+    custom_data: OwnedStringPairList,
+}
+
+impl OwnedDragData {
+    fn new(data: &ChromeDragData) -> Result<Self, Error> {
+        Ok(Self {
+            text: CString::new(data.text.as_str()).map_err(|_| Error::InvalidInput)?,
+            html: CString::new(data.html.as_str()).map_err(|_| Error::InvalidInput)?,
+            html_base_url: CString::new(data.html_base_url.as_str())
+                .map_err(|_| Error::InvalidInput)?,
+            url_infos: OwnedDragUrlList::new(&data.url_infos)?,
+            filenames: OwnedStringList::new(&data.filenames)?,
+            file_mime_types: OwnedStringList::new(&data.file_mime_types)?,
+            custom_data: OwnedStringPairList::new(&data.custom_data)?,
+        })
+    }
+
+    fn as_ffi(&mut self) -> CbfDragData {
+        CbfDragData {
+            text: as_ffi_string_ptr(&self.text),
+            html: as_ffi_string_ptr(&self.html),
+            html_base_url: as_ffi_string_ptr(&self.html_base_url),
+            url_infos: self.url_infos.as_ffi(),
+            filenames: self.filenames.as_ffi(),
+            file_mime_types: self.file_mime_types.as_ffi(),
+            custom_data: self.custom_data.as_ffi(),
+        }
     }
 }
 

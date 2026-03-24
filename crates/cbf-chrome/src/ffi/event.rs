@@ -1,6 +1,7 @@
 use cursor_icon::CursorIcon;
 
 use cbf::data::dialog::DialogType;
+use cbf::data::drag::DragOperation;
 
 use crate::data::{
     choice_menu::ChromeChoiceMenu,
@@ -279,6 +280,12 @@ pub enum IpcEvent {
         profile_id: String,
         browsing_context_id: TabId,
         request: ChromeDragStartRequest,
+    },
+    /// Negotiated operation for the active external drag changed.
+    ExternalDragOperationChanged {
+        profile_id: String,
+        browsing_context_id: TabId,
+        operation: DragOperation,
     },
     /// Shutdown is blocked by dirty pages.
     ///
