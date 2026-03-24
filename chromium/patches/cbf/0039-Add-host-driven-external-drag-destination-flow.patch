@@ -1,0 +1,1299 @@
+From 2b5261554bcbdb3d31cc762ce442dc6af2d75c80 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Tue, 24 Mar 2026 10:49:23 +0900
+Subject: [PATCH 39/39] Add host-driven external drag destination flow
+
+---
+ chrome/browser/cbf/BUILD.gn                   |   1 +
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |   4 +
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |  12 +
+ .../cbf/bridge/cbf_bridge_client_impl.h       |   2 +
+ .../cbf/bridge/cbf_bridge_event_wait_state.h  |   1 +
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |   3 +
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  43 ++
+ chrome/browser/cbf/bridge/cbf_bridge_input.cc | 261 +++++++++++
+ chrome/browser/cbf/bridge/cbf_bridge_mac.mm   | 106 ++---
+ chrome/browser/cbf/cbf_profile_service.cc     |  19 +
+ chrome/browser/cbf/cbf_profile_service.h      |   4 +
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  35 ++
+ .../profile/cbf_profile_drag_controller.cc    | 409 ++++++++++++++++++
+ .../cbf/profile/cbf_profile_drag_controller.h |  38 ++
+ .../cbf_profile_drag_controller_unittest.cc   |  17 +
+ .../cbf/test/cbf_test_profile_observer.cc     |   4 +
+ .../cbf/test/cbf_test_profile_observer.h      |   2 +
+ 17 files changed, 900 insertions(+), 61 deletions(-)
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index 49c3c9a71f0c7..9904b27cd16d5 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -152,6 +152,7 @@ shared_library("cbf_bridge") {
+ 
+   if (is_mac) {
+     sources += [ "bridge/cbf_bridge_mac.mm" ]
++    deps += [ "//content/public/browser" ]
+     frameworks = [ "AppKit.framework" ]
+   }
+ 
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index e454b96ef82e4..a8f699bbefd29 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -58,6 +58,10 @@ class CbfBridgeClient {
+   bool SendDragUpdate(const CbfDragUpdate* update);
+   bool SendDragDrop(const CbfDragDrop* drop);
+   bool SendDragCancel(uint64_t session_id, uint64_t tab_id);
++  bool SendExternalDragEnter(const CbfExternalDragEnter* event);
++  bool SendExternalDragUpdate(const CbfExternalDragUpdate* event);
++  bool SendExternalDragLeave(uint64_t tab_id);
++  bool SendExternalDragDrop(const CbfExternalDragDrop* event);
+   bool SetComposition(const CbfImeComposition* composition);
+   bool CommitText(const CbfImeCommitText* commit);
+   bool FinishComposingText(uint64_t tab_id, uint8_t behavior);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index 806280a82b18e..d229a4cd9fe76 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -686,6 +686,18 @@ void CbfBridgeClientImpl::Observer::OnDragStartRequested(
+   impl_->events.push(std::move(event));
+ }
+ 
++void CbfBridgeClientImpl::Observer::OnExternalDragOperationChanged(
++    uint64_t tab_id,
++    uint32_t operation) {
++  CbfBridgeEventData event;
++  event.kind = kEventExternalDragOperationChanged;
++  event.tab_id = tab_id;
++  event.profile_id = profile_id_;
++  event.drag_operation = operation;
++  std::lock_guard<std::mutex> lock(impl_->events_mutex);
++  impl_->events.push(std::move(event));
++}
++
+ void CbfBridgeClientImpl::Observer::OnExtensionsListed(
+     const std::string& profile_id,
+     std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions) {
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+index 0375535e50567..7cab6c378b2d0 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+@@ -165,6 +165,8 @@ struct CbfBridgeClientImpl {
+                                  cbf::mojom::CbfIpcMessagePtr message) override;
+     void OnDragStartRequested(
+         cbf::mojom::CbfDragStartRequestPtr request) override;
++    void OnExternalDragOperationChanged(uint64_t tab_id,
++                                        uint32_t operation) override;
+     void OnExtensionsListed(
+         const std::string& profile_id,
+         std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions) override;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+index 5571b9940141e..29248d5bc5cc3 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+@@ -52,6 +52,7 @@ struct CbfBridgeEventData {
+   cbf::mojom::CbfContextMenuPtr context_menu;
+   cbf::mojom::CbfChoiceMenuPtr choice_menu;
+   cbf::mojom::CbfDragStartRequestPtr drag_start_request;
++  uint32_t drag_operation = 0;
+   std::string extension_id;
+   std::string extension_name;
+   std::string triggering_extension_name;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index 1999b89885b34..513f45fa9fbb6 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -513,6 +513,9 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     out_event->favicon_url =
+         event.favicon_url.empty() ? nullptr : CopyCString(event.favicon_url);
+   }
++  if (event.kind == kEventExternalDragOperationChanged) {
++    out_event->drag_operation = event.drag_operation;
++  }
+   if (event.kind == kEventDragStartRequested) {
+     if (event.drag_start_request) {
+       out_event->drag_start_request.session_id =
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index 8db6d81214510..3ae42149d4ca0 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -65,6 +65,7 @@ enum CbfEventKind {
+   kEventExtensionPopupChoiceMenuRequested = 45,
+   kEventTabIpcMessageReceived = 46,
+   kEventCustomSchemeRequestReceived = 47,
++  kEventExternalDragOperationChanged = 48,
+   kEventTabCreated = kEventWebPageCreated,
+   kEventNewTabRequested = kEventNewWebPageRequested,
+   kEventTabClosed = kEventWebPageClosed,
+@@ -570,6 +571,36 @@ typedef struct CbfDragDrop {
+   float position_in_screen_y;
+ } CbfDragDrop;
+ 
++typedef struct CbfExternalDragEnter {
++  uint64_t tab_id;
++  CbfDragData data;
++  uint32_t allowed_operations;
++  uint32_t modifiers;
++  float position_in_widget_x;
++  float position_in_widget_y;
++  float position_in_screen_x;
++  float position_in_screen_y;
++} CbfExternalDragEnter;
++
++typedef struct CbfExternalDragUpdate {
++  uint64_t tab_id;
++  uint32_t allowed_operations;
++  uint32_t modifiers;
++  float position_in_widget_x;
++  float position_in_widget_y;
++  float position_in_screen_x;
++  float position_in_screen_y;
++} CbfExternalDragUpdate;
++
++typedef struct CbfExternalDragDrop {
++  uint64_t tab_id;
++  uint32_t modifiers;
++  float position_in_widget_x;
++  float position_in_widget_y;
++  float position_in_screen_x;
++  float position_in_screen_y;
++} CbfExternalDragDrop;
++
+ typedef struct CbfRect {
+   int32_t x;
+   int32_t y;
+@@ -713,6 +744,7 @@ typedef struct CbfBridgeEvent {
+   char* title;
+   char* favicon_url;
+   bool crashed;
++  uint32_t drag_operation;
+   CbfDragStartRequest drag_start_request;
+   CbfExtensionInfoList extensions;
+   char* extension_id;
+@@ -847,6 +879,17 @@ void cbf_bridge_free_converted_drag_data(CbfDragData* data);
+ enum CbfBridgeEventWaitStatus cbf_bridge_client_wait_for_event(
+     CbfBridgeClientHandle* client,
+     int64_t timeout_ms);
++bool cbf_bridge_client_send_external_drag_enter(
++    CbfBridgeClientHandle* client,
++    const CbfExternalDragEnter* event);
++bool cbf_bridge_client_send_external_drag_update(
++    CbfBridgeClientHandle* client,
++    const CbfExternalDragUpdate* event);
++bool cbf_bridge_client_send_external_drag_leave(CbfBridgeClientHandle* client,
++                                                uint64_t tab_id);
++bool cbf_bridge_client_send_external_drag_drop(
++    CbfBridgeClientHandle* client,
++    const CbfExternalDragDrop* event);
+ bool cbf_bridge_client_execute_edit_action(CbfBridgeClientHandle* client,
+                                            uint64_t tab_id,
+                                            uint8_t action);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_input.cc b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
+index c8044fe03c084..e77177c37826b 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_input.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_input.cc
+@@ -10,6 +10,7 @@
+ #include "base/containers/span.h"
+ #include "base/functional/bind.h"
+ #include "base/location.h"
++#include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/cbf/bridge/cbf_bridge_client_impl.h"
+ #include "chrome/browser/cbf/bridge/cbf_bridge_converters.h"
+ #include "chrome/browser/cbf/bridge/cbf_bridge_internal.h"
+@@ -17,6 +18,61 @@
+ 
+ namespace cbf_bridge::internal {
+ 
++namespace {
++
++cbf::mojom::CbfDragDataPtr ConvertCbfDragDataToMojom(const CbfDragData& data) {
++  auto mojom_data = cbf::mojom::CbfDragData::New();
++  mojom_data->text = MaybeCopyString(data.text);
++  mojom_data->html = MaybeCopyString(data.html);
++  mojom_data->html_base_url = MaybeCopyString(data.html_base_url);
++
++  if (data.url_infos.items && data.url_infos.len > 0) {
++    auto infos =
++        UNSAFE_BUFFERS(base::span(data.url_infos.items, data.url_infos.len));
++    mojom_data->url_infos.reserve(infos.size());
++    for (const auto& info : infos) {
++      auto mojom_info = cbf::mojom::CbfDragUrlInfo::New();
++      mojom_info->url = MaybeCopyString(info.url);
++      mojom_info->title = MaybeCopyString(info.title);
++      mojom_data->url_infos.push_back(std::move(mojom_info));
++    }
++  }
++
++  if (data.filenames.items && data.filenames.len > 0) {
++    auto filenames =
++        UNSAFE_BUFFERS(base::span(data.filenames.items, data.filenames.len));
++    mojom_data->filenames.reserve(filenames.size());
++    for (const char* filename : filenames) {
++      mojom_data->filenames.push_back(MaybeCopyString(filename));
++    }
++  }
++
++  if (data.file_mime_types.items && data.file_mime_types.len > 0) {
++    auto mime_types = UNSAFE_BUFFERS(
++        base::span(data.file_mime_types.items, data.file_mime_types.len));
++    mojom_data->file_mime_types.reserve(mime_types.size());
++    for (const char* mime_type : mime_types) {
++      mojom_data->file_mime_types.push_back(MaybeCopyString(mime_type));
++    }
++  }
++
++  if (data.custom_data.items && data.custom_data.len > 0) {
++    auto pairs =
++        UNSAFE_BUFFERS(base::span(data.custom_data.items, data.custom_data.len));
++    mojom_data->custom_data.reserve(pairs.size());
++    for (const auto& pair : pairs) {
++      auto mojom_pair = cbf::mojom::CbfStringPair::New();
++      mojom_pair->key = MaybeCopyString(pair.key);
++      mojom_pair->value = MaybeCopyString(pair.value);
++      mojom_data->custom_data.push_back(std::move(mojom_pair));
++    }
++  }
++
++  return mojom_data;
++}
++
++}  // namespace
++
+ bool CbfBridgeClient::SendKeyEvent(const CbfKeyEvent* event,
+                                    const CbfCommandList* commands) {
+   if (!event) {
+@@ -476,6 +532,171 @@ bool CbfBridgeClient::SendDragCancel(uint64_t session_id, uint64_t tab_id) {
+   return true;
+ }
+ 
++bool CbfBridgeClient::SendExternalDragEnter(const CbfExternalDragEnter* event) {
++  if (!event || !impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++
++  auto mojom_event = cbf::mojom::CbfExternalDragEnter::New();
++  mojom_event->tab_id = event->tab_id;
++  mojom_event->data = ConvertCbfDragDataToMojom(event->data);
++  mojom_event->allowed_operations = event->allowed_operations;
++  mojom_event->modifiers = event->modifiers;
++  mojom_event->position_in_widget_x = event->position_in_widget_x;
++  mojom_event->position_in_widget_y = event->position_in_widget_y;
++  mojom_event->position_in_screen_x = event->position_in_screen_x;
++  mojom_event->position_in_screen_y = event->position_in_screen_y;
++
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl,
++             cbf::mojom::CbfExternalDragEnterPtr event) {
++            if (!impl->browser_remote.is_bound()) {
++              return;
++            }
++            auto it = impl->web_page_profiles.find(event->tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->SendExternalDragEnter(std::move(event));
++          },
++          impl, std::move(mojom_event)));
++  return true;
++}
++
++bool CbfBridgeClient::SendExternalDragUpdate(
++    const CbfExternalDragUpdate* event) {
++  if (!event || !impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++
++  auto mojom_event = cbf::mojom::CbfExternalDragUpdate::New();
++  mojom_event->tab_id = event->tab_id;
++  mojom_event->allowed_operations = event->allowed_operations;
++  mojom_event->modifiers = event->modifiers;
++  mojom_event->position_in_widget_x = event->position_in_widget_x;
++  mojom_event->position_in_widget_y = event->position_in_widget_y;
++  mojom_event->position_in_screen_x = event->position_in_screen_x;
++  mojom_event->position_in_screen_y = event->position_in_screen_y;
++
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl,
++             cbf::mojom::CbfExternalDragUpdatePtr event) {
++            if (!impl->browser_remote.is_bound()) {
++              return;
++            }
++            auto it = impl->web_page_profiles.find(event->tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->SendExternalDragUpdate(std::move(event));
++          },
++          impl, std::move(mojom_event)));
++  return true;
++}
++
++bool CbfBridgeClient::SendExternalDragLeave(uint64_t tab_id) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce([](CbfBridgeClientImpl* impl, uint64_t tab_id) {
++        if (!impl->browser_remote.is_bound()) {
++          return;
++        }
++        auto it = impl->web_page_profiles.find(tab_id);
++        if (it == impl->web_page_profiles.end()) {
++          return;
++        }
++        auto remote_it = impl->profile_connections.find(it->second);
++        if (remote_it == impl->profile_connections.end()) {
++          return;
++        }
++        remote_it->second.remote->SendExternalDragLeave(tab_id);
++      }, impl, tab_id));
++  return true;
++}
++
++bool CbfBridgeClient::SendExternalDragDrop(const CbfExternalDragDrop* event) {
++  if (!event || !impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  if (!impl->browser_remote.is_bound()) {
++    return false;
++  }
++
++  auto mojom_event = cbf::mojom::CbfExternalDragDrop::New();
++  mojom_event->tab_id = event->tab_id;
++  mojom_event->modifiers = event->modifiers;
++  mojom_event->position_in_widget_x = event->position_in_widget_x;
++  mojom_event->position_in_widget_y = event->position_in_widget_y;
++  mojom_event->position_in_screen_x = event->position_in_screen_x;
++  mojom_event->position_in_screen_y = event->position_in_screen_y;
++
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl,
++             cbf::mojom::CbfExternalDragDropPtr event) {
++            if (!impl->browser_remote.is_bound()) {
++              return;
++            }
++            auto it = impl->web_page_profiles.find(event->tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->SendExternalDragDrop(std::move(event));
++          },
++          impl, std::move(mojom_event)));
++  return true;
++}
++
+ bool CbfBridgeClient::SetComposition(const CbfImeComposition* composition) {
+   if (!composition) {
+     return false;
+@@ -901,6 +1122,46 @@ extern "C" bool cbf_bridge_client_send_drag_cancel(
+       ->SendDragCancel(session_id, tab_id);
+ }
+ 
++extern "C" bool cbf_bridge_client_send_external_drag_enter(
++    CbfBridgeClientHandle* client,
++    const CbfExternalDragEnter* event) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->SendExternalDragEnter(event);
++}
++
++extern "C" bool cbf_bridge_client_send_external_drag_update(
++    CbfBridgeClientHandle* client,
++    const CbfExternalDragUpdate* event) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->SendExternalDragUpdate(event);
++}
++
++extern "C" bool cbf_bridge_client_send_external_drag_leave(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->SendExternalDragLeave(tab_id);
++}
++
++extern "C" bool cbf_bridge_client_send_external_drag_drop(
++    CbfBridgeClientHandle* client,
++    const CbfExternalDragDrop* event) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->SendExternalDragDrop(event);
++}
++
+ extern "C" bool cbf_bridge_client_set_composition(
+     CbfBridgeClientHandle* client,
+     const CbfImeComposition* composition) {
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_mac.mm b/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
+index 3de19602ab836..c6db3a06c7ec0 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
++++ b/chrome/browser/cbf/bridge/cbf_bridge_mac.mm
+@@ -7,11 +7,18 @@
+ #include "chrome/browser/cbf/mojom/cbf_browser.mojom.h"
+ #include "components/input/web_input_event_builders_mac.h"
+ #include "components/input/native_web_keyboard_event.h"
++#include "content/public/common/drop_data.h"
+ #include "third_party/blink/public/common/input/web_input_event.h"
+ #include "ui/events/keycodes/dom/keycode_converter.h"
+ #include "ui/events/event_constants.h"
+ #include "ui/events/types/scroll_types.h"
+ 
++namespace content {
++
++DropData PopulateDropDataFromPasteboard(NSPasteboard* pboard);
++
++}  // namespace content
++
+ namespace cbf {
+ 
+ namespace {
+@@ -108,6 +115,42 @@
+   return static_cast<ui::EventPointerType>(pointer_type);
+ }
+ 
++mojom::CbfDragDataPtr ConvertDropDataToMojomDragData(
++    const content::DropData& drop_data) {
++  auto data = mojom::CbfDragData::New();
++  data->text = base::UTF16ToUTF8(drop_data.text.value_or(std::u16string()));
++  data->html = base::UTF16ToUTF8(drop_data.html.value_or(std::u16string()));
++  data->html_base_url = drop_data.html_base_url.spec();
++
++  data->url_infos.reserve(drop_data.url_infos.size());
++  for (const auto& url_info : drop_data.url_infos) {
++    auto info = mojom::CbfDragUrlInfo::New();
++    info->url = url_info.url.spec();
++    info->title = base::UTF16ToUTF8(url_info.title);
++    data->url_infos.push_back(std::move(info));
++  }
++
++  data->filenames.reserve(drop_data.filenames.size());
++  for (const auto& file_info : drop_data.filenames) {
++    data->filenames.push_back(file_info.path.AsUTF8Unsafe());
++  }
++
++  data->file_mime_types.reserve(drop_data.file_mime_types.size());
++  for (const auto& mime_type : drop_data.file_mime_types) {
++    data->file_mime_types.push_back(base::UTF16ToUTF8(mime_type));
++  }
++
++  data->custom_data.reserve(drop_data.custom_data.size());
++  for (const auto& [key, value] : drop_data.custom_data) {
++    auto pair = mojom::CbfStringPair::New();
++    pair->key = base::UTF16ToUTF8(key);
++    pair->value = base::UTF16ToUTF8(value);
++    data->custom_data.push_back(std::move(pair));
++  }
++
++  return data;
++}
++
+ }  // namespace
+ 
+ mojom::CbfKeyEventPtr ConvertNSEventToMojom(void* nsevent, uint64_t tab_id) {
+@@ -223,67 +266,8 @@
+     return nullptr;
+   }
+ 
+-  auto data = mojom::CbfDragData::New();
+-
+-  NSString* text = [pasteboard stringForType:NSPasteboardTypeString];
+-  data->text = text ? std::string([text UTF8String]) : std::string();
+-
+-  NSData* html_data = [pasteboard dataForType:NSPasteboardTypeHTML];
+-  if (html_data) {
+-    NSString* html =
+-        [[NSString alloc] initWithData:html_data encoding:NSUTF8StringEncoding];
+-    data->html = html ? std::string([html UTF8String]) : std::string();
+-  } else {
+-    data->html = std::string();
+-  }
+-
+-  data->html_base_url = std::string();
+-
+-  NSString* url = [pasteboard stringForType:NSPasteboardTypeURL];
+-  if (url) {
+-    auto info = mojom::CbfDragUrlInfo::New();
+-    info->url = std::string([url UTF8String]);
+-    info->title = info->url;
+-    data->url_infos.push_back(std::move(info));
+-  }
+-
+-  NSDictionary* file_url_options = @{
+-    NSPasteboardURLReadingFileURLsOnlyKey : @YES,
+-  };
+-  NSArray<NSURL*>* file_urls = [pasteboard readObjectsForClasses:@[ [NSURL class] ]
+-                                                         options:file_url_options];
+-  if (file_urls) {
+-    data->filenames.reserve([file_urls count]);
+-    for (NSURL* file_url in file_urls) {
+-      if (![file_url isFileURL]) {
+-        continue;
+-      }
+-      data->filenames.push_back(std::string([[file_url path] UTF8String]));
+-    }
+-  }
+-
+-  // MIME types are not consistently available from NSPasteboard for all drag
+-  // sources. Keep this additive field empty when not provided.
+-  data->file_mime_types.clear();
+-
+-  NSArray<NSPasteboardType>* types = [pasteboard types];
+-  for (NSPasteboardType type in types) {
+-    if ([type isEqualToString:NSPasteboardTypeString] ||
+-        [type isEqualToString:NSPasteboardTypeHTML] ||
+-        [type isEqualToString:NSPasteboardTypeURL] ||
+-        [type isEqualToString:NSPasteboardTypeFileURL]) {
+-      continue;
+-    }
+-    NSString* value = [pasteboard stringForType:type];
+-    if (!value || [value length] == 0) {
+-      continue;
+-    }
+-    auto pair = mojom::CbfStringPair::New();
+-    pair->key = std::string([type UTF8String]);
+-    pair->value = std::string([value UTF8String]);
+-    data->custom_data.push_back(std::move(pair));
+-  }
+-  return data;
++  return ConvertDropDataToMojomDragData(
++      content::PopulateDropDataFromPasteboard(pasteboard));
+ }
+ 
+ void ReleaseNSEvent(void* nsevent) {
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index f114ad27b1c7f..3795613a30b48 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -1110,6 +1110,25 @@ void CbfProfileService::SendDragCancel(uint64_t session_id, uint64_t tab_id) {
+   drag_controller_->SendDragCancel(session_id, tab_id);
+ }
+ 
++void CbfProfileService::SendExternalDragEnter(
++    mojom::CbfExternalDragEnterPtr event) {
++  drag_controller_->SendExternalDragEnter(std::move(event));
++}
++
++void CbfProfileService::SendExternalDragUpdate(
++    mojom::CbfExternalDragUpdatePtr event) {
++  drag_controller_->SendExternalDragUpdate(std::move(event));
++}
++
++void CbfProfileService::SendExternalDragLeave(uint64_t tab_id) {
++  drag_controller_->SendExternalDragLeave(tab_id);
++}
++
++void CbfProfileService::SendExternalDragDrop(
++    mojom::CbfExternalDragDropPtr event) {
++  drag_controller_->SendExternalDragDrop(std::move(event));
++}
++
+ void CbfProfileService::SetComposition(
+     mojom::CbfImeCompositionPtr composition) {
+   ime_controller_->SetComposition(std::move(composition));
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 566c5f15a484f..f1b4c61c8c296 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -108,6 +108,10 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void SendDragUpdate(mojom::CbfDragUpdatePtr update) override;
+   void SendDragDrop(mojom::CbfDragDropPtr drop) override;
+   void SendDragCancel(uint64_t session_id, uint64_t tab_id) override;
++  void SendExternalDragEnter(mojom::CbfExternalDragEnterPtr event) override;
++  void SendExternalDragUpdate(mojom::CbfExternalDragUpdatePtr event) override;
++  void SendExternalDragLeave(uint64_t tab_id) override;
++  void SendExternalDragDrop(mojom::CbfExternalDragDropPtr event) override;
+   void SetComposition(mojom::CbfImeCompositionPtr composition) override;
+   void CommitText(mojom::CbfImeCommitTextPtr commit) override;
+   void FinishComposingText(uint64_t tab_id,
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 401093f08fa23..798c5a3da9135 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -590,6 +590,36 @@ struct CbfDragDrop {
+   float position_in_screen_y;
+ };
+ 
++struct CbfExternalDragEnter {
++  uint64 tab_id;
++  CbfDragData data;
++  uint32 allowed_operations;
++  uint32 modifiers;
++  float position_in_widget_x;
++  float position_in_widget_y;
++  float position_in_screen_x;
++  float position_in_screen_y;
++};
++
++struct CbfExternalDragUpdate {
++  uint64 tab_id;
++  uint32 allowed_operations;
++  uint32 modifiers;
++  float position_in_widget_x;
++  float position_in_widget_y;
++  float position_in_screen_x;
++  float position_in_screen_y;
++};
++
++struct CbfExternalDragDrop {
++  uint64 tab_id;
++  uint32 modifiers;
++  float position_in_widget_x;
++  float position_in_widget_y;
++  float position_in_screen_x;
++  float position_in_screen_y;
++};
++
+ struct CbfRect {
+   int32 x;
+   int32 y;
+@@ -790,6 +820,7 @@ interface CbfProfileObserver {
+   OnTabDomHtmlRead(uint64 tab_id, uint64 request_id, string html);
+   OnTabIpcMessageReceived(uint64 tab_id, CbfIpcMessage message);
+   OnDragStartRequested(CbfDragStartRequest request);
++  OnExternalDragOperationChanged(uint64 tab_id, uint32 operation);
+   OnExtensionsListed(string profile_id, array<CbfExtensionInfo> extensions);
+   OnAuxiliaryWindowOpenRequested(CbfAuxiliaryWindowRequest request);
+   OnAuxiliaryWindowResolved(CbfAuxiliaryWindowResolution resolution);
+@@ -822,6 +853,10 @@ interface CbfProfileService {
+   SendDragUpdate(CbfDragUpdate update);
+   SendDragDrop(CbfDragDrop drop);
+   SendDragCancel(uint64 session_id, uint64 tab_id);
++  SendExternalDragEnter(CbfExternalDragEnter event);
++  SendExternalDragUpdate(CbfExternalDragUpdate event);
++  SendExternalDragLeave(uint64 tab_id);
++  SendExternalDragDrop(CbfExternalDragDrop event);
+   SetComposition(CbfImeComposition composition);
+   CommitText(CbfImeCommitText commit);
+   FinishComposingText(uint64 tab_id, CbfConfirmCompositionBehavior behavior);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc b/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
+index bc8691979be64..7776b9259f823 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller.cc
+@@ -4,16 +4,79 @@
+ #include <utility>
+ #include <vector>
+ 
++#include "base/files/file_path.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
+ #include "content/browser/renderer_host/render_widget_host_impl.h"
++#include "content/browser/renderer_host/render_widget_host_view_base.h"
++#include "content/browser/web_contents/web_contents_impl.h"
++#include "content/public/browser/web_contents_delegate.h"
++#include "ui/base/clipboard/file_info.h"
+ #include "ui/gfx/codec/png_codec.h"
++#include "url/gurl.h"
+ #include "url/origin.h"
+ 
+ namespace cbf {
+ 
++namespace {
++
++content::DropData ConvertExternalDragData(const mojom::CbfDragData* data) {
++  content::DropData drop_data;
++  if (!data) {
++    return drop_data;
++  }
++
++  if (!data->text.empty()) {
++    drop_data.text = base::UTF8ToUTF16(data->text);
++  }
++  if (!data->html.empty()) {
++    drop_data.html = base::UTF8ToUTF16(data->html);
++  }
++  if (!data->html_base_url.empty()) {
++    drop_data.html_base_url = GURL(data->html_base_url);
++  }
++
++  drop_data.url_infos.reserve(data->url_infos.size());
++  for (const auto& url_info : data->url_infos) {
++    if (!url_info) {
++      continue;
++    }
++    drop_data.url_infos.push_back(
++        ui::ClipboardUrlInfo{GURL(url_info->url),
++                             base::UTF8ToUTF16(url_info->title)});
++  }
++
++  drop_data.filenames.reserve(data->filenames.size());
++  for (const auto& filename : data->filenames) {
++    drop_data.filenames.push_back(
++        ui::FileInfo(base::FilePath::FromUTF8Unsafe(filename),
++                     base::FilePath()));
++  }
++
++  drop_data.file_mime_types.reserve(data->file_mime_types.size());
++  for (const auto& mime_type : data->file_mime_types) {
++    drop_data.file_mime_types.push_back(base::UTF8ToUTF16(mime_type));
++  }
++
++  for (const auto& pair : data->custom_data) {
++    if (!pair) {
++      continue;
++    }
++    drop_data.custom_data[base::UTF8ToUTF16(pair->key)] =
++        base::UTF8ToUTF16(pair->value);
++  }
++
++  return drop_data;
++}
++
++content::WebContentsImpl* AsWebContentsImpl(content::WebContents* web_contents) {
++  return static_cast<content::WebContentsImpl*>(web_contents);
++}
++
++}  // namespace
++
+ CbfProfileDragController::CbfProfileDragController(CbfProfileServiceContext* context)
+     : context_(context) {}
+ 
+@@ -32,6 +95,14 @@ CbfProfileDragController::DragSessionState::operator=(DragSessionState&&) =
+     default;
+ CbfProfileDragController::DragSessionState::~DragSessionState() = default;
+ 
++CbfProfileDragController::ExternalDragState::ExternalDragState() = default;
++CbfProfileDragController::ExternalDragState::ExternalDragState(
++    ExternalDragState&&) = default;
++CbfProfileDragController::ExternalDragState&
++CbfProfileDragController::ExternalDragState::operator=(ExternalDragState&&) =
++    default;
++CbfProfileDragController::ExternalDragState::~ExternalDragState() = default;
++
+ void CbfProfileDragController::NotifyDragStartRequested(
+     content::WebContents* web_contents,
+     const content::DropData& drop_data,
+@@ -235,6 +306,340 @@ void CbfProfileDragController::SendDragCancel(uint64_t session_id,
+   session.source_rwh->DragSourceSystemDragEnded();
+ }
+ 
++void CbfProfileDragController::SendExternalDragEnter(
++    mojom::CbfExternalDragEnterPtr event) {
++  if (!event) {
++    return;
++  }
++
++  if (external_drag_state_) {
++    SendExternalDragLeave(external_drag_state_->tab_id);
++  }
++
++  content::WebContentsImpl* web_contents =
++      AsWebContentsImpl(context_->tab_manager().GetWebContents(event->tab_id));
++  if (!web_contents || !web_contents->GetRenderWidgetHostView()) {
++    return;
++  }
++
++  ExternalDragState state;
++  state.generation = next_external_drag_generation_++;
++  state.tab_id = event->tab_id;
++  state.drop_data_unfiltered = ConvertExternalDragData(event->data.get());
++  external_drag_state_.emplace(std::move(state));
++
++  const gfx::PointF client_point(event->position_in_widget_x,
++                                 event->position_in_widget_y);
++  const gfx::PointF screen_point(event->position_in_screen_x,
++                                 event->position_in_screen_y);
++  const blink::DragOperationsMask allowed_ops =
++      static_cast<blink::DragOperationsMask>(event->allowed_operations);
++  const int modifiers = static_cast<int>(event->modifiers);
++  const uint64_t generation = external_drag_state_->generation;
++  const uint64_t sequence = ++external_drag_state_->enter_sequence;
++
++  web_contents->GetRenderWidgetHostAtPointAsynchronously(
++      static_cast<content::RenderWidgetHostViewBase*>(
++          web_contents->GetRenderWidgetHostView()),
++      client_point,
++      base::BindOnce(
++          [](base::WeakPtr<CbfProfileDragController> self, uint64_t generation,
++             uint64_t sequence, gfx::PointF screen_point,
++             blink::DragOperationsMask allowed_ops, int modifiers,
++             base::WeakPtr<content::RenderWidgetHostViewBase> target_view,
++             std::optional<gfx::PointF> transformed_point) {
++            if (!self || !transformed_point.has_value() ||
++                !self->external_drag_state_ ||
++                self->external_drag_state_->generation != generation ||
++                self->external_drag_state_->enter_sequence != sequence) {
++              return;
++            }
++
++            content::WebContentsImpl* web_contents = AsWebContentsImpl(
++                self->context_->tab_manager().GetWebContents(
++                    self->external_drag_state_->tab_id));
++            if (!web_contents || !target_view) {
++              self->ResetExternalDragState();
++              return;
++            }
++
++            auto* rwh = target_view->GetRenderWidgetHost();
++            auto* target_rwh = content::RenderWidgetHostImpl::From(rwh);
++            if (!target_rwh) {
++              self->ResetExternalDragState();
++              return;
++            }
++
++            auto filtered = std::make_unique<content::DropData>(
++                self->external_drag_state_->drop_data_unfiltered);
++            target_rwh->FilterDropData(filtered.get());
++
++            if (auto* delegate = web_contents->GetDelegate();
++                delegate &&
++                !delegate->CanDragEnter(web_contents, *filtered, allowed_ops)) {
++              self->NotifyExternalDragOperationChanged(
++                  self->external_drag_state_->tab_id,
++                  ui::mojom::DragOperation::kNone);
++              self->external_drag_state_->last_operation =
++                  ui::mojom::DragOperation::kNone;
++              self->external_drag_state_->drop_data_filtered.reset();
++              self->external_drag_state_->current_target_rwh.reset();
++              return;
++            }
++
++            self->external_drag_state_->drop_data_filtered = std::move(filtered);
++            self->external_drag_state_->current_target_rwh =
++                target_rwh->GetWeakPtr();
++            target_rwh->DragTargetDragEnter(
++                *self->external_drag_state_->drop_data_filtered,
++                *transformed_point, screen_point, allowed_ops, modifiers,
++                base::BindOnce(
++                    &CbfProfileDragController::OnExternalDragOperationResolved,
++                    self, generation, self->external_drag_state_->tab_id));
++          },
++          weak_factory_.GetWeakPtr(), generation, sequence, screen_point,
++          allowed_ops, modifiers));
++}
++
++void CbfProfileDragController::SendExternalDragUpdate(
++    mojom::CbfExternalDragUpdatePtr event) {
++  if (!event || !external_drag_state_ ||
++      external_drag_state_->tab_id != event->tab_id) {
++    return;
++  }
++
++  content::WebContentsImpl* web_contents =
++      AsWebContentsImpl(context_->tab_manager().GetWebContents(event->tab_id));
++  if (!web_contents || !web_contents->GetRenderWidgetHostView()) {
++    ResetExternalDragState();
++    return;
++  }
++
++  const gfx::PointF client_point(event->position_in_widget_x,
++                                 event->position_in_widget_y);
++  const gfx::PointF screen_point(event->position_in_screen_x,
++                                 event->position_in_screen_y);
++  const blink::DragOperationsMask allowed_ops =
++      static_cast<blink::DragOperationsMask>(event->allowed_operations);
++  const int modifiers = static_cast<int>(event->modifiers);
++  const uint64_t generation = external_drag_state_->generation;
++  const uint64_t sequence = ++external_drag_state_->update_sequence;
++
++  web_contents->PreHandleDragUpdate(external_drag_state_->drop_data_unfiltered,
++                                    client_point);
++
++  web_contents->GetRenderWidgetHostAtPointAsynchronously(
++      static_cast<content::RenderWidgetHostViewBase*>(
++          web_contents->GetRenderWidgetHostView()),
++      client_point,
++      base::BindOnce(
++          [](base::WeakPtr<CbfProfileDragController> self, uint64_t generation,
++             uint64_t sequence, gfx::PointF client_point,
++             gfx::PointF screen_point, blink::DragOperationsMask allowed_ops,
++             int modifiers,
++             base::WeakPtr<content::RenderWidgetHostViewBase> target_view,
++             std::optional<gfx::PointF> transformed_point) {
++            if (!self || !transformed_point.has_value() ||
++                !self->external_drag_state_ ||
++                self->external_drag_state_->generation != generation ||
++                self->external_drag_state_->update_sequence != sequence) {
++              return;
++            }
++
++            content::WebContentsImpl* web_contents = AsWebContentsImpl(
++                self->context_->tab_manager().GetWebContents(
++                    self->external_drag_state_->tab_id));
++            if (!web_contents || !target_view) {
++              self->ResetExternalDragState();
++              return;
++            }
++
++            auto* rwh = target_view->GetRenderWidgetHost();
++            auto* target_rwh = content::RenderWidgetHostImpl::From(rwh);
++            if (!target_rwh) {
++              self->ResetExternalDragState();
++              return;
++            }
++
++            if (self->external_drag_state_->current_target_rwh &&
++                self->external_drag_state_->current_target_rwh.get() !=
++                    target_rwh) {
++              self->external_drag_state_->current_target_rwh->DragTargetDragLeave(
++                  gfx::PointF(), gfx::PointF());
++              self->external_drag_state_->drop_data_filtered.reset();
++            }
++
++            if (!self->external_drag_state_->current_target_rwh ||
++                self->external_drag_state_->current_target_rwh.get() !=
++                    target_rwh ||
++                !self->external_drag_state_->drop_data_filtered) {
++              auto filtered = std::make_unique<content::DropData>(
++                  self->external_drag_state_->drop_data_unfiltered);
++              target_rwh->FilterDropData(filtered.get());
++              if (auto* delegate = web_contents->GetDelegate();
++                  delegate &&
++                  !delegate->CanDragEnter(web_contents, *filtered,
++                                          allowed_ops)) {
++                self->NotifyExternalDragOperationChanged(
++                    self->external_drag_state_->tab_id,
++                    ui::mojom::DragOperation::kNone);
++                self->external_drag_state_->last_operation =
++                    ui::mojom::DragOperation::kNone;
++                self->external_drag_state_->drop_data_filtered.reset();
++                self->external_drag_state_->current_target_rwh.reset();
++                return;
++              }
++
++              self->external_drag_state_->drop_data_filtered =
++                  std::move(filtered);
++              self->external_drag_state_->current_target_rwh =
++                  target_rwh->GetWeakPtr();
++              target_rwh->DragTargetDragEnter(
++                  *self->external_drag_state_->drop_data_filtered,
++                  *transformed_point, screen_point, allowed_ops, modifiers,
++                  base::BindOnce(
++                      &CbfProfileDragController::OnExternalDragOperationResolved,
++                      self, generation, self->external_drag_state_->tab_id));
++            }
++
++            target_rwh->DragTargetDragOver(
++                *transformed_point, screen_point, allowed_ops, modifiers,
++                base::BindOnce(
++                    &CbfProfileDragController::OnExternalDragOperationResolved,
++                    self, generation, self->external_drag_state_->tab_id));
++          },
++          weak_factory_.GetWeakPtr(), generation, sequence, client_point,
++          screen_point, allowed_ops, modifiers));
++}
++
++void CbfProfileDragController::SendExternalDragLeave(uint64_t tab_id) {
++  if (!external_drag_state_ || external_drag_state_->tab_id != tab_id) {
++    return;
++  }
++
++  content::WebContentsImpl* web_contents =
++      AsWebContentsImpl(context_->tab_manager().GetWebContents(tab_id));
++  if (web_contents) {
++    web_contents->PreHandleDragExit();
++  }
++  if (external_drag_state_->current_target_rwh) {
++    external_drag_state_->current_target_rwh->DragTargetDragLeave(
++        gfx::PointF(), gfx::PointF());
++  }
++  ResetExternalDragState();
++}
++
++void CbfProfileDragController::SendExternalDragDrop(
++    mojom::CbfExternalDragDropPtr event) {
++  if (!event || !external_drag_state_ ||
++      external_drag_state_->tab_id != event->tab_id) {
++    return;
++  }
++
++  content::WebContentsImpl* web_contents =
++      AsWebContentsImpl(context_->tab_manager().GetWebContents(event->tab_id));
++  if (!web_contents || !web_contents->GetRenderWidgetHostView()) {
++    ResetExternalDragState();
++    return;
++  }
++
++  const gfx::PointF client_point(event->position_in_widget_x,
++                                 event->position_in_widget_y);
++  const gfx::PointF screen_point(event->position_in_screen_x,
++                                 event->position_in_screen_y);
++  const int modifiers = static_cast<int>(event->modifiers);
++  const uint64_t generation = external_drag_state_->generation;
++  const uint64_t sequence = ++external_drag_state_->drop_sequence;
++
++  web_contents->GetRenderWidgetHostAtPointAsynchronously(
++      static_cast<content::RenderWidgetHostViewBase*>(
++          web_contents->GetRenderWidgetHostView()),
++      client_point,
++      base::BindOnce(
++          [](base::WeakPtr<CbfProfileDragController> self, uint64_t generation,
++             uint64_t sequence, gfx::PointF screen_point, int modifiers,
++             base::WeakPtr<content::RenderWidgetHostViewBase> target_view,
++             std::optional<gfx::PointF> transformed_point) {
++            if (!self || !transformed_point.has_value() ||
++                !self->external_drag_state_ ||
++                self->external_drag_state_->generation != generation ||
++                self->external_drag_state_->drop_sequence != sequence) {
++              return;
++            }
++
++            auto clear_state = base::ScopedClosureRunner(base::BindOnce(
++                &CbfProfileDragController::ResetExternalDragState, self,
++                true));
++
++            auto* rwh = target_view ? target_view->GetRenderWidgetHost() : nullptr;
++            auto* target_rwh = content::RenderWidgetHostImpl::From(rwh);
++            if (!target_rwh) {
++              return;
++            }
++
++            if (!self->external_drag_state_->drop_data_filtered ||
++                !self->external_drag_state_->current_target_rwh ||
++                self->external_drag_state_->current_target_rwh.get() !=
++                    target_rwh) {
++              auto filtered = std::make_unique<content::DropData>(
++                  self->external_drag_state_->drop_data_unfiltered);
++              target_rwh->FilterDropData(filtered.get());
++              self->external_drag_state_->drop_data_filtered =
++                  std::move(filtered);
++              self->external_drag_state_->current_target_rwh =
++                  target_rwh->GetWeakPtr();
++            }
++
++            content::DropData drop_data =
++                *self->external_drag_state_->drop_data_filtered;
++            drop_data.document_is_handling_drag =
++                self->external_drag_state_->document_is_handling_drag;
++            target_rwh->DragTargetDrop(drop_data, *transformed_point,
++                                       screen_point, modifiers,
++                                       base::DoNothing());
++          },
++          weak_factory_.GetWeakPtr(), generation, sequence, screen_point,
++          modifiers));
++}
++
++void CbfProfileDragController::NotifyExternalDragOperationChanged(
++    TabId tab_id,
++    ui::mojom::DragOperation operation) {
++  if (!context_->observer_remote().is_bound()) {
++    return;
++  }
++  context_->observer_remote()->OnExternalDragOperationChanged(
++      tab_id, static_cast<uint32_t>(operation));
++}
++
++void CbfProfileDragController::ResetExternalDragState(bool notify_operation) {
++  if (!external_drag_state_) {
++    return;
++  }
++
++  const TabId tab_id = external_drag_state_->tab_id;
++  external_drag_state_.reset();
++  if (notify_operation) {
++    NotifyExternalDragOperationChanged(tab_id,
++                                       ui::mojom::DragOperation::kNone);
++  }
++}
++
++void CbfProfileDragController::OnExternalDragOperationResolved(
++    uint64_t generation,
++    TabId tab_id,
++    ui::mojom::DragOperation operation,
++    bool document_is_handling_drag) {
++  if (!external_drag_state_ || external_drag_state_->generation != generation ||
++      external_drag_state_->tab_id != tab_id) {
++    return;
++  }
++
++  external_drag_state_->last_operation = operation;
++  external_drag_state_->document_is_handling_drag = document_is_handling_drag;
++  NotifyExternalDragOperationChanged(tab_id, operation);
++}
++
+ void CbfProfileDragController::OnTabClosed(TabId tab_id) {
+   for (auto it = drag_sessions_.begin(); it != drag_sessions_.end();) {
+     if (it->second.tab_id == tab_id) {
+@@ -243,6 +648,10 @@ void CbfProfileDragController::OnTabClosed(TabId tab_id) {
+       ++it;
+     }
+   }
++
++  if (external_drag_state_ && external_drag_state_->tab_id == tab_id) {
++    ResetExternalDragState();
++  }
+ }
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller.h b/chrome/browser/cbf/profile/cbf_profile_drag_controller.h
+index 099820b79b000..d18b76c3dafc2 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_drag_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller.h
+@@ -2,6 +2,8 @@
+ #define CHROME_BROWSER_CBF_PROFILE_CBF_PROFILE_DRAG_CONTROLLER_H_
+ 
+ #include <cstdint>
++#include <memory>
++#include <optional>
+ 
+ #include "base/containers/flat_map.h"
+ #include "base/memory/raw_ptr.h"
+@@ -48,6 +50,10 @@ class CbfProfileDragController {
+   void SendDragUpdate(mojom::CbfDragUpdatePtr update);
+   void SendDragDrop(mojom::CbfDragDropPtr drop);
+   void SendDragCancel(uint64_t session_id, uint64_t tab_id);
++  void SendExternalDragEnter(mojom::CbfExternalDragEnterPtr event);
++  void SendExternalDragUpdate(mojom::CbfExternalDragUpdatePtr event);
++  void SendExternalDragLeave(uint64_t tab_id);
++  void SendExternalDragDrop(mojom::CbfExternalDragDropPtr event);
+   void OnTabClosed(TabId tab_id);
+ 
+  private:
+@@ -67,9 +73,41 @@ class CbfProfileDragController {
+     ui::mojom::DragOperation last_operation = ui::mojom::DragOperation::kNone;
+   };
+ 
++  struct ExternalDragState {
++    ExternalDragState();
++    ExternalDragState(const ExternalDragState&) = delete;
++    ExternalDragState& operator=(const ExternalDragState&) = delete;
++    ExternalDragState(ExternalDragState&&);
++    ExternalDragState& operator=(ExternalDragState&&);
++    ~ExternalDragState();
++
++    uint64_t generation = 0;
++    TabId tab_id = kInvalidTabId;
++    content::DropData drop_data_unfiltered;
++    std::unique_ptr<content::DropData> drop_data_filtered;
++    base::WeakPtr<content::RenderWidgetHostImpl> current_target_rwh;
++    bool document_is_handling_drag = false;
++    ui::mojom::DragOperation last_operation = ui::mojom::DragOperation::kNone;
++    uint64_t enter_sequence = 0;
++    uint64_t update_sequence = 0;
++    uint64_t drop_sequence = 0;
++  };
++
++  void NotifyExternalDragOperationChanged(
++      TabId tab_id,
++      ui::mojom::DragOperation operation);
++  void ResetExternalDragState(bool notify_operation = true);
++  void OnExternalDragOperationResolved(
++      uint64_t generation,
++      TabId tab_id,
++      ui::mojom::DragOperation operation,
++      bool document_is_handling_drag);
++
+   raw_ptr<CbfProfileServiceContext> context_;
+   uint64_t next_drag_session_id_ = 1;
++  uint64_t next_external_drag_generation_ = 1;
+   base::flat_map<uint64_t, DragSessionState> drag_sessions_;
++  std::optional<ExternalDragState> external_drag_state_;
+   base::WeakPtrFactory<CbfProfileDragController> weak_factory_{this};
+ };
+ 
+diff --git a/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc b/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
+index f39ba0694717b..b0f9ee1dadb82 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_drag_controller_unittest.cc
+@@ -41,6 +41,23 @@ TEST_F(CbfProfileDragControllerTest, InvalidSessionOperationsAreNoOp) {
+   controller_.SendDragCancel(9999, kInvalidTabId);
+ }
+ 
++TEST_F(CbfProfileDragControllerTest, InvalidExternalDragOperationsAreNoOp) {
++  auto enter = mojom::CbfExternalDragEnter::New();
++  enter->tab_id = kInvalidTabId;
++  enter->data = mojom::CbfDragData::New();
++  controller_.SendExternalDragEnter(std::move(enter));
++
++  auto update = mojom::CbfExternalDragUpdate::New();
++  update->tab_id = kInvalidTabId;
++  controller_.SendExternalDragUpdate(std::move(update));
++
++  auto drop = mojom::CbfExternalDragDrop::New();
++  drop->tab_id = kInvalidTabId;
++  controller_.SendExternalDragDrop(std::move(drop));
++
++  controller_.SendExternalDragLeave(kInvalidTabId);
++}
++
+ TEST_F(CbfProfileDragControllerTest, DuplicateCloseIsSafe) {
+   controller_.OnTabClosed(42);
+   controller_.OnTabClosed(42);
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index c5431e4dd42c8..ae550c35bdbd9 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -773,6 +773,10 @@ void CbfTestProfileObserver::OnTabIpcMessageReceived(
+ void CbfTestProfileObserver::OnDragStartRequested(
+     cbf::mojom::CbfDragStartRequestPtr request) {}
+ 
++void CbfTestProfileObserver::OnExternalDragOperationChanged(
++    uint64_t tab_id,
++    uint32_t operation) {}
++
+ void CbfTestProfileObserver::OnExtensionsListed(
+     const std::string& profile_id,
+     std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions) {}
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index e932fa0ce9325..c91fbed1075fe 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -556,6 +556,8 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void OnTabIpcMessageReceived(uint64_t tab_id,
+                                cbf::mojom::CbfIpcMessagePtr message) override;
+   void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
++  void OnExternalDragOperationChanged(uint64_t tab_id,
++                                      uint32_t operation) override;
+   void OnExtensionsListed(
+       const std::string& profile_id,
+       std::vector<cbf::mojom::CbfExtensionInfoPtr> extensions) override;
+-- 
+2.50.1 (Apple Git-155)
+
