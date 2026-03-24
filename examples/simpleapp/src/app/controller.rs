@@ -1182,7 +1182,8 @@ impl AppController {
             | BrowsingContextEvent::DomHtmlRead { .. }
             | BrowsingContextEvent::ExtensionRuntimeWarning { .. }
             | BrowsingContextEvent::SelectionChanged { .. }
-            | BrowsingContextEvent::ScrollPositionChanged { .. } => Vec::new(),
+            | BrowsingContextEvent::ScrollPositionChanged { .. }
+            | BrowsingContextEvent::ExternalDragOperationChanged { .. } => Vec::new(),
         }
     }
 

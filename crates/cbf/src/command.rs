@@ -9,7 +9,7 @@ use crate::data::{
     browsing_context_open::BrowsingContextOpenResponse,
     dialog::DialogResponse,
     download::DownloadId,
-    drag::{DragDrop, DragUpdate},
+    drag::{DragDrop, DragUpdate, ExternalDragDrop, ExternalDragEnter, ExternalDragUpdate},
     edit::EditAction,
     ids::{BrowsingContextId, TransientBrowsingContextId},
     ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
@@ -226,6 +226,16 @@ pub enum BrowserCommand {
         session_id: u64,
         browsing_context_id: BrowsingContextId,
     },
+    /// Deliver a native external drag enter event to the page.
+    SendExternalDragEnter { event: ExternalDragEnter },
+    /// Deliver a native external drag update event to the page.
+    SendExternalDragUpdate { event: ExternalDragUpdate },
+    /// Notify the backend that the native external drag left the page.
+    SendExternalDragLeave {
+        browsing_context_id: BrowsingContextId,
+    },
+    /// Deliver a native external drag drop event to the page.
+    SendExternalDragDrop { event: ExternalDragDrop },
     /// Update the current IME composition state.
     ///
     /// `ImeComposition` carries browser-generic span data and may include
@@ -348,6 +358,10 @@ pub enum BrowserOperation {
     SendDragUpdate,
     SendDragDrop,
     SendDragCancel,
+    SendExternalDragEnter,
+    SendExternalDragUpdate,
+    SendExternalDragLeave,
+    SendExternalDragDrop,
     SetComposition,
     CommitText,
     SetTransientComposition,
@@ -434,6 +448,10 @@ impl BrowserOperation {
             BrowserCommand::SendDragUpdate { .. } => Self::SendDragUpdate,
             BrowserCommand::SendDragDrop { .. } => Self::SendDragDrop,
             BrowserCommand::SendDragCancel { .. } => Self::SendDragCancel,
+            BrowserCommand::SendExternalDragEnter { .. } => Self::SendExternalDragEnter,
+            BrowserCommand::SendExternalDragUpdate { .. } => Self::SendExternalDragUpdate,
+            BrowserCommand::SendExternalDragLeave { .. } => Self::SendExternalDragLeave,
+            BrowserCommand::SendExternalDragDrop { .. } => Self::SendExternalDragDrop,
             BrowserCommand::SetComposition { .. } => Self::SetComposition,
             BrowserCommand::CommitText { .. } => Self::CommitText,
             BrowserCommand::SetTransientComposition { .. } => Self::SetTransientComposition,
@@ -512,6 +530,10 @@ impl std::fmt::Display for BrowserOperation {
             Self::SendDragUpdate => "send_drag_update",
             Self::SendDragDrop => "send_drag_drop",
             Self::SendDragCancel => "send_drag_cancel",
+            Self::SendExternalDragEnter => "send_external_drag_enter",
+            Self::SendExternalDragUpdate => "send_external_drag_update",
+            Self::SendExternalDragLeave => "send_external_drag_leave",
+            Self::SendExternalDragDrop => "send_external_drag_drop",
             Self::SetComposition => "set_composition",
             Self::CommitText => "commit_text",
             Self::SetTransientComposition => "set_transient_composition",

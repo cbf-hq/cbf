@@ -14,7 +14,7 @@ use crate::data::{
     context_menu::ContextMenu,
     dialog::{BeforeUnloadReason, DialogType},
     download::{DownloadId, DownloadOutcome, DownloadState},
-    drag::DragStartRequest,
+    drag::{DragOperation, DragStartRequest},
     extension::ExtensionInfo,
     ids::{BrowsingContextId, TransientBrowsingContextId},
     ime::ImeBoundsUpdate,
@@ -307,6 +307,9 @@ pub enum BrowsingContextEvent {
     ///
     /// Carries browser-generic drag payload only.
     DragStartRequested { request: DragStartRequest },
+
+    /// The negotiated operation for an active external drag changed.
+    ExternalDragOperationChanged { operation: DragOperation },
 
     /// Non-fatal extension runtime warning.
     ExtensionRuntimeWarning { detail: String },

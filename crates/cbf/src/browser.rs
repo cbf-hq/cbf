@@ -8,7 +8,7 @@ use crate::{
         auxiliary_window::{AuxiliaryWindowId, AuxiliaryWindowResponse},
         browsing_context_open::BrowsingContextOpenResponse,
         download::DownloadId,
-        drag::{DragDrop, DragUpdate},
+        drag::{DragDrop, DragUpdate, ExternalDragDrop, ExternalDragEnter, ExternalDragUpdate},
         edit::EditAction,
         ids::{BrowsingContextId, TransientBrowsingContextId},
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
@@ -530,6 +530,31 @@ impl<B: Backend> BrowserHandle<B> {
             session_id,
             browsing_context_id,
         })
+    }
+
+    /// Send an external drag enter event to the web page.
+    pub fn send_external_drag_enter(&self, event: ExternalDragEnter) -> Result<(), Error> {
+        self.send(BrowserCommand::SendExternalDragEnter { event })
+    }
+
+    /// Send an external drag update event to the web page.
+    pub fn send_external_drag_update(&self, event: ExternalDragUpdate) -> Result<(), Error> {
+        self.send(BrowserCommand::SendExternalDragUpdate { event })
+    }
+
+    /// Notify the backend that an external drag left the web page.
+    pub fn send_external_drag_leave(
+        &self,
+        browsing_context_id: BrowsingContextId,
+    ) -> Result<(), Error> {
+        self.send(BrowserCommand::SendExternalDragLeave {
+            browsing_context_id,
+        })
+    }
+
+    /// Send an external drag drop event to the web page.
+    pub fn send_external_drag_drop(&self, event: ExternalDragDrop) -> Result<(), Error> {
+        self.send(BrowserCommand::SendExternalDragDrop { event })
     }
 
     /// Update the current IME composition state.

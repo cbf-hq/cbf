@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SetBrowsingContextVisibility` command support for host-driven visibility changes.
 - Browser-generic background policy control for browsing contexts and transient browsing contexts.
 - `BackgroundPolicy` command support for host-driven opaque and transparent embedded surface behavior.
+- Browser-generic external drag destination data models:
+  - `ExternalDragEnter`
+  - `ExternalDragUpdate`
+  - `ExternalDragDrop`
+- Browser commands for host-driven external drag destination handling:
+  - `SendExternalDragEnter`
+  - `SendExternalDragUpdate`
+  - `SendExternalDragLeave`
+  - `SendExternalDragDrop`
+- Browsing-context event `BrowsingContextEvent::ExternalDragOperationChanged` so hosts can mirror the latest negotiated external drag operation in native UI.
 - `BrowserSession::force_close()` for host-driven immediate shutdown without beforeunload confirmations.
 - Browser-generic browsing-context IPC command surface with `EnableIpc`, `DisableIpc`, and `PostBrowsingContextIpcMessage`.
 - Browser-generic IPC data models in `cbf::data::ipc` for config, payload, message type, error code, and message envelope.

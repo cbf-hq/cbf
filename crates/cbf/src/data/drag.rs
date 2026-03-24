@@ -118,6 +118,42 @@ pub struct DragUpdate {
     pub position_in_screen_y: f32,
 }
 
+/// External drag enter payload delivered when a native drag first enters a page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternalDragEnter {
+    pub browsing_context_id: BrowsingContextId,
+    pub data: DragData,
+    pub allowed_operations: DragOperations,
+    pub modifiers: u32,
+    pub position_in_widget_x: f32,
+    pub position_in_widget_y: f32,
+    pub position_in_screen_x: f32,
+    pub position_in_screen_y: f32,
+}
+
+/// External drag update payload delivered while a native drag hovers over a page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternalDragUpdate {
+    pub browsing_context_id: BrowsingContextId,
+    pub allowed_operations: DragOperations,
+    pub modifiers: u32,
+    pub position_in_widget_x: f32,
+    pub position_in_widget_y: f32,
+    pub position_in_screen_x: f32,
+    pub position_in_screen_y: f32,
+}
+
+/// External drag drop payload delivered when a native drag is dropped on a page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternalDragDrop {
+    pub browsing_context_id: BrowsingContextId,
+    pub modifiers: u32,
+    pub position_in_widget_x: f32,
+    pub position_in_widget_y: f32,
+    pub position_in_screen_x: f32,
+    pub position_in_screen_y: f32,
+}
+
 /// Drop event payload delivered when the user releases a drag.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragDrop {
