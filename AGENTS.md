@@ -3,7 +3,7 @@
 ## Project
 
 CBF (Chromium Browser Framework) — reusable browser backend framework for Rust.
-Framework development only; not product-specific. Currently private; breaking changes are acceptable.
+Framework development only; not product-specific. Currently alpha-stage; breaking changes are acceptable.
 
 **Language:** conversations follow first-used language; code comments, docs, and commits in English.
 
