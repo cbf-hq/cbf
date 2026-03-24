@@ -179,6 +179,94 @@ pub const CMD_CONTENT_SELECT_ALL: i32 = 50156;
 pub const CMD_CONTENT_PASTE_AND_MATCH_STYLE: i32 = 50157;
 /// Command id for inspecting element via DevTools.
 pub const CMD_CONTENT_INSPECT_ELEMENT: i32 = 50162;
+/// DevTools command id for storing a node as a global variable.
+pub const CMD_DEVTOOLS_STORE_AS_GLOBAL_VARIABLE: i32 = 47000;
+/// DevTools command id for adding an attribute to a node.
+pub const CMD_DEVTOOLS_ADD_ATTRIBUTE: i32 = 47001;
+/// DevTools command id for editing an attribute.
+pub const CMD_DEVTOOLS_EDIT_ATTRIBUTE: i32 = 47002;
+/// DevTools command id for editing a node as HTML.
+pub const CMD_DEVTOOLS_EDIT_AS_HTML: i32 = 47003;
+/// DevTools command id for cutting a node.
+pub const CMD_DEVTOOLS_CUT: i32 = 47004;
+/// DevTools command id for copying a node outer HTML.
+pub const CMD_DEVTOOLS_COPY_OUTER_HTML: i32 = 47005;
+/// DevTools command id for copying a node selector.
+pub const CMD_DEVTOOLS_COPY_SELECTOR: i32 = 47006;
+/// DevTools command id for copying a node JS path.
+pub const CMD_DEVTOOLS_COPY_JS_PATH: i32 = 47007;
+/// DevTools command id for copying node styles.
+pub const CMD_DEVTOOLS_COPY_STYLES: i32 = 47008;
+/// DevTools command id for copying a node XPath.
+pub const CMD_DEVTOOLS_COPY_XPATH: i32 = 47009;
+/// DevTools command id for copying a node full XPath.
+pub const CMD_DEVTOOLS_COPY_FULL_XPATH: i32 = 47010;
+/// DevTools command id for copying an element.
+pub const CMD_DEVTOOLS_COPY_ELEMENT: i32 = 47011;
+/// DevTools command id for duplicating an element.
+pub const CMD_DEVTOOLS_DUPLICATE_ELEMENT: i32 = 47012;
+/// DevTools command id for pasting into a node.
+pub const CMD_DEVTOOLS_PASTE: i32 = 47013;
+/// DevTools command id for hiding an element.
+pub const CMD_DEVTOOLS_HIDE_ELEMENT: i32 = 47014;
+/// DevTools command id for deleting an element.
+pub const CMD_DEVTOOLS_DELETE_ELEMENT: i32 = 47015;
+/// DevTools command id for expanding a node recursively.
+pub const CMD_DEVTOOLS_EXPAND_RECURSIVELY: i32 = 47016;
+/// DevTools command id for collapsing a node's children.
+pub const CMD_DEVTOOLS_COLLAPSE_CHILDREN: i32 = 47017;
+/// DevTools command id for forcing :active state.
+pub const CMD_DEVTOOLS_FORCE_STATE_ACTIVE: i32 = 47019;
+/// DevTools command id for forcing :hover state.
+pub const CMD_DEVTOOLS_FORCE_STATE_HOVER: i32 = 47020;
+/// DevTools command id for forcing :focus state.
+pub const CMD_DEVTOOLS_FORCE_STATE_FOCUS: i32 = 47021;
+/// DevTools command id for forcing :visited state.
+pub const CMD_DEVTOOLS_FORCE_STATE_VISITED: i32 = 47022;
+/// DevTools command id for forcing :focus-within state.
+pub const CMD_DEVTOOLS_FORCE_STATE_FOCUS_WITHIN: i32 = 47023;
+/// DevTools command id for forcing :focus-visible state.
+pub const CMD_DEVTOOLS_FORCE_STATE_FOCUS_VISIBLE: i32 = 47024;
+/// DevTools command id for scrolling a node into view.
+pub const CMD_DEVTOOLS_SCROLL_INTO_VIEW: i32 = 47025;
+/// DevTools command id for focusing a node.
+pub const CMD_DEVTOOLS_FOCUS: i32 = 47026;
+/// DevTools command id for toggling the ad badge.
+pub const CMD_DEVTOOLS_BADGE_AD: i32 = 47027;
+/// DevTools command id for toggling the container badge.
+pub const CMD_DEVTOOLS_BADGE_CONTAINER: i32 = 47028;
+/// DevTools command id for toggling the flex badge.
+pub const CMD_DEVTOOLS_BADGE_FLEX: i32 = 47029;
+/// DevTools command id for toggling the grid badge.
+pub const CMD_DEVTOOLS_BADGE_GRID: i32 = 47030;
+/// DevTools command id for toggling the grid-lanes badge.
+pub const CMD_DEVTOOLS_BADGE_GRID_LANES: i32 = 47031;
+/// DevTools command id for toggling the media badge.
+pub const CMD_DEVTOOLS_BADGE_MEDIA: i32 = 47032;
+/// DevTools command id for toggling the popover badge.
+pub const CMD_DEVTOOLS_BADGE_POPOVER: i32 = 47033;
+/// DevTools command id for toggling the reveal badge.
+pub const CMD_DEVTOOLS_BADGE_REVEAL: i32 = 47034;
+/// DevTools command id for toggling the scroll badge.
+pub const CMD_DEVTOOLS_BADGE_SCROLL: i32 = 47035;
+/// DevTools command id for toggling the scroll-snap badge.
+pub const CMD_DEVTOOLS_BADGE_SCROLL_SNAP: i32 = 47036;
+/// DevTools command id for toggling the slot badge.
+pub const CMD_DEVTOOLS_BADGE_SLOT: i32 = 47037;
+/// DevTools command id for toggling the view-source badge.
+pub const CMD_DEVTOOLS_BADGE_VIEW_SOURCE: i32 = 47038;
+/// DevTools command id for toggling the starting-style badge.
+pub const CMD_DEVTOOLS_BADGE_STARTING_STYLE: i32 = 47039;
+/// DevTools command id for toggling the subgrid badge.
+pub const CMD_DEVTOOLS_BADGE_SUBGRID: i32 = 47040;
+/// DevTools command id for toggling the top-layer badge.
+pub const CMD_DEVTOOLS_BADGE_TOP_LAYER: i32 = 47041;
+/// DevTools command id for breaking on subtree modifications.
+pub const CMD_DEVTOOLS_BREAK_ON_SUBTREE_MODIFICATIONS: i32 = 47042;
+/// DevTools command id for breaking on attribute modifications.
+pub const CMD_DEVTOOLS_BREAK_ON_ATTRIBUTE_MODIFICATIONS: i32 = 47043;
+/// DevTools command id for breaking on node removal.
+pub const CMD_DEVTOOLS_BREAK_ON_NODE_REMOVAL: i32 = 47044;
 
 const CONTEXT_MENU_ALLOWLIST: &[i32] = &[
     CMD_BACK,
@@ -202,6 +290,50 @@ const CONTEXT_MENU_ALLOWLIST: &[i32] = &[
     CMD_CONTENT_SELECT_ALL,
     CMD_CONTENT_PASTE_AND_MATCH_STYLE,
     CMD_CONTENT_INSPECT_ELEMENT,
+    CMD_DEVTOOLS_STORE_AS_GLOBAL_VARIABLE,
+    CMD_DEVTOOLS_ADD_ATTRIBUTE,
+    CMD_DEVTOOLS_EDIT_ATTRIBUTE,
+    CMD_DEVTOOLS_EDIT_AS_HTML,
+    CMD_DEVTOOLS_CUT,
+    CMD_DEVTOOLS_COPY_OUTER_HTML,
+    CMD_DEVTOOLS_COPY_SELECTOR,
+    CMD_DEVTOOLS_COPY_JS_PATH,
+    CMD_DEVTOOLS_COPY_STYLES,
+    CMD_DEVTOOLS_COPY_XPATH,
+    CMD_DEVTOOLS_COPY_FULL_XPATH,
+    CMD_DEVTOOLS_COPY_ELEMENT,
+    CMD_DEVTOOLS_DUPLICATE_ELEMENT,
+    CMD_DEVTOOLS_PASTE,
+    CMD_DEVTOOLS_HIDE_ELEMENT,
+    CMD_DEVTOOLS_DELETE_ELEMENT,
+    CMD_DEVTOOLS_EXPAND_RECURSIVELY,
+    CMD_DEVTOOLS_COLLAPSE_CHILDREN,
+    CMD_DEVTOOLS_FORCE_STATE_ACTIVE,
+    CMD_DEVTOOLS_FORCE_STATE_HOVER,
+    CMD_DEVTOOLS_FORCE_STATE_FOCUS,
+    CMD_DEVTOOLS_FORCE_STATE_VISITED,
+    CMD_DEVTOOLS_FORCE_STATE_FOCUS_WITHIN,
+    CMD_DEVTOOLS_FORCE_STATE_FOCUS_VISIBLE,
+    CMD_DEVTOOLS_SCROLL_INTO_VIEW,
+    CMD_DEVTOOLS_FOCUS,
+    CMD_DEVTOOLS_BADGE_AD,
+    CMD_DEVTOOLS_BADGE_CONTAINER,
+    CMD_DEVTOOLS_BADGE_FLEX,
+    CMD_DEVTOOLS_BADGE_GRID,
+    CMD_DEVTOOLS_BADGE_GRID_LANES,
+    CMD_DEVTOOLS_BADGE_MEDIA,
+    CMD_DEVTOOLS_BADGE_POPOVER,
+    CMD_DEVTOOLS_BADGE_REVEAL,
+    CMD_DEVTOOLS_BADGE_SCROLL,
+    CMD_DEVTOOLS_BADGE_SCROLL_SNAP,
+    CMD_DEVTOOLS_BADGE_SLOT,
+    CMD_DEVTOOLS_BADGE_VIEW_SOURCE,
+    CMD_DEVTOOLS_BADGE_STARTING_STYLE,
+    CMD_DEVTOOLS_BADGE_SUBGRID,
+    CMD_DEVTOOLS_BADGE_TOP_LAYER,
+    CMD_DEVTOOLS_BREAK_ON_SUBTREE_MODIFICATIONS,
+    CMD_DEVTOOLS_BREAK_ON_ATTRIBUTE_MODIFICATIONS,
+    CMD_DEVTOOLS_BREAK_ON_NODE_REMOVAL,
 ];
 
 pub fn filter_supported(menu: ChromeContextMenu) -> ChromeContextMenu {
