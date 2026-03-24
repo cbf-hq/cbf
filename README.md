@@ -77,6 +77,7 @@ Linux, Windows, and Intel macOS are not yet supported.
   - Feature Matrix: [Feature Matrix](https://cbf-hq.github.io/cbf/feature-matrix.html)
 - API Reference
   - `cbf`: [cbf API](https://docs.rs/cbf/latest/cbf/)
+  - `cbf-compositor`: [cbf-compositor API](https://docs.rs/cbf-compositor/latest/cbf_compositor/)
   - `cbf-chrome`: [cbf-chrome API](https://docs.rs/cbf-chrome/latest/cbf_chrome/)
   - `cbf-chrome-sys`: [cbf-chrome-sys API](https://docs.rs/cbf-chrome-sys/latest/cbf_chrome_sys/)
 - Contributing Guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
@@ -105,6 +106,7 @@ When available, planned release artifacts are:
   - Contains `Chromium.app` and `libcbf_bridge.dylib`
 - crates.io:
   - `cbf`
+  - `cbf-compositor`
   - `cbf-chrome`
   - `cbf-chrome-sys`
   - `cbf-cli`
@@ -113,6 +115,9 @@ When available, planned release artifacts are:
 
 - `cbf` (browser-generic high-level Rust API)
     - Browser-generic public commands/events and session lifecycle.
+- `cbf-compositor` (desktop surface composition layer)
+    - Scene-based compositor for arranging browser surfaces inside native host windows.
+    - Keeps composition/window attachment concerns separate from backend-specific IPC details.
 - `cbf-chrome` (chrome-specific safe API/backend)
     - Chrome-specific backend implementation and safe extension surface.
 - `cbf-chrome-sys` (low-level Rust FFI boundary)
@@ -125,6 +130,7 @@ When available, planned release artifacts are:
 Dependency direction:
 
 - `cbf`: no internal crate dependency
+- `cbf-compositor`: depends on `cbf` and optionally `cbf-chrome` for Chrome backend adapters
 - `cbf-chrome`: depends on `cbf` and `cbf-chrome-sys`
 - `cbf-chrome-sys`: links to Chromium bridge/runtime
 
