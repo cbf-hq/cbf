@@ -2,7 +2,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use cbf::{
     command::BrowserCommand,
-    data::{context_menu::ContextMenu, drag::DragStartRequest},
+    data::{
+        context_menu::ContextMenu,
+        drag::{DragOperation, DragStartRequest},
+    },
 };
 #[cfg(feature = "chrome")]
 use cbf_chrome::data::choice_menu::ChromeChoiceMenu;
@@ -57,6 +60,15 @@ impl PlatformWindowHost for MacPlatformWindowHost {
         request: DragStartRequest,
     ) -> Result<bool, CompositorError> {
         self.view.start_native_drag_session(target, &request)
+    }
+
+    fn set_external_drag_operation(
+        &mut self,
+        target: SurfaceTarget,
+        operation: DragOperation,
+    ) -> Result<(), CompositorError> {
+        self.view.set_external_drag_operation(target, operation);
+        Ok(())
     }
 
     fn input_state(&self) -> PlatformInputState {

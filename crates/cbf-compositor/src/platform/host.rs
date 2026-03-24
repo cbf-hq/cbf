@@ -1,5 +1,8 @@
-use cbf::data::ime::ImeBoundsUpdate;
-use cbf::data::{context_menu::ContextMenu, drag::DragStartRequest};
+use cbf::data::{
+    context_menu::ContextMenu,
+    drag::{DragOperation, DragStartRequest},
+    ime::ImeBoundsUpdate,
+};
 #[cfg(feature = "chrome")]
 use cbf_chrome::data::choice_menu::ChromeChoiceMenu;
 
@@ -52,6 +55,14 @@ pub(crate) trait PlatformWindowHost {
         target: SurfaceTarget,
         request: DragStartRequest,
     ) -> Result<bool, CompositorError>;
+
+    fn set_external_drag_operation(
+        &mut self,
+        _target: SurfaceTarget,
+        _operation: DragOperation,
+    ) -> Result<(), CompositorError> {
+        Ok(())
+    }
 
     #[allow(dead_code)]
     fn input_state(&self) -> PlatformInputState {

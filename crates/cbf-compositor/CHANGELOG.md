@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scene-based browser surface composition for `BrowsingContext` and `TransientBrowsingContext`.
 - Native window attachment and scene synchronization for host-managed browser surfaces.
 - macOS compositor hosting through a single `CompositorViewMac` that manages multiple Chromium surfaces.
+- macOS external drag destination routing for browsing contexts, including hit-tested drag enter/update/leave/drop command emission and negotiated drag-operation reflection back into native drag handling.
 - Background policy propagation from composition items to browser-generic background policy commands.
 - Validation that rejects compositions which attempt to display the same `SurfaceTarget` more than once across the live compositor state.
 

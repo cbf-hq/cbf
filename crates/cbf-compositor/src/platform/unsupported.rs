@@ -1,4 +1,7 @@
-use cbf::data::{context_menu::ContextMenu, drag::DragStartRequest};
+use cbf::data::{
+    context_menu::ContextMenu,
+    drag::{DragOperation, DragStartRequest},
+};
 #[cfg(feature = "chrome")]
 use cbf_chrome::data::choice_menu::ChromeChoiceMenu;
 
@@ -40,6 +43,14 @@ impl PlatformWindowHost for UnsupportedPlatformWindowHost {
         _request: DragStartRequest,
     ) -> Result<bool, CompositorError> {
         Err(CompositorError::PlatformUnsupported)
+    }
+
+    fn set_external_drag_operation(
+        &mut self,
+        _target: SurfaceTarget,
+        _operation: DragOperation,
+    ) -> Result<(), CompositorError> {
+        Ok(())
     }
 
     fn input_state(&self) -> PlatformInputState {

@@ -16,8 +16,12 @@ use cbf::{
     command::BrowserCommand,
     data::{
         context_menu::{ContextMenu, ContextMenuIcon, ContextMenuItem, ContextMenuItemType},
-        drag::{DragOperations, DragStartRequest},
+        drag::{
+            DragData, DragOperation, DragOperations, DragStartRequest, ExternalDragDrop,
+            ExternalDragEnter, ExternalDragUpdate,
+        },
         edit::EditAction,
+        ids::BrowsingContextId,
         ime::{
             ConfirmCompositionBehavior, ImeCommitText, ImeComposition, ImeTextRange, ImeTextSpan,
             ImeTextSpanType,
@@ -34,21 +38,23 @@ use cbf_chrome::{
     },
     ffi::{
         convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
-        convert_nsevent_to_mouse_wheel_event,
+        convert_nsevent_to_mouse_wheel_event, convert_nspasteboard_to_drag_data,
     },
     platform::macos::bindings::CALayerHost,
 };
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::Retained,
-    runtime::{AnyObject, NSObject, ProtocolObject},
+    runtime::{AnyObject, Bool, NSObject, ProtocolObject},
     sel,
 };
 use objc2_app_kit::{
     NSApplication, NSAutoresizingMaskOptions, NSControlStateValueOff, NSControlStateValueOn,
-    NSDragOperation, NSDraggingContext, NSDraggingItem, NSDraggingSession, NSDraggingSource,
-    NSEvent, NSEventModifierFlags, NSEventType, NSImage, NSMenu, NSMenuItem, NSMenuItemBadge,
-    NSPasteboardWriting, NSResponder, NSTextInputClient, NSView,
+    NSDragOperation, NSDraggingContext, NSDraggingDestination, NSDraggingInfo, NSDraggingItem,
+    NSDraggingSession, NSDraggingSource, NSEvent, NSEventModifierFlags, NSEventType, NSImage,
+    NSMenu, NSMenuItem, NSMenuItemBadge, NSPasteboardTypeFileURL, NSPasteboardTypeHTML,
+    NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardTypeURL, NSPasteboardWriting,
+    NSResponder, NSTextInputClient, NSView,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
@@ -101,6 +107,7 @@ pub(crate) struct CompositorViewMacIvars {
     choice_menu_request_id: Cell<u64>,
     choice_menu_selected_action: Cell<i32>,
     active_drag_source: RefCell<Option<Retained<NSObject>>>,
+    external_drag_state: RefCell<Option<ExternalDragSessionState>>,
 }
 
 struct HostDragSourceIvars {
@@ -110,6 +117,15 @@ struct HostDragSourceIvars {
     session_id: u64,
     allowed_operations: DragOperations,
     operation_mask: NSDragOperation,
+}
+
+#[derive(Debug, Clone)]
+struct ExternalDragSessionState {
+    item_id: CompositionItemId,
+    browsing_context_id: BrowsingContextId,
+    data: DragData,
+    allowed_operations: DragOperations,
+    operation: DragOperation,
 }
 
 define_class!(
@@ -450,6 +466,133 @@ define_class!(
             NSNotFound as NSUInteger
         }
     }
+
+    unsafe impl NSObjectProtocol for CompositorViewMac {}
+
+    #[allow(non_snake_case)]
+    unsafe impl NSDraggingDestination for CompositorViewMac {
+        #[unsafe(method(draggingEntered:))]
+        fn draggingEntered(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            let Some((local_point, screen_point)) = self.dragging_points(sender) else {
+                return NSDragOperation::None;
+            };
+            let Some((item_id, browsing_context_id)) = self.drag_target_at_point(local_point) else {
+                return NSDragOperation::None;
+            };
+
+            let pasteboard = sender.draggingPasteboard();
+            let data =
+                convert_nspasteboard_to_drag_data(NonNull::from(&*pasteboard).cast::<c_void>());
+            let allowed_operations = drag_operations_from_ns(sender.draggingSourceOperationMask());
+
+            self.begin_external_drag_session(
+                item_id,
+                browsing_context_id,
+                data,
+                allowed_operations,
+                screen_point,
+            );
+            NSDragOperation::Copy
+        }
+
+        #[unsafe(method(draggingUpdated:))]
+        fn draggingUpdated(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            let Some((local_point, screen_point)) = self.dragging_points(sender) else {
+                self.leave_external_drag_session();
+                return NSDragOperation::None;
+            };
+            let next_target = self.drag_target_at_point(local_point);
+            let allowed_operations = drag_operations_from_ns(sender.draggingSourceOperationMask());
+            let current_state = self.ivars().external_drag_state.borrow().clone();
+
+            match (current_state, next_target) {
+                (Some(state), Some((item_id, browsing_context_id)))
+                    if state.item_id == item_id
+                        && state.browsing_context_id == browsing_context_id =>
+                {
+                    self.update_external_drag_session(
+                        item_id,
+                        browsing_context_id,
+                        allowed_operations,
+                        screen_point,
+                    );
+                    self.current_external_drag_operation()
+                }
+                (Some(state), Some((item_id, browsing_context_id))) => {
+                    self.leave_external_drag_session();
+                    self.begin_external_drag_session(
+                        item_id,
+                        browsing_context_id,
+                        state.data,
+                        allowed_operations,
+                        screen_point,
+                    );
+                    NSDragOperation::Copy
+                }
+                (None, Some((item_id, browsing_context_id))) => {
+                    let pasteboard = sender.draggingPasteboard();
+                    let data = convert_nspasteboard_to_drag_data(
+                        NonNull::from(&*pasteboard).cast::<c_void>(),
+                    );
+                    self.begin_external_drag_session(
+                        item_id,
+                        browsing_context_id,
+                        data,
+                        allowed_operations,
+                        screen_point,
+                    );
+                    NSDragOperation::Copy
+                }
+                (Some(_), None) => {
+                    self.leave_external_drag_session();
+                    NSDragOperation::None
+                }
+                (None, None) => NSDragOperation::None,
+            }
+        }
+
+        #[unsafe(method(draggingExited:))]
+        fn draggingExited(&self, _sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) {
+            self.leave_external_drag_session();
+        }
+
+        #[unsafe(method(performDragOperation:))]
+        fn performDragOperation(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> Bool {
+            let Some((local_point, screen_point)) = self.dragging_points(sender) else {
+                self.leave_external_drag_session();
+                return Bool::NO;
+            };
+            let next_target = self.drag_target_at_point(local_point);
+            let current_state = self.ivars().external_drag_state.borrow().clone();
+
+            match (current_state, next_target) {
+                (Some(state), Some((item_id, browsing_context_id)))
+                    if state.item_id == item_id
+                        && state.browsing_context_id == browsing_context_id =>
+                {
+                    self.drop_external_drag_session(item_id, browsing_context_id, screen_point);
+                    Bool::YES
+                }
+                (Some(state), Some((item_id, browsing_context_id))) => {
+                    self.leave_external_drag_session();
+                    self.begin_external_drag_session(
+                        item_id,
+                        browsing_context_id,
+                        state.data,
+                        drag_operations_from_ns(sender.draggingSourceOperationMask()),
+                        screen_point,
+                    );
+                    self.drop_external_drag_session(item_id, browsing_context_id, screen_point);
+                    Bool::YES
+                }
+                (Some(_), None) => {
+                    self.leave_external_drag_session();
+                    Bool::NO
+                }
+                (None, _) => Bool::NO,
+            }
+        }
+    }
 );
 
 define_class!(
@@ -560,6 +703,7 @@ impl CompositorViewMac {
             choice_menu_request_id: Cell::new(NO_CHOICE_MENU_REQUEST_ID),
             choice_menu_selected_action: Cell::new(NO_CHOICE_MENU_ACTION),
             active_drag_source: RefCell::new(None),
+            external_drag_state: RefCell::new(None),
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };
 
@@ -571,9 +715,34 @@ impl CompositorViewMac {
                 | NSAutoresizingMaskOptions::ViewHeightSizable,
         );
         this.setWantsLayer(true);
+        let dragged_types = unsafe {
+            NSArray::from_slice(&[
+                NSPasteboardTypeFileURL,
+                NSPasteboardTypeHTML,
+                NSPasteboardTypeRTF,
+                NSPasteboardTypeString,
+                NSPasteboardTypeURL,
+            ])
+        };
+        this.registerForDraggedTypes(&dragged_types);
         host_view.addSubview(&this);
 
         this
+    }
+
+    pub(crate) fn set_external_drag_operation(
+        &self,
+        target: SurfaceTarget,
+        operation: DragOperation,
+    ) {
+        let SurfaceTarget::BrowsingContext(browsing_context_id) = target else {
+            return;
+        };
+        if let Some(state) = self.ivars().external_drag_state.borrow_mut().as_mut()
+            && state.browsing_context_id == browsing_context_id
+        {
+            state.operation = operation;
+        }
     }
 
     pub(crate) fn replace_scene(&self, items: &[PlatformSceneItem]) {
@@ -1286,6 +1455,44 @@ impl CompositorViewMac {
         self.convertPoint_fromView(point, None)
     }
 
+    fn dragging_points(
+        &self,
+        sender: &ProtocolObject<dyn NSDraggingInfo>,
+    ) -> Option<(CGPoint, NSPoint)> {
+        let window_point = sender.draggingLocation();
+        let window = self.window()?;
+        let local_point = self.convertPoint_fromView(window_point, None);
+        let screen_point = window.convertPointToScreen(window_point);
+        Some((local_point, screen_point))
+    }
+
+    fn drag_target_at_point(
+        &self,
+        point: CGPoint,
+    ) -> Option<(CompositionItemId, BrowsingContextId)> {
+        let slots = self.ivars().slots.borrow();
+        let order = self.ivars().order.borrow();
+        let item_id = topmost_item_at_point(&order, &slots, point)?;
+        let slot = slots.get(&item_id)?;
+        if !slot.visible || !slot.interactive {
+            return None;
+        }
+        match slot.target {
+            SurfaceTarget::BrowsingContext(browsing_context_id) => {
+                Some((item_id, browsing_context_id))
+            }
+            SurfaceTarget::TransientBrowsingContext(_) => None,
+        }
+    }
+
+    fn current_modifier_flags(&self) -> u32 {
+        self.window()
+            .and_then(|_| MainThreadMarker::new())
+            .and_then(|mtm| NSApplication::sharedApplication(mtm).currentEvent())
+            .map(|event| event.modifierFlags().bits() as u32)
+            .unwrap_or(0)
+    }
+
     fn convert_key_event(&self, event: &NSEvent) -> KeyEvent {
         let nsevent_ptr = NonNull::from(event).cast::<c_void>();
         convert_nsevent_to_key_event(0, nsevent_ptr)
@@ -1356,6 +1563,105 @@ impl CompositorViewMac {
             session_id,
             browsing_context_id,
         });
+    }
+
+    fn begin_external_drag_session(
+        &self,
+        item_id: CompositionItemId,
+        browsing_context_id: BrowsingContextId,
+        data: DragData,
+        allowed_operations: DragOperations,
+        screen_point: NSPoint,
+    ) {
+        let (widget_x, widget_y, screen_x, screen_y) = self.drag_points(item_id, screen_point);
+        let modifiers = self.current_modifier_flags();
+        self.ivars()
+            .external_drag_state
+            .replace(Some(ExternalDragSessionState {
+                item_id,
+                browsing_context_id,
+                data: data.clone(),
+                allowed_operations,
+                operation: DragOperation::Copy,
+            }));
+        self.emit(BrowserCommand::SendExternalDragEnter {
+            event: ExternalDragEnter {
+                browsing_context_id,
+                data,
+                allowed_operations,
+                modifiers,
+                position_in_widget_x: widget_x,
+                position_in_widget_y: widget_y,
+                position_in_screen_x: screen_x,
+                position_in_screen_y: screen_y,
+            },
+        });
+    }
+
+    fn update_external_drag_session(
+        &self,
+        item_id: CompositionItemId,
+        browsing_context_id: BrowsingContextId,
+        allowed_operations: DragOperations,
+        screen_point: NSPoint,
+    ) {
+        let (widget_x, widget_y, screen_x, screen_y) = self.drag_points(item_id, screen_point);
+        let modifiers = self.current_modifier_flags();
+        if let Some(state) = self.ivars().external_drag_state.borrow_mut().as_mut() {
+            state.item_id = item_id;
+            state.browsing_context_id = browsing_context_id;
+            state.allowed_operations = allowed_operations;
+        }
+        self.emit(BrowserCommand::SendExternalDragUpdate {
+            event: ExternalDragUpdate {
+                browsing_context_id,
+                allowed_operations,
+                modifiers,
+                position_in_widget_x: widget_x,
+                position_in_widget_y: widget_y,
+                position_in_screen_x: screen_x,
+                position_in_screen_y: screen_y,
+            },
+        });
+    }
+
+    fn leave_external_drag_session(&self) {
+        let Some(state) = self.ivars().external_drag_state.borrow_mut().take() else {
+            return;
+        };
+        self.emit(BrowserCommand::SendExternalDragLeave {
+            browsing_context_id: state.browsing_context_id,
+        });
+    }
+
+    fn drop_external_drag_session(
+        &self,
+        item_id: CompositionItemId,
+        browsing_context_id: BrowsingContextId,
+        screen_point: NSPoint,
+    ) {
+        let (widget_x, widget_y, screen_x, screen_y) = self.drag_points(item_id, screen_point);
+        let modifiers = self.current_modifier_flags();
+        self.ivars().external_drag_state.borrow_mut().take();
+        self.emit(BrowserCommand::SendExternalDragDrop {
+            event: ExternalDragDrop {
+                browsing_context_id,
+                modifiers,
+                position_in_widget_x: widget_x,
+                position_in_widget_y: widget_y,
+                position_in_screen_x: screen_x,
+                position_in_screen_y: screen_y,
+            },
+        });
+    }
+
+    fn current_external_drag_operation(&self) -> NSDragOperation {
+        self.ivars()
+            .external_drag_state
+            .borrow()
+            .as_ref()
+            .map(|state| ns_drag_operation_from_generic(state.operation))
+            .unwrap_or(NSDragOperation::None)
     }
 
     fn drag_points(
@@ -1466,6 +1772,29 @@ impl CompositorViewMac {
 #[inline]
 fn ns_not_found_range() -> NSRange {
     NSRange::new(NSNotFound as usize, 0)
+}
+
+fn drag_operations_from_ns(operation: NSDragOperation) -> DragOperations {
+    let mut bits = DragOperations::NONE.bits();
+    if operation.contains(NSDragOperation::Copy) {
+        bits |= DragOperations::COPY.bits();
+    }
+    if operation.contains(NSDragOperation::Link) {
+        bits |= DragOperations::LINK.bits();
+    }
+    if operation.contains(NSDragOperation::Move) {
+        bits |= DragOperations::MOVE.bits();
+    }
+    DragOperations::from_bits(bits)
+}
+
+fn ns_drag_operation_from_generic(operation: DragOperation) -> NSDragOperation {
+    match operation {
+        DragOperation::None => NSDragOperation::None,
+        DragOperation::Copy => NSDragOperation::Copy,
+        DragOperation::Link => NSDragOperation::Link,
+        DragOperation::Move => NSDragOperation::Move,
+    }
 }
 
 fn slot_menu_location(bounds: CGRect, x: i32, y: i32, flipped: bool) -> NSPoint {

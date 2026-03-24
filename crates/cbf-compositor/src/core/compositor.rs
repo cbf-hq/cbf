@@ -194,6 +194,16 @@ impl Compositor {
                         update.clone(),
                     )?;
                 }
+                BrowsingContextEvent::ExternalDragOperationChanged { operation } => {
+                    let target = SurfaceTarget::BrowsingContext(*browsing_context_id);
+                    if let Some(window_id) = self.window_id_for_target(target)
+                        && let Some(window) = self.windows.get_mut(&window_id)
+                    {
+                        window
+                            .platform_host
+                            .set_external_drag_operation(target, *operation)?;
+                    }
+                }
                 _ => {}
             },
             BrowserEvent::TransientBrowsingContext {
