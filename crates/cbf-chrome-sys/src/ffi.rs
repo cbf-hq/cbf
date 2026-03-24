@@ -23,6 +23,7 @@ pub const CBF_EVENT_WEB_PAGE_RESIZE_ACKNOWLEDGED: u8 = 12;
 pub const CBF_EVENT_CURSOR_CHANGED: u8 = 13;
 pub const CBF_EVENT_WEB_PAGE_DOM_HTML_READ: u8 = 14;
 pub const CBF_EVENT_DRAG_START_REQUESTED: u8 = 15;
+pub const CBF_EVENT_EXTERNAL_DRAG_OPERATION_CHANGED: u8 = 48;
 pub const CBF_EVENT_TITLE_UPDATED: u8 = 16;
 pub const CBF_EVENT_FAVICON_URL_UPDATED: u8 = 17;
 pub const CBF_EVENT_DEVTOOLS_OPENED: u8 = 18;
@@ -379,6 +380,7 @@ pub struct CbfBridgeEvent {
     pub title: *mut c_char,
     pub favicon_url: *mut c_char,
     pub crashed: bool,
+    pub drag_operation: u32,
     pub drag_start_request: CbfDragStartRequest,
     pub extensions: CbfExtensionInfoList,
     pub extension_id: *mut c_char,
@@ -680,6 +682,42 @@ pub struct CbfDragUpdate {
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CbfDragDrop {
     pub session_id: u64,
+    pub tab_id: u64,
+    pub modifiers: u32,
+    pub position_in_widget_x: f32,
+    pub position_in_widget_y: f32,
+    pub position_in_screen_x: f32,
+    pub position_in_screen_y: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfExternalDragEnter {
+    pub tab_id: u64,
+    pub data: CbfDragData,
+    pub allowed_operations: u32,
+    pub modifiers: u32,
+    pub position_in_widget_x: f32,
+    pub position_in_widget_y: f32,
+    pub position_in_screen_x: f32,
+    pub position_in_screen_y: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfExternalDragUpdate {
+    pub tab_id: u64,
+    pub allowed_operations: u32,
+    pub modifiers: u32,
+    pub position_in_widget_x: f32,
+    pub position_in_widget_y: f32,
+    pub position_in_screen_x: f32,
+    pub position_in_screen_y: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CbfExternalDragDrop {
     pub tab_id: u64,
     pub modifiers: u32,
     pub position_in_widget_x: f32,
@@ -996,6 +1034,22 @@ unsafe extern "C" {
         client: *mut CbfBridgeClientHandle,
         session_id: u64,
         tab_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_send_external_drag_enter(
+        client: *mut CbfBridgeClientHandle,
+        event: *const CbfExternalDragEnter,
+    ) -> bool;
+    pub fn cbf_bridge_client_send_external_drag_update(
+        client: *mut CbfBridgeClientHandle,
+        event: *const CbfExternalDragUpdate,
+    ) -> bool;
+    pub fn cbf_bridge_client_send_external_drag_leave(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+    ) -> bool;
+    pub fn cbf_bridge_client_send_external_drag_drop(
+        client: *mut CbfBridgeClientHandle,
+        event: *const CbfExternalDragDrop,
     ) -> bool;
     pub fn cbf_bridge_convert_nsevent(
         nsevent: *mut std::ffi::c_void,
