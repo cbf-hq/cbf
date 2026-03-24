@@ -144,9 +144,10 @@ The intended usage is:
 - switch input focus between app UI and `BrowserView`,
 - coexist with host frameworks/toolkits such as Tauri, Wry, and GPUI.
 
-Current `BrowserViewMac` behavior (separate subview under `contentView`, hit-test based
-pointer routing, and first-responder based keyboard/IME routing) is a good baseline.
-Equivalent behavior is generally feasible on Windows and Linux, with platform caveats.
+Current macOS compositor-host behavior (a compositor-owned host view under
+`contentView`, hit-test based pointer routing, and first-responder based
+keyboard/IME routing) is a good baseline. Equivalent behavior is generally
+feasible on Windows and Linux, with platform caveats.
 
 ### 7.1 Windows
 

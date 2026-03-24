@@ -52,12 +52,13 @@ Relevant files:
 
 ## Implication for CBF
 
-CBF can display any `WebContents` surface through the existing CAContextID pipeline (`BrowserViewMac` + `CALayerHost`).
+CBF can display any `WebContents` surface through the existing CAContextID
+pipeline (compositor-owned host view + `CALayerHost`).
 However, `DevToolsWindow` is not a good architectural fit for CBF because it is designed around Chrome Browser/tab integration.
 
 So:
 
-- "Use the same rendering path as `BrowserViewMac`" is valid for display mechanics.
+- "Use the same compositor-backed surface delivery path" is valid for display mechanics.
 - "Use `DevToolsWindow` as-is" is not valid as the primary integration strategy.
 
 ## Browser-less DevTools Pattern in Chromium

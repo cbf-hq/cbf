@@ -30,7 +30,7 @@ Instead, CBF will implement a Browser-less DevTools integration pattern based on
 
 - Target attachment via `content::DevToolsAgentHost`
 - Frontend bridging via `content::DevToolsFrontendHost` (shell-style bindings approach)
-- DevTools frontend as a CBF-managed `WebContents` so existing surface delivery (`CAContextId` -> `BrowserViewMac`) can render it
+- DevTools frontend as a CBF-managed `WebContents` so existing surface delivery (`CAContextId` -> compositor-managed host view) can render it
 
 CBF API/IPC will expose explicit DevTools lifecycle operations bound to `WebPageId`, supporting:
 

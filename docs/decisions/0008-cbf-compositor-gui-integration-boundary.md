@@ -336,7 +336,6 @@ point, but the public model is scene/item-based rather than frame-based.
   but still closes with its parent.
 - Chrome surface handles remain below the generic core boundary and are
   consumed only by the `chrome` backend adapter plus the platform host.
-- The macOS renderer now uses a compositor-owned container view with one child
-  `BrowserViewMac` per scene item, so existing Chromium-backed key, wheel,
-  edit-action, and IME behavior can be reused while the new scene model is
-  introduced.
+- The macOS renderer uses a compositor-owned container view that manages the
+  scene's Chromium surfaces and centralizes key, wheel, edit-action, and IME
+  routing inside the compositor-owned responder view.

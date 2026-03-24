@@ -31,7 +31,8 @@ Key code:
 
 ## 3. `Atelier` Fallback in macOS Host Drag
 
-In `BrowserViewMac::start_native_drag_session`, CBF picks a string writer in this order:
+In the macOS compositor host's `start_native_drag_session` path, CBF picks a
+string writer in this order:
 
 1. `request.data.text`
 2. first URL in `request.data.url_infos`

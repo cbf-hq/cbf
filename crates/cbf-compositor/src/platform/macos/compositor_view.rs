@@ -90,8 +90,8 @@ pub(crate) struct CompositorViewMacIvars {
     // layer reordering.
     slots: RefCell<HashMap<CompositionItemId, SurfaceSlot>>,
     order: RefCell<Vec<CompositionItemId>>,
-    // AppKit IME state mirrors BrowserViewMac so marked text handling stays
-    // inside this single responder instead of being split across child views.
+    // AppKit IME state stays inside this single responder so marked text
+    // handling does not need to be split across per-surface child views.
     has_marked_text: Cell<bool>,
     marked_range: Cell<NSRange>,
     selected_range: Cell<NSRange>,
@@ -175,10 +175,10 @@ define_class!(
                 return;
             }
 
-            // Match BrowserViewMac's AppKit text-input flow: collect key/edit
-            // state first, let interpretKeyEvents drive NSTextInputClient
-            // callbacks, then forward the residual key event if IME did not
-            // fully consume it.
+            // Match the previous single-surface AppKit text-input flow:
+            // collect key/edit state first, let interpretKeyEvents drive
+            // NSTextInputClient callbacks, then forward the residual key event
+            // if IME did not fully consume it.
             let had_marked_text = self.ivars().has_marked_text.get();
             self.ivars().ime_handled.set(false);
             self.ivars().suppress_key_up.set(false);

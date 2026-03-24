@@ -36,12 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- macOS surface embedding guidance now points applications to `cbf-compositor` as the standard host-side integration path instead of the old `cbf-chrome`-local view helper.
 - `simpleapp` now serves embedded toolbar assets over `app://simpleapp/...` instead of resolving `file://` URLs from the Cargo manifest location, so the same UI loading path works in development and packaged builds.
 - Hardened shutdown flow to use explicit force-close handling, staged process termination, and best-effort cleanup instead of relying on session drop side effects.
 - `BackendStopped` emission now preserves fact-only disconnect reasons; shutdown intent is tracked locally in `ChromiumRuntime` rather than inferred from transport teardown.
 - `simpleapp` now suppresses shutdown-time disconnect warnings and avoids duplicate shutdown requests by consulting `ChromiumRuntime` state.
 - IPC bootstrap moved to renderer-side `window.cbf` installation and host->page delivery now uses isolated-world event dispatch to avoid navigation-time JS execution crashes.
 - macOS external drag pasteboard conversion now follows Chromium's normalized `DropData` population instead of exposing raw platform pasteboard flavor strings through webpage-visible drag data.
+
+### Removed
+
+- Removed the legacy macOS `BrowserViewMac` embedding implementation and its host-owned choice-menu presenter from `cbf-chrome`; surface embedding now goes through `cbf-compositor`.
 
 ### Fixed
 

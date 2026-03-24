@@ -122,13 +122,12 @@ Displaying browser content requires two additional steps that the application is
 1. **Create a native window** using a windowing library such as `winit`.
 2. **Attach a surface** — after `BackendReady` and browsing context creation, you will receive
    a `SurfaceHandleUpdated` event containing a platform-specific surface handle. Attach this
-   handle to your host window using the native API (for example, `cbf-chrome` provides
-   `BrowserViewMac` for macOS).
+   handle to your host window using `cbf-compositor` or your own platform-native integration.
    If you later hide a browsing context and show it again, macOS may recreate the underlying
    compositor surface. In that case CBF can emit another `SurfaceHandleUpdated` event with a new
    handle, and the host should reattach or rebind the surface using that latest handle.
 
-`simpleapp` implements this full cycle using `winit` and `BrowserViewMac` of `cbf-chrome` for macOS.
+`simpleapp` implements this full cycle using `winit` and `cbf-compositor`.
 See `examples/simpleapp/src/` for the platform-specific surface attachment and event loop wiring.
 
 ## 5. Validate behavior
