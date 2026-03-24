@@ -612,7 +612,7 @@ version = "146.1.0-alpha.2"
 
 [[package]]
 name = "cbf-cli"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "cargo_metadata",
  "clap",
