@@ -50,8 +50,8 @@ Linux, Windows, and Intel macOS are not yet supported.
 - **Content & Interaction**
   - ✅ Get DOM HTML
   - ✅ Drag and drop on webpage
+  - ✅ Drag and drop from other apps
   - 🚧 Context menu events
-  - ❌ Drag and drop from other apps
 - **Downloads & Print**
   - ✅ General download management
   - 🚧 Print dialog UI
@@ -62,7 +62,7 @@ Linux, Windows, and Intel macOS are not yet supported.
   - ✅ Extension inline UI
   - 🚧 Full extension support
 - **Developer Tools & Built-in Pages**
-  - 🚧 DevTools UI (embedded)
+  - 🚧 DevTools UI
   - ✅ `chrome://version`
   - 🚧 `chrome://history` / `chrome://settings`
 

@@ -37,8 +37,8 @@ This document provides a high-level overview of the features supported by CBF, c
 | --- | --- | --- | --- |
 | Get DOM html | ✅ | macOS | |
 | Drag and Drop on webpage | ✅ | macOS | |
+| Drag and Drop from other apps | ✅ | | |
 | Context menu events | 🚧 | macOS | Some native items are not yet supported |
-| Drag and Drop from other apps | ❌ | | |
 
 ## Downloads & Print
 
@@ -63,7 +63,7 @@ This document provides a high-level overview of the features supported by CBF, c
 
 | Feature | Status | Platform | Notes |
 | --- | --- | --- | --- |
-| DevTools UI | 🚧 | macOS | Only embedding via `NSView`; docking is achieved with two `NSView` |
+| DevTools UI | 🚧 | macOS | You can embed DevTools in your app |
 | `chrome://version` | ✅ | macOS | |
 | `chrome://history` | 🚧 | macOS | Deleting all history at once is not yet supported |
 | `chrome://settings` | 🚧 | macOS | Some settings options are not yet available |
