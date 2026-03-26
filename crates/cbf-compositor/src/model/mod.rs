@@ -9,7 +9,10 @@ mod ids;
 mod ownership;
 mod target;
 
-pub use composition::{BackgroundPolicy, CompositionItemSpec, WindowCompositionSpec};
+pub use composition::{
+    BackgroundPolicy, CompositionItemSpec, HitTestCoordinateSpace, HitTestPolicy, HitTestRegion,
+    HitTestRegionSnapshot, WindowCompositionSpec,
+};
 pub use geometry::Rect;
 pub use ids::{CompositionItemId, CompositorWindowId};
 pub use ownership::TransientOwnership;

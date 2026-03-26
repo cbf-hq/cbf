@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     error::CompositorError,
     model::{
-        CompositionItemId, CompositionItemSpec, CompositorWindowId, Rect, SurfaceTarget,
+        CompositionItemId, CompositionItemSpec, CompositorWindowId, HitTestCoordinateSpace,
+        HitTestPolicy, HitTestRegion, HitTestRegionSnapshot, Rect, SurfaceTarget,
         WindowCompositionSpec,
     },
 };
@@ -18,6 +19,13 @@ pub(crate) struct CompositionState {
 struct CompositionItemState {
     window_id: CompositorWindowId,
     spec: CompositionItemSpec,
+    hit_test_snapshot: Option<HitTestRegionSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WindowSceneItemState {
+    pub(crate) spec: CompositionItemSpec,
+    pub(crate) hit_test_snapshot: Option<HitTestRegionSnapshot>,
 }
 
 #[derive(Debug, Default)]
@@ -94,8 +102,19 @@ impl CompositionState {
             .collect::<Vec<_>>();
 
         for spec in composition.items {
-            self.items
-                .insert(spec.item_id, CompositionItemState { window_id, spec });
+            let hit_test_snapshot = self.items.get(&spec.item_id).and_then(|state| {
+                matches!(spec.hit_test, HitTestPolicy::RegionSnapshot)
+                    .then(|| state.hit_test_snapshot.clone())
+                    .flatten()
+            });
+            self.items.insert(
+                spec.item_id,
+                CompositionItemState {
+                    window_id,
+                    spec,
+                    hit_test_snapshot,
+                },
+            );
         }
 
         self.windows.insert(window_id, ordered_item_ids);
@@ -122,6 +141,35 @@ impl CompositionState {
         let item = self.item_state_mut(window_id, item_id)?;
         item.spec.visible = visible;
         Ok(())
+    }
+
+    pub(crate) fn set_item_hit_test_regions(
+        &mut self,
+        window_id: CompositorWindowId,
+        item_id: CompositionItemId,
+        snapshot_id: u64,
+        coordinate_space: HitTestCoordinateSpace,
+        regions: Vec<HitTestRegion>,
+    ) -> Result<bool, CompositorError> {
+        let item = self.item_state_mut(window_id, item_id)?;
+        if !matches!(item.spec.hit_test, HitTestPolicy::RegionSnapshot) {
+            return Err(CompositorError::ItemDoesNotUseRegionHitTesting);
+        }
+
+        if item
+            .hit_test_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.snapshot_id > snapshot_id)
+        {
+            return Ok(false);
+        }
+
+        item.hit_test_snapshot = Some(HitTestRegionSnapshot {
+            snapshot_id,
+            coordinate_space,
+            regions,
+        });
+        Ok(true)
     }
 
     pub(crate) fn remove_item(
@@ -170,6 +218,23 @@ impl CompositionState {
             item_ids
                 .iter()
                 .filter_map(|item_id| self.items.get(item_id).map(|state| state.spec.clone()))
+                .collect()
+        })
+    }
+
+    pub(crate) fn window_scene_items(
+        &self,
+        window_id: CompositorWindowId,
+    ) -> Option<Vec<WindowSceneItemState>> {
+        self.windows.get(&window_id).map(|item_ids| {
+            item_ids
+                .iter()
+                .filter_map(|item_id| {
+                    self.items.get(item_id).map(|state| WindowSceneItemState {
+                        spec: state.spec.clone(),
+                        hit_test_snapshot: state.hit_test_snapshot.clone(),
+                    })
+                })
                 .collect()
         })
     }
@@ -249,8 +314,9 @@ mod tests {
     use super::CompositionState;
     use crate::CompositorError;
     use crate::model::{
-        BackgroundPolicy, CompositionItemId, CompositionItemSpec, CompositorWindowId, Rect,
-        SurfaceTarget, WindowCompositionSpec,
+        BackgroundPolicy, CompositionItemId, CompositionItemSpec, CompositorWindowId,
+        HitTestCoordinateSpace, HitTestPolicy, HitTestRegion, Rect, SurfaceTarget,
+        WindowCompositionSpec,
     };
 
     fn item(item_id: u64, target: SurfaceTarget) -> CompositionItemSpec {
@@ -259,8 +325,15 @@ mod tests {
             target,
             bounds: Rect::new(1.0, 2.0, 3.0, 4.0),
             visible: true,
-            interactive: true,
+            hit_test: HitTestPolicy::Bounds,
             background: BackgroundPolicy::Opaque,
+        }
+    }
+
+    fn region_item(item_id: u64, target: SurfaceTarget) -> CompositionItemSpec {
+        CompositionItemSpec {
+            hit_test: HitTestPolicy::RegionSnapshot,
+            ..item(item_id, target)
         }
     }
 
@@ -444,5 +517,86 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, CompositorError::DuplicateSurfaceTarget));
+    }
+
+    #[test]
+    fn set_item_hit_test_regions_rejects_non_region_item() {
+        let mut state = CompositionState::default();
+        let window_id = CompositorWindowId::new(1);
+        let item_id = CompositionItemId::new(1);
+        state.ensure_window(window_id);
+        state
+            .set_window_composition(
+                window_id,
+                WindowCompositionSpec {
+                    items: vec![item(
+                        item_id.get(),
+                        SurfaceTarget::BrowsingContext(BrowsingContextId::new(10)),
+                    )],
+                },
+            )
+            .unwrap();
+
+        let err = state
+            .set_item_hit_test_regions(
+                window_id,
+                item_id,
+                1,
+                HitTestCoordinateSpace::ItemLocalCssPx,
+                vec![HitTestRegion::new(0.0, 0.0, 10.0, 10.0)],
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            CompositorError::ItemDoesNotUseRegionHitTesting
+        ));
+    }
+
+    #[test]
+    fn set_item_hit_test_regions_ignores_stale_snapshot() {
+        let mut state = CompositionState::default();
+        let window_id = CompositorWindowId::new(1);
+        let item_id = CompositionItemId::new(1);
+        state.ensure_window(window_id);
+        state
+            .set_window_composition(
+                window_id,
+                WindowCompositionSpec {
+                    items: vec![region_item(
+                        item_id.get(),
+                        SurfaceTarget::BrowsingContext(BrowsingContextId::new(10)),
+                    )],
+                },
+            )
+            .unwrap();
+
+        assert!(state
+            .set_item_hit_test_regions(
+                window_id,
+                item_id,
+                2,
+                HitTestCoordinateSpace::ItemLocalCssPx,
+                vec![HitTestRegion::new(1.0, 2.0, 3.0, 4.0)],
+            )
+            .unwrap());
+        assert!(!state
+            .set_item_hit_test_regions(
+                window_id,
+                item_id,
+                1,
+                HitTestCoordinateSpace::ItemLocalCssPx,
+                vec![HitTestRegion::new(5.0, 6.0, 7.0, 8.0)],
+            )
+            .unwrap());
+
+        let scene = state.window_scene_items(window_id).unwrap();
+        let snapshot = scene
+            .into_iter()
+            .next()
+            .and_then(|item| item.hit_test_snapshot)
+            .expect("snapshot should exist");
+        assert_eq!(snapshot.snapshot_id, 2);
+        assert_eq!(snapshot.regions, vec![HitTestRegion::new(1.0, 2.0, 3.0, 4.0)]);
     }
 }

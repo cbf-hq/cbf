@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background policy propagation from composition items to browser-generic background policy commands.
 - Validation that rejects compositions which attempt to display the same `SurfaceTarget` more than once across the live compositor state.
 - Programmatic active-item switching through `Compositor::set_active_item`, allowing hosts to move browser input focus by `CompositionItemId` while reusing the compositor's native focus-routing path.
+- Region-based hit-test snapshots for compositor items through `HitTestPolicy::RegionSnapshot` and `CompositionCommand::SetItemHitTestRegions`.
+- Public hit-test model types `HitTestPolicy`, `HitTestCoordinateSpace`, `HitTestRegion`, and `HitTestRegionSnapshot`.
+
+### Changed
+
+- Replaced `CompositionItemSpec.interactive` with `CompositionItemSpec.hit_test`, allowing compositor items to choose between passthrough, full-bounds, and region-snapshot hit testing.
+- macOS pointer routing now resolves targets against per-item hit-test policy and cached region snapshots instead of a bounds-only interactive flag.
 
 ### Security
 

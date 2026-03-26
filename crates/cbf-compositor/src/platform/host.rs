@@ -8,7 +8,9 @@ use cbf_chrome::data::choice_menu::ChromeChoiceMenu;
 
 use crate::{
     error::CompositorError,
-    model::{CompositionItemId, Rect, SurfaceTarget},
+    model::{
+        CompositionItemId, HitTestPolicy, HitTestRegionSnapshot, Rect, SurfaceTarget,
+    },
     window::WindowHost,
 };
 
@@ -30,7 +32,8 @@ pub(crate) struct PlatformSceneItem {
     pub(crate) target: SurfaceTarget,
     pub(crate) bounds: Rect,
     pub(crate) visible: bool,
-    pub(crate) interactive: bool,
+    pub(crate) hit_test: HitTestPolicy,
+    pub(crate) hit_test_snapshot: Option<HitTestRegionSnapshot>,
     pub(crate) surface: Option<PlatformSurfaceHandle>,
     pub(crate) ime_bounds: Option<ImeBoundsUpdate>,
 }

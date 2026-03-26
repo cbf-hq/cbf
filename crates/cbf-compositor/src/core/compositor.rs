@@ -156,6 +156,26 @@ impl Compositor {
                     .set_item_visibility(window_id, item_id, visible)?;
                 self.sync_window_scene(window_id)
             }
+            CompositionCommand::SetItemHitTestRegions {
+                window_id,
+                item_id,
+                snapshot_id,
+                coordinate_space,
+                regions,
+            } => {
+                self.ensure_window(window_id)?;
+                if self.composition_state.set_item_hit_test_regions(
+                    window_id,
+                    item_id,
+                    snapshot_id,
+                    coordinate_space,
+                    regions,
+                )? {
+                    self.sync_window_scene(window_id)
+                } else {
+                    Ok(())
+                }
+            }
             CompositionCommand::RemoveItem { window_id, item_id } => {
                 self.ensure_window(window_id)?;
                 self.composition_state.remove_item(window_id, item_id)?;
@@ -270,13 +290,13 @@ impl Compositor {
         self.composition_state.window_id_for_item(item_id)
     }
 
-    /// Programmatically move the active input target to one visible, interactive item.
+    /// Programmatically move the active input target to one visible input-receiving item.
     pub fn set_active_item(&mut self, item_id: CompositionItemId) -> Result<(), CompositorError> {
         let spec = self
             .composition_state
             .item_spec(item_id)
             .ok_or(CompositorError::UnknownItem)?;
-        if !spec.visible || !spec.interactive {
+        if !spec.visible || matches!(spec.hit_test, crate::model::HitTestPolicy::Passthrough) {
             return Err(CompositorError::ItemNotInteractive);
         }
 
@@ -448,17 +468,18 @@ impl Compositor {
     fn sync_window_scene(&mut self, window_id: CompositorWindowId) -> Result<(), CompositorError> {
         let scene = self
             .composition_state
-            .items_for_window(window_id)
+            .window_scene_items(window_id)
             .ok_or(CompositorError::UnknownWindow)?
             .into_iter()
-            .map(|spec| {
-                let runtime_state = self.surface_state.get(spec.target);
+            .map(|item| {
+                let runtime_state = self.surface_state.get(item.spec.target);
                 PlatformSceneItem {
-                    item_id: spec.item_id,
-                    target: spec.target,
-                    bounds: spec.bounds,
-                    visible: spec.visible,
-                    interactive: spec.interactive,
+                    item_id: item.spec.item_id,
+                    target: item.spec.target,
+                    bounds: item.spec.bounds,
+                    visible: item.spec.visible,
+                    hit_test: item.spec.hit_test,
+                    hit_test_snapshot: item.hit_test_snapshot,
                     surface: runtime_state.and_then(|state| state.surface.clone()),
                     ime_bounds: runtime_state.and_then(|state| state.ime_bounds.clone()),
                 }
@@ -584,7 +605,8 @@ mod tests {
     use super::*;
     use crate::{
         model::{
-            BackgroundPolicy, CompositionItemId, CompositionItemSpec, Rect, WindowCompositionSpec,
+            BackgroundPolicy, CompositionItemId, CompositionItemSpec, HitTestCoordinateSpace,
+            HitTestPolicy, HitTestRegion, Rect, WindowCompositionSpec,
         },
         platform::host::{PlatformInputState, PlatformSceneItem},
     };
@@ -675,8 +697,15 @@ mod tests {
             target,
             bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
             visible: true,
-            interactive: true,
+            hit_test: HitTestPolicy::Bounds,
             background: BackgroundPolicy::Opaque,
+        }
+    }
+
+    fn region_item(item_id: u64, target: SurfaceTarget) -> CompositionItemSpec {
+        CompositionItemSpec {
+            hit_test: HitTestPolicy::RegionSnapshot,
+            ..item(item_id, target)
         }
     }
 
@@ -1007,5 +1036,93 @@ mod tests {
             .set_active_item(CompositionItemId::new(999))
             .unwrap_err();
         assert!(matches!(err, CompositorError::UnknownItem));
+    }
+
+    #[test]
+    fn set_item_hit_test_regions_updates_platform_scene_snapshot() {
+        let mut compositor = Compositor::new();
+        let window_id = CompositorWindowId::new(1);
+        let host = TestPlatformHost::default();
+        let scene_log = Rc::clone(&host.last_scene);
+        compositor.attach_test_window(window_id, Box::new(host));
+
+        compositor
+            .apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id,
+                    composition: WindowCompositionSpec {
+                        items: vec![region_item(
+                            1,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(10)),
+                        )],
+                    },
+                },
+                |_| {},
+            )
+            .unwrap();
+
+        compositor
+            .apply(
+                CompositionCommand::SetItemHitTestRegions {
+                    window_id,
+                    item_id: CompositionItemId::new(1),
+                    snapshot_id: 3,
+                    coordinate_space: HitTestCoordinateSpace::ItemLocalCssPx,
+                    regions: vec![HitTestRegion::new(10.0, 20.0, 30.0, 40.0)],
+                },
+                |_| {},
+            )
+            .unwrap();
+
+        let scene = scene_log.borrow();
+        let snapshot = scene
+            .first()
+            .and_then(|item| item.hit_test_snapshot.as_ref())
+            .expect("snapshot should be synced");
+        assert_eq!(snapshot.snapshot_id, 3);
+        assert_eq!(
+            snapshot.regions,
+            vec![HitTestRegion::new(10.0, 20.0, 30.0, 40.0)]
+        );
+    }
+
+    #[test]
+    fn set_item_hit_test_regions_rejects_bounds_item() {
+        let mut compositor = Compositor::new();
+        let window_id = CompositorWindowId::new(1);
+        compositor.attach_test_window(window_id, Box::<TestPlatformHost>::default());
+
+        compositor
+            .apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id,
+                    composition: WindowCompositionSpec {
+                        items: vec![item(
+                            1,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(10)),
+                        )],
+                    },
+                },
+                |_| {},
+            )
+            .unwrap();
+
+        let err = compositor
+            .apply(
+                CompositionCommand::SetItemHitTestRegions {
+                    window_id,
+                    item_id: CompositionItemId::new(1),
+                    snapshot_id: 1,
+                    coordinate_space: HitTestCoordinateSpace::ItemLocalCssPx,
+                    regions: vec![HitTestRegion::new(0.0, 0.0, 10.0, 10.0)],
+                },
+                |_| {},
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            CompositorError::ItemDoesNotUseRegionHitTesting
+        ));
     }
 }

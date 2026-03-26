@@ -15,7 +15,8 @@ pub mod window;
 pub use core::{AttachWindowOptions, CompositionCommand, Compositor};
 pub use error::CompositorError;
 pub use model::{
-    BackgroundPolicy, CompositionItemId, CompositionItemSpec, CompositorWindowId, Rect,
+    BackgroundPolicy, CompositionItemId, CompositionItemSpec, CompositorWindowId,
+    HitTestCoordinateSpace, HitTestPolicy, HitTestRegion, HitTestRegionSnapshot, Rect,
     SurfaceTarget, TransientOwnership, WindowCompositionSpec,
 };
 pub use window::WindowHost;

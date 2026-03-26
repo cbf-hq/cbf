@@ -11,6 +11,13 @@ applications.
 Within a window, `WindowCompositionSpec.items` defines front-to-back stacking
 order. The first item is topmost.
 
+Each scene item declares a hit-test policy:
+
+- `Passthrough`: never receives pointer hit-tests
+- `Bounds`: receives pointer hit-tests across the full item bounds
+- `RegionSnapshot`: receives pointer hit-tests only inside the latest pushed
+  region snapshot
+
 The compositor only manages browser-managed surfaces:
 
 - `BrowsingContext`
@@ -33,4 +40,5 @@ The current implementation provides:
 The macOS implementation attaches exactly one compositor-owned `NSView` to the
 host content view. That responder view becomes first responder and routes
 keyboard, IME, mouse, wheel, menu, and drag interactions to the appropriate
-scene item based on composition order and hit-testing.
+scene item based on composition order and hit-testing. Region snapshots use
+item-local CSS-pixel rectangles with a top-left origin.

@@ -69,7 +69,8 @@ use crate::{
     platform::{
         host::{PlatformInputState, PlatformSceneItem, PlatformSurfaceHandle},
         macos::{
-            hit_test::topmost_item_at_point, ime::candidate_rect_for_slot,
+            hit_test::{slot_hit_test_contains_point, topmost_item_at_point},
+            ime::candidate_rect_for_slot,
             surface_slot::SurfaceSlot,
         },
     },
@@ -1060,7 +1061,8 @@ impl CompositorViewMac {
                 layer,
                 bounds: rect_to_cgrect(item.bounds),
                 visible: item.visible,
-                interactive: item.interactive,
+                hit_test: item.hit_test,
+                hit_test_snapshot: item.hit_test_snapshot.clone(),
                 surface: item.surface.clone(),
                 ime_bounds: item.ime_bounds.clone(),
             }
@@ -1069,7 +1071,8 @@ impl CompositorViewMac {
         slot.target = item.target;
         slot.bounds = rect_to_cgrect(item.bounds);
         slot.visible = item.visible;
-        slot.interactive = item.interactive;
+        slot.hit_test = item.hit_test;
+        slot.hit_test_snapshot = item.hit_test_snapshot.clone();
         slot.surface = item.surface.clone();
         slot.ime_bounds = item.ime_bounds.clone();
 
@@ -1475,7 +1478,7 @@ impl CompositorViewMac {
         update_active: bool,
     ) -> Option<(CompositionItemId, SurfaceTarget)> {
         // Pointer capture wins while a drag is in progress; otherwise resolve
-        // the topmost visible/interactable item under the cursor.
+        // the topmost visible item whose hit-test policy matches the cursor.
         if let Some(item_id) = self.ivars().input_state.borrow().pointer_capture_item_id {
             if let Some(target) = self.item_target(item_id) {
                 return Some(target);
@@ -1489,7 +1492,7 @@ impl CompositorViewMac {
         let point = self.local_point(event);
         let slots = self.ivars().slots.borrow();
         let order = self.ivars().order.borrow();
-        let item_id = topmost_item_at_point(&order, &slots, point)?;
+        let item_id = topmost_item_at_point(&order, &slots, point, self.bounds().size.height)?;
         let target = slots.get(&item_id).map(|slot| (item_id, slot.target))?;
         drop(order);
         drop(slots);
@@ -1509,7 +1512,7 @@ impl CompositorViewMac {
     fn target_at_point(&self, point: CGPoint) -> Option<(CompositionItemId, SurfaceTarget)> {
         let slots = self.ivars().slots.borrow();
         let order = self.ivars().order.borrow();
-        let item_id = topmost_item_at_point(&order, &slots, point)?;
+        let item_id = topmost_item_at_point(&order, &slots, point, self.bounds().size.height)?;
         slots.get(&item_id).map(|slot| (item_id, slot.target))
     }
 
@@ -1601,9 +1604,9 @@ impl CompositorViewMac {
     ) -> Option<(CompositionItemId, BrowsingContextId)> {
         let slots = self.ivars().slots.borrow();
         let order = self.ivars().order.borrow();
-        let item_id = topmost_item_at_point(&order, &slots, point)?;
+        let item_id = topmost_item_at_point(&order, &slots, point, self.bounds().size.height)?;
         let slot = slots.get(&item_id)?;
-        if !slot.visible || !slot.interactive {
+        if !slot.visible || !slot_hit_test_contains_point(slot, point, self.bounds().size.height) {
             return None;
         }
         match slot.target {
