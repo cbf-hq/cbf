@@ -73,60 +73,60 @@ void CbfProfileService::RequestCloseWebPage(uint64_t web_page_id) {
 FFI から Mojo への呼び出しを中継します。`SetWebPageSize` などの既存実装を参考にします。
 
 - **`cbf_bridge_web_page.cc`**:
-    - `CbfBridgeClient::RequestCloseWebPage` / `ConfirmBeforeUnload` を実装 (Mojo 呼び出し)。
-    - `extern "C"` 関数 `cbf_bridge_client_request_close_web_page` / `cbf_bridge_client_confirm_beforeunload` を追加。
+    - `CbfBridgeClient::RequestCloseTab` / `ConfirmBeforeUnload` を実装 (Mojo 呼び出し)。
+    - `extern "C"` 関数 `cbf_bridge_client_request_close_tab` / `cbf_bridge_client_confirm_beforeunload` を追加。
 
 ```cpp
 // chromium/src/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
 
 namespace cbf_bridge::internal {
 
-bool CbfBridgeClient::RequestCloseWebPage(const uint64_t web_page_id) {
+bool CbfBridgeClient::RequestCloseTab(const uint64_t tab_id) {
     // ... impl_->browser_remote チェック ...
-    // ... web_page_id から profile を特定し、connection.remote->RequestCloseWebPage(web_page_id) を呼ぶ
+    // ... tab_id から profile を特定し、connection.remote->RequestCloseTab(tab_id) を呼ぶ
     // (実装パターンは SetWebPageSize と同様)
 }
 
-bool CbfBridgeClient::ConfirmBeforeUnload(const uint64_t web_page_id,
+bool CbfBridgeClient::ConfirmBeforeUnload(const uint64_t tab_id,
                                           const uint64_t request_id,
                                           const bool proceed) {
-    // ... web_page_id から profile を特定し、connection.remote->ConfirmBeforeUnload(request_id, proceed) を呼ぶ
+    // ... tab_id から profile を特定し、connection.remote->ConfirmBeforeUnload(request_id, proceed) を呼ぶ
 }
 
 } // namespace
 
-extern "C" bool cbf_bridge_client_request_close_web_page(CbfBridgeClientHandle* client, uint64_t web_page_id) {
+extern "C" bool cbf_bridge_client_request_close_tab(CbfBridgeClientHandle* client, uint64_t tab_id) {
   if (!client) return false;
   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-      ->RequestCloseWebPage(web_page_id);
+      ->RequestCloseTab(tab_id);
 }
 
 extern "C" bool cbf_bridge_client_confirm_beforeunload(
     CbfBridgeClientHandle* client,
-    uint64_t web_page_id,
+    uint64_t tab_id,
     uint64_t request_id,
     bool proceed) {
   if (!client) return false;
   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
-      ->ConfirmBeforeUnload(web_page_id, request_id, proceed);
+      ->ConfirmBeforeUnload(tab_id, request_id, proceed);
 }
 ```
 
 ### 4. Rust 側の実装 (`cbf-sys`, `cbf`)
 
 - **`crates/cbf-sys/src/ffi.rs`**:
-    - `cbf_bridge_client_request_close_web_page` / `cbf_bridge_client_confirm_beforeunload` を定義します。
+    - `cbf_bridge_client_request_close_tab` / `cbf_bridge_client_confirm_beforeunload` を定義します。
 
 ```rust
 unsafe extern "C" {
-    pub fn cbf_bridge_client_request_close_web_page(
+    pub fn cbf_bridge_client_request_close_tab(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
     ) -> bool;
 
     pub fn cbf_bridge_client_confirm_beforeunload(
         client: *mut CbfBridgeClientHandle,
-        web_page_id: u64,
+        tab_id: u64,
         request_id: u64,
         proceed: bool,
     ) -> bool;
@@ -134,10 +134,10 @@ unsafe extern "C" {
 ```
 
 - **`crates/cbf/src/ffi/mod.rs`**:
-    - `IpcClient::request_close_web_page` / `confirm_beforeunload` メソッドを追加し、FFI 関数を呼び出します。
+    - `IpcClient::request_close_tab` / `confirm_beforeunload` メソッドを追加し、FFI 関数を呼び出します。
 
 - **`crates/cbf/src/chromium_backend.rs`**:
-    - `BrowserCommand::RequestCloseWebPage` のハンドリングを実装し、`client.request_close_web_page(web_page_id)` を呼び出します。
+    - `BrowserCommand::RequestCloseWebPage` のハンドリングを実装し、`client.request_close_tab(web_page_id)` を呼び出します。
     - `BrowserCommand::ConfirmBeforeUnload` のハンドリングを追加します。
 
 ## 注意点

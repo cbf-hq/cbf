@@ -19,7 +19,7 @@ IMEイベントをChromiumに転送する際、空のリストではなく、明
 let utf16_len = text.encode_utf16().count();
 let spans = if utf16_len > 0 {
     vec![ImeTextSpan {
-        type_: ImeTextSpanType::Composition,
+        r#type: ImeTextSpanType::Composition,
         start_offset: 0,
         end_offset: utf16_len as u32,
         underline_color: 0, // 透明またはデフォルト

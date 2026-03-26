@@ -311,41 +311,6 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             profile_id: c_string_to_string(event.profile_id),
             extensions: parse_extension_list(event.extensions),
         }),
-        CBF_EVENT_AUXILIARY_WINDOW_OPEN_REQUESTED => Ok(IpcEvent::PromptUiOpenRequested {
-            profile_id: c_string_to_string(event.profile_id),
-            source_tab_id: event
-                .prompt_ui_has_source_tab_id
-                .then(|| TabId::new(event.prompt_ui_source_tab_id)),
-            request_id: event.request_id,
-            kind: prompt_ui_kind_from_auxiliary_window_ffi(
-                event.auxiliary_window_kind,
-                event.extension_id,
-                event.extension_name,
-                event.triggering_extension_name,
-                event.prompt_ui_can_report_abuse,
-                event.permission_names,
-                event.prompt_ui_repost_reason,
-                event.prompt_ui_repost_target_url,
-            ),
-        }),
-        CBF_EVENT_AUXILIARY_WINDOW_RESOLVED => Ok(IpcEvent::PromptUiResolved {
-            profile_id: c_string_to_string(event.profile_id),
-            source_tab_id: event
-                .prompt_ui_has_source_tab_id
-                .then(|| TabId::new(event.prompt_ui_source_tab_id)),
-            request_id: event.request_id,
-            resolution: prompt_ui_resolution_from_auxiliary_window_ffi(
-                event.auxiliary_window_kind,
-                event.extension_id,
-                event.prompt_ui_extension_install_result,
-                event.prompt_ui_extension_uninstall_result,
-                event.prompt_ui_extension_install_detail,
-                event.prompt_ui_report_abuse,
-                event.prompt_ui_result,
-                event.prompt_ui_repost_reason,
-                event.prompt_ui_repost_target_url,
-            ),
-        }),
         CBF_EVENT_PROMPT_UI_REQUESTED => Ok(IpcEvent::PromptUiOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
             source_tab_id: event
@@ -415,9 +380,17 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             source_tab_id: event
                 .prompt_ui_has_source_tab_id
                 .then(|| TabId::new(event.prompt_ui_source_tab_id)),
-            prompt_ui_id: PromptUiId::new(event.auxiliary_window_id),
-            kind: prompt_ui_kind_from_auxiliary_window_ffi(
-                event.auxiliary_window_kind,
+            prompt_ui_id: PromptUiId::new(event.prompt_ui_id),
+            kind: prompt_ui_kind_from_ffi(
+                event.prompt_ui_kind,
+                event.prompt_ui_permission,
+                event.prompt_ui_permission_key,
+                event.download_reason,
+                event.download_id,
+                event.download_file_name,
+                event.download_total_bytes,
+                event.download_has_total_bytes,
+                event.download_suggested_path,
                 event.extension_id,
                 event.extension_name,
                 event.triggering_extension_name,
@@ -427,19 +400,27 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.prompt_ui_repost_target_url,
             ),
             title: {
-                let value = c_string_to_string(event.auxiliary_window_title);
+                let value = c_string_to_string(event.prompt_ui_title);
                 if value.is_empty() { None } else { Some(value) }
             },
-            modal: event.auxiliary_window_modal,
+            modal: event.prompt_ui_modal,
         }),
         CBF_EVENT_PROMPT_UI_CLOSED => Ok(IpcEvent::PromptUiClosed {
             profile_id: c_string_to_string(event.profile_id),
             source_tab_id: event
                 .prompt_ui_has_source_tab_id
                 .then(|| TabId::new(event.prompt_ui_source_tab_id)),
-            prompt_ui_id: PromptUiId::new(event.auxiliary_window_id),
-            kind: prompt_ui_kind_from_auxiliary_window_ffi(
-                event.auxiliary_window_kind,
+            prompt_ui_id: PromptUiId::new(event.prompt_ui_id),
+            kind: prompt_ui_kind_from_ffi(
+                event.prompt_ui_kind,
+                event.prompt_ui_permission,
+                event.prompt_ui_permission_key,
+                event.download_reason,
+                event.download_id,
+                event.download_file_name,
+                event.download_total_bytes,
+                event.download_has_total_bytes,
+                event.download_suggested_path,
                 event.extension_id,
                 event.extension_name,
                 event.triggering_extension_name,
@@ -448,7 +429,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.prompt_ui_repost_reason,
                 event.prompt_ui_repost_target_url,
             ),
-            reason: prompt_ui_close_reason_from_ffi(event.auxiliary_window_close_reason),
+            reason: prompt_ui_close_reason_from_ffi(event.prompt_ui_close_reason),
         }),
         CBF_EVENT_DOWNLOAD_CREATED => Ok(IpcEvent::DownloadCreated {
             profile_id: c_string_to_string(event.profile_id),
@@ -731,7 +712,7 @@ fn parse_choice_menu_items(list: CbfChoiceMenuItemList) -> Vec<ChromeChoiceMenuI
 
 fn parse_choice_menu_item(item: &CbfChoiceMenuItem) -> ChromeChoiceMenuItem {
     ChromeChoiceMenuItem {
-        item_type: choice_menu_item_type_from_ffi(item.type_),
+        item_type: choice_menu_item_type_from_ffi(item.r#type),
         label: optional_string_from_ffi(item.label),
         tool_tip: optional_string_from_ffi(item.tool_tip),
         enabled: item.enabled,
@@ -754,7 +735,7 @@ fn parse_context_menu_items(list: CbfContextMenuItemList) -> Vec<ChromeContextMe
 
 fn parse_context_menu_item(item: &CbfContextMenuItem) -> ChromeContextMenuItem {
     ChromeContextMenuItem {
-        r#type: context_menu_item_type_from_ffi(item.type_),
+        r#type: context_menu_item_type_from_ffi(item.r#type),
         command_id: item.command_id,
         label: c_string_to_string(item.label),
         secondary_label: c_string_to_string(item.secondary_label),
@@ -993,43 +974,6 @@ fn prompt_ui_kind_from_ffi(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn prompt_ui_kind_from_auxiliary_window_ffi(
-    kind: u8,
-    extension_id: *mut std::ffi::c_char,
-    extension_name: *mut std::ffi::c_char,
-    triggering_extension_name: *mut std::ffi::c_char,
-    can_report_abuse: bool,
-    permission_names: CbfStringList,
-    repost_reason: u8,
-    repost_target_url: *mut std::ffi::c_char,
-) -> PromptUiKind {
-    match kind {
-        CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT => {
-            PromptUiKind::ExtensionInstallPrompt {
-                extension_id: c_string_to_string(extension_id),
-                extension_name: c_string_to_string(extension_name),
-                permission_names: parse_string_list(permission_names),
-            }
-        }
-        CBF_AUXILIARY_WINDOW_KIND_EXTENSION_UNINSTALL_PROMPT => {
-            PromptUiKind::ExtensionUninstallPrompt {
-                extension_id: c_string_to_string(extension_id),
-                extension_name: c_string_to_string(extension_name),
-                triggering_extension_name: optional_string_from_ffi(triggering_extension_name),
-                can_report_abuse,
-            }
-        }
-        CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG => PromptUiKind::PrintPreviewDialog,
-        CBF_AUXILIARY_WINDOW_KIND_FORM_RESUBMISSION_PROMPT => {
-            PromptUiKind::FormResubmissionPrompt {
-                reason: prompt_ui_form_resubmission_reason_from_ffi(repost_reason),
-                target_url: optional_string_from_ffi(repost_target_url),
-            }
-        }
-        _ => PromptUiKind::Unknown,
-    }
-}
-
 fn prompt_ui_dialog_result_from_ffi(value: u8) -> PromptUiDialogResult {
     match value {
         CBF_PROMPT_UI_DIALOG_RESULT_PROCEEDED => PromptUiDialogResult::Proceeded,
@@ -1105,50 +1049,6 @@ fn prompt_ui_resolution_from_ffi(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn prompt_ui_resolution_from_auxiliary_window_ffi(
-    kind: u8,
-    extension_id: *mut std::ffi::c_char,
-    extension_install_result: u8,
-    extension_uninstall_result: u8,
-    detail: *mut std::ffi::c_char,
-    report_abuse: bool,
-    permission_result: u8,
-    repost_reason: u8,
-    repost_target_url: *mut std::ffi::c_char,
-) -> PromptUiResolution {
-    match kind {
-        CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT => {
-            PromptUiResolution::ExtensionInstallPrompt {
-                extension_id: c_string_to_string(extension_id),
-                result: prompt_ui_extension_install_result_from_ffi(extension_install_result),
-                detail: {
-                    let value = c_string_to_string(detail);
-                    if value.is_empty() { None } else { Some(value) }
-                },
-            }
-        }
-        CBF_AUXILIARY_WINDOW_KIND_EXTENSION_UNINSTALL_PROMPT => {
-            PromptUiResolution::ExtensionUninstallPrompt {
-                extension_id: c_string_to_string(extension_id),
-                result: prompt_ui_extension_uninstall_result_from_ffi(extension_uninstall_result),
-                detail: {
-                    let value = c_string_to_string(detail);
-                    if value.is_empty() { None } else { Some(value) }
-                },
-                report_abuse,
-            }
-        }
-        CBF_AUXILIARY_WINDOW_KIND_FORM_RESUBMISSION_PROMPT => {
-            PromptUiResolution::FormResubmissionPrompt {
-                reason: prompt_ui_form_resubmission_reason_from_ffi(repost_reason),
-                target_url: optional_string_from_ffi(repost_target_url),
-                result: prompt_ui_resolution_result_from_ffi(permission_result),
-            }
-        }
-        _ => PromptUiResolution::Unknown,
-    }
-}
-
 fn download_prompt_result_from_ffi(value: u8) -> ChromeDownloadPromptResult {
     match value {
         CBF_DOWNLOAD_PROMPT_RESULT_ALLOWED => ChromeDownloadPromptResult::Allowed,
@@ -1481,7 +1381,7 @@ pub(super) fn to_ffi_ime_text_spans(spans: &[ChromeImeTextSpan]) -> Vec<CbfImeTe
         .map(|span| {
             let chrome_style = chrome_ime_text_span_style_from_span(span);
             CbfImeTextSpan {
-                type_: ime_text_span_type_to_ffi(span.r#type),
+                r#type: ime_text_span_type_to_ffi(span.r#type),
                 start_offset: span.start_offset,
                 end_offset: span.end_offset,
                 underline_color: chrome_style.underline_color,
@@ -1520,7 +1420,7 @@ pub fn convert_nsevent_to_chrome_key_event(
     }
 
     let event = ChromeKeyEvent {
-        type_: match ffi_event.type_ {
+        type_: match ffi_event.r#type {
             CBF_KEY_EVENT_RAW_KEY_DOWN => ChromeKeyEventType::RawKeyDown,
             CBF_KEY_EVENT_KEY_DOWN => ChromeKeyEventType::KeyDown,
             CBF_KEY_EVENT_KEY_UP => ChromeKeyEventType::KeyUp,
@@ -1629,7 +1529,7 @@ pub fn convert_nsevent_to_chrome_mouse_event(
     }
 
     ChromeMouseEvent {
-        type_: mouse_event_type_from_ffi(ffi_event.type_),
+        type_: mouse_event_type_from_ffi(ffi_event.r#type),
         modifiers: ffi_event.modifiers,
         button: mouse_button_from_ffi(ffi_event.button),
         click_count: ffi_event.click_count,
@@ -1851,7 +1751,7 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_open_requested_maps_permission_kind() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_OPEN_REQUESTED);
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_REQUESTED);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 21;
         event.request_id = 99;
@@ -1879,7 +1779,7 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_open_requested_maps_download_kind() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_OPEN_REQUESTED);
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_REQUESTED);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 31;
         event.request_id = 109;
@@ -1917,7 +1817,7 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_open_requested_maps_unknown_download_reason() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_OPEN_REQUESTED);
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_REQUESTED);
         event.tab_id = 31;
         event.request_id = 110;
         event.prompt_ui_kind = CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT;
@@ -1974,10 +1874,10 @@ mod tests {
         let mut event = make_event(CBF_EVENT_PROMPT_UI_OPENED);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 12;
-        event.auxiliary_window_id = 44;
-        event.auxiliary_window_kind = CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT;
-        event.auxiliary_window_title = CString::new("Install extension").unwrap().into_raw();
-        event.auxiliary_window_modal = true;
+        event.prompt_ui_id = 44;
+        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT;
+        event.prompt_ui_title = CString::new("Install extension").unwrap().into_raw();
+        event.prompt_ui_modal = true;
         event.extension_id = CString::new("ext-id").unwrap().into_raw();
         event.extension_name = CString::new("Ext").unwrap().into_raw();
 
@@ -2124,9 +2024,9 @@ mod tests {
         let mut event = make_event(CBF_EVENT_PROMPT_UI_CLOSED);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 8;
-        event.auxiliary_window_id = 19;
-        event.auxiliary_window_kind = CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG;
-        event.auxiliary_window_close_reason = CBF_PROMPT_UI_CLOSE_REASON_HOST_FORCED;
+        event.prompt_ui_id = 19;
+        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG;
+        event.prompt_ui_close_reason = CBF_PROMPT_UI_CLOSE_REASON_HOST_FORCED;
 
         let parsed = parse_event(event).expect("prompt ui closed should parse");
         assert!(matches!(
@@ -2198,16 +2098,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_event_auxiliary_window_open_requested_maps_extension_kind() {
-        let mut event = make_event(CBF_EVENT_AUXILIARY_WINDOW_OPEN_REQUESTED);
+    fn parse_event_prompt_ui_requested_maps_extension_kind() {
+        let mut event = make_event(CBF_EVENT_PROMPT_UI_REQUESTED);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 64;
         event.request_id = 808;
-        event.auxiliary_window_kind = CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT;
+        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT;
         event.extension_id = CString::new("ext-aux").unwrap().into_raw();
         event.extension_name = CString::new("AuxExt").unwrap().into_raw();
 
-        let parsed = parse_event(event).expect("auxiliary window requested should parse");
+        let parsed = parse_event(event).expect("prompt ui requested should parse");
         assert!(matches!(
             parsed,
             IpcEvent::PromptUiOpenRequested {

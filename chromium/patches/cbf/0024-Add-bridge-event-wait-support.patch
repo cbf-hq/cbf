@@ -1,7 +1,7 @@
 From d2fde6cd2c30ae70d966cfecc4bebc0518941045 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 13 Mar 2026 10:18:40 +0900
-Subject: [PATCH 24/42] Add bridge event wait support
+Subject: [PATCH 24/44] Add bridge event wait support
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   6 +

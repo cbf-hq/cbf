@@ -1,0 +1,574 @@
+From f42dd92d9a256da2f2e5833826b7389c7c49d9c3 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 26 Mar 2026 20:34:35 +0900
+Subject: [PATCH 44/44] Remove legacy bridge FFI aliases
+
+---
+ chrome/browser/cbf/bridge/cbf_bridge.h        | 21 ------
+ .../cbf/bridge/cbf_bridge_client_impl.cc      | 26 +++----
+ .../cbf/bridge/cbf_bridge_event_wait_state.h  |  9 +--
+ .../browser/cbf/bridge/cbf_bridge_events.cc   | 75 +++++--------------
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    | 69 +++++++----------
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc | 69 ++++-------------
+ 6 files changed, 76 insertions(+), 193 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index b8651b0715146..2acd0447f72b7 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -41,27 +41,14 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_list_extensions(
+     const char* profile_id,
+     CbfExtensionInfoList* out_list);
+ CBF_BRIDGE_EXPORT void cbf_bridge_extension_list_free(CbfExtensionInfoList* list);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_create_web_page(
+-    CbfBridgeClientHandle* client,
+-    uint64_t request_id,
+-    const char* initial_url,
+-    const char* profile_id);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_create_tab(
+     CbfBridgeClientHandle* client,
+     uint64_t request_id,
+     const char* initial_url,
+     const char* profile_id);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_request_close_web_page(
+-    CbfBridgeClientHandle* client,
+-    uint64_t tab_id);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_request_close_tab(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_web_page_size(
+-    CbfBridgeClientHandle* client,
+-    uint64_t tab_id,
+-    uint32_t width,
+-    uint32_t height);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_tab_size(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+@@ -71,10 +58,6 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_tab_background_policy(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+     bool transparent);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_web_page_focus(
+-    CbfBridgeClientHandle* client,
+-    uint64_t tab_id,
+-    bool focused);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_tab_focus(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+@@ -234,10 +217,6 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_finish_extension_popup_composing_text(
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_close_extension_popup(
+     CbfBridgeClientHandle* client,
+     uint64_t popup_id);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_get_web_page_dom_html(
+-    CbfBridgeClientHandle* client,
+-    uint64_t tab_id,
+-    uint64_t request_id);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_get_tab_dom_html(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index 7a17854ccf2ef..1ecc32b6ca673 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -739,14 +739,14 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowOpenRequested(
+     return;
+   }
+   CbfBridgeEventData event;
+-  event.kind = kEventAuxiliaryWindowOpenRequested;
++  event.kind = kEventPromptUiRequested;
+   event.profile_id = profile_id_;
+   if (request->source_tab_id.has_value()) {
+     event.prompt_ui_has_source_tab_id = true;
+     event.prompt_ui_source_tab_id = request->source_tab_id.value();
+   }
+   event.request_id = request->request_id;
+-  event.auxiliary_window_kind = static_cast<uint8_t>(request->kind);
++  event.prompt_ui_kind = static_cast<uint8_t>(request->kind);
+   event.extension_id = request->extension_id;
+   event.extension_name = request->extension_name;
+   event.triggering_extension_name = request->triggering_extension_name;
+@@ -762,14 +762,14 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowResolved(
+     return;
+   }
+   CbfBridgeEventData event;
+-  event.kind = kEventAuxiliaryWindowResolved;
++  event.kind = kEventPromptUiResolved;
+   event.profile_id = profile_id_;
+   if (resolution->source_tab_id.has_value()) {
+     event.prompt_ui_has_source_tab_id = true;
+     event.prompt_ui_source_tab_id = resolution->source_tab_id.value();
+   }
+   event.request_id = resolution->request_id;
+-  event.auxiliary_window_kind = static_cast<uint8_t>(resolution->kind);
++  event.prompt_ui_kind = static_cast<uint8_t>(resolution->kind);
+   event.extension_id = resolution->extension_id;
+   event.extension_install_prompt_result =
+       static_cast<uint8_t>(resolution->result);
+@@ -964,16 +964,16 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowOpened(
+     const std::string& title,
+     bool modal) {
+   CbfBridgeEventData event;
+-  event.kind = kEventAuxiliaryWindowOpened;
++  event.kind = kEventPromptUiOpened;
+   event.profile_id = profile_id_;
+   if (source_tab_id.has_value()) {
+     event.prompt_ui_has_source_tab_id = true;
+     event.prompt_ui_source_tab_id = source_tab_id.value();
+   }
+-  event.auxiliary_window_id = window_id;
+-  event.auxiliary_window_kind = static_cast<uint8_t>(kind);
+-  event.auxiliary_window_title = title;
+-  event.auxiliary_window_modal = modal;
++  event.prompt_ui_id = window_id;
++  event.prompt_ui_kind = static_cast<uint8_t>(kind);
++  event.prompt_ui_title = title;
++  event.prompt_ui_modal = modal;
+   std::lock_guard<std::mutex> lock(impl_->events_mutex);
+   impl_->events.push(std::move(event));
+ }
+@@ -984,15 +984,15 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowClosed(
+     cbf::mojom::CbfAuxiliaryWindowKind kind,
+     cbf::mojom::CbfAuxiliaryWindowCloseReason reason) {
+   CbfBridgeEventData event;
+-  event.kind = kEventAuxiliaryWindowClosed;
++  event.kind = kEventPromptUiClosed;
+   event.profile_id = profile_id_;
+   if (source_tab_id.has_value()) {
+     event.prompt_ui_has_source_tab_id = true;
+     event.prompt_ui_source_tab_id = source_tab_id.value();
+   }
+-  event.auxiliary_window_id = window_id;
+-  event.auxiliary_window_kind = static_cast<uint8_t>(kind);
+-  event.auxiliary_window_close_reason = static_cast<uint8_t>(reason);
++  event.prompt_ui_id = window_id;
++  event.prompt_ui_kind = static_cast<uint8_t>(kind);
++  event.prompt_ui_close_reason = static_cast<uint8_t>(reason);
+   std::lock_guard<std::mutex> lock(impl_->events_mutex);
+   impl_->events.push(std::move(event));
+ }
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+index e074ea047906c..86d18ee58b37c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+@@ -66,12 +66,11 @@ struct CbfBridgeEventData {
+   uint8_t extension_uninstall_prompt_result = 0;
+   std::string extension_uninstall_prompt_detail;
+   std::string extension_runtime_warning;
+-  uint64_t auxiliary_window_id = 0;
+-  uint8_t auxiliary_window_kind = kCbfAuxiliaryWindowKindUnknown;
+-  uint8_t auxiliary_window_close_reason = kCbfAuxiliaryWindowCloseReasonUnknown;
+-  std::string auxiliary_window_title;
+-  bool auxiliary_window_modal = false;
++  uint64_t prompt_ui_id = 0;
+   uint8_t prompt_ui_kind = kCbfPromptUiKindUnknown;
++  uint8_t prompt_ui_close_reason = kCbfPromptUiCloseReasonUnknown;
++  std::string prompt_ui_title;
++  bool prompt_ui_modal = false;
+   bool prompt_ui_has_source_tab_id = false;
+   uint64_t prompt_ui_source_tab_id = 0;
+   bool prompt_ui_can_report_abuse = false;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index 982760f1cf9dc..775f8524baa69 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -147,7 +147,7 @@ void FillCbfChoiceMenuItem(const cbf::mojom::CbfChoiceMenuItemPtr& item,
+     return;
+   }
+ 
+-  out_item->type_ = static_cast<uint8_t>(item->type);
++  out_item->type = static_cast<uint8_t>(item->type);
+   if (item->label.has_value()) {
+     out_item->label = CopyCString(item->label.value());
+   }
+@@ -358,12 +358,10 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+   out_event->find_active_match_ordinal = 0;
+   out_event->find_selection_rect = ToCbfRect(gfx::Rect());
+   out_event->find_final_update = false;
+-  out_event->auxiliary_window_id = 0;
+-  out_event->auxiliary_window_kind = kCbfAuxiliaryWindowKindUnknown;
+-  out_event->auxiliary_window_close_reason =
+-      kCbfAuxiliaryWindowCloseReasonUnknown;
+-  out_event->auxiliary_window_title = nullptr;
+-  out_event->auxiliary_window_modal = false;
++  out_event->prompt_ui_id = 0;
++  out_event->prompt_ui_close_reason = kCbfPromptUiCloseReasonUnknown;
++  out_event->prompt_ui_title = nullptr;
++  out_event->prompt_ui_modal = false;
+   out_event->prompt_ui_kind = kCbfPromptUiKindUnknown;
+   out_event->prompt_ui_has_source_tab_id = false;
+   out_event->prompt_ui_source_tab_id = 0;
+@@ -558,66 +556,29 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+   if (event.kind == kEventExtensionsListed) {
+     out_event->extensions = ToCbfExtensionInfoList(event.extensions);
+   }
+-  if (event.kind == kEventAuxiliaryWindowOpenRequested) {
+-    out_event->prompt_ui_has_source_tab_id = event.prompt_ui_has_source_tab_id;
+-    out_event->prompt_ui_source_tab_id = event.prompt_ui_source_tab_id;
+-    out_event->extension_id =
+-        event.extension_id.empty() ? nullptr : CopyCString(event.extension_id);
+-    out_event->extension_name = event.extension_name.empty()
+-                                    ? nullptr
+-                                    : CopyCString(event.extension_name);
+-    out_event->triggering_extension_name =
+-        event.triggering_extension_name.empty()
+-            ? nullptr
+-            : CopyCString(event.triggering_extension_name);
+-    out_event->prompt_ui_can_report_abuse = event.prompt_ui_can_report_abuse;
+-    out_event->permission_names = ToCbfStringList(event.permission_names);
+-    out_event->auxiliary_window_kind = event.auxiliary_window_kind;
+-  }
+-  if (event.kind == kEventAuxiliaryWindowResolved) {
+-    out_event->prompt_ui_has_source_tab_id = event.prompt_ui_has_source_tab_id;
+-    out_event->prompt_ui_source_tab_id = event.prompt_ui_source_tab_id;
+-    out_event->extension_id =
+-        event.extension_id.empty() ? nullptr : CopyCString(event.extension_id);
+-    out_event->extension_install_prompt_result =
+-        event.extension_install_prompt_result;
+-    out_event->extension_uninstall_prompt_result =
+-        event.extension_uninstall_prompt_result;
+-    out_event->extension_install_prompt_detail =
+-        event.extension_install_prompt_detail.empty()
+-            ? nullptr
+-            : CopyCString(event.extension_install_prompt_detail);
+-    out_event->extension_uninstall_prompt_detail =
+-        event.extension_uninstall_prompt_detail.empty()
+-            ? nullptr
+-            : CopyCString(event.extension_uninstall_prompt_detail);
+-    out_event->prompt_ui_report_abuse = event.prompt_ui_report_abuse;
+-    out_event->auxiliary_window_kind = event.auxiliary_window_kind;
+-  }
+   if (event.kind == kEventExtensionRuntimeWarning) {
+     out_event->extension_runtime_warning =
+         event.extension_runtime_warning.empty()
+             ? nullptr
+             : CopyCString(event.extension_runtime_warning);
+   }
+-  if (event.kind == kEventAuxiliaryWindowOpened) {
++  if (event.kind == kEventPromptUiOpened) {
+     out_event->prompt_ui_has_source_tab_id = event.prompt_ui_has_source_tab_id;
+     out_event->prompt_ui_source_tab_id = event.prompt_ui_source_tab_id;
+-    out_event->auxiliary_window_id = event.auxiliary_window_id;
+-    out_event->auxiliary_window_kind = event.auxiliary_window_kind;
+-    out_event->auxiliary_window_title =
+-        event.auxiliary_window_title.empty()
++    out_event->prompt_ui_id = event.prompt_ui_id;
++    out_event->prompt_ui_kind = event.prompt_ui_kind;
++    out_event->prompt_ui_title =
++        event.prompt_ui_title.empty()
+             ? nullptr
+-            : CopyCString(event.auxiliary_window_title);
+-    out_event->auxiliary_window_modal = event.auxiliary_window_modal;
++            : CopyCString(event.prompt_ui_title);
++    out_event->prompt_ui_modal = event.prompt_ui_modal;
+   }
+-  if (event.kind == kEventAuxiliaryWindowClosed) {
++  if (event.kind == kEventPromptUiClosed) {
+     out_event->prompt_ui_has_source_tab_id = event.prompt_ui_has_source_tab_id;
+     out_event->prompt_ui_source_tab_id = event.prompt_ui_source_tab_id;
+-    out_event->auxiliary_window_id = event.auxiliary_window_id;
+-    out_event->auxiliary_window_kind = event.auxiliary_window_kind;
+-    out_event->auxiliary_window_close_reason =
+-        event.auxiliary_window_close_reason;
++    out_event->prompt_ui_id = event.prompt_ui_id;
++    out_event->prompt_ui_kind = event.prompt_ui_kind;
++    out_event->prompt_ui_close_reason = event.prompt_ui_close_reason;
+   }
+   if (event.kind == kEventPromptUiRequested) {
+     out_event->prompt_ui_kind = event.prompt_ui_kind;
+@@ -904,8 +865,8 @@ extern "C" void cbf_bridge_event_free(CbfBridgeEvent* event) {
+   event->extension_install_prompt_detail = nullptr;
+   delete[] event->extension_runtime_warning;
+   event->extension_runtime_warning = nullptr;
+-  delete[] event->auxiliary_window_title;
+-  event->auxiliary_window_title = nullptr;
++  delete[] event->prompt_ui_title;
++  event->prompt_ui_title = nullptr;
+   delete[] event->prompt_ui_permission_key;
+   event->prompt_ui_permission_key = nullptr;
+   delete[] event->prompt_ui_repost_target_url;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index abfaf5d858360..cc8eb4c0a5322 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -19,29 +19,27 @@ typedef struct CbfImeCommitText CbfImeCommitText;
+ enum CbfEventKind {
+   kEventNone = 0,
+   kEventSurfaceHandleUpdated = 1,
+-  kEventWebPageCreated = 2,
++  kEventTabCreated = 2,
+   kEventImeBoundsUpdated = 3,
+   kEventShutdownBlocked = 4,
+   kEventShutdownProceeding = 5,
+   kEventShutdownCancelled = 6,
+   kEventContextMenuRequested = 7,
+-  kEventNewWebPageRequested = 8,
++  kEventNewTabRequested = 8,
+   kEventBeforeUnloadDialogRequested = 9,
+-  kEventWebPageClosed = 10,
++  kEventTabClosed = 10,
+   kEventNavigationStateChanged = 11,
+-  kEventWebPageResizeAcknowledged = 12,
++  kEventTabResizeAcknowledged = 12,
+   kEventCursorChanged = 13,
+-  kEventWebPageDomHtmlRead = 14,
++  kEventTabDomHtmlRead = 14,
+   kEventDragStartRequested = 15,
+   kEventTitleUpdated = 16,
+   kEventFaviconUrlUpdated = 17,
+   kEventDevToolsOpened = 18,
+   kEventExtensionsListed = 19,
+-  kEventAuxiliaryWindowOpenRequested = 20,
+-  kEventAuxiliaryWindowResolved = 21,
+   kEventExtensionRuntimeWarning = 22,
+-  kEventAuxiliaryWindowOpened = 23,
+-  kEventAuxiliaryWindowClosed = 24,
++  kEventPromptUiOpened = 23,
++  kEventPromptUiClosed = 24,
+   kEventTabOpenRequested = 25,
+   kEventTabOpenResolved = 26,
+   kEventPromptUiRequested = 27,
+@@ -67,11 +65,6 @@ enum CbfEventKind {
+   kEventCustomSchemeRequestReceived = 47,
+   kEventFindReply = 49,
+   kEventExternalDragOperationChanged = 48,
+-  kEventTabCreated = kEventWebPageCreated,
+-  kEventNewTabRequested = kEventNewWebPageRequested,
+-  kEventTabClosed = kEventWebPageClosed,
+-  kEventTabResizeAcknowledged = kEventWebPageResizeAcknowledged,
+-  kEventTabDomHtmlRead = kEventWebPageDomHtmlRead,
+ };
+ 
+ enum CbfBridgeEventWaitStatus {
+@@ -95,21 +88,6 @@ enum CbfExtensionUninstallPromptResult {
+   kCbfExtensionUninstallPromptResultFailed = 3,
+ };
+ 
+-enum CbfAuxiliaryWindowKind {
+-  kCbfAuxiliaryWindowKindUnknown = 0,
+-  kCbfAuxiliaryWindowKindExtensionInstallPrompt = 1,
+-  kCbfAuxiliaryWindowKindExtensionUninstallPrompt = 2,
+-  kCbfAuxiliaryWindowKindPrintPreviewDialog = 3,
+-  kCbfAuxiliaryWindowKindFormResubmissionPrompt = 4,
+-};
+-
+-enum CbfAuxiliaryWindowCloseReason {
+-  kCbfAuxiliaryWindowCloseReasonUnknown = 0,
+-  kCbfAuxiliaryWindowCloseReasonUserCanceled = 1,
+-  kCbfAuxiliaryWindowCloseReasonHostForced = 2,
+-  kCbfAuxiliaryWindowCloseReasonSystemDismissed = 3,
+-};
+-
+ enum CbfPromptUiKind {
+   kCbfPromptUiKindUnknown = 0,
+   kCbfPromptUiKindPermissionPrompt = 1,
+@@ -120,6 +98,13 @@ enum CbfPromptUiKind {
+   kCbfPromptUiKindFormResubmissionPrompt = 6,
+ };
+ 
++enum CbfPromptUiCloseReason {
++  kCbfPromptUiCloseReasonUnknown = 0,
++  kCbfPromptUiCloseReasonUserCanceled = 1,
++  kCbfPromptUiCloseReasonHostForced = 2,
++  kCbfPromptUiCloseReasonSystemDismissed = 3,
++};
++
+ enum CbfFormResubmissionReason {
+   kCbfFormResubmissionReasonUnknown = 0,
+   kCbfFormResubmissionReasonReload = 1,
+@@ -280,11 +265,10 @@ enum CbfConfirmCompositionBehavior {
+ 
+ enum CbfBeforeUnloadReason {
+   kCbfBeforeUnloadReasonUnknown = 0,
+-  kCbfBeforeUnloadReasonCloseWebPage = 1,
++  kCbfBeforeUnloadReasonCloseTab = 1,
+   kCbfBeforeUnloadReasonNavigate = 2,
+   kCbfBeforeUnloadReasonReload = 3,
+   kCbfBeforeUnloadReasonWindowClose = 4,
+-  kCbfBeforeUnloadReasonCloseTab = kCbfBeforeUnloadReasonCloseWebPage,
+ };
+ 
+ enum CbfJavaScriptDialogType {
+@@ -687,7 +671,7 @@ typedef struct CbfChoiceMenuItemList {
+ } CbfChoiceMenuItemList;
+ 
+ typedef struct CbfChoiceMenuItem {
+-  uint8_t type_;
++  uint8_t type;
+   char* label;
+   char* tool_tip;
+   uint32_t action;
+@@ -761,12 +745,11 @@ typedef struct CbfBridgeEvent {
+   int32_t find_active_match_ordinal;
+   CbfRect find_selection_rect;
+   bool find_final_update;
+-  uint64_t auxiliary_window_id;
+-  uint8_t auxiliary_window_kind;
+-  uint8_t auxiliary_window_close_reason;
+-  char* auxiliary_window_title;
+-  bool auxiliary_window_modal;
++  uint64_t prompt_ui_id;
+   uint8_t prompt_ui_kind;
++  uint8_t prompt_ui_close_reason;
++  char* prompt_ui_title;
++  bool prompt_ui_modal;
+   bool prompt_ui_has_source_tab_id;
+   uint64_t prompt_ui_source_tab_id;
+   bool prompt_ui_can_report_abuse;
+@@ -967,9 +950,9 @@ bool cbf_bridge_client_inspect_element(CbfBridgeClientHandle* client,
+                                        uint64_t tab_id,
+                                        int32_t x,
+                                        int32_t y);
+-bool cbf_bridge_client_set_web_page_focus(CbfBridgeClientHandle* client,
+-                                          uint64_t tab_id,
+-                                          bool focused);
++bool cbf_bridge_client_set_tab_focus(CbfBridgeClientHandle* client,
++                                     uint64_t tab_id,
++                                     bool focused);
+ bool cbf_bridge_client_set_tab_visibility(CbfBridgeClientHandle* client,
+                                           uint64_t tab_id,
+                                           uint8_t visibility);
+@@ -996,9 +979,9 @@ bool cbf_bridge_client_set_extension_popup_background_policy(
+     CbfBridgeClientHandle* client,
+     uint64_t popup_id,
+     bool transparent);
+-bool cbf_bridge_client_get_web_page_dom_html(CbfBridgeClientHandle* client,
+-                                             uint64_t tab_id,
+-                                             uint64_t request_id);
++bool cbf_bridge_client_get_tab_dom_html(CbfBridgeClientHandle* client,
++                                        uint64_t tab_id,
++                                        uint64_t request_id);
+ bool cbf_bridge_client_list_extensions(CbfBridgeClientHandle* client,
+                                        const char* profile_id,
+                                        CbfExtensionInfoList* out_list);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index 782c642c2e274..e38b263f6ca37 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -1295,10 +1295,10 @@ bool CbfBridgeClient::RespondTabOpen(uint64_t request_id,
+ 
+ }  // namespace cbf_bridge::internal
+ 
+-extern "C" bool cbf_bridge_client_create_web_page(CbfBridgeClientHandle* client,
+-                                                  uint64_t request_id,
+-                                                  const char* initial_url,
+-                                                  const char* profile_id) {
++extern "C" bool cbf_bridge_client_create_tab(CbfBridgeClientHandle* client,
++                                             uint64_t request_id,
++                                             const char* initial_url,
++                                             const char* profile_id) {
+   if (!client || !initial_url || !profile_id || profile_id[0] == '\0') {
+     return false;
+   }
+@@ -1306,15 +1306,7 @@ extern "C" bool cbf_bridge_client_create_web_page(CbfBridgeClientHandle* client,
+       ->CreateTab(request_id, initial_url, profile_id);
+ }
+ 
+-extern "C" bool cbf_bridge_client_create_tab(CbfBridgeClientHandle* client,
+-                                             uint64_t request_id,
+-                                             const char* initial_url,
+-                                             const char* profile_id) {
+-  return cbf_bridge_client_create_web_page(client, request_id, initial_url,
+-                                           profile_id);
+-}
+-
+-extern "C" bool cbf_bridge_client_request_close_web_page(
++extern "C" bool cbf_bridge_client_request_close_tab(
+     CbfBridgeClientHandle* client,
+     const uint64_t tab_id) {
+   if (!client) {
+@@ -1324,17 +1316,10 @@ extern "C" bool cbf_bridge_client_request_close_web_page(
+       ->RequestCloseTab(tab_id);
+ }
+ 
+-extern "C" bool cbf_bridge_client_request_close_tab(
+-    CbfBridgeClientHandle* client,
+-    const uint64_t tab_id) {
+-  return cbf_bridge_client_request_close_web_page(client, tab_id);
+-}
+-
+-extern "C" bool cbf_bridge_client_set_web_page_size(
+-    CbfBridgeClientHandle* client,
+-    const uint64_t tab_id,
+-    const uint32_t width,
+-    const uint32_t height) {
++extern "C" bool cbf_bridge_client_set_tab_size(CbfBridgeClientHandle* client,
++                                               const uint64_t tab_id,
++                                               const uint32_t width,
++                                               const uint32_t height) {
+   if (!client) {
+     return false;
+   }
+@@ -1342,14 +1327,6 @@ extern "C" bool cbf_bridge_client_set_web_page_size(
+       ->SetTabSize(tab_id, width, height);
+ }
+ 
+-extern "C" bool cbf_bridge_client_set_tab_size(
+-    CbfBridgeClientHandle* client,
+-    const uint64_t tab_id,
+-    const uint32_t width,
+-    const uint32_t height) {
+-  return cbf_bridge_client_set_web_page_size(client, tab_id, width, height);
+-}
+-
+ extern "C" bool cbf_bridge_client_set_tab_background_policy(
+     CbfBridgeClientHandle* client,
+     const uint64_t tab_id,
+@@ -1361,10 +1338,9 @@ extern "C" bool cbf_bridge_client_set_tab_background_policy(
+       ->SetTabBackgroundPolicy(tab_id, transparent);
+ }
+ 
+-extern "C" bool cbf_bridge_client_set_web_page_focus(
+-    CbfBridgeClientHandle* client,
+-    const uint64_t tab_id,
+-    const bool focused) {
++extern "C" bool cbf_bridge_client_set_tab_focus(CbfBridgeClientHandle* client,
++                                                const uint64_t tab_id,
++                                                const bool focused) {
+   if (!client) {
+     return false;
+   }
+@@ -1372,13 +1348,6 @@ extern "C" bool cbf_bridge_client_set_web_page_focus(
+       ->SetTabFocus(tab_id, focused);
+ }
+ 
+-extern "C" bool cbf_bridge_client_set_tab_focus(
+-    CbfBridgeClientHandle* client,
+-    const uint64_t tab_id,
+-    const bool focused) {
+-  return cbf_bridge_client_set_web_page_focus(client, tab_id, focused);
+-}
+-
+ extern "C" bool cbf_bridge_client_set_tab_visibility(
+     CbfBridgeClientHandle* client,
+     const uint64_t tab_id,
+@@ -1579,10 +1548,9 @@ extern "C" bool cbf_bridge_client_close_extension_popup(
+       ->CloseExtensionPopup(popup_id);
+ }
+ 
+-extern "C" bool cbf_bridge_client_get_web_page_dom_html(
+-    CbfBridgeClientHandle* client,
+-    uint64_t tab_id,
+-    uint64_t request_id) {
++extern "C" bool cbf_bridge_client_get_tab_dom_html(CbfBridgeClientHandle* client,
++                                                   uint64_t tab_id,
++                                                   uint64_t request_id) {
+   if (!client) {
+     return false;
+   }
+@@ -1590,13 +1558,6 @@ extern "C" bool cbf_bridge_client_get_web_page_dom_html(
+       ->GetTabDomHtml(tab_id, request_id);
+ }
+ 
+-extern "C" bool cbf_bridge_client_get_tab_dom_html(
+-    CbfBridgeClientHandle* client,
+-    uint64_t tab_id,
+-    uint64_t request_id) {
+-  return cbf_bridge_client_get_web_page_dom_html(client, tab_id, request_id);
+-}
+-
+ extern "C" bool cbf_bridge_client_find_in_page(CbfBridgeClientHandle* client,
+                                                uint64_t tab_id,
+                                                uint64_t request_id,
+-- 
+2.50.1 (Apple Git-155)
+

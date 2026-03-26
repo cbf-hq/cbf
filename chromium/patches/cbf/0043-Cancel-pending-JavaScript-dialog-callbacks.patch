@@ -1,0 +1,437 @@
+From c1b351a830738e341e9d94c25232c6fb43bbee88 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 26 Mar 2026 20:02:54 +0900
+Subject: [PATCH 43/44] Cancel pending JavaScript dialog callbacks
+
+---
+ .../cbf/cbf_java_script_dialog_manager.cc     | 90 ++++++++++++++++---
+ .../cbf/cbf_java_script_dialog_manager.h      | 29 +++++-
+ .../cbf/cbf_profile_service_browsertest.cc    | 56 ++++++++++++
+ .../cbf/test/cbf_test_profile_observer.cc     | 46 +++++++++-
+ .../cbf/test/cbf_test_profile_observer.h      | 24 +++++
+ 5 files changed, 229 insertions(+), 16 deletions(-)
+
+diff --git a/chrome/browser/cbf/cbf_java_script_dialog_manager.cc b/chrome/browser/cbf/cbf_java_script_dialog_manager.cc
+index 1be3edd5799c3..48f7f4bb5c1bf 100644
+--- a/chrome/browser/cbf/cbf_java_script_dialog_manager.cc
++++ b/chrome/browser/cbf/cbf_java_script_dialog_manager.cc
+@@ -14,6 +14,26 @@ CbfJavaScriptDialogManager::CbfJavaScriptDialogManager(
+ 
+ CbfJavaScriptDialogManager::~CbfJavaScriptDialogManager() = default;
+ 
++CbfJavaScriptDialogManager::PendingBeforeUnloadCallback::
++    PendingBeforeUnloadCallback() = default;
++CbfJavaScriptDialogManager::PendingBeforeUnloadCallback::
++    PendingBeforeUnloadCallback(PendingBeforeUnloadCallback&&) = default;
++CbfJavaScriptDialogManager::PendingBeforeUnloadCallback&
++CbfJavaScriptDialogManager::PendingBeforeUnloadCallback::operator=(
++    PendingBeforeUnloadCallback&&) = default;
++CbfJavaScriptDialogManager::PendingBeforeUnloadCallback::
++    ~PendingBeforeUnloadCallback() = default;
++
++CbfJavaScriptDialogManager::PendingBeforeUnloadRequest::
++    PendingBeforeUnloadRequest() = default;
++CbfJavaScriptDialogManager::PendingBeforeUnloadRequest::
++    PendingBeforeUnloadRequest(PendingBeforeUnloadRequest&&) = default;
++CbfJavaScriptDialogManager::PendingBeforeUnloadRequest&
++CbfJavaScriptDialogManager::PendingBeforeUnloadRequest::operator=(
++    PendingBeforeUnloadRequest&&) = default;
++CbfJavaScriptDialogManager::PendingBeforeUnloadRequest::
++    ~PendingBeforeUnloadRequest() = default;
++
+ CbfJavaScriptDialogManager::PendingJavaScriptDialogRequest::
+     PendingJavaScriptDialogRequest() = default;
+ CbfJavaScriptDialogManager::PendingJavaScriptDialogRequest::
+@@ -29,8 +49,8 @@ void CbfJavaScriptDialogManager::SetAutoConfirmBeforeUnload(bool enabled) {
+ }
+ 
+ void CbfJavaScriptDialogManager::ResolvePendingBeforeUnload(bool proceed) {
+-  for (auto& callback : pending_beforeunload_callbacks_) {
+-    std::move(callback).Run(proceed, std::u16string());
++  for (auto& pending : pending_beforeunload_callbacks_) {
++    std::move(pending.callback).Run(proceed, std::u16string());
+   }
+   pending_beforeunload_callbacks_.clear();
+ }
+@@ -42,9 +62,9 @@ void CbfJavaScriptDialogManager::ResolvePendingBeforeUnloadRequest(
+   if (it == pending_beforeunload_requests_.end()) {
+     return;
+   }
+-  auto callback = std::move(it->second);
++  auto pending = std::move(it->second);
+   pending_beforeunload_requests_.erase(it);
+-  std::move(callback).Run(proceed, std::u16string());
++  std::move(pending.callback).Run(proceed, std::u16string());
+ }
+ 
+ void CbfJavaScriptDialogManager::ResolvePendingJavaScriptDialogRequest(
+@@ -96,6 +116,7 @@ void CbfJavaScriptDialogManager::RunJavaScriptDialog(
+ 
+   const uint64_t request_id = next_javascript_dialog_request_id_++;
+   PendingJavaScriptDialogRequest pending;
++  pending.web_contents = web_contents->GetWeakPtr();
+   pending.callback = std::move(callback);
+   pending_javascript_dialog_requests_.emplace(request_id, std::move(pending));
+   profile_service_->NotifyJavaScriptDialogRequested(
+@@ -111,7 +132,12 @@ void CbfJavaScriptDialogManager::RunBeforeUnloadDialog(
+     DialogClosedCallback callback) {
+   (void)render_frame_host;
+   if (profile_service_ && profile_service_->IsShutdownRequested()) {
+-    pending_beforeunload_callbacks_.push_back(std::move(callback));
++    PendingBeforeUnloadCallback pending;
++    if (web_contents) {
++      pending.web_contents = web_contents->GetWeakPtr();
++    }
++    pending.callback = std::move(callback);
++    pending_beforeunload_callbacks_.push_back(std::move(pending));
+     profile_service_->OnBeforeUnloadDialogRequested(web_contents);
+     return;
+   }
+@@ -123,7 +149,10 @@ void CbfJavaScriptDialogManager::RunBeforeUnloadDialog(
+   const auto reason =
+       profile_service_->ResolveBeforeUnloadReason(web_contents, is_reload);
+   const uint64_t request_id = next_beforeunload_request_id_++;
+-  pending_beforeunload_requests_.emplace(request_id, std::move(callback));
++  PendingBeforeUnloadRequest pending;
++  pending.web_contents = web_contents->GetWeakPtr();
++  pending.callback = std::move(callback);
++  pending_beforeunload_requests_.emplace(request_id, std::move(pending));
+   profile_service_->NotifyBeforeUnloadDialogRequested(web_contents, request_id,
+                                                       reason);
+ }
+@@ -131,12 +160,51 @@ void CbfJavaScriptDialogManager::RunBeforeUnloadDialog(
+ void CbfJavaScriptDialogManager::CancelDialogs(
+     content::WebContents* web_contents,
+     bool reset_state) {
+-  (void)web_contents;
+-  if (reset_state) {
+-    pending_beforeunload_callbacks_.clear();
+-    pending_beforeunload_requests_.clear();
+-    pending_javascript_dialog_requests_.clear();
++  const auto matches_web_contents =
++      [web_contents](const base::WeakPtr<content::WebContents>& pending) {
++        return pending && pending.get() == web_contents;
++      };
++
++  auto beforeunload_callback_it = pending_beforeunload_callbacks_.begin();
++  while (beforeunload_callback_it != pending_beforeunload_callbacks_.end()) {
++    if (!matches_web_contents(beforeunload_callback_it->web_contents)) {
++      ++beforeunload_callback_it;
++      continue;
++    }
++
++    auto pending = std::move(*beforeunload_callback_it);
++    beforeunload_callback_it =
++        pending_beforeunload_callbacks_.erase(beforeunload_callback_it);
++    std::move(pending.callback).Run(false, std::u16string());
+   }
++
++  auto beforeunload_request_it = pending_beforeunload_requests_.begin();
++  while (beforeunload_request_it != pending_beforeunload_requests_.end()) {
++    if (!matches_web_contents(beforeunload_request_it->second.web_contents)) {
++      ++beforeunload_request_it;
++      continue;
++    }
++
++    auto pending = std::move(beforeunload_request_it->second);
++    beforeunload_request_it =
++        pending_beforeunload_requests_.erase(beforeunload_request_it);
++    std::move(pending.callback).Run(false, std::u16string());
++  }
++
++  auto javascript_request_it = pending_javascript_dialog_requests_.begin();
++  while (javascript_request_it != pending_javascript_dialog_requests_.end()) {
++    if (!matches_web_contents(javascript_request_it->second.web_contents)) {
++      ++javascript_request_it;
++      continue;
++    }
++
++    auto pending = std::move(javascript_request_it->second);
++    javascript_request_it =
++        pending_javascript_dialog_requests_.erase(javascript_request_it);
++    std::move(pending.callback).Run(false, std::u16string());
++  }
++
++  (void)reset_state;
+ }
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_java_script_dialog_manager.h b/chrome/browser/cbf/cbf_java_script_dialog_manager.h
+index d875f58cd7062..746716c3a55f6 100644
+--- a/chrome/browser/cbf/cbf_java_script_dialog_manager.h
++++ b/chrome/browser/cbf/cbf_java_script_dialog_manager.h
+@@ -8,6 +8,7 @@
+ 
+ #include "base/functional/callback.h"
+ #include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
+ #include "chrome/browser/cbf/mojom/cbf_browser.mojom-forward.h"
+ #include "content/public/browser/javascript_dialog_manager.h"
+ 
+@@ -41,24 +42,44 @@ class CbfJavaScriptDialogManager final
+                              content::RenderFrameHost* render_frame_host,
+                              bool is_reload,
+                              DialogClosedCallback callback) override;
+- void CancelDialogs(content::WebContents* web_contents, bool reset_state)
++  void CancelDialogs(content::WebContents* web_contents, bool reset_state)
+       override;
+ 
+  private:
++  struct PendingBeforeUnloadCallback {
++    PendingBeforeUnloadCallback();
++    PendingBeforeUnloadCallback(PendingBeforeUnloadCallback&&);
++    PendingBeforeUnloadCallback& operator=(PendingBeforeUnloadCallback&&);
++    ~PendingBeforeUnloadCallback();
++
++    base::WeakPtr<content::WebContents> web_contents;
++    DialogClosedCallback callback;
++  };
++
++  struct PendingBeforeUnloadRequest {
++    PendingBeforeUnloadRequest();
++    PendingBeforeUnloadRequest(PendingBeforeUnloadRequest&&);
++    PendingBeforeUnloadRequest& operator=(PendingBeforeUnloadRequest&&);
++    ~PendingBeforeUnloadRequest();
++
++    base::WeakPtr<content::WebContents> web_contents;
++    DialogClosedCallback callback;
++  };
++
+   struct PendingJavaScriptDialogRequest {
+     PendingJavaScriptDialogRequest();
+     PendingJavaScriptDialogRequest(PendingJavaScriptDialogRequest&&);
+     PendingJavaScriptDialogRequest& operator=(PendingJavaScriptDialogRequest&&);
+     ~PendingJavaScriptDialogRequest();
+ 
++    base::WeakPtr<content::WebContents> web_contents;
+     DialogClosedCallback callback;
+-    bool is_beforeunload = false;
+   };
+ 
+   bool auto_confirm_beforeunload_ = false;
+   raw_ptr<CbfProfileService> profile_service_;
+-  std::vector<DialogClosedCallback> pending_beforeunload_callbacks_;
+-  std::map<uint64_t, DialogClosedCallback> pending_beforeunload_requests_;
++  std::vector<PendingBeforeUnloadCallback> pending_beforeunload_callbacks_;
++  std::map<uint64_t, PendingBeforeUnloadRequest> pending_beforeunload_requests_;
+   std::map<uint64_t, PendingJavaScriptDialogRequest>
+       pending_javascript_dialog_requests_;
+   uint64_t next_beforeunload_request_id_ = 1;
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 6ad552ee3018c..14b237475f4ec 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -1190,6 +1190,62 @@ IN_PROC_BROWSER_TEST_F(
+   observer_.WaitForExtensionPopupClosedCount(1);
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       ClosingManagedTabWithPendingAlertDoesNotCrash) {
++  browser_observer_->RegisterResponse(
++      "/dialog.html", "text/html; charset=utf-8",
++      "<!doctype html><title>dialog</title><body>dialog</body>");
++
++  const TabId tab_id = CreatePage("app://simpleapp/dialog.html");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++  AllowMainFrameJavaScriptInjection(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  content::ExecuteScriptAsync(web_contents, "window.alert('managed alert');");
++  observer_.WaitForJavaScriptDialogCount(1);
++
++  ASSERT_EQ(observer_.javascript_dialog_events().size(), 1u);
++  const auto& dialog = observer_.javascript_dialog_events()[0];
++  EXPECT_EQ(dialog.tab_id, tab_id);
++  EXPECT_EQ(dialog.type, mojom::CbfJavaScriptDialogType::kAlert);
++  EXPECT_EQ(dialog.message, "managed alert");
++
++  profile_service_->CloseWebContents(web_contents);
++  observer_.WaitForWebPageClosedCount(1);
++
++  EXPECT_EQ(observer_.web_page_closed_events().size(), 1u);
++  EXPECT_EQ(observer_.web_page_closed_events()[0], tab_id);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       ClosingPopupWithPendingAlertDoesNotCrash) {
++  auto extension = LoadActionPopupExtensionWithScript(
++      "Popup Pending Dialog Extension", "alert('popup alert');",
++      "<!doctype html><title>Popup Dialog</title>"
++      "<body>popup<script src='popup.js'></script></body>");
++  ASSERT_TRUE(extension);
++
++  const TabId tab_id = CreatePage("about:blank");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  profile_service_->ActivateExtensionAction(tab_id, extension->id());
++  observer_.WaitForExtensionPopupOpenedCount(1);
++  observer_.WaitForExtensionPopupJavaScriptDialogCount(1);
++
++  ASSERT_EQ(observer_.extension_popup_javascript_dialog_events().size(), 1u);
++  const auto& dialog = observer_.extension_popup_javascript_dialog_events()[0];
++  EXPECT_EQ(dialog.type, mojom::CbfJavaScriptDialogType::kAlert);
++  EXPECT_EQ(dialog.message, "popup alert");
++
++  profile_service_->CloseExtensionPopup(dialog.popup_id);
++  observer_.WaitForExtensionPopupClosedCount(1);
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        ActivateExtensionActionEmitsPopupCloseRequested) {
+   auto extension = LoadActionPopupExtensionWithScript(
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index 206a446356cc1..790b06eba446f 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -169,6 +169,21 @@ CbfTestProfileObserver::ExtensionPopupCloseRequestedEvent&
+ CbfTestProfileObserver::ExtensionPopupCloseRequestedEvent::operator=(
+     ExtensionPopupCloseRequestedEvent&&) = default;
+ 
++CbfTestProfileObserver::JavaScriptDialogEvent::JavaScriptDialogEvent() =
++    default;
++CbfTestProfileObserver::JavaScriptDialogEvent::~JavaScriptDialogEvent() =
++    default;
++CbfTestProfileObserver::JavaScriptDialogEvent::JavaScriptDialogEvent(
++    const JavaScriptDialogEvent&) = default;
++CbfTestProfileObserver::JavaScriptDialogEvent&
++CbfTestProfileObserver::JavaScriptDialogEvent::operator=(
++    const JavaScriptDialogEvent&) = default;
++CbfTestProfileObserver::JavaScriptDialogEvent::JavaScriptDialogEvent(
++    JavaScriptDialogEvent&&) = default;
++CbfTestProfileObserver::JavaScriptDialogEvent&
++CbfTestProfileObserver::JavaScriptDialogEvent::operator=(
++    JavaScriptDialogEvent&&) = default;
++
+ CbfTestProfileObserver::TabIpcMessageEvent::TabIpcMessageEvent() = default;
+ CbfTestProfileObserver::TabIpcMessageEvent::~TabIpcMessageEvent() = default;
+ CbfTestProfileObserver::TabIpcMessageEvent::TabIpcMessageEvent(
+@@ -467,6 +482,19 @@ void CbfTestProfileObserver::WaitForExtensionPopupCloseRequestedCount(
+   quit_wait_loop_.Reset();
+ }
+ 
++void CbfTestProfileObserver::WaitForJavaScriptDialogCount(
++    size_t expected_count) {
++  ResetWaitTargets();
++  wait_javascript_dialog_count_ = expected_count;
++  if (javascript_dialog_events_.size() >= wait_javascript_dialog_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
+ void CbfTestProfileObserver::WaitForChoiceMenuCount(size_t expected_count) {
+   ResetWaitTargets();
+   wait_choice_menu_count_ = expected_count;
+@@ -739,7 +767,17 @@ void CbfTestProfileObserver::OnJavaScriptDialogRequested(
+     cbf::mojom::CbfJavaScriptDialogType type,
+     const std::string& message,
+     const std::string& default_prompt_text,
+-    cbf::mojom::CbfBeforeUnloadReason reason) {}
++    cbf::mojom::CbfBeforeUnloadReason reason) {
++  JavaScriptDialogEvent event;
++  event.tab_id = tab_id;
++  event.request_id = request_id;
++  event.type = type;
++  event.message = message;
++  event.default_prompt_text = default_prompt_text;
++  event.reason = reason;
++  javascript_dialog_events_.push_back(std::move(event));
++  MaybeQuitWaitLoop();
++}
+ 
+ void CbfTestProfileObserver::OnCursorChanged(
+     uint64_t tab_id,
+@@ -1084,6 +1122,11 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
+     quit_wait_loop_.Run();
+     return;
+   }
++  if (wait_javascript_dialog_count_ > 0 &&
++      javascript_dialog_events_.size() >= wait_javascript_dialog_count_) {
++    quit_wait_loop_.Run();
++    return;
++  }
+   if (wait_choice_menu_count_ > 0 &&
+       choice_menu_events_.size() >= wait_choice_menu_count_) {
+     quit_wait_loop_.Run();
+@@ -1134,6 +1177,7 @@ void CbfTestProfileObserver::ResetWaitTargets() {
+   wait_extension_popup_title_updated_count_ = 0;
+   wait_extension_popup_javascript_dialog_count_ = 0;
+   wait_extension_popup_close_requested_count_ = 0;
++  wait_javascript_dialog_count_ = 0;
+   wait_choice_menu_count_ = 0;
+   wait_extension_popup_choice_menu_count_ = 0;
+   wait_tab_ipc_message_count_ = 0;
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index 600b1bc4b86ad..2ef1e44ac1654 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -282,6 +282,24 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+     uint64_t popup_id = 0;
+   };
+ 
++  struct JavaScriptDialogEvent {
++    JavaScriptDialogEvent();
++    ~JavaScriptDialogEvent();
++    JavaScriptDialogEvent(const JavaScriptDialogEvent&);
++    JavaScriptDialogEvent& operator=(const JavaScriptDialogEvent&);
++    JavaScriptDialogEvent(JavaScriptDialogEvent&&);
++    JavaScriptDialogEvent& operator=(JavaScriptDialogEvent&&);
++
++    uint64_t tab_id = 0;
++    uint64_t request_id = 0;
++    cbf::mojom::CbfJavaScriptDialogType type =
++        cbf::mojom::CbfJavaScriptDialogType::kAlert;
++    std::string message;
++    std::string default_prompt_text;
++    cbf::mojom::CbfBeforeUnloadReason reason =
++        cbf::mojom::CbfBeforeUnloadReason::kUnknown;
++  };
++
+   struct ChoiceMenuEvent {
+     uint64_t tab_id = 0;
+     uint64_t request_id = 0;
+@@ -429,6 +447,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   extension_popup_close_requested_events() const {
+     return extension_popup_close_requested_events_;
+   }
++  const std::vector<JavaScriptDialogEvent>& javascript_dialog_events() const {
++    return javascript_dialog_events_;
++  }
+   const std::vector<ChoiceMenuEvent>& choice_menu_events() const {
+     return choice_menu_events_;
+   }
+@@ -471,6 +492,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void WaitForExtensionPopupTitleUpdatedCount(size_t expected_count);
+   void WaitForExtensionPopupJavaScriptDialogCount(size_t expected_count);
+   void WaitForExtensionPopupCloseRequestedCount(size_t expected_count);
++  void WaitForJavaScriptDialogCount(size_t expected_count);
+   void WaitForChoiceMenuCount(size_t expected_count);
+   void WaitForExtensionPopupChoiceMenuCount(size_t expected_count);
+   void WaitForTabIpcMessageCount(size_t expected_count);
+@@ -637,6 +659,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+       extension_popup_javascript_dialog_events_;
+   std::vector<ExtensionPopupCloseRequestedEvent>
+       extension_popup_close_requested_events_;
++  std::vector<JavaScriptDialogEvent> javascript_dialog_events_;
+   std::vector<ChoiceMenuEvent> choice_menu_events_;
+   std::vector<ExtensionPopupChoiceMenuEvent> extension_popup_choice_menu_events_;
+   std::vector<TabIpcMessageEvent> tab_ipc_message_events_;
+@@ -665,6 +688,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   size_t wait_extension_popup_title_updated_count_ = 0;
+   size_t wait_extension_popup_javascript_dialog_count_ = 0;
+   size_t wait_extension_popup_close_requested_count_ = 0;
++  size_t wait_javascript_dialog_count_ = 0;
+   size_t wait_choice_menu_count_ = 0;
+   size_t wait_extension_popup_choice_menu_count_ = 0;
+   size_t wait_tab_ipc_message_count_ = 0;
+-- 
+2.50.1 (Apple Git-155)
+

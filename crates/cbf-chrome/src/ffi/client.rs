@@ -1128,7 +1128,7 @@ impl IpcClient {
 
         let ffi_event = CbfKeyEvent {
             tab_id: browsing_context_id.get(),
-            type_: key_event_type_to_ffi(event.type_),
+            r#type: key_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             windows_key_code: event.windows_key_code,
             native_key_code: event.native_key_code,
@@ -1183,7 +1183,7 @@ impl IpcClient {
 
         let ffi_event = CbfKeyEvent {
             tab_id: 0,
-            type_: key_event_type_to_ffi(event.type_),
+            r#type: key_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             windows_key_code: event.windows_key_code,
             native_key_code: event.native_key_code,
@@ -1232,7 +1232,7 @@ impl IpcClient {
 
         let ffi_event = CbfMouseEvent {
             tab_id: browsing_context_id.get(),
-            type_: mouse_event_type_to_ffi(event.type_),
+            r#type: mouse_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             button: mouse_button_to_ffi(event.button),
             click_count: event.click_count,
@@ -1265,7 +1265,7 @@ impl IpcClient {
 
         let ffi_event = CbfMouseEvent {
             tab_id: 0,
-            type_: mouse_event_type_to_ffi(event.type_),
+            r#type: mouse_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             button: mouse_button_to_ffi(event.button),
             click_count: event.click_count,
