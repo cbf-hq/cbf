@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - auxiliary/prompt-ui kind value for form resubmission
   - repost reason enum values
   - repost reason and repost target URL fields on `CbfBridgeEvent`.
+- Bridge ABI support for Chromium `FindInPage` / `StopFinding` commands and raw `FindReply` event transport, including match counts, active ordinal, final-update state, and selection rectangle fields.
 
 ## [146.1.0-alpha.1] - 2026-03-16
 

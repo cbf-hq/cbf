@@ -56,6 +56,7 @@ pub const CBF_EVENT_CHOICE_MENU_REQUESTED: u8 = 44;
 pub const CBF_EVENT_EXTENSION_POPUP_CHOICE_MENU_REQUESTED: u8 = 45;
 pub const CBF_EVENT_TAB_IPC_MESSAGE_RECEIVED: u8 = 46;
 pub const CBF_EVENT_CUSTOM_SCHEME_REQUEST_RECEIVED: u8 = 47;
+pub const CBF_EVENT_FIND_REPLY: u8 = 49;
 
 pub const CBF_BRIDGE_EVENT_WAIT_STATUS_EVENT_AVAILABLE: i32 = 0;
 pub const CBF_BRIDGE_EVENT_WAIT_STATUS_TIMED_OUT: i32 = 1;
@@ -70,6 +71,10 @@ pub const CBF_EVENT_NEW_TAB_REQUESTED: u8 = CBF_EVENT_NEW_WEB_PAGE_REQUESTED;
 pub const CBF_EVENT_TAB_CLOSED: u8 = CBF_EVENT_WEB_PAGE_CLOSED;
 pub const CBF_EVENT_TAB_RESIZE_ACKNOWLEDGED: u8 = CBF_EVENT_WEB_PAGE_RESIZE_ACKNOWLEDGED;
 pub const CBF_EVENT_TAB_DOM_HTML_READ: u8 = CBF_EVENT_WEB_PAGE_DOM_HTML_READ;
+
+pub const CBF_STOP_FIND_ACTION_CLEAR_SELECTION: u8 = 0;
+pub const CBF_STOP_FIND_ACTION_KEEP_SELECTION: u8 = 1;
+pub const CBF_STOP_FIND_ACTION_ACTIVATE_SELECTION: u8 = 2;
 
 pub const CBF_PROMPT_UI_REQUESTED: u8 = CBF_EVENT_PROMPT_UI_REQUESTED;
 pub const CBF_PROMPT_UI_RESOLVED: u8 = CBF_EVENT_PROMPT_UI_RESOLVED;
@@ -392,6 +397,10 @@ pub struct CbfBridgeEvent {
     pub prompt_ui_extension_uninstall_result: u8,
     pub prompt_ui_extension_uninstall_detail: *mut c_char,
     pub extension_runtime_warning: *mut c_char,
+    pub find_number_of_matches: u32,
+    pub find_active_match_ordinal: i32,
+    pub find_selection_rect: CbfRect,
+    pub find_final_update: bool,
     pub auxiliary_window_id: u64,
     pub auxiliary_window_kind: u8,
     pub auxiliary_window_close_reason: u8,
@@ -1106,6 +1115,21 @@ unsafe extern "C" {
         behavior: u8,
     ) -> bool;
     pub fn cbf_bridge_client_execute_edit_action(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        action: u8,
+    ) -> bool;
+    pub fn cbf_bridge_client_find_in_page(
+        client: *mut CbfBridgeClientHandle,
+        tab_id: u64,
+        request_id: u64,
+        query: *const c_char,
+        forward: bool,
+        match_case: bool,
+        new_session: bool,
+        find_match: bool,
+    ) -> bool;
+    pub fn cbf_bridge_client_stop_finding(
         client: *mut CbfBridgeClientHandle,
         tab_id: u64,
         action: u8,
