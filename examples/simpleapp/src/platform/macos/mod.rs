@@ -238,6 +238,13 @@ impl AppRunner {
                         .registry
                         .sync_window_scene(&mut running.controller, window_id);
                 }
+                CoreAction::FocusPageSurface { window_id } => {
+                    let Some(running) = self.running_mut() else {
+                        continue;
+                    };
+
+                    running.controller.focus_page_surface(window_id);
+                }
                 CoreAction::UpdateWindowTitle { window_id, title } => {
                     let Some(running) = self.running_mut() else {
                         continue;

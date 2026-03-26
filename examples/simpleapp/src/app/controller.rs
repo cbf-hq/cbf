@@ -812,6 +812,21 @@ impl AppController {
         }
     }
 
+    pub(crate) fn focus_page_surface(&mut self, host_window_id: HostWindowId) {
+        let Some(page_browsing_context_id) =
+            page_browsing_context_id_for_window(&self.shared, host_window_id)
+        else {
+            return;
+        };
+
+        if let Err(err) = self
+            .compositor
+            .set_active_item(composition::page_item_id(page_browsing_context_id))
+        {
+            warn!("failed to focus page surface for window {host_window_id}: {err}");
+        }
+    }
+
     pub(crate) fn request_shutdown_once(&mut self) {
         if self.shutdown_requested {
             return;
@@ -1431,6 +1446,7 @@ impl AppController {
         match event {
             BrowsingContextEvent::Created { request_id } => {
                 let mut created_toolbar = false;
+                let mut should_focus_page_surface = false;
                 let host_window_id = if request_id == TOOLBAR_CREATE_REQUEST_ID {
                     set_toolbar_browsing_context_id(&self.shared, Some(browsing_context_id));
                     set_window_toolbar_browsing_context(
@@ -1451,16 +1467,20 @@ impl AppController {
                         PRIMARY_HOST_WINDOW_ID,
                         Some(browsing_context_id),
                     );
+                    should_focus_page_surface = true;
                     Some(PRIMARY_HOST_WINDOW_ID)
                 } else if let Some(pending) =
                     take_pending_window_browsing_context_create(&self.shared, request_id)
                 {
                     match pending.role {
-                        PendingWindowBrowsingContextRole::Page => set_window_page_browsing_context(
-                            &self.shared,
-                            pending.window_id,
-                            Some(browsing_context_id),
-                        ),
+                        PendingWindowBrowsingContextRole::Page => {
+                            should_focus_page_surface = true;
+                            set_window_page_browsing_context(
+                                &self.shared,
+                                pending.window_id,
+                                Some(browsing_context_id),
+                            )
+                        }
                         PendingWindowBrowsingContextRole::Toolbar => {
                             created_toolbar = true;
                             set_window_toolbar_browsing_context(
@@ -1498,9 +1518,15 @@ impl AppController {
                             );
                         }
                     }
-                    vec![CoreAction::SyncWindowScene {
+                    let mut actions = vec![CoreAction::SyncWindowScene {
                         window_id: host_window_id,
-                    }]
+                    }];
+                    if should_focus_page_surface {
+                        actions.push(CoreAction::FocusPageSurface {
+                            window_id: host_window_id,
+                        });
+                    }
+                    actions
                 } else {
                     Vec::new()
                 }

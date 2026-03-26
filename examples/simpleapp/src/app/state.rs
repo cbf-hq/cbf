@@ -117,6 +117,9 @@ pub(crate) enum CoreAction {
     SyncWindowScene {
         window_id: HostWindowId,
     },
+    FocusPageSurface {
+        window_id: HostWindowId,
+    },
     UpdateWindowTitle {
         window_id: HostWindowId,
         title: String,
