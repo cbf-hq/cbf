@@ -12,6 +12,7 @@ use crate::plist::InfoPlist;
 const FRAMEWORKS_RPATH: &str = "@executable_path/../Frameworks";
 const RUNTIME_DIR_NAME: &str = "CBF Runtime";
 const MAIN_RUNTIME_EXECUTABLE_NAME: &str = "Chromium";
+const BRIDGE_DYLIB_NAME: &str = "libcbf_bridge.dylib";
 
 #[derive(Debug)]
 pub struct BundleOutput {
@@ -89,7 +90,7 @@ pub fn bundle(config: &ResolvedConfig) -> Result<BundleOutput> {
     copy_file(&config.executable_source_path, &executable_path)?;
     set_executable_permissions(&executable_path)?;
 
-    let bridge_path = frameworks_dir.join("libcbf_bridge.dylib");
+    let bridge_path = frameworks_dir.join(BRIDGE_DYLIB_NAME);
     copy_file(&config.bridge_dylib_source_path, &bridge_path)?;
 
     let runtime_path = runtime_dir.join(format!("{}.app", config.runtime_app_name));
