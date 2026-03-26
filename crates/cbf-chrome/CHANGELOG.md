@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - macOS surface embedding guidance now points applications to `cbf-compositor` as the standard host-side integration path instead of the old `cbf-chrome`-local view helper.
+- `cbf-chrome` now dispatches bridge calls through `cbf-chrome-sys` runtime-loaded symbol wrappers instead of relying on downstream crate `build.rs` linkage setup.
 - `simpleapp` now serves embedded toolbar assets over `app://simpleapp/...` instead of resolving `file://` URLs from the Cargo manifest location, so the same UI loading path works in development and packaged builds.
 - Hardened shutdown flow to use explicit force-close handling, staged process termination, and best-effort cleanup instead of relying on session drop side effects.
 - `BackendStopped` emission now preserves fact-only disconnect reasons; shutdown intent is tracked locally in `ChromiumRuntime` rather than inferred from transport teardown.
@@ -52,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - macOS production bundle startup for rebranded runtimes by reading the launched runtime bundle identifier from `Info.plist` and aligning the host-side Mach rendezvous base bundle ID before bridge initialization.
-- macOS packaged applications now locate `libcbf_bridge.dylib` from `Contents/Frameworks` by rewriting bundled bridge linkage to `@rpath/libcbf_bridge.dylib`.
+- macOS packaged applications now locate `libcbf_bridge.dylib` from `Contents/Frameworks` through `cbf-chrome-sys` runtime bridge lookup instead of executable rpath rewriting.
 - Chrome drag-operation bitmask conversion now maps `Move` to Chromium/AppKit value `16`, restoring external-drop handling for `dropEffect = "move"` targets.
 - DevTools context menus now preserve the verified element-inspector commands in the Chrome-side allowlist, restoring right-click menu display for inspected nodes while continuing to filter unsupported actions.
 

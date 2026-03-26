@@ -7,7 +7,7 @@ use cbf::data::{
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent, PointerType},
 };
-use cbf_chrome_sys::ffi::*;
+use cbf_chrome_sys::{calls::*, ffi::*};
 use cursor_icon::CursorIcon;
 
 use super::{Error, IpcEvent, utils::c_string_to_string};

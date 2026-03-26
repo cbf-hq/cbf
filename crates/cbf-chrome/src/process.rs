@@ -4,7 +4,7 @@ use cbf::{
     delegate::BackendDelegate,
     error::{ApiErrorKind, BackendErrorInfo, Error as CbfError},
 };
-use cbf_chrome_sys::ffi::{cbf_bridge_client_create, cbf_bridge_client_destroy};
+use cbf_chrome_sys::calls::{cbf_bridge_client_create, cbf_bridge_client_destroy};
 use futures_lite::future::block_on;
 use signal_hook::iterator::Signals;
 use std::{

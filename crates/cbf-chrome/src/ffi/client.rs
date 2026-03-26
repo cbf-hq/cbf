@@ -6,7 +6,7 @@ use std::{
 };
 
 use cbf::data::{edit::EditAction, window_open::WindowOpenResponse};
-use cbf_chrome_sys::ffi::*;
+use cbf_chrome_sys::{calls::*, ffi::*};
 use tracing::warn;
 
 use super::map::{
@@ -110,6 +110,9 @@ impl IpcClient {
             .to_str()
             .map_err(|_| Error::ConnectionFailed)?
             .to_owned();
+        if switch_arg.is_empty() {
+            return Err(Error::ConnectionFailed);
+        }
         Ok((fd, switch_arg))
     }
 
