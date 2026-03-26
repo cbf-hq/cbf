@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - FFI support for host-driven custom scheme request/response transport in the bridge ABI, including request metadata, response result values, body bytes, MIME type, CSP, and `Access-Control-Allow-Origin`.
 - FFI support for launch-time custom scheme registration so Chromium can classify configured schemes as first-class web origins before the browser process starts.
+- macOS bridge FFI support for overriding the base bundle ID used by Mach rendezvous, so packaged hosts can align bootstrap naming with a rebranded Chromium runtime bundle.
 - FFI support for host-driven external drag destination transport in the bridge ABI, including external drag enter/update/leave/drop commands and negotiated drag-operation change events.
 - FFI support for Chromium tab and extension popup background policy commands in the bridge client ABI.
 - FFI support for browsing-context IPC commands and envelope fields in the bridge ABI, including channel, request/response metadata, text/binary payloads, and structured IPC error codes.

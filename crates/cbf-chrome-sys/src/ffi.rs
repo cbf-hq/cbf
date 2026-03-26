@@ -873,6 +873,7 @@ pub struct CbfContextMenu {
 }
 
 unsafe extern "C" {
+    pub fn cbf_bridge_set_base_bundle_id(bundle_id: *const std::os::raw::c_char);
     pub fn cbf_bridge_client_create() -> *mut CbfBridgeClientHandle;
     pub fn cbf_bridge_client_destroy(client: *mut CbfBridgeClientHandle);
     pub fn cbf_bridge_init();
