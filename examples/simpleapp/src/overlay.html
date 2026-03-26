@@ -37,7 +37,33 @@
 
 <body>
   <div style="position: absolute; left: 0; top: 0;">Top-left</div>
-  <div class="label">Overlay test</div>
+  <div class="label" data-cbf-hit-test="consume">Overlay test</div>
+
+  <script src="/overlay-hit-test.js"></script>
+  <script>
+    (function () {
+      if (!window.CbfOverlayHitTest) {
+        return;
+      }
+
+      if (!window.cbf || typeof window.cbf.invoke !== 'function') {
+        console.warn('overlay hit test IPC unavailable');
+        return;
+      }
+
+      window.CbfOverlayHitTest.install({
+        sendSnapshot(snapshot) {
+          window.cbf.invoke(
+            'simpleapp.overlay.hit_test.update',
+            JSON.stringify(snapshot),
+            { content_type: 'application/json' }
+          ).catch((error) => {
+            console.warn('failed to send overlay hit test snapshot', error);
+          });
+        },
+      });
+    })();
+  </script>
 </body>
 
 </html>

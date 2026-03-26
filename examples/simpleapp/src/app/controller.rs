@@ -49,8 +49,8 @@ use crate::{
             PendingWindowBrowsingContextCreate, PendingWindowBrowsingContextRole,
             SharedStateHandle, TOOLBAR_CREATE_REQUEST_ID, TransientPopupState, allocate_request_id,
             bind_browsing_context_to_window, browsing_context_ids_for_window,
-            devtools_browsing_context_id, has_bound_windows, overlay_browsing_context_id,
-            page_browsing_context_id_for_toolbar_browsing_context,
+            compositor_window_id_for_host_window, devtools_browsing_context_id, has_bound_windows,
+            overlay_browsing_context_id, page_browsing_context_id_for_toolbar_browsing_context,
             page_browsing_context_id_for_window, primary_browsing_context_id,
             primary_host_window_id, register_pending_window_browsing_context_create,
             set_devtools_browsing_context_id, set_overlay_browsing_context_id,
@@ -65,6 +65,9 @@ use crate::{
         },
     },
     cli::Cli,
+    ipc::overlay::{
+        handler as overlay_handler, protocol as overlay_protocol, publisher as overlay_publisher,
+    },
     ipc::toolbar::{
         handler as toolbar_handler, protocol as toolbar_protocol, publisher as toolbar_publisher,
     },
@@ -841,6 +844,18 @@ impl AppController {
         }
     }
 
+    fn try_enable_overlay_ipc(&self, overlay_browsing_context_id: BrowsingContextId) {
+        let command = BrowserCommand::EnableIpc {
+            browsing_context_id: overlay_browsing_context_id,
+            config: IpcConfig {
+                allowed_origins: vec![APP_ORIGIN.to_string()],
+            },
+        };
+        if let Err(err) = self.browser_handle.send(command) {
+            warn!("failed to enable overlay ipc: {err}");
+        }
+    }
+
     fn post_toolbar_ipc_message(
         &self,
         toolbar_browsing_context_id: BrowsingContextId,
@@ -854,6 +869,22 @@ impl AppController {
             })
         {
             warn!("failed to post toolbar ipc message: {err}");
+        }
+    }
+
+    fn post_overlay_ipc_message(
+        &self,
+        overlay_browsing_context_id: BrowsingContextId,
+        message: cbf::data::ipc::BrowsingContextIpcMessage,
+    ) {
+        if let Err(err) = self
+            .browser_handle
+            .send(BrowserCommand::PostBrowsingContextIpcMessage {
+                browsing_context_id: overlay_browsing_context_id,
+                message,
+            })
+        {
+            warn!("failed to post overlay ipc message: {err}");
         }
     }
 
@@ -1269,6 +1300,80 @@ impl AppController {
         self.post_toolbar_ipc_message(toolbar_browsing_context_id, response);
     }
 
+    fn handle_overlay_ipc_request(
+        &mut self,
+        overlay_browsing_context_id: BrowsingContextId,
+        message: cbf::data::ipc::BrowsingContextIpcMessage,
+    ) {
+        let response_channel = message.channel.clone();
+        let (request_id, request) = match overlay_handler::decode_request(&message) {
+            Ok(decoded) => decoded,
+            Err(err) => {
+                let response = overlay_publisher::response_error_message(
+                    &response_channel,
+                    message.request_id,
+                    IpcErrorCode::ProtocolError,
+                    &format!("invalid request: {err:?}"),
+                );
+                self.post_overlay_ipc_message(overlay_browsing_context_id, response);
+                return;
+            }
+        };
+
+        let Some(window_id) =
+            window_id_for_browsing_context(&self.shared, overlay_browsing_context_id)
+        else {
+            let response = overlay_publisher::response_error_message(
+                &response_channel,
+                request_id,
+                IpcErrorCode::ContextClosed,
+                "overlay host window not found",
+            );
+            self.post_overlay_ipc_message(overlay_browsing_context_id, response);
+            return;
+        };
+
+        let Some(compositor_window_id) =
+            compositor_window_id_for_host_window(&self.shared, window_id)
+        else {
+            let response = overlay_publisher::response_error_message(
+                &response_channel,
+                request_id,
+                IpcErrorCode::ContextClosed,
+                "overlay compositor window not found",
+            );
+            self.post_overlay_ipc_message(overlay_browsing_context_id, response);
+            return;
+        };
+
+        let response = match request {
+            overlay_protocol::OverlayRequest::UpdateHitTest { snapshot } => {
+                match self.compositor.apply(
+                    CompositionCommand::SetItemHitTestRegions {
+                        window_id: compositor_window_id,
+                        item_id: composition::overlay_item_id(overlay_browsing_context_id),
+                        snapshot_id: snapshot.snapshot_id,
+                        coordinate_space: snapshot.coordinate_space,
+                        regions: snapshot.regions,
+                    },
+                    |_| {},
+                ) {
+                    Ok(()) => {
+                        overlay_publisher::response_success_message(&response_channel, request_id)
+                    }
+                    Err(err) => overlay_publisher::response_error_message(
+                        &response_channel,
+                        request_id,
+                        IpcErrorCode::ProtocolError,
+                        &format!("failed to update overlay hit test regions: {err}"),
+                    ),
+                }
+            }
+        };
+
+        self.post_overlay_ipc_message(overlay_browsing_context_id, response);
+    }
+
     fn handle_profiles_listed(&mut self, profiles: Vec<ProfileInfo>) -> Vec<CoreAction> {
         let Some(profile_id) = profiles
             .iter()
@@ -1337,6 +1442,7 @@ impl AppController {
                     Some(PRIMARY_HOST_WINDOW_ID)
                 } else if request_id == OVERLAY_CREATE_REQUEST_ID {
                     set_overlay_browsing_context_id(&self.shared, Some(browsing_context_id));
+                    self.try_enable_overlay_ipc(browsing_context_id);
                     Some(PRIMARY_HOST_WINDOW_ID)
                 } else if request_id == MAIN_PAGE_CREATE_REQUEST_ID {
                     set_primary_browsing_context_id(&self.shared, Some(browsing_context_id));
@@ -1546,6 +1652,8 @@ impl AppController {
                     || Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared)
                 {
                     self.handle_toolbar_ipc_request(browsing_context_id, message);
+                } else if Some(browsing_context_id) == overlay_browsing_context_id(&self.shared) {
+                    self.handle_overlay_ipc_request(browsing_context_id, message);
                 }
                 Vec::new()
             }

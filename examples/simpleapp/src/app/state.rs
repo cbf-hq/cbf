@@ -8,6 +8,7 @@ use cbf::data::{
     extension::ExtensionInfo,
     ids::{BrowsingContextId, TransientBrowsingContextId, WindowId as HostWindowId},
 };
+use cbf_compositor::model::CompositorWindowId;
 use cursor_icon::CursorIcon;
 
 pub(crate) type SharedStateHandle = Arc<Mutex<SharedState>>;
@@ -36,6 +37,7 @@ pub(crate) struct SharedState {
     pub(crate) overlay_browsing_context_id: Option<BrowsingContextId>,
     pub(crate) devtools_browsing_context_id: Option<BrowsingContextId>,
     pub(crate) primary_host_window_id: Option<HostWindowId>,
+    pub(crate) host_window_to_compositor_window: HashMap<HostWindowId, CompositorWindowId>,
     pub(crate) browsing_context_to_window: HashMap<BrowsingContextId, HostWindowId>,
     pub(crate) window_to_browsing_contexts: HashMap<HostWindowId, HashSet<BrowsingContextId>>,
     pub(crate) pending_window_open_requests: HashMap<u64, HostWindowId>,
@@ -56,6 +58,7 @@ impl Default for SharedState {
             overlay_browsing_context_id: None,
             devtools_browsing_context_id: None,
             primary_host_window_id: None,
+            host_window_to_compositor_window: HashMap::new(),
             browsing_context_to_window: HashMap::new(),
             window_to_browsing_contexts: HashMap::new(),
             pending_window_open_requests: HashMap::new(),
@@ -149,6 +152,33 @@ pub(crate) fn primary_host_window_id(shared: &SharedStateHandle) -> Option<HostW
         .lock()
         .expect("shared state lock poisoned")
         .primary_host_window_id
+}
+
+pub(crate) fn set_compositor_window_id_for_host_window(
+    shared: &SharedStateHandle,
+    host_window_id: HostWindowId,
+    compositor_window_id: Option<CompositorWindowId>,
+) {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    if let Some(compositor_window_id) = compositor_window_id {
+        guard
+            .host_window_to_compositor_window
+            .insert(host_window_id, compositor_window_id);
+    } else {
+        guard.host_window_to_compositor_window.remove(&host_window_id);
+    }
+}
+
+pub(crate) fn compositor_window_id_for_host_window(
+    shared: &SharedStateHandle,
+    host_window_id: HostWindowId,
+) -> Option<CompositorWindowId> {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .host_window_to_compositor_window
+        .get(&host_window_id)
+        .copied()
 }
 
 pub(crate) fn bind_browsing_context_to_window(

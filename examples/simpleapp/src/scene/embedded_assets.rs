@@ -23,6 +23,7 @@ const DEFAULT_CONTENT_SECURITY_POLICY: &str = concat!(
 #[folder = "src/"]
 #[include = "ui.html"]
 #[include = "overlay.html"]
+#[include = "overlay-hit-test.js"]
 struct EmbeddedAssets;
 
 pub(crate) fn respond_to_request(

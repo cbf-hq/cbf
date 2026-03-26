@@ -16,7 +16,8 @@ use crate::{
         controller::AppController,
         state::{
             DEVTOOLS_HOST_WINDOW_ID, PRIMARY_HOST_WINDOW_ID, SharedStateHandle,
-            bind_transient_to_window, set_primary_host_window_id,
+            bind_transient_to_window, set_compositor_window_id_for_host_window,
+            set_primary_host_window_id,
         },
     },
     platform::macos::window_visibility::WindowVisibilityObserver,
@@ -190,6 +191,7 @@ impl WindowRegistry {
         let Some(winit_id) = self.winit_id_by_host_window.remove(&host_window_id) else {
             return;
         };
+        set_compositor_window_id_for_host_window(&self.shared, host_window_id, None);
         if let Some(entry) = self.windows.remove(&winit_id) {
             _ = controller.detach_window(entry.compositor_window_id);
         }
@@ -295,6 +297,11 @@ impl WindowRegistry {
         );
         self.winit_id_by_host_window
             .insert(host_window_id, winit_window_id);
+        set_compositor_window_id_for_host_window(
+            &self.shared,
+            host_window_id,
+            Some(compositor_window_id),
+        );
         let (width, height) = logical_inner_size(&window);
         controller.sync_window_scene(host_window_id, compositor_window_id, width, height);
         Ok(())

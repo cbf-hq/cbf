@@ -1,6 +1,7 @@
 use cbf::data::ids::{BrowsingContextId, TransientBrowsingContextId};
 use cbf_compositor::model::{
-    BackgroundPolicy, CompositionItemId, CompositionItemSpec, SurfaceTarget, WindowCompositionSpec,
+    BackgroundPolicy, CompositionItemId, CompositionItemSpec, HitTestPolicy, SurfaceTarget,
+    WindowCompositionSpec,
 };
 
 use crate::scene::layout::{full_window_rect, main_page_rect, main_toolbar_rect};
@@ -26,7 +27,7 @@ pub(crate) fn main_window_composition(
             target: SurfaceTarget::BrowsingContext(overlay_id),
             bounds: full_window_rect(width, height),
             visible: true,
-            interactive: false,
+            hit_test: HitTestPolicy::RegionSnapshot,
             background: BackgroundPolicy::Transparent,
         });
     }
@@ -37,7 +38,7 @@ pub(crate) fn main_window_composition(
             target: SurfaceTarget::BrowsingContext(toolbar_id),
             bounds: main_toolbar_rect(width, height),
             visible: true,
-            interactive: true,
+            hit_test: HitTestPolicy::Bounds,
             background: BackgroundPolicy::Opaque,
         });
     }
@@ -48,7 +49,7 @@ pub(crate) fn main_window_composition(
             target: SurfaceTarget::BrowsingContext(page_id),
             bounds: main_page_rect(width, height),
             visible: true,
-            interactive: true,
+            hit_test: HitTestPolicy::Bounds,
             background: BackgroundPolicy::Opaque,
         });
     }
@@ -67,7 +68,7 @@ pub(crate) fn devtools_window_composition(
             target: SurfaceTarget::BrowsingContext(browsing_context_id),
             bounds: full_window_rect(width, height),
             visible: true,
-            interactive: true,
+            hit_test: HitTestPolicy::Bounds,
             background: BackgroundPolicy::Opaque,
         }],
     }
@@ -84,7 +85,7 @@ pub(crate) fn host_window_composition(
             target: SurfaceTarget::BrowsingContext(browsing_context_id),
             bounds: full_window_rect(width, height),
             visible: true,
-            interactive: true,
+            hit_test: HitTestPolicy::Bounds,
             background: BackgroundPolicy::Opaque,
         }],
     }
@@ -101,7 +102,7 @@ pub(crate) fn transient_window_composition(
             target: SurfaceTarget::TransientBrowsingContext(transient_browsing_context_id),
             bounds: full_window_rect(width, height),
             visible: true,
-            interactive: true,
+            hit_test: HitTestPolicy::Bounds,
             background: BackgroundPolicy::Opaque,
         }],
     }
@@ -121,7 +122,7 @@ pub(crate) const fn toolbar_item_id(browsing_context_id: BrowsingContextId) -> C
     CompositionItemId::new(TOOLBAR_ITEM_NAMESPACE + browsing_context_id.get())
 }
 
-const fn overlay_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
+pub(crate) const fn overlay_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
     CompositionItemId::new(OVERLAY_ITEM_NAMESPACE + browsing_context_id.get())
 }
 

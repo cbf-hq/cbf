@@ -21,6 +21,12 @@ The toolbar and overlay UI are served from embedded assets through
 `cbf-chrome`. This keeps the sample on the same URL model in development and in
 bundled builds without resolving `file://` paths from the Cargo manifest tree.
 
+When `--test-overlay-surface` is enabled, `overlay.html` loads
+`overlay-hit-test.js` and pushes hit-test region snapshots for elements marked
+with `data-cbf-hit-test="consume"`. The sample transport uses
+`window.cbf.invoke("simpleapp.overlay.hit_test.update", ...)` so the overlay
+label consumes clicks while transparent regions pass input through to the page.
+
 ## License
 
 This project is licensed under the BSD Zero Clause License.
