@@ -482,6 +482,7 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
                 html: html.clone(),
             }),
         }),
+        IpcEvent::FindReply { .. } => None,
         IpcEvent::TabIpcMessageReceived {
             profile_id,
             browsing_context_id,
@@ -981,6 +982,26 @@ mod tests {
                     } if title == "Popup"
                 )
         ));
+    }
+
+    #[test]
+    fn find_reply_remains_raw_only() {
+        let event = IpcEvent::FindReply {
+            profile_id: "default".to_string(),
+            browsing_context_id: TabId::new(5),
+            request_id: 7,
+            number_of_matches: 4,
+            active_match_ordinal: 2,
+            selection_rect: crate::data::find::ChromeFindRect {
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 4,
+            },
+            final_update: true,
+        };
+
+        assert!(map_ipc_event_to_generic(&event).is_none());
     }
 
     #[test]

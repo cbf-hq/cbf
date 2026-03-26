@@ -8,6 +8,7 @@ pub mod custom_scheme;
 pub mod download;
 pub mod drag;
 pub mod extension;
+pub mod find;
 pub mod ids;
 pub mod ime;
 pub mod input;

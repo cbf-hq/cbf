@@ -14,6 +14,7 @@ use crate::data::{
         ChromeExternalDragUpdate,
     },
     extension::ChromeAuxiliaryWindowResponse,
+    find::{ChromeFindInPageOptions, ChromeStopFindAction},
     ids::{PopupId, TabId},
     ime::{
         ChromeConfirmCompositionBehavior, ChromeImeCommitText, ChromeImeComposition,
@@ -112,6 +113,15 @@ pub enum ChromeCommand {
     GetTabDomHtml {
         browsing_context_id: TabId,
         request_id: u64,
+    },
+    FindInPage {
+        browsing_context_id: TabId,
+        request_id: u64,
+        options: ChromeFindInPageOptions,
+    },
+    StopFinding {
+        browsing_context_id: TabId,
+        action: ChromeStopFindAction,
     },
     SetTabFocus {
         browsing_context_id: TabId,
@@ -702,6 +712,7 @@ mod tests {
     use super::ChromeCommand;
     use crate::data::{
         background::ChromeBackgroundPolicy,
+        find::{ChromeFindInPageOptions, ChromeStopFindAction},
         ids::{PopupId, TabId},
         prompt_ui::{PromptUiId, PromptUiResponse},
         visibility::ChromeTabVisibility,
@@ -866,6 +877,52 @@ mod tests {
                 popup_id,
                 action: EditAction::SelectAll,
             } if popup_id == PopupId::new(12)
+        ));
+    }
+
+    #[test]
+    fn find_in_page_command_preserves_find_options() {
+        let raw = ChromeCommand::FindInPage {
+            browsing_context_id: TabId::new(31),
+            request_id: 14,
+            options: ChromeFindInPageOptions {
+                query: "needle".into(),
+                forward: false,
+                match_case: true,
+                new_session: false,
+                find_match: true,
+            },
+        };
+
+        assert!(matches!(
+            raw,
+            ChromeCommand::FindInPage {
+                browsing_context_id,
+                request_id,
+                options,
+            } if browsing_context_id == TabId::new(31)
+                && request_id == 14
+                && options.query == "needle"
+                && !options.forward
+                && options.match_case
+                && !options.new_session
+                && options.find_match
+        ));
+    }
+
+    #[test]
+    fn stop_finding_command_preserves_action() {
+        let raw = ChromeCommand::StopFinding {
+            browsing_context_id: TabId::new(41),
+            action: ChromeStopFindAction::ActivateSelection,
+        };
+
+        assert!(matches!(
+            raw,
+            ChromeCommand::StopFinding {
+                browsing_context_id,
+                action: ChromeStopFindAction::ActivateSelection,
+            } if browsing_context_id == TabId::new(41)
         ));
     }
 

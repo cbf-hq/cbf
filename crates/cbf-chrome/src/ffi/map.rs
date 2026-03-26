@@ -31,6 +31,7 @@ use crate::data::{
         ChromeDragUrlInfo,
     },
     extension::{ChromeExtensionInfo, ChromeIconData},
+    find::ChromeFindRect,
     ids::{PopupId, TabId},
     ime::{
         ChromeImeBoundsUpdate, ChromeImeCompositionBounds, ChromeImeRect, ChromeImeTextRange,
@@ -267,6 +268,15 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
             html: c_string_to_string(event.dom_html),
+        }),
+        CBF_EVENT_FIND_REPLY => Ok(IpcEvent::FindReply {
+            profile_id: c_string_to_string(event.profile_id),
+            browsing_context_id: TabId::new(event.tab_id),
+            request_id: event.request_id,
+            number_of_matches: event.find_number_of_matches,
+            active_match_ordinal: event.find_active_match_ordinal,
+            selection_rect: find_rect_from_ffi(event.find_selection_rect),
+            final_update: event.find_final_update,
         }),
         CBF_EVENT_TAB_IPC_MESSAGE_RECEIVED => Ok(IpcEvent::TabIpcMessageReceived {
             profile_id: c_string_to_string(event.profile_id),
@@ -806,6 +816,15 @@ fn context_menu_item_type_from_ffi(value: u8) -> ChromeContextMenuItemType {
 
 fn rect_from_ffi(rect: CbfRect) -> ChromeImeRect {
     ChromeImeRect {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+    }
+}
+
+fn find_rect_from_ffi(rect: CbfRect) -> ChromeFindRect {
+    ChromeFindRect {
         x: rect.x,
         y: rect.y,
         width: rect.width,
@@ -1772,6 +1791,42 @@ mod tests {
             } if browsing_context_id == TabId::new(44)
                 && popup_id == PopupId::new(88)
                 && update.selection.as_ref().is_some_and(|selection| selection.range_start == 1)
+        ));
+    }
+
+    #[test]
+    fn parse_event_find_reply_maps_selection_rect() {
+        let mut event = make_event(CBF_EVENT_FIND_REPLY);
+        event.tab_id = 52;
+        event.request_id = 7;
+        event.find_number_of_matches = 9;
+        event.find_active_match_ordinal = 3;
+        event.find_selection_rect = CbfRect {
+            x: 10,
+            y: 11,
+            width: 12,
+            height: 13,
+        };
+        event.find_final_update = true;
+
+        let parsed = parse_event(event).expect("find reply should parse");
+        assert!(matches!(
+            parsed,
+            IpcEvent::FindReply {
+                browsing_context_id,
+                request_id,
+                number_of_matches,
+                active_match_ordinal,
+                selection_rect,
+                final_update,
+                ..
+            } if browsing_context_id == TabId::new(52)
+                && request_id == 7
+                && number_of_matches == 9
+                && active_match_ordinal == 3
+                && selection_rect.x == 10
+                && selection_rect.height == 13
+                && final_update
         ));
     }
 

@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - repost target URL mapping
   - `PromptUiResponse::FormResubmissionPrompt` response wiring
 - Generic conversion support between Chrome Prompt UI and browser-generic auxiliary window models for form resubmission flows.
+- Chrome-specific `FindInPage` command helpers and raw `FindReply` events for Chromium page-text search, including `StopFinding` actions and follow-up next/previous navigation.
 
 ### Changed
 

@@ -26,6 +26,7 @@ use crate::data::{
         ChromeExternalDragEnter, ChromeExternalDragUpdate,
     },
     extension::ChromeExtensionInfo,
+    find::{ChromeFindInPageOptions, ChromeStopFindAction},
     ids::{PopupId, TabId},
     ime::{
         ChromeConfirmCompositionBehavior, ChromeImeCommitText, ChromeImeComposition,
@@ -778,6 +779,53 @@ impl IpcClient {
 
         if unsafe {
             cbf_bridge_client_get_tab_dom_html(self.inner, browsing_context_id.get(), request_id)
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    pub fn find_in_page(
+        &mut self,
+        browsing_context_id: TabId,
+        request_id: u64,
+        options: &ChromeFindInPageOptions,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        let query = CString::new(options.query.as_str()).map_err(|_| Error::InvalidInput)?;
+        if unsafe {
+            cbf_bridge_client_find_in_page(
+                self.inner,
+                browsing_context_id.get(),
+                request_id,
+                query.as_ptr(),
+                options.forward,
+                options.match_case,
+                options.new_session,
+                options.find_match,
+            )
+        } {
+            Ok(())
+        } else {
+            Err(Error::ConnectionFailed)
+        }
+    }
+
+    pub fn stop_finding(
+        &mut self,
+        browsing_context_id: TabId,
+        action: ChromeStopFindAction,
+    ) -> Result<(), Error> {
+        if self.inner.is_null() {
+            return Err(Error::ConnectionFailed);
+        }
+
+        if unsafe {
+            cbf_bridge_client_stop_finding(self.inner, browsing_context_id.get(), action.to_ffi())
         } {
             Ok(())
         } else {

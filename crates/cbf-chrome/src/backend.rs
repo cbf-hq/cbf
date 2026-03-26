@@ -1197,6 +1197,19 @@ impl ChromiumBackend {
             } => client
                 .get_tab_dom_html(*browsing_context_id, *request_id)
                 .map(|_| (None, Vec::new())),
+            ChromeCommand::FindInPage {
+                browsing_context_id,
+                request_id,
+                options,
+            } => client
+                .find_in_page(*browsing_context_id, *request_id, options)
+                .map(|_| (None, Vec::new())),
+            ChromeCommand::StopFinding {
+                browsing_context_id,
+                action,
+            } => client
+                .stop_finding(*browsing_context_id, *action)
+                .map(|_| (None, Vec::new())),
             ChromeCommand::SetTabFocus {
                 browsing_context_id,
                 focused,

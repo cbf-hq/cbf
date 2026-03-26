@@ -10,6 +10,7 @@ use crate::data::{
     download::{ChromeDownloadCompletion, ChromeDownloadProgress, ChromeDownloadSnapshot},
     drag::ChromeDragStartRequest,
     extension::ChromeExtensionInfo,
+    find::ChromeFindRect,
     ids::{PopupId, TabId},
     ime::ChromeImeBoundsUpdate,
     ipc::{TabIpcErrorCode, TabIpcMessageType, TabIpcPayload},
@@ -261,6 +262,19 @@ pub enum IpcEvent {
         browsing_context_id: TabId,
         request_id: u64,
         html: String,
+    },
+    /// Find-in-page result for a tab.
+    ///
+    /// **Note**: This event does not map to `BrowserEvent` because it carries
+    /// Chromium-specific selection geometry and partial-update semantics.
+    FindReply {
+        profile_id: String,
+        browsing_context_id: TabId,
+        request_id: u64,
+        number_of_matches: u32,
+        active_match_ordinal: i32,
+        selection_rect: ChromeFindRect,
+        final_update: bool,
     },
     /// Browsing context IPC message from page to host.
     TabIpcMessageReceived {
