@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Replaced `CompositionItemSpec.interactive` with `CompositionItemSpec.hit_test`, allowing compositor items to choose between passthrough, full-bounds, and region-snapshot hit testing.
 - macOS pointer routing now resolves targets against per-item hit-test policy and cached region snapshots instead of a bounds-only interactive flag.
+- `cbf-compositor` no longer needs a crate-local `build.rs` bridge linkage shim; bridge lookup now flows through `cbf-chrome-sys` at runtime.
 
 ### Security
 
