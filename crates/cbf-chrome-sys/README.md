@@ -1,8 +1,8 @@
 # cbf-chrome-sys
 
-`cbf-chrome-sys` is the low-level Rust FFI and wire-boundary crate for CBF.
+`cbf-chrome-sys` is the low-level Rust FFI, wire-boundary, and runtime bridge-loader crate for CBF.
 
-It defines the bridge-facing ABI used by `cbf-chrome` and tracks compatibility by Chromium milestone line.
+It defines the bridge-facing ABI used by `cbf-chrome`, loads `libcbf_bridge` at runtime, and tracks compatibility by Chromium milestone line.
 
 CBF is currently in alpha. ABI details, boundary behavior, and security coverage may still change.
 

@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - repost reason and repost target URL fields on `CbfBridgeEvent`.
 - Bridge ABI support for Chromium `FindInPage` / `StopFinding` commands and raw `FindReply` event transport, including match counts, active ordinal, final-update state, and selection rectangle fields.
 
+### Changed
+
+- `cbf-chrome-sys` now resolves `libcbf_bridge` at runtime with `libloading` instead of relying on Cargo link-time bridge configuration.
+- Generated bridge declarations now expose `unsafe extern "C" fn` type aliases so runtime-loaded symbol lookup stays aligned with the ABI source of truth.
+
 ## [146.1.0-alpha.1] - 2026-03-16
 
 ### Added

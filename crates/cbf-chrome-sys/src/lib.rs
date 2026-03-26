@@ -2,4 +2,7 @@
 //!
 //! This crate owns the unsafe C ABI contract with `cbf_bridge`.
 
+pub mod bridge;
+pub mod calls;
 pub mod ffi;
+mod symbols;

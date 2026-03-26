@@ -829,391 +829,321 @@ pub struct CbfContextMenu {
     pub items: CbfContextMenuItemList,
 }
 
-unsafe extern "C" {
-    pub fn cbf_bridge_set_base_bundle_id(bundle_id: *const std::os::raw::c_char);
-    pub fn cbf_bridge_client_create() -> *mut CbfBridgeClientHandle;
-    pub fn cbf_bridge_client_destroy(client: *mut CbfBridgeClientHandle);
-    pub fn cbf_bridge_init();
-    pub fn cbf_bridge_prepare_channel(out_switch_arg: *mut c_char, out_arg_len: i32) -> i32;
-    pub fn cbf_bridge_pass_child_pid(child_pid: i64);
-    pub fn cbf_bridge_client_connect_inherited(client: *mut CbfBridgeClientHandle) -> bool;
-    pub fn cbf_bridge_client_authenticate(
-        client: *mut CbfBridgeClientHandle,
-        token: *const c_char,
-    ) -> bool;
-    pub fn cbf_bridge_client_wait_for_event(
-        client: *mut CbfBridgeClientHandle,
-        timeout_ms: i64,
-    ) -> i32;
-    pub fn cbf_bridge_client_poll_event(
-        client: *mut CbfBridgeClientHandle,
-        out_event: *mut CbfBridgeEvent,
-    ) -> bool;
-    pub fn cbf_bridge_event_free(event: *mut CbfBridgeEvent);
-    pub fn cbf_bridge_client_get_profiles(
-        client: *mut CbfBridgeClientHandle,
-        out_list: *mut CbfProfileList,
-    ) -> bool;
-    pub fn cbf_bridge_profile_list_free(list: *mut CbfProfileList);
-    pub fn cbf_bridge_client_list_extensions(
-        client: *mut CbfBridgeClientHandle,
-        profile_id: *const c_char,
-        out_list: *mut CbfExtensionInfoList,
-    ) -> bool;
-    pub fn cbf_bridge_extension_list_free(list: *mut CbfExtensionInfoList);
-    pub fn cbf_bridge_client_create_tab(
-        client: *mut CbfBridgeClientHandle,
-        request_id: u64,
-        initial_url: *const c_char,
-        profile_id: *const c_char,
-    ) -> bool;
-    pub fn cbf_bridge_client_request_close_tab(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_set_tab_size(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        width: u32,
-        height: u32,
-    ) -> bool;
-    pub fn cbf_bridge_client_set_tab_background_policy(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        transparent: bool,
-    ) -> bool;
-    pub fn cbf_bridge_client_set_extension_popup_size(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        width: u32,
-        height: u32,
-    ) -> bool;
-    pub fn cbf_bridge_client_set_extension_popup_background_policy(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        transparent: bool,
-    ) -> bool;
-    pub fn cbf_bridge_client_set_tab_focus(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        focused: bool,
-    ) -> bool;
-    pub fn cbf_bridge_client_set_tab_visibility(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        visibility: u8,
-    ) -> bool;
-    pub fn cbf_bridge_client_enable_tab_ipc(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        allowed_origins: *const CbfCommandList,
-    ) -> bool;
-    pub fn cbf_bridge_client_disable_tab_ipc(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_post_tab_ipc_message(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        channel: *const c_char,
-        message_type: u8,
-        request_id: u64,
-        payload_kind: u8,
-        payload_text: *const c_char,
-        payload_binary: *const u8,
-        payload_binary_len: u32,
-        content_type: *const c_char,
-        error_code: u8,
-    ) -> bool;
-    pub fn cbf_bridge_client_set_extension_popup_focus(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        focused: bool,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_key_event(
-        client: *mut CbfBridgeClientHandle,
-        event: *const CbfKeyEvent,
-        commands: *const CbfCommandList,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_extension_popup_key_event(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        event: *const CbfKeyEvent,
-        commands: *const CbfCommandList,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_mouse_event(
-        client: *mut CbfBridgeClientHandle,
-        event: *const CbfMouseEvent,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_extension_popup_mouse_event(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        event: *const CbfMouseEvent,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_mouse_wheel_event(
-        client: *mut CbfBridgeClientHandle,
-        event: *const CbfMouseWheelEvent,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_extension_popup_mouse_wheel_event(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        event: *const CbfMouseWheelEvent,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_drag_update(
-        client: *mut CbfBridgeClientHandle,
-        update: *const CbfDragUpdate,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_drag_drop(
-        client: *mut CbfBridgeClientHandle,
-        drop: *const CbfDragDrop,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_drag_cancel(
-        client: *mut CbfBridgeClientHandle,
-        session_id: u64,
-        tab_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_external_drag_enter(
-        client: *mut CbfBridgeClientHandle,
-        event: *const CbfExternalDragEnter,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_external_drag_update(
-        client: *mut CbfBridgeClientHandle,
-        event: *const CbfExternalDragUpdate,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_external_drag_leave(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_send_external_drag_drop(
-        client: *mut CbfBridgeClientHandle,
-        event: *const CbfExternalDragDrop,
-    ) -> bool;
-    pub fn cbf_bridge_convert_nsevent(
-        nsevent: *mut std::ffi::c_void,
-        tab_id: u64,
-        out_event: *mut CbfKeyEvent,
-    );
-    pub fn cbf_bridge_free_converted_key_event(event: *mut CbfKeyEvent);
-    pub fn cbf_bridge_convert_nsevent_to_mouse_event(
-        nsevent: *mut std::ffi::c_void,
-        nsview: *mut std::ffi::c_void,
-        tab_id: u64,
-        pointer_type: u8,
-        unaccelerated_movement: bool,
-        out_event: *mut CbfMouseEvent,
-    );
-    pub fn cbf_bridge_convert_nsevent_to_mouse_wheel_event(
-        nsevent: *mut std::ffi::c_void,
-        nsview: *mut std::ffi::c_void,
-        tab_id: u64,
-        out_event: *mut CbfMouseWheelEvent,
-    );
-    pub fn cbf_bridge_convert_nspasteboard_to_drag_data(
-        nspasteboard: *mut std::ffi::c_void,
-        out_data: *mut CbfDragData,
-    );
-    pub fn cbf_bridge_free_converted_drag_data(data: *mut CbfDragData);
-    pub fn cbf_bridge_client_set_composition(
-        client: *mut CbfBridgeClientHandle,
-        composition: *const CbfImeComposition,
-    ) -> bool;
-    pub fn cbf_bridge_client_set_extension_popup_composition(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        composition: *const CbfImeComposition,
-    ) -> bool;
-    pub fn cbf_bridge_client_commit_text(
-        client: *mut CbfBridgeClientHandle,
-        commit: *const CbfImeCommitText,
-    ) -> bool;
-    pub fn cbf_bridge_client_commit_extension_popup_text(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        commit: *const CbfImeCommitText,
-    ) -> bool;
-    pub fn cbf_bridge_client_finish_composing_text(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        behavior: u8,
-    ) -> bool;
-    pub fn cbf_bridge_client_finish_extension_popup_composing_text(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        behavior: u8,
-    ) -> bool;
-    pub fn cbf_bridge_client_execute_edit_action(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        action: u8,
-    ) -> bool;
-    pub fn cbf_bridge_client_find_in_page(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        request_id: u64,
-        query: *const c_char,
-        forward: bool,
-        match_case: bool,
-        new_session: bool,
-        find_match: bool,
-    ) -> bool;
-    pub fn cbf_bridge_client_stop_finding(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        action: u8,
-    ) -> bool;
-    pub fn cbf_bridge_client_execute_extension_popup_edit_action(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        action: u8,
-    ) -> bool;
-    pub fn cbf_bridge_client_execute_context_menu_command(
-        client: *mut CbfBridgeClientHandle,
-        menu_id: u64,
-        command_id: i32,
-        event_flags: i32,
-    ) -> bool;
-    pub fn cbf_bridge_client_dismiss_context_menu(
-        client: *mut CbfBridgeClientHandle,
-        menu_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_accept_choice_menu_selection(
-        client: *mut CbfBridgeClientHandle,
-        request_id: u64,
-        indices: *const CbfChoiceMenuSelectedIndices,
-    ) -> bool;
-    pub fn cbf_bridge_client_dismiss_choice_menu(
-        client: *mut CbfBridgeClientHandle,
-        request_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_confirm_beforeunload(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        request_id: u64,
-        proceed: bool,
-    ) -> bool;
-    pub fn cbf_bridge_client_respond_javascript_dialog(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        request_id: u64,
-        accept: bool,
-        prompt_text: *const c_char,
-    ) -> bool;
-    pub fn cbf_bridge_client_respond_extension_popup_javascript_dialog(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-        request_id: u64,
-        accept: bool,
-        prompt_text: *const c_char,
-    ) -> bool;
-    pub fn cbf_bridge_client_navigate(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        url: *const c_char,
-    ) -> bool;
-    pub fn cbf_bridge_client_go_back(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
-    pub fn cbf_bridge_client_go_forward(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
-    pub fn cbf_bridge_client_reload(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        ignore_cache: bool,
-    ) -> bool;
-    pub fn cbf_bridge_client_print_preview(client: *mut CbfBridgeClientHandle, tab_id: u64)
-    -> bool;
-    pub fn cbf_bridge_client_activate_extension_action(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        extension_id: *const c_char,
-    ) -> bool;
-    pub fn cbf_bridge_client_close_extension_popup(
-        client: *mut CbfBridgeClientHandle,
-        popup_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_open_dev_tools(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_inspect_element(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        x: i32,
-        y: i32,
-    ) -> bool;
-    pub fn cbf_bridge_client_get_tab_dom_html(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        request_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_open_default_prompt_ui(
-        client: *mut CbfBridgeClientHandle,
-        profile_id: *const c_char,
-        request_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_register_custom_scheme_handler(
-        client: *mut CbfBridgeClientHandle,
-        scheme: *const c_char,
-        host: *const c_char,
-    ) -> bool;
-    pub fn cbf_bridge_client_respond_custom_scheme_request(
-        client: *mut CbfBridgeClientHandle,
-        request_id: u64,
-        result: u8,
-        mime_type: *const c_char,
-        content_security_policy: *const c_char,
-        access_control_allow_origin: *const c_char,
-        body: *const u8,
-        body_len: u32,
-    ) -> bool;
-    pub fn cbf_bridge_client_respond_prompt_ui(
-        client: *mut CbfBridgeClientHandle,
-        profile_id: *const c_char,
-        request_id: u64,
-        prompt_ui_kind: u8,
-        proceed: bool,
-        report_abuse: bool,
-        destination_path: *const c_char,
-    ) -> bool;
-    pub fn cbf_bridge_client_respond_prompt_ui_for_tab(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        request_id: u64,
-        prompt_ui_kind: u8,
-        proceed: bool,
-        report_abuse: bool,
-        destination_path: *const c_char,
-    ) -> bool;
-    pub fn cbf_bridge_client_pause_download(
-        client: *mut CbfBridgeClientHandle,
-        download_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_resume_download(
-        client: *mut CbfBridgeClientHandle,
-        download_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_cancel_download(
-        client: *mut CbfBridgeClientHandle,
-        download_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_close_prompt_ui(
-        client: *mut CbfBridgeClientHandle,
-        profile_id: *const c_char,
-        prompt_ui_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_respond_tab_open(
-        client: *mut CbfBridgeClientHandle,
-        request_id: u64,
-        response_kind: u8,
-        target_tab_id: u64,
-        activate: bool,
-    ) -> bool;
-    pub fn cbf_bridge_client_shutdown(client: *mut CbfBridgeClientHandle);
-    pub fn cbf_bridge_client_request_shutdown(
-        client: *mut CbfBridgeClientHandle,
-        request_id: u64,
-    ) -> bool;
-    pub fn cbf_bridge_client_confirm_shutdown(
-        client: *mut CbfBridgeClientHandle,
-        request_id: u64,
-        proceed: bool,
-    ) -> bool;
-    pub fn cbf_bridge_client_force_shutdown(client: *mut CbfBridgeClientHandle) -> bool;
-}
+pub type CbfBridgeSetBaseBundleIdFn = unsafe extern "C" fn(bundle_id: *const std::os::raw::c_char);
+pub type CbfBridgeClientCreateFn = unsafe extern "C" fn() -> *mut CbfBridgeClientHandle;
+pub type CbfBridgeClientDestroyFn = unsafe extern "C" fn(client: *mut CbfBridgeClientHandle);
+pub type CbfBridgeInitFn = unsafe extern "C" fn();
+pub type CbfBridgePrepareChannelFn =
+    unsafe extern "C" fn(out_switch_arg: *mut c_char, out_arg_len: i32) -> i32;
+pub type CbfBridgePassChildPidFn = unsafe extern "C" fn(child_pid: i64);
+pub type CbfBridgeClientConnectInheritedFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle) -> bool;
+pub type CbfBridgeClientAuthenticateFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, token: *const c_char) -> bool;
+pub type CbfBridgeClientWaitForEventFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, timeout_ms: i64) -> i32;
+pub type CbfBridgeClientPollEventFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    out_event: *mut CbfBridgeEvent,
+) -> bool;
+pub type CbfBridgeEventFreeFn = unsafe extern "C" fn(event: *mut CbfBridgeEvent);
+pub type CbfBridgeClientGetProfilesFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, out_list: *mut CbfProfileList) -> bool;
+pub type CbfBridgeProfileListFreeFn = unsafe extern "C" fn(list: *mut CbfProfileList);
+pub type CbfBridgeClientListExtensionsFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    profile_id: *const c_char,
+    out_list: *mut CbfExtensionInfoList,
+) -> bool;
+pub type CbfBridgeExtensionListFreeFn = unsafe extern "C" fn(list: *mut CbfExtensionInfoList);
+pub type CbfBridgeClientCreateTabFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    request_id: u64,
+    initial_url: *const c_char,
+    profile_id: *const c_char,
+) -> bool;
+pub type CbfBridgeClientRequestCloseTabFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
+pub type CbfBridgeClientSetTabSizeFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    width: u32,
+    height: u32,
+) -> bool;
+pub type CbfBridgeClientSetTabBackgroundPolicyFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    transparent: bool,
+) -> bool;
+pub type CbfBridgeClientSetExtensionPopupSizeFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    popup_id: u64,
+    width: u32,
+    height: u32,
+) -> bool;
+pub type CbfBridgeClientSetExtensionPopupBackgroundPolicyFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    popup_id: u64,
+    transparent: bool,
+) -> bool;
+pub type CbfBridgeClientSetTabFocusFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64, focused: bool) -> bool;
+pub type CbfBridgeClientSetTabVisibilityFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64, visibility: u8) -> bool;
+pub type CbfBridgeClientEnableTabIpcFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    allowed_origins: *const CbfCommandList,
+) -> bool;
+pub type CbfBridgeClientDisableTabIpcFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
+pub type CbfBridgeClientPostTabIpcMessageFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    channel: *const c_char,
+    message_type: u8,
+    request_id: u64,
+    payload_kind: u8,
+    payload_text: *const c_char,
+    payload_binary: *const u8,
+    payload_binary_len: u32,
+    content_type: *const c_char,
+    error_code: u8,
+) -> bool;
+pub type CbfBridgeClientSetExtensionPopupFocusFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, popup_id: u64, focused: bool) -> bool;
+pub type CbfBridgeClientSendKeyEventFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    event: *const CbfKeyEvent,
+    commands: *const CbfCommandList,
+) -> bool;
+pub type CbfBridgeClientSendExtensionPopupKeyEventFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    popup_id: u64,
+    event: *const CbfKeyEvent,
+    commands: *const CbfCommandList,
+) -> bool;
+pub type CbfBridgeClientSendMouseEventFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, event: *const CbfMouseEvent) -> bool;
+pub type CbfBridgeClientSendExtensionPopupMouseEventFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    popup_id: u64,
+    event: *const CbfMouseEvent,
+) -> bool;
+pub type CbfBridgeClientSendMouseWheelEventFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    event: *const CbfMouseWheelEvent,
+) -> bool;
+pub type CbfBridgeClientSendExtensionPopupMouseWheelEventFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    popup_id: u64,
+    event: *const CbfMouseWheelEvent,
+) -> bool;
+pub type CbfBridgeClientSendDragUpdateFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, update: *const CbfDragUpdate) -> bool;
+pub type CbfBridgeClientSendDragDropFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, drop: *const CbfDragDrop) -> bool;
+pub type CbfBridgeClientSendDragCancelFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, session_id: u64, tab_id: u64) -> bool;
+pub type CbfBridgeClientSendExternalDragEnterFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    event: *const CbfExternalDragEnter,
+) -> bool;
+pub type CbfBridgeClientSendExternalDragUpdateFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    event: *const CbfExternalDragUpdate,
+) -> bool;
+pub type CbfBridgeClientSendExternalDragLeaveFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
+pub type CbfBridgeClientSendExternalDragDropFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    event: *const CbfExternalDragDrop,
+) -> bool;
+pub type CbfBridgeConvertNseventFn =
+    unsafe extern "C" fn(nsevent: *mut std::ffi::c_void, tab_id: u64, out_event: *mut CbfKeyEvent);
+pub type CbfBridgeFreeConvertedKeyEventFn = unsafe extern "C" fn(event: *mut CbfKeyEvent);
+pub type CbfBridgeConvertNseventToMouseEventFn = unsafe extern "C" fn(
+    nsevent: *mut std::ffi::c_void,
+    nsview: *mut std::ffi::c_void,
+    tab_id: u64,
+    pointer_type: u8,
+    unaccelerated_movement: bool,
+    out_event: *mut CbfMouseEvent,
+);
+pub type CbfBridgeConvertNseventToMouseWheelEventFn = unsafe extern "C" fn(
+    nsevent: *mut std::ffi::c_void,
+    nsview: *mut std::ffi::c_void,
+    tab_id: u64,
+    out_event: *mut CbfMouseWheelEvent,
+);
+pub type CbfBridgeConvertNspasteboardToDragDataFn =
+    unsafe extern "C" fn(nspasteboard: *mut std::ffi::c_void, out_data: *mut CbfDragData);
+pub type CbfBridgeFreeConvertedDragDataFn = unsafe extern "C" fn(data: *mut CbfDragData);
+pub type CbfBridgeClientSetCompositionFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    composition: *const CbfImeComposition,
+) -> bool;
+pub type CbfBridgeClientSetExtensionPopupCompositionFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    popup_id: u64,
+    composition: *const CbfImeComposition,
+) -> bool;
+pub type CbfBridgeClientCommitTextFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    commit: *const CbfImeCommitText,
+) -> bool;
+pub type CbfBridgeClientCommitExtensionPopupTextFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    popup_id: u64,
+    commit: *const CbfImeCommitText,
+) -> bool;
+pub type CbfBridgeClientFinishComposingTextFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64, behavior: u8) -> bool;
+pub type CbfBridgeClientFinishExtensionPopupComposingTextFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, popup_id: u64, behavior: u8) -> bool;
+pub type CbfBridgeClientExecuteEditActionFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64, action: u8) -> bool;
+pub type CbfBridgeClientFindInPageFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    request_id: u64,
+    query: *const c_char,
+    forward: bool,
+    match_case: bool,
+    new_session: bool,
+    find_match: bool,
+) -> bool;
+pub type CbfBridgeClientStopFindingFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64, action: u8) -> bool;
+pub type CbfBridgeClientExecuteExtensionPopupEditActionFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, popup_id: u64, action: u8) -> bool;
+pub type CbfBridgeClientExecuteContextMenuCommandFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    menu_id: u64,
+    command_id: i32,
+    event_flags: i32,
+) -> bool;
+pub type CbfBridgeClientDismissContextMenuFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, menu_id: u64) -> bool;
+pub type CbfBridgeClientAcceptChoiceMenuSelectionFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    request_id: u64,
+    indices: *const CbfChoiceMenuSelectedIndices,
+) -> bool;
+pub type CbfBridgeClientDismissChoiceMenuFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, request_id: u64) -> bool;
+pub type CbfBridgeClientConfirmBeforeunloadFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    request_id: u64,
+    proceed: bool,
+) -> bool;
+pub type CbfBridgeClientRespondJavascriptDialogFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    request_id: u64,
+    accept: bool,
+    prompt_text: *const c_char,
+) -> bool;
+pub type CbfBridgeClientRespondExtensionPopupJavascriptDialogFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    popup_id: u64,
+    request_id: u64,
+    accept: bool,
+    prompt_text: *const c_char,
+) -> bool;
+pub type CbfBridgeClientNavigateFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    url: *const c_char,
+) -> bool;
+pub type CbfBridgeClientGoBackFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
+pub type CbfBridgeClientGoForwardFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
+pub type CbfBridgeClientReloadFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    ignore_cache: bool,
+) -> bool;
+pub type CbfBridgeClientPrintPreviewFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
+pub type CbfBridgeClientActivateExtensionActionFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    extension_id: *const c_char,
+) -> bool;
+pub type CbfBridgeClientCloseExtensionPopupFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, popup_id: u64) -> bool;
+pub type CbfBridgeClientOpenDevToolsFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool;
+pub type CbfBridgeClientInspectElementFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64, x: i32, y: i32) -> bool;
+pub type CbfBridgeClientGetTabDomHtmlFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64, request_id: u64) -> bool;
+pub type CbfBridgeClientOpenDefaultPromptUiFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    profile_id: *const c_char,
+    request_id: u64,
+) -> bool;
+pub type CbfBridgeClientRegisterCustomSchemeHandlerFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    scheme: *const c_char,
+    host: *const c_char,
+) -> bool;
+pub type CbfBridgeClientRespondCustomSchemeRequestFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    request_id: u64,
+    result: u8,
+    mime_type: *const c_char,
+    content_security_policy: *const c_char,
+    access_control_allow_origin: *const c_char,
+    body: *const u8,
+    body_len: u32,
+) -> bool;
+pub type CbfBridgeClientRespondPromptUiFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    profile_id: *const c_char,
+    request_id: u64,
+    prompt_ui_kind: u8,
+    proceed: bool,
+    report_abuse: bool,
+    destination_path: *const c_char,
+) -> bool;
+pub type CbfBridgeClientRespondPromptUiForTabFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    tab_id: u64,
+    request_id: u64,
+    prompt_ui_kind: u8,
+    proceed: bool,
+    report_abuse: bool,
+    destination_path: *const c_char,
+) -> bool;
+pub type CbfBridgeClientPauseDownloadFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, download_id: u64) -> bool;
+pub type CbfBridgeClientResumeDownloadFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, download_id: u64) -> bool;
+pub type CbfBridgeClientCancelDownloadFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, download_id: u64) -> bool;
+pub type CbfBridgeClientClosePromptUiFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    profile_id: *const c_char,
+    prompt_ui_id: u64,
+) -> bool;
+pub type CbfBridgeClientRespondTabOpenFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    request_id: u64,
+    response_kind: u8,
+    target_tab_id: u64,
+    activate: bool,
+) -> bool;
+pub type CbfBridgeClientShutdownFn = unsafe extern "C" fn(client: *mut CbfBridgeClientHandle);
+pub type CbfBridgeClientRequestShutdownFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, request_id: u64) -> bool;
+pub type CbfBridgeClientConfirmShutdownFn = unsafe extern "C" fn(
+    client: *mut CbfBridgeClientHandle,
+    request_id: u64,
+    proceed: bool,
+) -> bool;
+pub type CbfBridgeClientForceShutdownFn =
+    unsafe extern "C" fn(client: *mut CbfBridgeClientHandle) -> bool;
