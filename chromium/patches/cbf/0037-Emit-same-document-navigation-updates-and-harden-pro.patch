@@ -1,7 +1,7 @@
 From 37b5d3236aaf9e06d73572273f8f576363622ebd Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 22 Mar 2026 15:37:36 +0900
-Subject: [PATCH 37/40] Emit same-document navigation updates and harden
+Subject: [PATCH 37/41] Emit same-document navigation updates and harden
  profile teardown
 
 ---

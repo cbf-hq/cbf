@@ -44,6 +44,7 @@ source-built use rather than a downloadable binary bundle.
 
 ### Fixed
 
+- macOS production bundle startup for rebranded runtimes by resolving helper executables from the launched runtime name and by aligning Mach rendezvous bootstrap naming with the runtime bundle identifier used by the packaged Chromium engine.
 - Custom-scheme HTML documents now commit and render as web content instead of source text by providing Chromium with the expected response metadata and first-class scheme registration.
 - Non-cryptographic custom-scheme subresource fetches no longer trigger renderer-side bad Mojo failures from unnecessary `SubresourceResponseStarted` IPC.
 - Profile teardown stability in `CbfProfileService` by restoring download-prompt prefs before shutdown and removing stale profile-service registry entries during `OnProfileWillBeDestroyed`.
