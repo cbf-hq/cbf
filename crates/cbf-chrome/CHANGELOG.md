@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- macOS production bundle startup for rebranded runtimes by reading the launched runtime bundle identifier from `Info.plist` and aligning the host-side Mach rendezvous base bundle ID before bridge initialization.
+- macOS packaged applications now locate `libcbf_bridge.dylib` from `Contents/Frameworks` by rewriting bundled bridge linkage to `@rpath/libcbf_bridge.dylib`.
 - Chrome drag-operation bitmask conversion now maps `Move` to Chromium/AppKit value `16`, restoring external-drop handling for `dropEffect = "move"` targets.
 - DevTools context menus now preserve the verified element-inspector commands in the Chrome-side allowlist, restoring right-click menu display for inspected nodes while continuing to filter unsupported actions.
 

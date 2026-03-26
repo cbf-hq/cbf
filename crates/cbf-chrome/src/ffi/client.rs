@@ -79,6 +79,15 @@ impl std::fmt::Debug for IpcClient {
 }
 
 impl IpcClient {
+    /// Override the base bundle ID used for Mach rendezvous on macOS.
+    ///
+    /// Must be called before `prepare_channel`.
+    pub fn set_base_bundle_id(bundle_id: &str) -> Result<(), Error> {
+        let bundle_id = CString::new(bundle_id).map_err(|_| Error::InvalidInput)?;
+        unsafe { cbf_bridge_set_base_bundle_id(bundle_id.as_ptr()) };
+        Ok(())
+    }
+
     /// Prepare the Mojo channel before spawning the Chromium process.
     ///
     /// Returns `(remote_fd, switch_arg)` where:

@@ -1,4 +1,9 @@
 use async_process::{Child, Command};
+use cbf::{
+    browser::{BrowserHandle, BrowserSession, EventStream},
+    delegate::BackendDelegate,
+    error::{ApiErrorKind, BackendErrorInfo, Error as CbfError},
+};
 use cbf_chrome_sys::ffi::{cbf_bridge_client_create, cbf_bridge_client_destroy};
 use futures_lite::future::block_on;
 use signal_hook::iterator::Signals;
@@ -15,12 +20,6 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-
-use cbf::{
-    browser::{BrowserHandle, BrowserSession, EventStream},
-    delegate::BackendDelegate,
-    error::{ApiErrorKind, BackendErrorInfo, Error as CbfError},
-};
 
 use crate::{
     backend::{ChromiumBackend, ChromiumBackendOptions},
@@ -606,6 +605,27 @@ pub fn start_chromium(
 
     validate_runtime_selection(runtime)?;
 
+    // Production bundles launch the Chromium runtime from a separate app bundle.
+    // Align the host-side base bundle ID with that runtime bundle so Mach
+    // rendezvous uses the same bootstrap name on both sides.
+    #[cfg(target_os = "macos")]
+    if let Some(app_path) = executable_path
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+    {
+        let plist_path = app_path.join("Contents").join("Info.plist");
+        if let Ok(info) = plist::Value::from_file(&plist_path)
+            && let Some(bundle_id) = info
+                .as_dictionary()
+                .and_then(|d| d.get("CFBundleIdentifier"))
+                .and_then(|v| v.as_string())
+        {
+            tracing::debug!(bundle_id = %bundle_id, "overriding base bundle id for mach rendezvous");
+            _ = IpcClient::set_base_bundle_id(bundle_id);
+        }
+    }
+
     // Create the bridge client handle and prepare the Mojo channel pair.
     let inner = unsafe { cbf_bridge_client_create() };
     if inner.is_null() {
@@ -665,7 +685,7 @@ pub fn start_chromium(
         ));
     }
 
-    if let Some(enable_logging) = enable_logging {
+    if let Some(ref enable_logging) = enable_logging {
         command.arg(format!("--enable-logging={}", enable_logging));
     }
 

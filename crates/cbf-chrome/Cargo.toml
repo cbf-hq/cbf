@@ -30,6 +30,7 @@ signal-hook.workspace = true
 libc.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
+plist = { workspace = true }
 objc2 = { workspace = true }
 objc2-core-foundation = { workspace = true, features = ["CFCGTypes"] }
 objc2-quartz-core = { workspace = true, features = [
