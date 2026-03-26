@@ -4,6 +4,7 @@ from typing import Any
 
 import click
 
+from tool.ffi import compare_snapshots, write_snapshot
 from tool.chromium_patches import (
     ConfigError,
     apply_series,
@@ -202,6 +203,11 @@ def cli() -> None:
 
 @cli.group("release", help="Release packaging helpers.")
 def release_group() -> None:
+    return None
+
+
+@cli.group("ffi", help="FFI snapshot and comparison helpers.")
+def ffi_group() -> None:
     return None
 
 
@@ -408,6 +414,70 @@ def release_source_info_command(
 def release_package_command(*, series: str, tag: str | None, allow_dirty: bool) -> None:
     paths = create_release_archive(allow_dirty=allow_dirty, series=series, tag=tag)
     click.echo(f"Created release archive: {paths.archive_path}")
+
+
+@ffi_group.command("snapshot", help="Write a machine-readable FFI snapshot.")
+# Temporary #64 migration command. Keep the ffi snapshot/compare commands until
+# #65 completes so generated bindings can be checked against this baseline.
+@click.option(
+    "--ref",
+    default=None,
+    help="Optional git ref to snapshot instead of the current worktree.",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Directory that will receive ffi-snapshot.json.",
+)
+def ffi_snapshot_command(*, ref: str | None, output_dir: Path) -> None:
+    output_path = write_snapshot(repo_root=repo_root(), ref=ref, output_dir=output_dir)
+    click.echo(f"Wrote FFI snapshot: {output_path}")
+
+
+@ffi_group.command("compare", help="Compare two FFI snapshots.")
+@click.option(
+    "--baseline",
+    "baseline_path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to the baseline ffi-snapshot.json.",
+)
+@click.option(
+    "--candidate",
+    "candidate_path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to the candidate ffi-snapshot.json.",
+)
+@click.option(
+    "--allowlist",
+    "allowlist_path",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Optional JSON allowlist used for normalized comparison.",
+)
+@click.option(
+    "--normalize/--no-normalize",
+    default=False,
+    help="Apply allowlisted removals/renames before comparing.",
+)
+def ffi_compare_command(
+    *,
+    baseline_path: Path,
+    candidate_path: Path,
+    allowlist_path: Path | None,
+    normalize: bool,
+) -> None:
+    differences, _, _ = compare_snapshots(
+        baseline_path=baseline_path,
+        candidate_path=candidate_path,
+        allowlist_path=allowlist_path,
+        normalize=normalize,
+    )
+    if differences:
+        raise click.ClickException("\n".join(differences))
+    click.echo("FFI snapshots match.")
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -1,0 +1,95 @@
+{
+  "remove_c_constants": [
+    "kEventAuxiliaryWindowOpenRequested",
+    "kEventAuxiliaryWindowResolved",
+    "kCbfAuxiliaryWindowKindUnknown",
+    "kCbfAuxiliaryWindowKindExtensionInstallPrompt",
+    "kCbfAuxiliaryWindowKindExtensionUninstallPrompt",
+    "kCbfAuxiliaryWindowKindPrintPreviewDialog",
+    "kCbfAuxiliaryWindowKindFormResubmissionPrompt"
+  ],
+  "remove_rust_constants": [
+    "CBF_EVENT_PROMPT_UI_OPEN_REQUESTED",
+    "CBF_PROMPT_UI_REQUESTED",
+    "CBF_PROMPT_UI_RESOLVED",
+    "CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED",
+    "CBF_EXTENSION_INSTALL_PROMPT_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS",
+    "CBF_EXTENSION_INSTALL_PROMPT_RESULT_USER_CANCELED",
+    "CBF_EXTENSION_INSTALL_PROMPT_RESULT_ABORTED",
+    "CBF_EXTENSION_UNINSTALL_PROMPT_RESULT_ACCEPTED",
+    "CBF_EXTENSION_UNINSTALL_PROMPT_RESULT_USER_CANCELED",
+    "CBF_EXTENSION_UNINSTALL_PROMPT_RESULT_ABORTED",
+    "CBF_EXTENSION_UNINSTALL_PROMPT_RESULT_FAILED",
+    "CBF_EVENT_AUXILIARY_WINDOW_OPEN_REQUESTED",
+    "CBF_EVENT_AUXILIARY_WINDOW_RESOLVED",
+    "CBF_AUXILIARY_WINDOW_KIND_UNKNOWN",
+    "CBF_AUXILIARY_WINDOW_KIND_EXTENSION_INSTALL_PROMPT",
+    "CBF_AUXILIARY_WINDOW_KIND_EXTENSION_UNINSTALL_PROMPT",
+    "CBF_AUXILIARY_WINDOW_KIND_PRINT_PREVIEW_DIALOG",
+    "CBF_AUXILIARY_WINDOW_KIND_FORM_RESUBMISSION_PROMPT",
+    "CBF_AUXILIARY_WINDOW_CLOSE_REASON_UNKNOWN",
+    "CBF_AUXILIARY_WINDOW_CLOSE_REASON_USER_CANCELED",
+    "CBF_AUXILIARY_WINDOW_CLOSE_REASON_HOST_FORCED",
+    "CBF_AUXILIARY_WINDOW_CLOSE_REASON_SYSTEM_DISMISSED"
+  ],
+  "remove_c_functions": [
+    "cbf_bridge_client_create_web_page",
+    "cbf_bridge_client_request_close_web_page",
+    "cbf_bridge_client_set_web_page_size",
+    "cbf_bridge_client_set_web_page_focus",
+    "cbf_bridge_client_get_web_page_dom_html"
+  ],
+  "remove_rust_functions": [
+    "cbf_bridge_client_create_web_page",
+    "cbf_bridge_client_request_close_web_page",
+    "cbf_bridge_client_set_web_page_size",
+    "cbf_bridge_client_set_web_page_focus",
+    "cbf_bridge_client_get_web_page_dom_html"
+  ],
+  "rename_c_constants": {
+    "kEventWebPageCreated": "kEventTabCreated",
+    "kEventNewWebPageRequested": "kEventNewTabRequested",
+    "kEventWebPageClosed": "kEventTabClosed",
+    "kEventWebPageResizeAcknowledged": "kEventTabResizeAcknowledged",
+    "kEventWebPageDomHtmlRead": "kEventTabDomHtmlRead",
+    "kEventAuxiliaryWindowOpened": "kEventPromptUiOpened",
+    "kEventAuxiliaryWindowClosed": "kEventPromptUiClosed",
+    "kCbfAuxiliaryWindowCloseReasonUnknown": "kCbfPromptUiCloseReasonUnknown",
+    "kCbfAuxiliaryWindowCloseReasonUserCanceled": "kCbfPromptUiCloseReasonUserCanceled",
+    "kCbfAuxiliaryWindowCloseReasonHostForced": "kCbfPromptUiCloseReasonHostForced",
+    "kCbfAuxiliaryWindowCloseReasonSystemDismissed": "kCbfPromptUiCloseReasonSystemDismissed",
+    "kCbfBeforeUnloadReasonCloseWebPage": "kCbfBeforeUnloadReasonCloseTab"
+  },
+  "rename_rust_constants": {
+    "CBF_EVENT_WEB_PAGE_CREATED": "CBF_EVENT_TAB_CREATED",
+    "CBF_EVENT_NEW_WEB_PAGE_REQUESTED": "CBF_EVENT_NEW_TAB_REQUESTED",
+    "CBF_EVENT_WEB_PAGE_CLOSED": "CBF_EVENT_TAB_CLOSED",
+    "CBF_EVENT_WEB_PAGE_RESIZE_ACKNOWLEDGED": "CBF_EVENT_TAB_RESIZE_ACKNOWLEDGED",
+    "CBF_EVENT_WEB_PAGE_DOM_HTML_READ": "CBF_EVENT_TAB_DOM_HTML_READ",
+    "CBF_EVENT_AUXILIARY_WINDOW_OPENED": "CBF_EVENT_PROMPT_UI_OPENED",
+    "CBF_EVENT_AUXILIARY_WINDOW_CLOSED": "CBF_EVENT_PROMPT_UI_CLOSED",
+    "CBF_BEFOREUNLOAD_REASON_CLOSE_WEB_PAGE": "CBF_BEFOREUNLOAD_REASON_CLOSE_TAB"
+  },
+  "rename_c_fields": {
+    "CbfChoiceMenuItem.type_": "type",
+    "CbfBridgeEvent.auxiliary_window_id": "prompt_ui_id",
+    "CbfBridgeEvent.auxiliary_window_kind": "prompt_ui_kind",
+    "CbfBridgeEvent.auxiliary_window_close_reason": "prompt_ui_close_reason",
+    "CbfBridgeEvent.auxiliary_window_title": "prompt_ui_title",
+    "CbfBridgeEvent.auxiliary_window_modal": "prompt_ui_modal"
+  },
+  "rename_rust_fields": {
+    "CbfKeyEvent.type_": "r#type",
+    "CbfMouseEvent.type_": "r#type",
+    "CbfChoiceMenuItem.type_": "r#type",
+    "CbfImeTextSpan.type_": "r#type",
+    "CbfContextMenuItem.type_": "r#type",
+    "CbfBridgeEvent.auxiliary_window_id": "prompt_ui_id",
+    "CbfBridgeEvent.auxiliary_window_kind": "prompt_ui_kind",
+    "CbfBridgeEvent.auxiliary_window_close_reason": "prompt_ui_close_reason",
+    "CbfBridgeEvent.auxiliary_window_title": "prompt_ui_title",
+    "CbfBridgeEvent.auxiliary_window_modal": "prompt_ui_modal"
+  },
+  "remove_c_fields": [],
+  "remove_rust_fields": []
+}
