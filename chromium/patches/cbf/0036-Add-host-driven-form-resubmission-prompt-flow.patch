@@ -1,7 +1,7 @@
 From 3df8d79cf185707e08e2152a2451e31f6cf7e6bf Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 22 Mar 2026 14:23:07 +0900
-Subject: [PATCH 36/39] Add host-driven form resubmission prompt flow
+Subject: [PATCH 36/40] Add host-driven form resubmission prompt flow
 
 ---
  .../cbf/bridge/cbf_bridge_client_impl.cc      |   5 +

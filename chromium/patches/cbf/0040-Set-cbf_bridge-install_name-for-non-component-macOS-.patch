@@ -1,0 +1,28 @@
+From 74d113039542d08a3f81e9d2dacb4c06106664cd Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 26 Mar 2026 11:00:11 +0900
+Subject: [PATCH 40/40] Set cbf_bridge install_name for non-component macOS
+ builds
+
+---
+ chrome/browser/cbf/BUILD.gn | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index 9904b27cd16d5..1e322cce7e635 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -154,6 +154,10 @@ shared_library("cbf_bridge") {
+     sources += [ "bridge/cbf_bridge_mac.mm" ]
+     deps += [ "//content/public/browser" ]
+     frameworks = [ "AppKit.framework" ]
++
++    if (!is_component_build) {
++      ldflags = [ "-Wl,-install_name,@rpath/libcbf_bridge.dylib" ]
++    }
+   }
+ 
+   configs += [ "//build/config/gcc:symbol_visibility_default" ]
+-- 
+2.50.1 (Apple Git-155)
+
