@@ -2,32 +2,34 @@ mod menu;
 mod window_registry;
 mod window_visibility;
 
-use std::sync::{Arc, Mutex};
-
 use async_executor::LocalExecutor;
 use cbf::dialogs::{DialogPresenter, NativeDialogPresenter};
 use tracing::error;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
-    event_loop::{ActiveEventLoop, EventLoop},
+    event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     window::WindowId,
 };
 
+pub(crate) use self::window_registry::WindowRegistry;
+
 use crate::{
-    app::{
-        controller::{AppController, respond_javascript_dialog_for_target},
-        events::UserEvent,
-        state::{CoreAction, SharedState, SharedStateHandle},
-    },
-    browser::{forwarder::spawn_browser_event_forwarder, startup::start_browser},
-    cli::parse_cli,
+    app::{controller::respond_javascript_dialog_for_target, events::UserEvent, state::CoreAction},
+    browser::startup::{RunningApp, launch_backend},
+    cli::{Cli, parse_cli},
 };
 
+enum AppRunnerState {
+    Launching,
+    Running(Box<RunningApp>),
+    Failed,
+}
+
 struct AppRunner {
-    controller: AppController,
-    browser: cbf_chrome::process::ChromiumRuntime,
-    registry: window_registry::WindowRegistry,
+    pending_cli: Option<Cli>,
+    proxy: EventLoopProxy<UserEvent>,
+    state: AppRunnerState,
     menu: Option<menu::MacMenu>,
     // JavaScript dialogs are driven by AppKit sheet callbacks, so user
     // interaction naturally produces another winit turn. Polling this local
@@ -41,21 +43,44 @@ impl ApplicationHandler<UserEvent> for AppRunner {
         if let Some(menu) = &self.menu {
             menu.setup();
         }
-        if let Err(err) = self
-            .registry
-            .ensure_main_window(event_loop, &mut self.controller)
-        {
+
+        if matches!(self.state, AppRunnerState::Launching) {
+            let Some(cli) = self.pending_cli.take() else {
+                error!("missing startup CLI while launching backend");
+                self.state = AppRunnerState::Failed;
+                event_loop.exit();
+                return;
+            };
+
+            match launch_backend(cli, self.proxy.clone()) {
+                Ok(running) => self.state = AppRunnerState::Running(Box::new(running)),
+                Err(err) => {
+                    error!("{err}");
+                    self.state = AppRunnerState::Failed;
+                    event_loop.exit();
+                    return;
+                }
+            }
+        }
+
+        if let Err(err) = self.ensure_main_window(event_loop) {
             error!("{err}");
+            self.state = AppRunnerState::Failed;
             event_loop.exit();
         }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
-        let actions = match event {
-            UserEvent::Browser(event) => self.controller.handle_browser_event(event),
-            UserEvent::Chrome(event) => self.controller.handle_chrome_event(event),
-            UserEvent::Menu(command) => self.controller.handle_menu_command(command),
+        let Some(running) = self.running_mut() else {
+            return;
         };
+
+        let actions = match event {
+            UserEvent::Browser(event) => running.controller.handle_browser_event(event),
+            UserEvent::Chrome(event) => running.controller.handle_chrome_event(event),
+            UserEvent::Menu(command) => running.controller.handle_menu_command(command),
+        };
+
         self.apply_core_actions(event_loop, actions);
     }
 
@@ -65,10 +90,18 @@ impl ApplicationHandler<UserEvent> for AppRunner {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        let Some(host_window_id) = self.registry.host_window_id_for_winit_window(window_id) else {
+        let Some(running) = self.running_mut() else {
             return;
         };
-        let actions = self.controller.handle_window_event(host_window_id, &event);
+
+        let Some(host_window_id) = running.registry.host_window_id_for_winit_window(window_id)
+        else {
+            return;
+        };
+        let actions = running
+            .controller
+            .handle_window_event(host_window_id, &event);
+
         self.apply_core_actions(event_loop, actions);
     }
 
@@ -77,10 +110,15 @@ impl ApplicationHandler<UserEvent> for AppRunner {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        if self.browser.shutdown_state() == cbf_chrome::process::ChromiumRuntimeShutdownState::Idle
+        let Some(running) = self.running_mut() else {
+            return;
+        };
+
+        if running.browser.shutdown_state()
+            == cbf_chrome::process::ChromiumRuntimeShutdownState::Idle
         {
-            self.controller.request_shutdown_once();
-            _ = self
+            running.controller.request_shutdown_once();
+            _ = running
                 .browser
                 .shutdown(cbf_chrome::process::ShutdownMode::Force);
         }
@@ -88,31 +126,61 @@ impl ApplicationHandler<UserEvent> for AppRunner {
 }
 
 impl AppRunner {
+    fn running_mut(&mut self) -> Option<&mut RunningApp> {
+        match &mut self.state {
+            AppRunnerState::Running(running) => Some(running),
+            AppRunnerState::Launching | AppRunnerState::Failed => None,
+        }
+    }
+
+    fn ensure_main_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
+        let Some(running) = self.running_mut() else {
+            return Ok(());
+        };
+
+        running
+            .registry
+            .ensure_main_window(event_loop, &mut running.controller)
+    }
+
     fn apply_core_actions(&mut self, event_loop: &ActiveEventLoop, actions: Vec<CoreAction>) {
         for action in actions {
             match action {
                 CoreAction::ExitEventLoop => event_loop.exit(),
                 CoreAction::EnsureMainWindow => {
-                    if let Err(err) = self
+                    let Some(running) = self.running_mut() else {
+                        continue;
+                    };
+
+                    if let Err(err) = running
                         .registry
-                        .ensure_main_window(event_loop, &mut self.controller)
+                        .ensure_main_window(event_loop, &mut running.controller)
                     {
                         error!("{err}");
                         event_loop.exit();
                     }
                 }
                 CoreAction::EnsureHostWindow { window } => {
-                    if let Err(err) =
-                        self.registry
-                            .ensure_host_window(event_loop, &mut self.controller, window)
-                    {
+                    let Some(running) = self.running_mut() else {
+                        continue;
+                    };
+
+                    if let Err(err) = running.registry.ensure_host_window(
+                        event_loop,
+                        &mut running.controller,
+                        window,
+                    ) {
                         error!("{err}");
                     }
                 }
                 CoreAction::EnsureDevToolsWindow => {
-                    if let Err(err) = self
+                    let Some(running) = self.running_mut() else {
+                        continue;
+                    };
+
+                    if let Err(err) = running
                         .registry
-                        .ensure_devtools_window(event_loop, &mut self.controller)
+                        .ensure_devtools_window(event_loop, &mut running.controller)
                     {
                         error!("{err}");
                     }
@@ -123,9 +191,13 @@ impl AppRunner {
                     width,
                     height,
                 } => {
-                    if let Err(err) = self.registry.ensure_popup_window(
+                    let Some(running) = self.running_mut() else {
+                        continue;
+                    };
+
+                    if let Err(err) = running.registry.ensure_popup_window(
                         event_loop,
-                        &mut self.controller,
+                        &mut running.controller,
                         transient_browsing_context_id,
                         &title,
                         width,
@@ -135,27 +207,50 @@ impl AppRunner {
                     }
                 }
                 CoreAction::CloseHostWindow { window_id } => {
-                    self.registry
-                        .close_host_window(&mut self.controller, window_id);
+                    let Some(running) = self.running_mut() else {
+                        continue;
+                    };
+
+                    running
+                        .registry
+                        .close_host_window(&mut running.controller, window_id);
                 }
                 CoreAction::ResizeHostWindow {
                     window_id,
                     width,
                     height,
                 } => {
-                    self.registry.resize_window(window_id, width, height);
-                    self.registry
-                        .sync_window_scene(&mut self.controller, window_id);
+                    let Some(running) = self.running_mut() else {
+                        continue;
+                    };
+
+                    running.registry.resize_window(window_id, width, height);
+                    running
+                        .registry
+                        .sync_window_scene(&mut running.controller, window_id);
                 }
                 CoreAction::SyncWindowScene { window_id } => {
-                    self.registry
-                        .sync_window_scene(&mut self.controller, window_id);
+                    let Some(running) = self.running_mut() else {
+                        continue;
+                    };
+
+                    running
+                        .registry
+                        .sync_window_scene(&mut running.controller, window_id);
                 }
                 CoreAction::UpdateWindowTitle { window_id, title } => {
-                    self.registry.update_title(window_id, &title);
+                    let Some(running) = self.running_mut() else {
+                        continue;
+                    };
+
+                    running.registry.update_title(window_id, &title);
                 }
                 CoreAction::UpdateCursor { window_id, cursor } => {
-                    self.registry.update_cursor(window_id, cursor);
+                    let Some(running) = self.running_mut() else {
+                        continue;
+                    };
+
+                    running.registry.update_cursor(window_id, cursor);
                 }
                 CoreAction::SetExtensionsMenuLoading => {
                     if let Some(menu) = &self.menu {
@@ -172,12 +267,20 @@ impl AppRunner {
                     request_id,
                     request,
                 } => {
-                    let context = self
-                        .controller
-                        .host_window_id_for_dialog_target(target)
-                        .map(|window_id| self.registry.dialog_context_for_host_window(window_id))
-                        .unwrap_or_default();
-                    let browser = self.controller.browser_handle();
+                    let (context, browser) = {
+                        let Some(running) = self.running_mut() else {
+                            continue;
+                        };
+                        let context = running
+                            .controller
+                            .host_window_id_for_dialog_target(target)
+                            .map(|window_id| {
+                                running.registry.dialog_context_for_host_window(window_id)
+                            })
+                            .unwrap_or_default();
+                        let browser = running.controller.browser_handle();
+                        (context, browser)
+                    };
 
                     self.executor
                         .spawn(async move {
@@ -210,13 +313,6 @@ pub(crate) fn run() {
         .init();
 
     let cli = parse_cli();
-    let runtime = match start_browser(&cli) {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            error!("{err}");
-            return;
-        }
-    };
 
     let event_loop = match EventLoop::<UserEvent>::with_user_event().build() {
         Ok(event_loop) => event_loop,
@@ -227,27 +323,11 @@ pub(crate) fn run() {
     };
     let proxy = event_loop.create_proxy();
     let menu = menu::MacMenu::new(proxy.clone()).ok();
-    let shutdown_state = runtime.browser.shutdown_state_reader();
-    let _ = runtime.browser.install_signal_handlers();
-    spawn_browser_event_forwarder(
-        runtime.browser.events(),
-        shutdown_state.clone(),
-        proxy.clone(),
-    );
-
-    let shared: SharedStateHandle = Arc::new(Mutex::new(SharedState::default()));
-    let controller = AppController::new(
-        cli,
-        runtime.browser.session().handle(),
-        shutdown_state,
-        Arc::clone(&shared),
-    );
-    let registry = window_registry::WindowRegistry::new(runtime.browser.session().handle(), shared);
 
     let mut runner = AppRunner {
-        controller,
-        browser: runtime.browser,
-        registry,
+        pending_cli: Some(cli),
+        proxy,
+        state: AppRunnerState::Launching,
         menu,
         executor: LocalExecutor::new(),
     };
