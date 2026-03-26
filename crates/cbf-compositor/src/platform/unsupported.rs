@@ -20,6 +20,13 @@ impl PlatformWindowHost for UnsupportedPlatformWindowHost {
         Ok(())
     }
 
+    fn set_active_item(
+        &mut self,
+        _item_id: Option<crate::model::CompositionItemId>,
+    ) -> Result<(), CompositorError> {
+        Err(CompositorError::PlatformUnsupported)
+    }
+
     fn show_context_menu(
         &mut self,
         _target: SurfaceTarget,

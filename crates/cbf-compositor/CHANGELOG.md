@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS external drag destination routing for browsing contexts, including hit-tested drag enter/update/leave/drop command emission and negotiated drag-operation reflection back into native drag handling.
 - Background policy propagation from composition items to browser-generic background policy commands.
 - Validation that rejects compositions which attempt to display the same `SurfaceTarget` more than once across the live compositor state.
+- Programmatic active-item switching through `Compositor::set_active_item`, allowing hosts to move browser input focus by `CompositionItemId` while reusing the compositor's native focus-routing path.
 
 ### Security
 

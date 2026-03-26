@@ -270,6 +270,28 @@ impl Compositor {
         self.composition_state.window_id_for_item(item_id)
     }
 
+    /// Programmatically move the active input target to one visible, interactive item.
+    pub fn set_active_item(&mut self, item_id: CompositionItemId) -> Result<(), CompositorError> {
+        let spec = self
+            .composition_state
+            .item_spec(item_id)
+            .ok_or(CompositorError::UnknownItem)?;
+        if !spec.visible || !spec.interactive {
+            return Err(CompositorError::ItemNotInteractive);
+        }
+
+        let window_id = self
+            .composition_state
+            .window_id_for_item(item_id)
+            .ok_or(CompositorError::UnknownItem)?;
+        self.focus_state.active_item_id = Some(item_id);
+        self.windows
+            .get_mut(&window_id)
+            .ok_or(CompositorError::UnknownWindow)?
+            .platform_host
+            .set_active_item(Some(item_id))
+    }
+
     /// Return the last preferred size hint reported for a transient popup.
     pub fn transient_preferred_size(
         &self,
@@ -417,19 +439,10 @@ impl Compositor {
     }
 
     fn window_id_for_target(&self, target: SurfaceTarget) -> Option<CompositorWindowId> {
-        self.focus_state
-            .active_item_id
-            .and_then(|item_id| {
-                (self.composition_state.surface_target_for_item(item_id) == Some(target))
-                    .then_some(item_id)
-            })
-            .and_then(|item_id| self.composition_state.window_id_for_item(item_id))
-            .or_else(|| {
-                self.composition_state
-                    .window_ids_for_target(target)
-                    .into_iter()
-                    .next()
-            })
+        self.composition_state
+            .window_ids_for_target(target)
+            .into_iter()
+            .next()
     }
 
     fn sync_window_scene(&mut self, window_id: CompositorWindowId) -> Result<(), CompositorError> {
@@ -600,12 +613,14 @@ mod tests {
 
     struct TestPlatformHost {
         last_scene: Rc<RefCell<Vec<PlatformSceneItem>>>,
+        last_active_item: Rc<RefCell<Option<CompositionItemId>>>,
     }
 
     impl Default for TestPlatformHost {
         fn default() -> Self {
             Self {
                 last_scene: Rc::new(RefCell::new(Vec::new())),
+                last_active_item: Rc::new(RefCell::new(None)),
             }
         }
     }
@@ -613,6 +628,14 @@ mod tests {
     impl PlatformWindowHost for TestPlatformHost {
         fn sync_scene(&mut self, items: &[PlatformSceneItem]) -> Result<(), CompositorError> {
             self.last_scene.replace(items.to_vec());
+            Ok(())
+        }
+
+        fn set_active_item(
+            &mut self,
+            item_id: Option<CompositionItemId>,
+        ) -> Result<(), CompositorError> {
+            self.last_active_item.replace(item_id);
             Ok(())
         }
 
@@ -912,5 +935,77 @@ mod tests {
             }) if *transient_browsing_context_id
                 == cbf::data::ids::TransientBrowsingContextId::new(20)
         ));
+    }
+
+    #[test]
+    fn set_active_item_updates_platform_host() {
+        let mut compositor = Compositor::new();
+        let window_id = CompositorWindowId::new(1);
+        let host = TestPlatformHost::default();
+        let active_item_log = Rc::clone(&host.last_active_item);
+        compositor.attach_test_window(window_id, Box::new(host));
+
+        compositor
+            .apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id,
+                    composition: WindowCompositionSpec {
+                        items: vec![item(
+                            1,
+                            SurfaceTarget::BrowsingContext(BrowsingContextId::new(10)),
+                        )],
+                    },
+                },
+                |_| {},
+            )
+            .unwrap();
+
+        compositor
+            .set_active_item(CompositionItemId::new(1))
+            .unwrap();
+
+        assert_eq!(*active_item_log.borrow(), Some(CompositionItemId::new(1)));
+    }
+
+    #[test]
+    fn set_active_item_rejects_hidden_item() {
+        let mut compositor = Compositor::new();
+        let window_id = CompositorWindowId::new(1);
+        compositor.attach_test_window(window_id, Box::<TestPlatformHost>::default());
+
+        compositor
+            .apply(
+                CompositionCommand::SetWindowComposition {
+                    window_id,
+                    composition: WindowCompositionSpec {
+                        items: vec![CompositionItemSpec {
+                            visible: false,
+                            ..item(
+                                1,
+                                SurfaceTarget::BrowsingContext(BrowsingContextId::new(10)),
+                            )
+                        }],
+                    },
+                },
+                |_| {},
+            )
+            .unwrap();
+
+        let err = compositor
+            .set_active_item(CompositionItemId::new(1))
+            .unwrap_err();
+        assert!(matches!(err, CompositorError::ItemNotInteractive));
+    }
+
+    #[test]
+    fn set_active_item_rejects_unknown_item() {
+        let mut compositor = Compositor::new();
+        let window_id = CompositorWindowId::new(1);
+        compositor.attach_test_window(window_id, Box::<TestPlatformHost>::default());
+
+        let err = compositor
+            .set_active_item(CompositionItemId::new(999))
+            .unwrap_err();
+        assert!(matches!(err, CompositorError::UnknownItem));
     }
 }

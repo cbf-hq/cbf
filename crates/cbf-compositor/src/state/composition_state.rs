@@ -195,6 +195,10 @@ impl CompositionState {
         self.items.get(&item_id).map(|item| item.window_id)
     }
 
+    pub(crate) fn item_spec(&self, item_id: CompositionItemId) -> Option<&CompositionItemSpec> {
+        self.items.get(&item_id).map(|item| &item.spec)
+    }
+
     pub(crate) fn window_ids_for_target(&self, target: SurfaceTarget) -> Vec<CompositorWindowId> {
         let mut window_ids = Vec::new();
         for state in self.items.values() {

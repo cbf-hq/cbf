@@ -16,7 +16,7 @@ use raw_window_handle::RawWindowHandle;
 
 use crate::{
     error::CompositorError,
-    model::SurfaceTarget,
+    model::{CompositionItemId, SurfaceTarget},
     platform::{
         host::{PlatformInputState, PlatformSceneItem, PlatformWindowHost},
         macos::compositor_view::{CommandCallback, CompositorViewMac, SharedInputState},
@@ -35,6 +35,13 @@ impl PlatformWindowHost for MacPlatformWindowHost {
     fn sync_scene(&mut self, items: &[PlatformSceneItem]) -> Result<(), CompositorError> {
         self.view.replace_scene(items);
         Ok(())
+    }
+
+    fn set_active_item(
+        &mut self,
+        item_id: Option<CompositionItemId>,
+    ) -> Result<(), CompositorError> {
+        self.view.set_programmatic_active_item(item_id)
     }
 
     fn show_context_menu(

@@ -38,6 +38,13 @@ pub(crate) struct PlatformSceneItem {
 pub(crate) trait PlatformWindowHost {
     fn sync_scene(&mut self, items: &[PlatformSceneItem]) -> Result<(), CompositorError>;
 
+    fn set_active_item(
+        &mut self,
+        _item_id: Option<CompositionItemId>,
+    ) -> Result<(), CompositorError> {
+        Err(CompositorError::PlatformUnsupported)
+    }
+
     fn show_context_menu(
         &mut self,
         target: SurfaceTarget,

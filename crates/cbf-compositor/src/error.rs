@@ -14,6 +14,9 @@ pub enum CompositorError {
     /// The requested scene item is not present in the composition state.
     #[error("unknown composition item")]
     UnknownItem,
+    /// The requested scene item cannot accept focus.
+    #[error("composition item is not interactive")]
+    ItemNotInteractive,
     /// A scene item cannot belong to two compositor windows at once.
     #[error("composition item is already attached to another window")]
     ItemOwnedByAnotherWindow,

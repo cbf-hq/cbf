@@ -64,6 +64,7 @@ use objc2_foundation::{
 use objc2_quartz_core::CATransaction;
 
 use crate::{
+    error::CompositorError,
     model::{CompositionItemId, SurfaceTarget},
     platform::{
         host::{PlatformInputState, PlatformSceneItem, PlatformSurfaceHandle},
@@ -1192,6 +1193,32 @@ impl CompositorViewMac {
                     transient_browsing_context_id,
                     focused,
                 });
+            }
+        }
+    }
+
+    pub(crate) fn set_programmatic_active_item(
+        &self,
+        item_id: Option<CompositionItemId>,
+    ) -> Result<(), CompositorError> {
+        self.ensure_first_responder();
+        match item_id {
+            Some(item_id) => {
+                let Some((item_id, target)) = self.item_target(item_id) else {
+                    return Err(CompositorError::UnknownItem);
+                };
+                self.focus_item(item_id, target);
+                Ok(())
+            }
+            None => {
+                let previous = self.ivars().input_state.borrow().active_item_id;
+                if let Some(previous_item_id) = previous
+                    && let Some((_, previous_target)) = self.item_target(previous_item_id)
+                {
+                    self.emit_focus(previous_target, false);
+                }
+                self.ivars().input_state.borrow_mut().active_item_id = None;
+                Ok(())
             }
         }
     }
