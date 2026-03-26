@@ -1,7 +1,8 @@
 use cbf::data::ipc::{BrowsingContextIpcMessage, IpcErrorCode, IpcMessageType, IpcPayload};
 
 use super::protocol::{
-    CHANNEL_STATE_NAVIGATION, CONTENT_TYPE_JSON, NavigationState, to_error_json, to_success_json,
+    CHANNEL_FIND_STATE, CHANNEL_STATE_NAVIGATION, CONTENT_TYPE_JSON, FindStateSnapshot,
+    NavigationState, to_error_json, to_success_json,
 };
 
 pub(crate) fn response_success_message(
@@ -60,6 +61,25 @@ pub(crate) fn navigation_state_event_message(state: &NavigationState) -> Browsin
     }
 }
 
+pub(crate) fn find_state_event_message(
+    state: &FindStateSnapshot,
+    request_id: u64,
+) -> BrowsingContextIpcMessage {
+    let payload_text = serde_json::to_string(state).unwrap_or_else(|_| {
+        "{\"visible\":false,\"query\":\"\",\"number_of_matches\":0,\"active_match_ordinal\":0,\"pending\":false}"
+            .to_string()
+    });
+
+    BrowsingContextIpcMessage {
+        channel: CHANNEL_FIND_STATE.to_string(),
+        message_type: IpcMessageType::Event,
+        request_id,
+        payload: IpcPayload::Text(payload_text),
+        content_type: Some(CONTENT_TYPE_JSON.to_string()),
+        error_code: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,5 +120,28 @@ mod tests {
             "bad",
         );
         assert_eq!(err.channel, "simpleapp.nav.open");
+    }
+
+    #[test]
+    fn find_state_event_message_has_expected_shape() {
+        let state = FindStateSnapshot {
+            visible: true,
+            query: "needle".to_string(),
+            number_of_matches: 3,
+            active_match_ordinal: 2,
+            pending: false,
+        };
+
+        let message = find_state_event_message(&state, 42);
+        assert_eq!(message.channel, CHANNEL_FIND_STATE);
+        assert_eq!(message.request_id, 42);
+        match message.payload {
+            IpcPayload::Text(text) => {
+                let parsed: FindStateSnapshot =
+                    serde_json::from_str(&text).expect("payload should parse");
+                assert_eq!(parsed, state);
+            }
+            IpcPayload::Binary(_) => panic!("expected text payload"),
+        }
     }
 }

@@ -26,6 +26,7 @@ use cbf_chrome::{
     backend::ChromiumBackend,
     browser::ChromiumBrowserHandleExt,
     command::ChromeCommand,
+    data::find::{ChromeFindInPageOptions, ChromeStopFindAction},
     event::ChromeEvent,
     ffi::IpcEvent,
     process::{ChromiumRuntimeShutdownState, ChromiumRuntimeShutdownStateReader},
@@ -46,10 +47,10 @@ use crate::{
             CoreAction, DEVTOOLS_HOST_WINDOW_ID, DownloadStatus, JavaScriptDialogTarget,
             MAIN_PAGE_CREATE_REQUEST_ID, OVERLAY_CREATE_REQUEST_ID, PRIMARY_HOST_WINDOW_ID,
             PendingWindowBrowsingContextCreate, PendingWindowBrowsingContextRole,
-            SharedStateHandle, TOOLBAR_CREATE_REQUEST_ID, TransientPopupState,
-            allocate_browsing_context_request_id, bind_browsing_context_to_window,
-            browsing_context_ids_for_window, devtools_browsing_context_id, has_bound_windows,
-            overlay_browsing_context_id, page_browsing_context_id_for_toolbar_browsing_context,
+            SharedStateHandle, TOOLBAR_CREATE_REQUEST_ID, TransientPopupState, allocate_request_id,
+            bind_browsing_context_to_window, browsing_context_ids_for_window,
+            devtools_browsing_context_id, has_bound_windows, overlay_browsing_context_id,
+            page_browsing_context_id_for_toolbar_browsing_context,
             page_browsing_context_id_for_window, primary_browsing_context_id,
             primary_host_window_id, register_pending_window_browsing_context_create,
             set_devtools_browsing_context_id, set_overlay_browsing_context_id,
@@ -72,6 +73,64 @@ use crate::{
     scene::ui_url::{overlay_test_ui_url, toolbar_ui_url},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolbarUiMode {
+    Navigation,
+    Find,
+}
+
+#[derive(Debug, Clone)]
+struct FindSessionState {
+    ui_mode: ToolbarUiMode,
+    query: String,
+    number_of_matches: u32,
+    active_match_ordinal: i32,
+    pending: bool,
+    last_request_id: u64,
+}
+
+impl Default for FindSessionState {
+    fn default() -> Self {
+        Self {
+            ui_mode: ToolbarUiMode::Navigation,
+            query: String::new(),
+            number_of_matches: 0,
+            active_match_ordinal: 0,
+            pending: false,
+            last_request_id: 0,
+        }
+    }
+}
+
+impl FindSessionState {
+    fn snapshot(&self) -> toolbar_protocol::FindStateSnapshot {
+        toolbar_protocol::FindStateSnapshot {
+            visible: matches!(self.ui_mode, ToolbarUiMode::Find),
+            query: self.query.clone(),
+            number_of_matches: self.number_of_matches,
+            active_match_ordinal: self.active_match_ordinal,
+            pending: self.pending,
+        }
+    }
+
+    fn open(&mut self) {
+        self.ui_mode = ToolbarUiMode::Find;
+    }
+
+    fn reset_search_results(&mut self) {
+        self.query.clear();
+        self.number_of_matches = 0;
+        self.active_match_ordinal = 0;
+        self.pending = false;
+        self.last_request_id = 0;
+    }
+
+    fn close(&mut self) {
+        self.ui_mode = ToolbarUiMode::Navigation;
+        self.reset_search_results();
+    }
+}
+
 pub(crate) struct AppController {
     cli: Cli,
     browser_handle: BrowserHandle<ChromiumBackend>,
@@ -88,6 +147,8 @@ pub(crate) struct AppController {
     resolved_profile_id: Option<String>,
     extensions_loading: bool,
     navigation_state_by_page: HashMap<BrowsingContextId, toolbar_protocol::NavigationState>,
+    find_state_by_page: HashMap<BrowsingContextId, FindSessionState>,
+    focused_host_window_id: Option<HostWindowId>,
 }
 
 impl AppController {
@@ -113,6 +174,8 @@ impl AppController {
             resolved_profile_id: None,
             extensions_loading: false,
             navigation_state_by_page: HashMap::new(),
+            find_state_by_page: HashMap::new(),
+            focused_host_window_id: None,
         }
     }
 
@@ -173,6 +236,10 @@ impl AppController {
                 }
                 self.extensions_loading = true;
                 vec![CoreAction::SetExtensionsMenuLoading]
+            }
+            MenuCommand::OpenFind => {
+                self.open_find_ui_for_target();
+                Vec::new()
             }
             MenuCommand::ActivateExtension { extension_id } => {
                 let Some(browsing_context_id) = primary_browsing_context_id(&self.shared) else {
@@ -319,7 +386,7 @@ impl AppController {
                     warn!("failed to respond window open request: {err}");
                 }
 
-                let page_request_id = allocate_browsing_context_request_id(&self.shared);
+                let page_request_id = allocate_request_id(&self.shared);
                 register_pending_window_browsing_context_create(
                     &self.shared,
                     page_request_id,
@@ -342,7 +409,7 @@ impl AppController {
                 }
 
                 if kind == WindowKind::Normal {
-                    let toolbar_request_id = allocate_browsing_context_request_id(&self.shared);
+                    let toolbar_request_id = allocate_request_id(&self.shared);
                     register_pending_window_browsing_context_create(
                         &self.shared,
                         toolbar_request_id,
@@ -535,6 +602,31 @@ impl AppController {
                     }
                     Vec::new()
                 }
+                IpcEvent::FindReply {
+                    browsing_context_id,
+                    request_id,
+                    number_of_matches,
+                    active_match_ordinal,
+                    final_update,
+                    ..
+                } => {
+                    let page_browsing_context_id: BrowsingContextId = browsing_context_id.into();
+                    let Some(state) = self.find_state_by_page.get_mut(&page_browsing_context_id)
+                    else {
+                        return Vec::new();
+                    };
+                    if !matches!(state.ui_mode, ToolbarUiMode::Find) {
+                        return Vec::new();
+                    }
+
+                    state.number_of_matches = number_of_matches;
+                    state.active_match_ordinal = active_match_ordinal;
+                    if request_id == state.last_request_id && final_update {
+                        state.pending = false;
+                    }
+                    self.publish_find_state_for_page(page_browsing_context_id, 0);
+                    Vec::new()
+                }
                 _ => Vec::new(),
             },
             _ => Vec::new(),
@@ -550,6 +642,11 @@ impl AppController {
             WindowEvent::Resized(_) => vec![CoreAction::SyncWindowScene { window_id }],
             WindowEvent::CloseRequested => self.handle_window_close_requested(window_id),
             WindowEvent::Focused(focused) => {
+                if *focused {
+                    self.focused_host_window_id = Some(window_id);
+                } else if self.focused_host_window_id == Some(window_id) {
+                    self.focused_host_window_id = None;
+                }
                 if let Some(transient_id) =
                     transient_browsing_context_id_for_window(&self.shared, window_id)
                 {
@@ -772,6 +869,261 @@ impl AppController {
         self.post_toolbar_ipc_message(toolbar_browsing_context_id, message);
     }
 
+    fn publish_find_state_to_toolbar(
+        &self,
+        toolbar_browsing_context_id: BrowsingContextId,
+        page_browsing_context_id: BrowsingContextId,
+        event_request_id: u64,
+    ) {
+        let Some(state) = self.find_state_by_page.get(&page_browsing_context_id) else {
+            return;
+        };
+        let message =
+            toolbar_publisher::find_state_event_message(&state.snapshot(), event_request_id);
+        self.post_toolbar_ipc_message(toolbar_browsing_context_id, message);
+    }
+
+    fn publish_find_state_for_page(
+        &self,
+        page_browsing_context_id: BrowsingContextId,
+        event_request_id: u64,
+    ) {
+        let Some(window_id) =
+            window_id_for_page_browsing_context(&self.shared, page_browsing_context_id)
+        else {
+            return;
+        };
+        let Some(toolbar_browsing_context_id) =
+            toolbar_browsing_context_id_for_window(&self.shared, window_id)
+        else {
+            return;
+        };
+        self.publish_find_state_to_toolbar(
+            toolbar_browsing_context_id,
+            page_browsing_context_id,
+            event_request_id,
+        );
+    }
+
+    fn ensure_find_state(
+        &mut self,
+        page_browsing_context_id: BrowsingContextId,
+    ) -> &mut FindSessionState {
+        self.find_state_by_page
+            .entry(page_browsing_context_id)
+            .or_default()
+    }
+
+    fn resolve_find_target(&self) -> Option<(HostWindowId, BrowsingContextId)> {
+        self.focused_host_window_id
+            .and_then(|window_id| {
+                page_browsing_context_id_for_window(&self.shared, window_id)
+                    .map(|page_browsing_context_id| (window_id, page_browsing_context_id))
+            })
+            .or_else(|| {
+                let window_id =
+                    primary_host_window_id(&self.shared).unwrap_or(PRIMARY_HOST_WINDOW_ID);
+                page_browsing_context_id_for_window(&self.shared, window_id)
+                    .or_else(|| primary_browsing_context_id(&self.shared))
+                    .map(|page_browsing_context_id| (window_id, page_browsing_context_id))
+            })
+    }
+
+    fn open_find_ui_for_target(&mut self) {
+        let Some((window_id, page_browsing_context_id)) = self.resolve_find_target() else {
+            warn!("ignoring find open without a target page browsing context");
+            return;
+        };
+        self.ensure_find_state(page_browsing_context_id).open();
+
+        let Some(toolbar_browsing_context_id) =
+            toolbar_browsing_context_id_for_window(&self.shared, window_id)
+        else {
+            return;
+        };
+        if let Err(err) = self
+            .compositor
+            .set_active_item(composition::toolbar_item_id(toolbar_browsing_context_id))
+        {
+            warn!("failed to focus toolbar find surface: {err}");
+        }
+        self.publish_find_state_to_toolbar(
+            toolbar_browsing_context_id,
+            page_browsing_context_id,
+            allocate_request_id(&self.shared),
+        );
+    }
+
+    fn handle_find_set_query(
+        &mut self,
+        page_browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        query: String,
+    ) -> cbf::data::ipc::BrowsingContextIpcMessage {
+        if query.is_empty() {
+            if let Err(err) = self.browser_handle.stop_finding(
+                page_browsing_context_id,
+                ChromeStopFindAction::ClearSelection,
+            ) {
+                return toolbar_publisher::response_error_message(
+                    toolbar_protocol::CHANNEL_FIND_SET_QUERY,
+                    request_id,
+                    IpcErrorCode::ContextClosed,
+                    "CONTEXT_CLOSED",
+                    &format!("failed to clear find state: {err}"),
+                );
+            }
+            let state = self.ensure_find_state(page_browsing_context_id);
+            state.open();
+            state.reset_search_results();
+            self.publish_find_state_for_page(page_browsing_context_id, 0);
+            return toolbar_publisher::response_success_message(
+                toolbar_protocol::CHANNEL_FIND_SET_QUERY,
+                request_id,
+                serde_json::json!({}),
+            );
+        }
+
+        let chrome_request_id = allocate_request_id(&self.shared);
+        let mut options = ChromeFindInPageOptions::new(query.clone());
+        options.new_session = true;
+        options.find_match = true;
+        match self
+            .browser_handle
+            .find_in_page(page_browsing_context_id, chrome_request_id, options)
+        {
+            Ok(()) => {
+                let state = self.ensure_find_state(page_browsing_context_id);
+                state.open();
+                state.query = query;
+                state.number_of_matches = 0;
+                state.active_match_ordinal = 0;
+                state.pending = true;
+                state.last_request_id = chrome_request_id;
+                self.publish_find_state_for_page(page_browsing_context_id, 0);
+                toolbar_publisher::response_success_message(
+                    toolbar_protocol::CHANNEL_FIND_SET_QUERY,
+                    request_id,
+                    serde_json::json!({}),
+                )
+            }
+            Err(err) => toolbar_publisher::response_error_message(
+                toolbar_protocol::CHANNEL_FIND_SET_QUERY,
+                request_id,
+                IpcErrorCode::ContextClosed,
+                "CONTEXT_CLOSED",
+                &format!("failed to search page: {err}"),
+            ),
+        }
+    }
+
+    fn handle_find_step(
+        &mut self,
+        page_browsing_context_id: BrowsingContextId,
+        request_id: u64,
+        forward: bool,
+    ) -> cbf::data::ipc::BrowsingContextIpcMessage {
+        let Some(state) = self.find_state_by_page.get(&page_browsing_context_id) else {
+            return toolbar_publisher::response_success_message(
+                if forward {
+                    toolbar_protocol::CHANNEL_FIND_NEXT
+                } else {
+                    toolbar_protocol::CHANNEL_FIND_PREVIOUS
+                },
+                request_id,
+                serde_json::json!({}),
+            );
+        };
+        if !matches!(state.ui_mode, ToolbarUiMode::Find) || state.query.is_empty() {
+            return toolbar_publisher::response_success_message(
+                if forward {
+                    toolbar_protocol::CHANNEL_FIND_NEXT
+                } else {
+                    toolbar_protocol::CHANNEL_FIND_PREVIOUS
+                },
+                request_id,
+                serde_json::json!({}),
+            );
+        }
+
+        let query = state.query.clone();
+        let chrome_request_id = allocate_request_id(&self.shared);
+        let result = if forward {
+            self.browser_handle
+                .find_next(page_browsing_context_id, chrome_request_id, query, false)
+        } else {
+            self.browser_handle.find_previous(
+                page_browsing_context_id,
+                chrome_request_id,
+                query,
+                false,
+            )
+        };
+
+        match result {
+            Ok(()) => {
+                if let Some(state) = self.find_state_by_page.get_mut(&page_browsing_context_id) {
+                    state.pending = true;
+                    state.last_request_id = chrome_request_id;
+                }
+                self.publish_find_state_for_page(page_browsing_context_id, 0);
+                toolbar_publisher::response_success_message(
+                    if forward {
+                        toolbar_protocol::CHANNEL_FIND_NEXT
+                    } else {
+                        toolbar_protocol::CHANNEL_FIND_PREVIOUS
+                    },
+                    request_id,
+                    serde_json::json!({}),
+                )
+            }
+            Err(err) => toolbar_publisher::response_error_message(
+                if forward {
+                    toolbar_protocol::CHANNEL_FIND_NEXT
+                } else {
+                    toolbar_protocol::CHANNEL_FIND_PREVIOUS
+                },
+                request_id,
+                IpcErrorCode::ContextClosed,
+                "CONTEXT_CLOSED",
+                &format!("failed to move find selection: {err}"),
+            ),
+        }
+    }
+
+    fn handle_find_close(
+        &mut self,
+        page_browsing_context_id: BrowsingContextId,
+        request_id: u64,
+    ) -> cbf::data::ipc::BrowsingContextIpcMessage {
+        if let Err(err) = self.browser_handle.stop_finding(
+            page_browsing_context_id,
+            ChromeStopFindAction::KeepSelection,
+        ) {
+            return toolbar_publisher::response_error_message(
+                toolbar_protocol::CHANNEL_FIND_CLOSE,
+                request_id,
+                IpcErrorCode::ContextClosed,
+                "CONTEXT_CLOSED",
+                &format!("failed to close find UI: {err}"),
+            );
+        }
+
+        self.ensure_find_state(page_browsing_context_id).close();
+        if let Err(err) = self
+            .compositor
+            .set_active_item(composition::page_item_id(page_browsing_context_id))
+        {
+            warn!("failed to restore page focus surface: {err}");
+        }
+        self.publish_find_state_for_page(page_browsing_context_id, 0);
+        toolbar_publisher::response_success_message(
+            toolbar_protocol::CHANNEL_FIND_CLOSE,
+            request_id,
+            serde_json::json!({}),
+        )
+    }
+
     fn handle_toolbar_ipc_request(
         &mut self,
         toolbar_browsing_context_id: BrowsingContextId,
@@ -879,6 +1231,18 @@ impl AppController {
                         &format!("failed to reload: {err}"),
                     ),
                 }
+            }
+            toolbar_protocol::ToolbarRequest::FindSetQuery { query } => {
+                self.handle_find_set_query(page_browsing_context_id, request_id, query)
+            }
+            toolbar_protocol::ToolbarRequest::FindNext => {
+                self.handle_find_step(page_browsing_context_id, request_id, true)
+            }
+            toolbar_protocol::ToolbarRequest::FindPrevious => {
+                self.handle_find_step(page_browsing_context_id, request_id, false)
+            }
+            toolbar_protocol::ToolbarRequest::FindClose => {
+                self.handle_find_close(page_browsing_context_id, request_id)
             }
             toolbar_protocol::ToolbarRequest::StateRequest => {
                 if let Some(state) = self.navigation_state_by_page.get(&page_browsing_context_id) {
@@ -1016,9 +1380,15 @@ impl AppController {
                         if let Some(page_browsing_context_id) =
                             page_browsing_context_id_for_window(&self.shared, host_window_id)
                         {
+                            self.ensure_find_state(page_browsing_context_id);
                             self.publish_navigation_state_to_toolbar(
                                 browsing_context_id,
                                 page_browsing_context_id,
+                            );
+                            self.publish_find_state_to_toolbar(
+                                browsing_context_id,
+                                page_browsing_context_id,
+                                0,
                             );
                         }
                     }
@@ -1116,6 +1486,7 @@ impl AppController {
             }
             BrowsingContextEvent::Closed => {
                 self.navigation_state_by_page.remove(&browsing_context_id);
+                self.find_state_by_page.remove(&browsing_context_id);
                 self.handle_closed_browsing_context(browsing_context_id)
             }
             BrowsingContextEvent::NavigationStateChanged {
@@ -1156,9 +1527,15 @@ impl AppController {
                     && let Some(toolbar_browsing_context_id) =
                         toolbar_browsing_context_id_for_window(&self.shared, window_id)
                 {
+                    self.ensure_find_state(browsing_context_id);
                     self.publish_navigation_state_to_toolbar(
                         toolbar_browsing_context_id,
                         browsing_context_id,
+                    );
+                    self.publish_find_state_to_toolbar(
+                        toolbar_browsing_context_id,
+                        browsing_context_id,
+                        0,
                     );
                 }
                 Vec::new()

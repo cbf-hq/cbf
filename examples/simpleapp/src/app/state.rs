@@ -43,7 +43,7 @@ pub(crate) struct SharedState {
         HashMap<u64, PendingWindowBrowsingContextCreate>,
     pub(crate) window_to_page_browsing_context: HashMap<HostWindowId, BrowsingContextId>,
     pub(crate) window_to_toolbar_browsing_context: HashMap<HostWindowId, BrowsingContextId>,
-    pub(crate) next_browsing_context_request_id: u64,
+    pub(crate) next_request_id: u64,
     pub(crate) transient_to_window: HashMap<TransientBrowsingContextId, HostWindowId>,
     pub(crate) window_to_transient: HashMap<HostWindowId, TransientBrowsingContextId>,
 }
@@ -62,7 +62,7 @@ impl Default for SharedState {
             pending_window_browsing_context_creates: HashMap::new(),
             window_to_page_browsing_context: HashMap::new(),
             window_to_toolbar_browsing_context: HashMap::new(),
-            next_browsing_context_request_id: 10_000,
+            next_request_id: 10_000,
             transient_to_window: HashMap::new(),
             window_to_transient: HashMap::new(),
         }
@@ -334,10 +334,10 @@ pub(crate) fn devtools_browsing_context_id(
         .devtools_browsing_context_id
 }
 
-pub(crate) fn allocate_browsing_context_request_id(shared: &SharedStateHandle) -> u64 {
+pub(crate) fn allocate_request_id(shared: &SharedStateHandle) -> u64 {
     let mut guard = shared.lock().expect("shared state lock poisoned");
-    let request_id = guard.next_browsing_context_request_id.max(10_000);
-    guard.next_browsing_context_request_id = request_id.saturating_add(1);
+    let request_id = guard.next_request_id.max(10_000);
+    guard.next_request_id = request_id.saturating_add(1);
     request_id
 }
 

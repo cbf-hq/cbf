@@ -107,7 +107,7 @@ pub(crate) fn transient_window_composition(
     }
 }
 
-const fn page_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
+pub(crate) const fn page_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
     CompositionItemId::new(PAGE_ITEM_NAMESPACE + browsing_context_id.get())
 }
 
@@ -117,7 +117,7 @@ const fn transient_item_id(
     CompositionItemId::new(TRANSIENT_ITEM_NAMESPACE + transient_browsing_context_id.get())
 }
 
-const fn toolbar_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
+pub(crate) const fn toolbar_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
     CompositionItemId::new(TOOLBAR_ITEM_NAMESPACE + browsing_context_id.get())
 }
 

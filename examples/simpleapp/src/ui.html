@@ -60,7 +60,7 @@
     .toolbar {
       height: 100vh;
       display: grid;
-      grid-template-columns: auto auto auto 1fr auto;
+      grid-template-columns: auto auto auto minmax(0, 1fr);
       gap: 10px;
       align-items: center;
       padding: 10px 14px;
@@ -123,6 +123,40 @@
       letter-spacing: 0.04em;
       text-transform: uppercase;
     }
+
+    .toolbar-center {
+      min-width: 0;
+      position: relative;
+      display: grid;
+    }
+
+    .mode-panel {
+      min-width: 0;
+      display: grid;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .mode-panel[hidden] {
+      display: none;
+    }
+
+    .nav-panel {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .find-panel {
+      grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+    }
+
+    .find-result {
+      min-width: 84px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 0 8px;
+      white-space: nowrap;
+    }
   </style>
 </head>
 
@@ -131,8 +165,19 @@
     <button id="back" aria-label="Back">&larr;</button>
     <button id="forward" aria-label="Forward">&rarr;</button>
     <button id="reload" aria-label="Reload">&#8635;</button>
-    <input id="address" aria-label="Address bar" value="https://www.google.com">
-    <button id="open" class="primary">Open</button>
+    <div class="toolbar-center">
+      <div id="nav-panel" class="mode-panel nav-panel">
+        <input id="address" aria-label="Address bar" value="https://www.google.com">
+        <button id="open" class="primary">Open</button>
+      </div>
+      <div id="find-panel" class="mode-panel find-panel" hidden>
+        <input id="find-query" aria-label="Find in page">
+        <button id="find-previous" aria-label="Previous result">&uarr;</button>
+        <button id="find-next" aria-label="Next result">&darr;</button>
+        <div id="find-result" class="find-result" aria-live="polite">No results</div>
+        <button id="find-close" aria-label="Close find bar">&times;</button>
+      </div>
+    </div>
   </div>
   <div id="status" class="hint" style="padding: 8px 14px;">Connecting…</div>
 
@@ -145,6 +190,11 @@
         RELOAD: 'simpleapp.nav.reload',
         STATE_REQUEST: 'simpleapp.state.request',
         STATE_NAVIGATION: 'simpleapp.state.navigation',
+        FIND_SET_QUERY: 'simpleapp.find.set_query',
+        FIND_NEXT: 'simpleapp.find.next',
+        FIND_PREVIOUS: 'simpleapp.find.previous',
+        FIND_CLOSE: 'simpleapp.find.close',
+        FIND_STATE: 'simpleapp.find.state',
       };
 
       const backButton = document.getElementById('back');
@@ -152,7 +202,23 @@
       const reloadButton = document.getElementById('reload');
       const openButton = document.getElementById('open');
       const addressInput = document.getElementById('address');
+      const navPanel = document.getElementById('nav-panel');
+      const findPanel = document.getElementById('find-panel');
+      const findInput = document.getElementById('find-query');
+      const findPreviousButton = document.getElementById('find-previous');
+      const findNextButton = document.getElementById('find-next');
+      const findCloseButton = document.getElementById('find-close');
+      const findResultNode = document.getElementById('find-result');
       const statusNode = document.getElementById('status');
+      let findDebounceTimer = null;
+      let lastFindFocusSignal = 0;
+      let currentFindState = {
+        visible: false,
+        query: '',
+        number_of_matches: 0,
+        active_match_ordinal: 0,
+        pending: false,
+      };
 
       function setStatus(text) {
         statusNode.textContent = text;
@@ -211,6 +277,78 @@
         }
       }
 
+      function setFindMode(visible) {
+        navPanel.hidden = !!visible;
+        findPanel.hidden = !visible;
+      }
+
+      function updateFindButtons() {
+        const hasQuery = currentFindState.query.length > 0;
+        findNextButton.disabled = !hasQuery;
+        findPreviousButton.disabled = !hasQuery;
+      }
+
+      function formatFindResult(state) {
+        if (!state.visible || !state.query) {
+          return 'No results';
+        }
+        if (state.pending) {
+          return 'Searching…';
+        }
+        if (state.number_of_matches === 0) {
+          return 'No results';
+        }
+        return `${state.active_match_ordinal}/${state.number_of_matches}`;
+      }
+
+      function applyFindState(state, focusSignal) {
+        if (!state || typeof state !== 'object') return;
+        const wasVisible = currentFindState.visible;
+        currentFindState = {
+          visible: !!state.visible,
+          query: typeof state.query === 'string' ? state.query : '',
+          number_of_matches: Number.isFinite(state.number_of_matches) ? state.number_of_matches : 0,
+          active_match_ordinal: Number.isFinite(state.active_match_ordinal) ? state.active_match_ordinal : 0,
+          pending: !!state.pending,
+        };
+
+        setFindMode(currentFindState.visible);
+        findResultNode.textContent = formatFindResult(currentFindState);
+        updateFindButtons();
+
+        if (currentFindState.visible && focusSignal > lastFindFocusSignal) {
+          lastFindFocusSignal = focusSignal;
+          window.requestAnimationFrame(() => {
+            findInput.focus();
+            findInput.select();
+          });
+        } else if (!wasVisible && currentFindState.visible) {
+          window.requestAnimationFrame(() => {
+            findInput.focus();
+            findInput.select();
+          });
+        }
+      }
+
+      function scheduleFindQuerySync() {
+        if (findDebounceTimer !== null) {
+          window.clearTimeout(findDebounceTimer);
+        }
+        findDebounceTimer = window.setTimeout(async () => {
+          findDebounceTimer = null;
+          try {
+            const response = await invokeJson(CHANNELS.FIND_SET_QUERY, { query: findInput.value });
+            if (!response || !response.ok) {
+              const code = response && response.code ? response.code : 'UNKNOWN';
+              setStatus(`Find failed (${code})`);
+            }
+          } catch (error) {
+            const code = error && error.code ? error.code : 'UNKNOWN';
+            setStatus(`Find failed (${code})`);
+          }
+        }, 150);
+      }
+
       async function navigateOpen() {
         const url = normalizeUrl(addressInput.value);
         addressInput.value = url;
@@ -241,6 +379,23 @@
         }
       }
 
+      async function closeFind() {
+        if (findDebounceTimer !== null) {
+          window.clearTimeout(findDebounceTimer);
+          findDebounceTimer = null;
+        }
+        try {
+          const response = await invokeJson(CHANNELS.FIND_CLOSE, {});
+          if (!response || !response.ok) {
+            const code = response && response.code ? response.code : 'UNKNOWN';
+            setStatus(`Find failed (${code})`);
+          }
+        } catch (error) {
+          const code = error && error.code ? error.code : 'UNKNOWN';
+          setStatus(`Find failed (${code})`);
+        }
+      }
+
       backButton.addEventListener('click', () => invokeWithoutPayload(CHANNELS.BACK));
       forwardButton.addEventListener('click', () => invokeWithoutPayload(CHANNELS.FORWARD));
       reloadButton.addEventListener('click', () => invokeWithoutPayload(CHANNELS.RELOAD));
@@ -251,10 +406,25 @@
           navigateOpen();
         }
       });
+      findInput.addEventListener('input', () => {
+        scheduleFindQuerySync();
+      });
+      findInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          invokeWithoutPayload(event.shiftKey ? CHANNELS.FIND_PREVIOUS : CHANNELS.FIND_NEXT);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          closeFind();
+        }
+      });
+      findNextButton.addEventListener('click', () => invokeWithoutPayload(CHANNELS.FIND_NEXT));
+      findPreviousButton.addEventListener('click', () => invokeWithoutPayload(CHANNELS.FIND_PREVIOUS));
+      findCloseButton.addEventListener('click', closeFind);
 
       if (window.cbf && typeof window.cbf.listen === 'function') {
         window.cbf.listen((message) => {
-          if (!message || message.channel !== CHANNELS.STATE_NAVIGATION) {
+          if (!message) {
             return;
           }
           let payload = null;
@@ -267,13 +437,20 @@
           } else {
             payload = message.payload;
           }
-          applyNavigationState(payload);
+          if (message.channel === CHANNELS.STATE_NAVIGATION) {
+            applyNavigationState(payload);
+            return;
+          }
+          if (message.channel === CHANNELS.FIND_STATE) {
+            applyFindState(payload, Number.isFinite(message.request_id) ? message.request_id : 0);
+          }
         });
       } else {
         setStatus('IPC unavailable');
       }
 
       requestState();
+      updateFindButtons();
     })();
   </script>
 </body>

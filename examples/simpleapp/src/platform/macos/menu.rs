@@ -5,6 +5,7 @@ use image::{ImageFormat, imageops::FilterType};
 use muda::{
     AboutMetadata, Icon, IconMenuItem, IconMenuItemBuilder, Menu, MenuEvent, MenuId, MenuItem,
     PredefinedMenuItem, Submenu,
+    accelerator::{Accelerator, CMD_OR_CTRL, Code},
 };
 use tracing::warn;
 use winit::event_loop::EventLoopProxy;
@@ -14,6 +15,7 @@ use crate::app::events::{MenuCommand, UserEvent};
 const MENU_ID_RELOAD_EXTENSIONS: &str = "simpleapp.extensions.reload";
 const MENU_ID_EXTENSION_PREFIX: &str = "simpleapp.extensions.item.";
 const MENU_ID_EXTENSIONS_STATUS: &str = "simpleapp.extensions.status";
+const MENU_ID_FIND: &str = "simpleapp.edit.find";
 const MENU_ICON_BITMAP_SIZE: u32 = 32;
 
 struct ExtensionMenuEntry {
@@ -61,6 +63,12 @@ impl MacMenu {
         menu_bar.append(&app_menu)?;
 
         let edit_menu = Submenu::new("&Edit", true);
+        let find_item = MenuItem::with_id(
+            MENU_ID_FIND,
+            "Find",
+            true,
+            Some(Accelerator::new(Some(CMD_OR_CTRL), Code::KeyF)),
+        );
         edit_menu.append_items(&[
             &PredefinedMenuItem::undo(None),
             &PredefinedMenuItem::redo(None),
@@ -69,6 +77,8 @@ impl MacMenu {
             &PredefinedMenuItem::copy(None),
             &PredefinedMenuItem::paste(None),
             &PredefinedMenuItem::select_all(None),
+            &PredefinedMenuItem::separator(),
+            &find_item,
         ])?;
 
         let reload_extensions_item =
@@ -195,6 +205,9 @@ fn extension_menu_id(extension_id: &str) -> String {
 fn menu_command_for_event(event: &MenuEvent) -> Option<MenuCommand> {
     if event.id == MENU_ID_RELOAD_EXTENSIONS {
         return Some(MenuCommand::ReloadExtensions);
+    }
+    if event.id == MENU_ID_FIND {
+        return Some(MenuCommand::OpenFind);
     }
     let extension_id = event.id.as_ref().strip_prefix(MENU_ID_EXTENSION_PREFIX)?;
     Some(MenuCommand::ActivateExtension {
