@@ -59,7 +59,7 @@ autoninja -C out/Default chrome
 autoninja -C out/Default cbf_bridge
 ```
 
-This builds the main Chromium target and the CBF bridge library, which is required for `cbf-chrome-sys` to link successfully.
+This builds the main Chromium target and the CBF bridge library, which is required for `cbf-chrome-sys` to load the bridge successfully at runtime.
 
 Release packaging uses a separate `chromium/src/out/Release` directory and a
 different `args.gn` policy. See [Release Process](./release-process.md) for the
@@ -69,9 +69,9 @@ release-specific flow.
 > Chromium builds can take several hours or longer, and CPU usage may stay high during the entire build, which can keep sustained load on your machine.
 > Because builds are long-running, you can mitigate sleep-related build interruption by using tools such as `caffeinate` of macOS.
 
-## 3. Configure bridge linkage
+## 3. Configure bridge runtime lookup
 
-`cbf-chrome-sys` and `cbf-chrome` needs bridge artifacts from `CBF_BRIDGE_LIB_DIR`:
+`cbf-chrome-sys` resolves `libcbf_bridge` at runtime. During development, point `CBF_BRIDGE_LIB_DIR` at the Chromium output directory that contains the bridge artifact:
 
 ```bash
 export CBF_BRIDGE_LIB_DIR="/path/to/chromium/src/out/Default"

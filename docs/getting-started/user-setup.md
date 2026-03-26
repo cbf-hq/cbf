@@ -40,7 +40,7 @@ Platform-specific library names:
 | Linux | `libcbf_bridge.so` (currently unsupported) |
 | Windows | `cbf_bridge.dll` (currently unsupported) |
 
-Set `CBF_BRIDGE_LIB_DIR` to the directory containing the bridge library:
+Set `CBF_BRIDGE_LIB_DIR` to the directory containing the bridge library. `cbf-chrome-sys` uses this as a runtime lookup hint:
 
 ```bash
 export CBF_BRIDGE_LIB_DIR="/path/to/cbf_bridge/libdir"
