@@ -35,6 +35,8 @@ source-built use rather than a downloadable binary bundle.
   - origin allow-list enforcement via `allowed_origins` and deny-all default when empty
   - browser-test coverage for allow/deny, navigation re-evaluation, and lifecycle failure paths
 - Same-document `NavigationStateChanged` emission coverage for SPA-style history updates (`pushState`/`replaceState`/same-document back-forward traversal) with dedicated browser-test assertions.
+- Chromium find-in-page bridge flow for tabs, including bridge commands for `FindInPage` and `StopFinding`, `FindReply` observer/event transport, and host-visible match-count / active-match / selection-rect updates.
+- Browser-test coverage for find-in-page search, next/previous follow-up navigation, stop-finding behavior, and empty-query no-op handling in `CbfProfileServiceBrowserTest`.
 
 ### Changed
 

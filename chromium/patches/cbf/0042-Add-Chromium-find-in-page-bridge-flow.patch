@@ -1,0 +1,885 @@
+From 077b257dd3c86416848da6c23ab56075401cbde4 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 26 Mar 2026 15:38:35 +0900
+Subject: [PATCH 42/42] Add Chromium find-in-page bridge flow
+
+Wire cbf::mojom::CbfProfileService::FindInPage and StopFinding through
+CbfBridgeClient into content::WebContents::Find/StopFinding.
+
+Forward results from CbfWebContentsDelegate::FindReply as OnFindReply and
+cover search, next/previous, stop, and empty-query no-op behavior in browser tests.
+---
+ chrome/browser/cbf/bridge/cbf_bridge.h        |  13 ++
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |   8 +
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |  24 +++
+ .../cbf/bridge/cbf_bridge_client_impl.h       |   6 +
+ .../cbf/bridge/cbf_bridge_event_wait_state.h  |   4 +
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  10 ++
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  22 +++
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc |  92 ++++++++++++
+ chrome/browser/cbf/cbf_profile_service.cc     |  90 ++++++++++++
+ chrome/browser/cbf/cbf_profile_service.h      |  14 ++
+ .../cbf/cbf_profile_service_browsertest.cc    | 138 ++++++++++++++++++
+ .../browser/cbf/cbf_web_contents_delegate.cc  |  14 ++
+ .../browser/cbf/cbf_web_contents_delegate.h   |   6 +
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  12 ++
+ .../cbf/test/cbf_test_profile_observer.cc     |  41 ++++++
+ .../cbf/test/cbf_test_profile_observer.h      |  24 +++
+ 16 files changed, 518 insertions(+)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index 4fab10e654faf..b8651b0715146 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -117,6 +117,19 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_execute_edit_action(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id,
+     uint8_t action);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_find_in_page(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id,
++    uint64_t request_id,
++    const char* query,
++    bool forward,
++    bool match_case,
++    bool new_session,
++    bool find_match);
++CBF_BRIDGE_EXPORT bool cbf_bridge_client_stop_finding(
++    CbfBridgeClientHandle* client,
++    uint64_t tab_id,
++    uint8_t action);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_execute_extension_popup_edit_action(
+     CbfBridgeClientHandle* client,
+     uint64_t popup_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index a8f699bbefd29..08827bdb27bc3 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -116,6 +116,14 @@ class CbfBridgeClient {
+   bool OpenDevTools(uint64_t tab_id);
+   bool InspectElement(uint64_t tab_id, int32_t x, int32_t y);
+   bool GetTabDomHtml(uint64_t tab_id, uint64_t request_id);
++  bool FindInPage(uint64_t tab_id,
++                  uint64_t request_id,
++                  const std::string& query,
++                  bool forward,
++                  bool match_case,
++                  bool new_session,
++                  bool find_match);
++  bool StopFinding(uint64_t tab_id, uint8_t action);
+   bool OpenDefaultAuxiliaryWindow(const std::string& profile_id,
+                                   uint64_t request_id);
+   bool RespondAuxiliaryWindow(const std::string& profile_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index d229a4cd9fe76..7a17854ccf2ef 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -650,6 +650,30 @@ void CbfBridgeClientImpl::Observer::OnTabDomHtmlRead(uint64_t tab_id,
+   impl_->events.push(std::move(event));
+ }
+ 
++void CbfBridgeClientImpl::Observer::OnFindReply(
++    uint64_t tab_id,
++    uint64_t request_id,
++    uint32_t number_of_matches,
++    cbf::mojom::CbfRectPtr selection_rect,
++    int32_t active_match_ordinal,
++    bool final_update) {
++  CbfBridgeEventData event;
++  event.kind = kEventFindReply;
++  event.tab_id = tab_id;
++  event.request_id = request_id;
++  event.profile_id = profile_id_;
++  event.find_number_of_matches = number_of_matches;
++  event.find_active_match_ordinal = active_match_ordinal;
++  event.find_final_update = final_update;
++  if (selection_rect) {
++    event.find_selection_rect = gfx::Rect(selection_rect->x, selection_rect->y,
++                                          selection_rect->width,
++                                          selection_rect->height);
++  }
++  std::lock_guard<std::mutex> lock(impl_->events_mutex);
++  impl_->events.push(std::move(event));
++}
++
+ void CbfBridgeClientImpl::Observer::OnTabIpcMessageReceived(
+     uint64_t tab_id,
+     cbf::mojom::CbfIpcMessagePtr message) {
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+index 7cab6c378b2d0..f4e01db359c07 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+@@ -161,6 +161,12 @@ struct CbfBridgeClientImpl {
+     void OnTabDomHtmlRead(uint64_t tab_id,
+                           uint64_t request_id,
+                           const std::string& html) override;
++    void OnFindReply(uint64_t tab_id,
++                     uint64_t request_id,
++                     uint32_t number_of_matches,
++                     cbf::mojom::CbfRectPtr selection_rect,
++                     int32_t active_match_ordinal,
++                     bool final_update) override;
+     void OnTabIpcMessageReceived(uint64_t tab_id,
+                                  cbf::mojom::CbfIpcMessagePtr message) override;
+     void OnDragStartRequested(
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+index 29248d5bc5cc3..e074ea047906c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_event_wait_state.h
+@@ -33,6 +33,10 @@ struct CbfBridgeEventData {
+   uint32_t height = 0;
+   uint8_t beforeunload_reason = kCbfBeforeUnloadReasonUnknown;
+   uint8_t javascript_dialog_type = kCbfJavaScriptDialogAlert;
++  uint32_t find_number_of_matches = 0;
++  int32_t find_active_match_ordinal = 0;
++  gfx::Rect find_selection_rect;
++  bool find_final_update = false;
+   CbfSurfaceHandle surface_handle = {};
+   std::string profile_id;
+   std::string target_url;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index 513f45fa9fbb6..982760f1cf9dc 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -354,6 +354,10 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+       kCbfExtensionInstallPromptResultAborted;
+   out_event->extension_install_prompt_detail = nullptr;
+   out_event->extension_runtime_warning = nullptr;
++  out_event->find_number_of_matches = 0;
++  out_event->find_active_match_ordinal = 0;
++  out_event->find_selection_rect = ToCbfRect(gfx::Rect());
++  out_event->find_final_update = false;
+   out_event->auxiliary_window_id = 0;
+   out_event->auxiliary_window_kind = kCbfAuxiliaryWindowKindUnknown;
+   out_event->auxiliary_window_close_reason =
+@@ -477,6 +481,12 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+     out_event->dom_html =
+         event.dom_html.empty() ? nullptr : CopyCString(event.dom_html);
+   }
++  if (event.kind == kEventFindReply) {
++    out_event->find_number_of_matches = event.find_number_of_matches;
++    out_event->find_active_match_ordinal = event.find_active_match_ordinal;
++    out_event->find_selection_rect = ToCbfRect(event.find_selection_rect);
++    out_event->find_final_update = event.find_final_update;
++  }
+   if (event.kind == kEventTitleUpdated ||
+       event.kind == kEventExtensionPopupTitleUpdated) {
+     out_event->title = event.title.empty() ? nullptr : CopyCString(event.title);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index 3ae42149d4ca0..abfaf5d858360 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -65,6 +65,7 @@ enum CbfEventKind {
+   kEventExtensionPopupChoiceMenuRequested = 45,
+   kEventTabIpcMessageReceived = 46,
+   kEventCustomSchemeRequestReceived = 47,
++  kEventFindReply = 49,
+   kEventExternalDragOperationChanged = 48,
+   kEventTabCreated = kEventWebPageCreated,
+   kEventNewTabRequested = kEventNewWebPageRequested,
+@@ -756,6 +757,10 @@ typedef struct CbfBridgeEvent {
+   uint8_t extension_uninstall_prompt_result;
+   char* extension_uninstall_prompt_detail;
+   char* extension_runtime_warning;
++  uint32_t find_number_of_matches;
++  int32_t find_active_match_ordinal;
++  CbfRect find_selection_rect;
++  bool find_final_update;
+   uint64_t auxiliary_window_id;
+   uint8_t auxiliary_window_kind;
+   uint8_t auxiliary_window_close_reason;
+@@ -858,6 +863,12 @@ enum CbfEditAction {
+   kCbfEditActionSelectAll = 5,
+ };
+ 
++enum CbfStopFindAction {
++  kCbfStopFindActionClearSelection = 0,
++  kCbfStopFindActionKeepSelection = 1,
++  kCbfStopFindActionActivateSelection = 2,
++};
++
+ void cbf_bridge_convert_nsevent(void* nsevent,
+                                 uint64_t tab_id,
+                                 CbfKeyEvent* out_event);
+@@ -893,6 +904,17 @@ bool cbf_bridge_client_send_external_drag_drop(
+ bool cbf_bridge_client_execute_edit_action(CbfBridgeClientHandle* client,
+                                            uint64_t tab_id,
+                                            uint8_t action);
++bool cbf_bridge_client_find_in_page(CbfBridgeClientHandle* client,
++                                    uint64_t tab_id,
++                                    uint64_t request_id,
++                                    const char* query,
++                                    bool forward,
++                                    bool match_case,
++                                    bool new_session,
++                                    bool find_match);
++bool cbf_bridge_client_stop_finding(CbfBridgeClientHandle* client,
++                                    uint64_t tab_id,
++                                    uint8_t action);
+ bool cbf_bridge_client_execute_extension_popup_edit_action(
+     CbfBridgeClientHandle* client,
+     uint64_t popup_id,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index 404bbbd810256..782c642c2e274 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -871,6 +871,72 @@ bool CbfBridgeClient::GetTabDomHtml(uint64_t tab_id, uint64_t request_id) {
+   return true;
+ }
+ 
++bool CbfBridgeClient::FindInPage(uint64_t tab_id,
++                                 uint64_t request_id,
++                                 const std::string& query,
++                                 bool forward,
++                                 bool match_case,
++                                 bool new_session,
++                                 bool find_match) {
++  if (!impl_ || query.empty()) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id, uint64_t request_id,
++             std::string query, bool forward, bool match_case,
++             bool new_session, bool find_match) {
++            auto it = impl->web_page_profiles.find(tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->FindInPage(
++                tab_id, request_id, query, forward, match_case, new_session,
++                find_match);
++          },
++          impl, tab_id, request_id, query, forward, match_case, new_session,
++          find_match));
++  return true;
++}
++
++bool CbfBridgeClient::StopFinding(uint64_t tab_id, uint8_t action) {
++  if (!impl_) {
++    return false;
++  }
++  auto task_runner = GetMojoTaskRunner();
++  if (!task_runner) {
++    return false;
++  }
++  CbfBridgeClientImpl* impl = impl_.get();
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](CbfBridgeClientImpl* impl, uint64_t tab_id, uint8_t action) {
++            auto it = impl->web_page_profiles.find(tab_id);
++            if (it == impl->web_page_profiles.end()) {
++              return;
++            }
++            auto remote_it = impl->profile_connections.find(it->second);
++            if (remote_it == impl->profile_connections.end()) {
++              return;
++            }
++            remote_it->second.remote->StopFinding(
++                tab_id, static_cast<cbf::mojom::CbfStopFindAction>(action));
++          },
++          impl, tab_id, action));
++  return true;
++}
++
+ bool CbfBridgeClient::OpenDefaultAuxiliaryWindow(
+     const std::string& profile_id,
+     uint64_t request_id) {
+@@ -1531,6 +1597,32 @@ extern "C" bool cbf_bridge_client_get_tab_dom_html(
+   return cbf_bridge_client_get_web_page_dom_html(client, tab_id, request_id);
+ }
+ 
++extern "C" bool cbf_bridge_client_find_in_page(CbfBridgeClientHandle* client,
++                                               uint64_t tab_id,
++                                               uint64_t request_id,
++                                               const char* query,
++                                               bool forward,
++                                               bool match_case,
++                                               bool new_session,
++                                               bool find_match) {
++  if (!client || !query) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->FindInPage(tab_id, request_id, query, forward, match_case, new_session,
++                   find_match);
++}
++
++extern "C" bool cbf_bridge_client_stop_finding(CbfBridgeClientHandle* client,
++                                               uint64_t tab_id,
++                                               uint8_t action) {
++  if (!client) {
++    return false;
++  }
++  return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
++      ->StopFinding(tab_id, action);
++}
++
+ extern "C" bool cbf_bridge_client_open_dev_tools(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id) {
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index 3795613a30b48..e161d0ede0842 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -14,6 +14,7 @@
+ #include "base/logging.h"
+ #include "base/base64.h"
+ #include "base/no_destructor.h"
++#include "base/numerics/safe_conversions.h"
+ #include "base/strings/strcat.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_util.h"
+@@ -81,6 +82,7 @@
+ #include "content/public/browser/render_widget_host_view.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_observer.h"
++#include "content/public/common/stop_find_action.h"
+ #include "content/public/common/isolated_world_ids.h"
+ #include "extensions/browser/extension_action.h"
+ #include "extensions/browser/extension_action_manager.h"
+@@ -95,6 +97,7 @@
+ #include "mojo/public/cpp/bindings/clone_traits.h"
+ #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+ #include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
++#include "third_party/blink/public/mojom/frame/find_in_page.mojom.h"
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/page_transition_types.h"
+ #include "ui/views/widget/widget.h"
+@@ -113,6 +116,24 @@ std::map<Profile*, CbfProfileService*>& GetProfileServiceRegistry() {
+   return *registry;
+ }
+ 
++std::optional<int> ToFindRequestId(uint64_t request_id) {
++  if (!base::IsValueInRangeForNumericType<int>(request_id)) {
++    return std::nullopt;
++  }
++  return static_cast<int>(request_id);
++}
++
++content::StopFindAction ToBlinkStopFindAction(mojom::CbfStopFindAction action) {
++  switch (action) {
++    case mojom::CbfStopFindAction::kClearSelection:
++      return content::STOP_FIND_ACTION_CLEAR_SELECTION;
++    case mojom::CbfStopFindAction::kKeepSelection:
++      return content::STOP_FIND_ACTION_KEEP_SELECTION;
++    case mojom::CbfStopFindAction::kActivateSelection:
++      return content::STOP_FIND_ACTION_ACTIVATE_SELECTION;
++  }
++}
++
+ void RemoveProfileServiceRegistryEntry(Profile* profile,
+                                        CbfProfileService* service) {
+   if (!profile) {
+@@ -1466,6 +1487,51 @@ void CbfProfileService::GetTabDomHtml(uint64_t tab_id, uint64_t request_id) {
+       content::ISOLATED_WORLD_ID_CONTENT_END);
+ }
+ 
++void CbfProfileService::FindInPage(uint64_t tab_id,
++                                   uint64_t request_id,
++                                   const std::string& query,
++                                   bool forward,
++                                   bool match_case,
++                                   bool new_session,
++                                   bool find_match) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
++  if (!web_contents) {
++    return;
++  }
++
++  if (query.empty()) {
++    LOG(WARNING) << "CBF FindInPage ignored empty query: tab_id=" << tab_id
++                 << " request_id=" << request_id;
++    return;
++  }
++
++  const std::optional<int> chromium_request_id = ToFindRequestId(request_id);
++  if (!chromium_request_id.has_value()) {
++    LOG(WARNING) << "CBF FindInPage ignored out-of-range request id: tab_id="
++                 << tab_id << " request_id=" << request_id;
++    return;
++  }
++
++  auto options = blink::mojom::FindOptions::New();
++  options->forward = forward;
++  options->match_case = match_case;
++  options->new_session = new_session;
++  options->find_match = find_match;
++
++  web_contents->Find(*chromium_request_id, base::UTF8ToUTF16(query),
++                     std::move(options), false);
++}
++
++void CbfProfileService::StopFinding(uint64_t tab_id,
++                                    mojom::CbfStopFindAction action) {
++  content::WebContents* web_contents = tab_manager_.GetWebContents(tab_id);
++  if (!web_contents) {
++    return;
++  }
++
++  web_contents->StopFinding(ToBlinkStopFindAction(action));
++}
++
+ void CbfProfileService::ListExtensions(const std::string& profile_id,
+                                        ListExtensionsCallback callback) {
+   struct PendingRequest {
+@@ -2543,6 +2609,30 @@ void CbfProfileService::NotifyFaviconUrlUpdated(
+   observer_->OnFaviconUrlUpdated(tab_id, favicon_url);
+ }
+ 
++void CbfProfileService::NotifyFindReply(content::WebContents* web_contents,
++                                        uint64_t request_id,
++                                        int number_of_matches,
++                                        const gfx::Rect& selection_rect,
++                                        int active_match_ordinal,
++                                        bool final_update) {
++  if (!web_contents || !observer_) {
++    return;
++  }
++
++  if (GetActiveExtensionPopup(web_contents)) {
++    return;
++  }
++
++  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
++  if (tab_id == kInvalidTabId) {
++    return;
++  }
++
++  observer_->OnFindReply(tab_id, request_id, number_of_matches,
++                         mojo_converters::ToCbfRect(selection_rect),
++                         active_match_ordinal, final_update);
++}
++
+ void CbfProfileService::ResolveExtensionInstallPrompt(
+     uint64_t request_id,
+     mojom::CbfExtensionInstallPromptResult result,
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index f1b4c61c8c296..6a0e7d6345c1d 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -137,6 +137,14 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void OpenDevTools(uint64_t tab_id) override;
+   void InspectElement(uint64_t tab_id, int32_t x, int32_t y) override;
+   void SetTabFocus(uint64_t tab_id, bool focused) override;
++  void FindInPage(uint64_t tab_id,
++                  uint64_t request_id,
++                  const std::string& query,
++                  bool forward,
++                  bool match_case,
++                  bool new_session,
++                  bool find_match) override;
++  void StopFinding(uint64_t tab_id, mojom::CbfStopFindAction action) override;
+   void SetTabVisibility(uint64_t tab_id,
+                         mojom::CbfTabVisibility visibility) override;
+   void EnableTabIpc(uint64_t tab_id,
+@@ -312,6 +320,12 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void NotifyTitleUpdated(content::WebContents* web_contents);
+   void NotifyFaviconUrlUpdated(content::WebContents* web_contents,
+                                const std::string& favicon_url);
++  void NotifyFindReply(content::WebContents* web_contents,
++                       uint64_t request_id,
++                       int number_of_matches,
++                       const gfx::Rect& selection_rect,
++                       int active_match_ordinal,
++                       bool final_update);
+   void NotifyDragStartRequested(content::WebContents* web_contents,
+                                 const content::DropData& drop_data,
+                                 const url::Origin& source_origin,
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 1d5faa8627593..6ad552ee3018c 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -17,6 +17,7 @@
+ #include "base/strings/stringprintf.h"
+ #include "base/task/cancelable_task_tracker.h"
+ #include "base/test/scoped_feature_list.h"
++#include "base/test/run_until.h"
+ #include "base/threading/thread_restrictions.h"
+ #include "base/values.h"
+ #include "build/build_config.h"
+@@ -75,6 +76,35 @@
+ namespace cbf {
+ namespace {
+ 
++using FindReplyEvent = cbf::test::CbfTestProfileObserver::FindReplyEvent;
++
++size_t CountFinalFindRepliesSince(const std::vector<FindReplyEvent>& events,
++                                  size_t baseline_count,
++                                  uint64_t tab_id) {
++  return std::count_if(events.begin() + baseline_count, events.end(),
++                       [tab_id](const FindReplyEvent& event) {
++                         return event.tab_id == tab_id && event.final_update;
++                       });
++}
++
++const FindReplyEvent* FindNthFinalFindReplySince(
++    const std::vector<FindReplyEvent>& events,
++    size_t baseline_count,
++    uint64_t tab_id,
++    size_t ordinal) {
++  size_t seen = 0;
++  for (auto it = events.begin() + baseline_count; it != events.end(); ++it) {
++    if (it->tab_id != tab_id || !it->final_update) {
++      continue;
++    }
++    ++seen;
++    if (seen == ordinal) {
++      return &*it;
++    }
++  }
++  return nullptr;
++}
++
+ class TestBrowserObserver final : public mojom::CbfBrowserObserver {
+  public:
+   explicit TestBrowserObserver(CbfBrowserService* browser_service)
+@@ -2519,6 +2549,114 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   EXPECT_TRUE(query_result.success);
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, FindInPageEmitsReply) {
++  const TabId tab_id = CreatePage(
++      "data:text/html,<html><body>needle alpha needle beta needle</body></html>");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  const size_t baseline_count = observer_.find_reply_events().size();
++  profile_service_remote_->FindInPage(tab_id, 101, "needle", true, false, true,
++                                      true);
++  ASSERT_TRUE(base::test::RunUntil([&]() {
++    return CountFinalFindRepliesSince(observer_.find_reply_events(),
++                                      baseline_count, tab_id) >= 1;
++  }));
++
++  const FindReplyEvent* event = FindNthFinalFindReplySince(
++      observer_.find_reply_events(), baseline_count, tab_id, 1);
++  ASSERT_NE(event, nullptr);
++  EXPECT_EQ(event->tab_id, tab_id);
++  EXPECT_EQ(event->request_id, 101u);
++  EXPECT_GT(event->number_of_matches, 0u);
++  EXPECT_GT(event->active_match_ordinal, 0);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       FindNextAndPreviousEmitFollowUpReplies) {
++  const TabId tab_id = CreatePage(
++      "data:text/html,<html><body>needle one needle two needle</body></html>");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  const size_t baseline_count = observer_.find_reply_events().size();
++  profile_service_remote_->FindInPage(tab_id, 201, "needle", true, false, true,
++                                      true);
++  ASSERT_TRUE(base::test::RunUntil([&]() {
++    return CountFinalFindRepliesSince(observer_.find_reply_events(),
++                                      baseline_count, tab_id) >= 1;
++  }));
++
++  profile_service_remote_->FindInPage(tab_id, 202, "needle", true, false,
++                                      false, true);
++  ASSERT_TRUE(base::test::RunUntil([&]() {
++    return CountFinalFindRepliesSince(observer_.find_reply_events(),
++                                      baseline_count, tab_id) >= 2;
++  }));
++
++  profile_service_remote_->FindInPage(tab_id, 203, "needle", false, false,
++                                      false, true);
++  ASSERT_TRUE(base::test::RunUntil([&]() {
++    return CountFinalFindRepliesSince(observer_.find_reply_events(),
++                                      baseline_count, tab_id) >= 3;
++  }));
++
++  const auto& events = observer_.find_reply_events();
++  const FindReplyEvent* initial_event =
++      FindNthFinalFindReplySince(events, baseline_count, tab_id, 1);
++  const FindReplyEvent* next_event =
++      FindNthFinalFindReplySince(events, baseline_count, tab_id, 2);
++  const FindReplyEvent* previous_event =
++      FindNthFinalFindReplySince(events, baseline_count, tab_id, 3);
++  ASSERT_NE(initial_event, nullptr);
++  ASSERT_NE(next_event, nullptr);
++  ASSERT_NE(previous_event, nullptr);
++
++  EXPECT_EQ(initial_event->request_id, 201u);
++  EXPECT_EQ(next_event->request_id, 202u);
++  EXPECT_EQ(previous_event->request_id, 203u);
++  EXPECT_GT(next_event->active_match_ordinal, initial_event->active_match_ordinal);
++  EXPECT_EQ(previous_event->active_match_ordinal,
++            initial_event->active_match_ordinal);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       StopFindingClearSelectionDoesNotCrash) {
++  const TabId tab_id = CreatePage(
++      "data:text/html,<html><body>needle alpha needle</body></html>");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  const size_t baseline_count = observer_.find_reply_events().size();
++  profile_service_remote_->FindInPage(tab_id, 301, "needle", true, false, true,
++                                      true);
++  ASSERT_TRUE(base::test::RunUntil([&]() {
++    return CountFinalFindRepliesSince(observer_.find_reply_events(),
++                                      baseline_count, tab_id) >= 1;
++  }));
++
++  profile_service_remote_->StopFinding(
++      tab_id, mojom::CbfStopFindAction::kClearSelection);
++  base::RunLoop().RunUntilIdle();
++
++  EXPECT_NE(profile_service_->GetWebContentsForTesting(tab_id), nullptr);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       EmptyFindQueryDoesNotEmitReply) {
++  const TabId tab_id = CreatePage(
++      "data:text/html,<html><body>needle alpha needle</body></html>");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  const size_t baseline_count = observer_.find_reply_events().size();
++  profile_service_remote_->FindInPage(tab_id, 401, "", true, false, true,
++                                      true);
++  base::RunLoop().RunUntilIdle();
++
++  EXPECT_EQ(observer_.find_reply_events().size(), baseline_count);
++}
++
+ #if BUILDFLAG(IS_MAC)
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        InstallsSurfaceObserverForCreatedPage) {
+diff --git a/chrome/browser/cbf/cbf_web_contents_delegate.cc b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+index efccb0ba9d228..39fc9f70bcbed 100644
+--- a/chrome/browser/cbf/cbf_web_contents_delegate.cc
++++ b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+@@ -203,4 +203,18 @@ void CbfWebContentsDelegate::OnCursorChanged(
+   profile_service_->NotifyCursorChanged(source, cursor_type);
+ }
+ 
++void CbfWebContentsDelegate::FindReply(content::WebContents* web_contents,
++                                       int request_id,
++                                       int number_of_matches,
++                                       const gfx::Rect& selection_rect,
++                                       int active_match_ordinal,
++                                       bool final_update) {
++  if (!profile_service_ || !web_contents) {
++    return;
++  }
++  profile_service_->NotifyFindReply(web_contents, request_id,
++                                    number_of_matches, selection_rect,
++                                    active_match_ordinal, final_update);
++}
++
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_web_contents_delegate.h b/chrome/browser/cbf/cbf_web_contents_delegate.h
+index 754d0e942ba6d..b3b299c1e74ca 100644
+--- a/chrome/browser/cbf/cbf_web_contents_delegate.h
++++ b/chrome/browser/cbf/cbf_web_contents_delegate.h
+@@ -76,6 +76,12 @@ class CbfWebContentsDelegate final : public content::WebContentsDelegate {
+   void ShowRepostFormWarningDialog(content::WebContents* source) override;
+   void OnCursorChanged(content::WebContents* source,
+                        ui::mojom::CursorType cursor_type) override;
++  void FindReply(content::WebContents* web_contents,
++                 int request_id,
++                 int number_of_matches,
++                 const gfx::Rect& selection_rect,
++                 int active_match_ordinal,
++                 bool final_update) override;
+ 
+  private:
+   raw_ptr<CbfProfileService> profile_service_;
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 798c5a3da9135..b47cc1757fcb8 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -344,6 +344,12 @@ enum CbfEditAction {
+   kSelectAll,
+ };
+ 
++enum CbfStopFindAction {
++  kClearSelection,
++  kKeepSelection,
++  kActivateSelection,
++};
++
+ enum CbfTabVisibility {
+   kVisible,
+   kHidden,
+@@ -818,6 +824,9 @@ interface CbfProfileObserver {
+   OnNavigationStateChanged(uint64 tab_id, string url, bool can_go_back,
+                            bool can_go_forward, bool is_loading);
+   OnTabDomHtmlRead(uint64 tab_id, uint64 request_id, string html);
++  OnFindReply(uint64 tab_id, uint64 request_id, uint32 number_of_matches,
++              CbfRect selection_rect, int32 active_match_ordinal,
++              bool final_update);
+   OnTabIpcMessageReceived(uint64 tab_id, CbfIpcMessage message);
+   OnDragStartRequested(CbfDragStartRequest request);
+   OnExternalDragOperationChanged(uint64 tab_id, uint32 operation);
+@@ -897,6 +906,9 @@ interface CbfProfileService {
+                                     CbfConfirmCompositionBehavior behavior);
+ 
+   GetTabDomHtml(uint64 tab_id, uint64 request_id);
++  FindInPage(uint64 tab_id, uint64 request_id, string query, bool forward,
++             bool match_case, bool new_session, bool find_match);
++  StopFinding(uint64 tab_id, CbfStopFindAction action);
+   ListExtensions(string profile_id) => (array<CbfExtensionInfo> extensions);
+   ActivateExtensionAction(uint64 tab_id, string extension_id);
+   OpenDefaultAuxiliaryWindow(string profile_id, uint64 request_id);
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index ae550c35bdbd9..206a446356cc1 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -519,6 +519,18 @@ void CbfTestProfileObserver::WaitForNavigationStateChangedCount(
+   quit_wait_loop_.Reset();
+ }
+ 
++void CbfTestProfileObserver::WaitForFindReplyCount(size_t expected_count) {
++  ResetWaitTargets();
++  wait_find_reply_count_ = expected_count;
++  if (find_reply_events_.size() >= wait_find_reply_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
+ void CbfTestProfileObserver::OnSurfaceHandleUpdated(uint64_t tab_id,
+                                                     uint32_t ca_context_id) {
+   surface_events_.push_back(
+@@ -751,6 +763,29 @@ void CbfTestProfileObserver::OnTabDomHtmlRead(uint64_t tab_id,
+                                               uint64_t request_id,
+                                               const std::string& html) {}
+ 
++void CbfTestProfileObserver::OnFindReply(
++    uint64_t tab_id,
++    uint64_t request_id,
++    uint32_t number_of_matches,
++    cbf::mojom::CbfRectPtr selection_rect,
++    int32_t active_match_ordinal,
++    bool final_update) {
++  FindReplyEvent event;
++  event.tab_id = tab_id;
++  event.request_id = request_id;
++  event.number_of_matches = number_of_matches;
++  event.active_match_ordinal = active_match_ordinal;
++  event.final_update = final_update;
++  if (selection_rect) {
++    event.selection_rect_x = selection_rect->x;
++    event.selection_rect_y = selection_rect->y;
++    event.selection_rect_width = selection_rect->width;
++    event.selection_rect_height = selection_rect->height;
++  }
++  find_reply_events_.push_back(std::move(event));
++  MaybeQuitWaitLoop();
++}
++
+ void CbfTestProfileObserver::OnTabIpcMessageReceived(
+     uint64_t tab_id,
+     cbf::mojom::CbfIpcMessagePtr message) {
+@@ -1069,6 +1104,11 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
+       navigation_state_changed_events_.size() >=
+           wait_navigation_state_changed_count_) {
+     quit_wait_loop_.Run();
++    return;
++  }
++  if (wait_find_reply_count_ > 0 &&
++      find_reply_events_.size() >= wait_find_reply_count_) {
++    quit_wait_loop_.Run();
+   }
+ }
+ 
+@@ -1098,6 +1138,7 @@ void CbfTestProfileObserver::ResetWaitTargets() {
+   wait_extension_popup_choice_menu_count_ = 0;
+   wait_tab_ipc_message_count_ = 0;
+   wait_navigation_state_changed_count_ = 0;
++  wait_find_reply_count_ = 0;
+ }
+ 
+ }  // namespace cbf::test
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index c91fbed1075fe..600b1bc4b86ad 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -327,6 +327,18 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+     bool is_loading = false;
+   };
+ 
++  struct FindReplyEvent {
++    uint64_t tab_id = 0;
++    uint64_t request_id = 0;
++    uint32_t number_of_matches = 0;
++    int32_t active_match_ordinal = 0;
++    int32_t selection_rect_x = 0;
++    int32_t selection_rect_y = 0;
++    int32_t selection_rect_width = 0;
++    int32_t selection_rect_height = 0;
++    bool final_update = false;
++  };
++
+   enum class DownloadEventKind {
+     kCreated,
+     kUpdated,
+@@ -431,6 +443,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   navigation_state_changed_events() const {
+     return navigation_state_changed_events_;
+   }
++  const std::vector<FindReplyEvent>& find_reply_events() const {
++    return find_reply_events_;
++  }
+   const std::vector<DownloadEventKind>& download_event_order() const {
+     return download_event_order_;
+   }
+@@ -460,6 +475,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void WaitForExtensionPopupChoiceMenuCount(size_t expected_count);
+   void WaitForTabIpcMessageCount(size_t expected_count);
+   void WaitForNavigationStateChangedCount(size_t expected_count);
++  void WaitForFindReplyCount(size_t expected_count);
+ 
+   // cbf::mojom::CbfProfileObserver
+   void OnSurfaceHandleUpdated(uint64_t tab_id,
+@@ -553,6 +569,12 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void OnTabDomHtmlRead(uint64_t tab_id,
+                         uint64_t request_id,
+                         const std::string& html) override;
++  void OnFindReply(uint64_t tab_id,
++                   uint64_t request_id,
++                   uint32_t number_of_matches,
++                   cbf::mojom::CbfRectPtr selection_rect,
++                   int32_t active_match_ordinal,
++                   bool final_update) override;
+   void OnTabIpcMessageReceived(uint64_t tab_id,
+                                cbf::mojom::CbfIpcMessagePtr message) override;
+   void OnDragStartRequested(cbf::mojom::CbfDragStartRequestPtr request) override;
+@@ -619,6 +641,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   std::vector<ExtensionPopupChoiceMenuEvent> extension_popup_choice_menu_events_;
+   std::vector<TabIpcMessageEvent> tab_ipc_message_events_;
+   std::vector<NavigationStateChangedEvent> navigation_state_changed_events_;
++  std::vector<FindReplyEvent> find_reply_events_;
+   std::vector<DownloadEventKind> download_event_order_;
+ 
+   size_t wait_web_page_closed_count_ = 0;
+@@ -646,6 +669,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   size_t wait_extension_popup_choice_menu_count_ = 0;
+   size_t wait_tab_ipc_message_count_ = 0;
+   size_t wait_navigation_state_changed_count_ = 0;
++  size_t wait_find_reply_count_ = 0;
+   base::RepeatingClosure quit_wait_loop_;
+ };
+ 
+-- 
+2.50.1 (Apple Git-155)
+
