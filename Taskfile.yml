@@ -38,15 +38,31 @@ tasks:
   release:package:
     desc: Assemble the release archive under dist/release.
     cmds:
-      - task: release:licenses TAG={{.TAG}}
-      - task: release:source-info TAG={{.TAG}} ALLOW_DIRTY={{.ALLOW_DIRTY}}
+      - task: release:licenses
+        vars:
+          TAG: "{{.TAG}}"
+      - task: release:source-info
+        vars:
+          TAG: "{{.TAG}}"
+          ALLOW_DIRTY: "{{.ALLOW_DIRTY}}"
       - uv run tool release package {{.ALLOW_DIRTY_FLAG}} {{.TAG_FLAG}}
 
   release:
     desc: Run the full local MVP release flow.
     cmds:
-      - task: release:check TAG={{.TAG}} ALLOW_DIRTY={{.ALLOW_DIRTY}}
+      - task: release:check
+        vars:
+          TAG: "{{.TAG}}"
+          ALLOW_DIRTY: "{{.ALLOW_DIRTY}}"
       - task: release:build
-      - task: release:licenses TAG={{.TAG}}
-      - task: release:source-info TAG={{.TAG}} ALLOW_DIRTY={{.ALLOW_DIRTY}}
-      - task: release:package TAG={{.TAG}} ALLOW_DIRTY={{.ALLOW_DIRTY}}
+      - task: release:licenses
+        vars:
+          TAG: "{{.TAG}}"
+      - task: release:source-info
+        vars:
+          TAG: "{{.TAG}}"
+          ALLOW_DIRTY: "{{.ALLOW_DIRTY}}"
+      - task: release:package
+        vars:
+          TAG: "{{.TAG}}"
+          ALLOW_DIRTY: "{{.ALLOW_DIRTY}}"
