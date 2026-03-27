@@ -2140,7 +2140,7 @@ fn cleanup_bridge_call<F>(operation: &'static str, callback: F)
 where
     F: FnOnce(&BridgeLibrary),
 {
-    if let Err(error) = bridge().map(|bridge| callback(bridge)) {
+    if let Err(error) = bridge().map(callback) {
         warn!(operation, error = ?error, "bridge cleanup call failed");
     }
 }
