@@ -1,3 +1,9 @@
+//! Chrome-specific `BrowserHandle` extension methods.
+//!
+//! This module adds convenience methods on top of
+//! [`cbf::browser::BrowserHandle`] for Chrome-only operations that are not part
+//! of the browser-generic `cbf` API surface.
+
 use cbf::{browser::BrowserHandle, data::ids::BrowsingContextId, error::Error};
 
 use crate::{
@@ -9,13 +15,20 @@ use crate::{
     },
 };
 
+/// Extension trait that adds Chrome-specific commands to
+/// [`BrowserHandle<ChromiumBackend>`].
+///
+/// These helpers wrap raw [`crate::command::ChromeCommand`] dispatch while
+/// accepting browser-generic [`BrowsingContextId`] values at the API boundary.
 pub trait ChromiumBrowserHandleExt {
+    /// Activates an extension action for the given browsing context.
     fn activate_extension_action(
         &self,
         browsing_context_id: BrowsingContextId,
         extension_id: impl Into<String>,
     ) -> Result<(), Error>;
 
+    /// Starts or updates a Chrome find-in-page request with explicit options.
     fn find_in_page(
         &self,
         browsing_context_id: BrowsingContextId,
@@ -23,6 +36,7 @@ pub trait ChromiumBrowserHandleExt {
         options: ChromeFindInPageOptions,
     ) -> Result<(), Error>;
 
+    /// Advances an existing find session to the next match for `query`.
     fn find_next(
         &self,
         browsing_context_id: BrowsingContextId,
@@ -31,6 +45,7 @@ pub trait ChromiumBrowserHandleExt {
         match_case: bool,
     ) -> Result<(), Error>;
 
+    /// Advances an existing find session to the previous match for `query`.
     fn find_previous(
         &self,
         browsing_context_id: BrowsingContextId,
@@ -39,6 +54,7 @@ pub trait ChromiumBrowserHandleExt {
         match_case: bool,
     ) -> Result<(), Error>;
 
+    /// Stops the active find-in-page session using the requested stop action.
     fn stop_finding(
         &self,
         browsing_context_id: BrowsingContextId,

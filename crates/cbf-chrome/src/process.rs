@@ -1,3 +1,11 @@
+//! Chromium process launch and startup wiring for `cbf-chrome`.
+//!
+//! This module resolves the runtime executable, prepares bridge startup state,
+//! launches the Chromium child process, and connects it to
+//! [`crate::backend::ChromiumBackend`]. It owns process-level concerns such as
+//! runtime selection, command-line startup options, and initial IPC session
+//! establishment.
+
 use async_process::{Child, Command};
 use cbf::{
     browser::{BrowserHandle, BrowserSession, EventStream},
@@ -25,8 +33,8 @@ use std::{
 
 use crate::{
     backend::{ChromiumBackend, ChromiumBackendOptions},
-    data::custom_scheme::ChromeCustomSchemeRegistration,
     bridge::{BridgeError, IpcClient},
+    data::custom_scheme::ChromeCustomSchemeRegistration,
 };
 
 /// Resolves Chromium executable path for CBF applications.
@@ -119,26 +127,38 @@ impl std::str::FromStr for RuntimeSelection {
     }
 }
 
+/// Errors that can occur while launching Chromium and completing initial
+/// bridge/session setup.
 #[derive(Debug, thiserror::Error)]
 pub enum StartChromiumError {
+    /// The requested runtime is recognized but not currently supported for startup.
     #[error("unsupported chromium runtime '{runtime}': use 'chrome'")]
     UnsupportedRuntime { runtime: RuntimeSelection },
+    /// Custom scheme registrations contained invalid launch-time input.
     #[error("invalid custom scheme registration: {detail}")]
     InvalidCustomScheme { detail: String },
+    /// The runtime bridge library or one of its required symbols could not be loaded.
     #[error("failed to load cbf bridge: {0}")]
     BridgeLoad(#[from] BridgeLoadError),
+    /// The bridge loaded but failed to allocate a client handle.
     #[error("cbf_bridge_client_create returned null")]
     BridgeClientCreateReturnedNull,
+    /// Preparing the inherited IPC channel for the child process failed.
     #[error("failed to prepare IPC channel: {0}")]
     PrepareChannel(#[source] BridgeError),
+    /// Random session-token generation failed before launch.
     #[error("failed to generate session token: {0}")]
     TokenGeneration(#[source] getrandom::Error),
+    /// Spawning the Chromium child process failed at the OS process layer.
     #[error("failed to spawn chromium process: {0}")]
     ProcessSpawn(#[source] std::io::Error),
+    /// The bridge client could not bind the inherited IPC endpoint after spawn.
     #[error("failed to connect inherited IPC channel: {0}")]
     ConnectInherited(#[source] BridgeError),
+    /// Bridge session authentication failed after the IPC connection was established.
     #[error("failed to authenticate chromium bridge session: {0}")]
     Authenticate(#[source] BridgeError),
+    /// The backend connected, but the higher-level browser session setup failed.
     #[error("failed to initialize browser session: {0}")]
     SessionConnect(#[source] Error),
 }
@@ -288,16 +308,23 @@ impl ChromiumProcess {
     }
 }
 
+/// Shutdown strategy used when terminating a running Chromium runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShutdownMode {
+    /// Request orderly shutdown through the browser session before escalating.
     Graceful,
+    /// Skip orderly teardown and force the runtime toward immediate exit.
     Force,
 }
 
+/// Current shutdown status tracked by the runtime's shared shutdown controller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChromiumRuntimeShutdownState {
+    /// No shutdown has started.
     Idle,
+    /// Graceful shutdown has started.
     Graceful,
+    /// Forced shutdown has started.
     Force,
 }
 
@@ -326,17 +353,20 @@ impl ChromiumRuntimeShutdownState {
     }
 }
 
+/// Cloneable reader for observing runtime shutdown state from other threads.
 #[derive(Debug, Clone)]
 pub struct ChromiumRuntimeShutdownStateReader {
     state: Arc<AtomicU8>,
 }
 
 impl ChromiumRuntimeShutdownStateReader {
+    /// Returns the latest shutdown state recorded by the runtime controller.
     pub fn shutdown_state(&self) -> ChromiumRuntimeShutdownState {
         ChromiumRuntimeShutdownState::from_u8(self.state.load(Ordering::Acquire))
     }
 }
 
+/// Errors returned when installing process-wide signal handlers for a runtime.
 #[derive(Debug, thiserror::Error)]
 pub enum InstallSignalHandlersError {
     #[error("signal handlers are already installed for a Chromium runtime")]
@@ -429,6 +459,11 @@ impl ShutdownController {
 
 static SIGNAL_HANDLERS_INSTALLED: AtomicBool = AtomicBool::new(false);
 
+/// Owns a live Chromium session, its event stream, and the spawned child process.
+///
+/// `ChromiumRuntime` coordinates shutdown across the `cbf` session layer and
+/// the OS process, and can optionally install signal handlers that trigger
+/// forced termination on `SIGINT` or `SIGTERM`.
 #[derive(Debug)]
 pub struct ChromiumRuntime {
     session: BrowserSession<ChromiumBackend>,
@@ -438,6 +473,11 @@ pub struct ChromiumRuntime {
 }
 
 impl ChromiumRuntime {
+    /// Wraps an already connected session, event stream, and child process into
+    /// a single runtime owner.
+    ///
+    /// This is typically constructed from the tuple returned by
+    /// [`start_chromium`].
     pub fn new(
         session: BrowserSession<ChromiumBackend>,
         events: EventStream<ChromiumBackend>,
@@ -453,30 +493,51 @@ impl ChromiumRuntime {
         }
     }
 
+    /// Returns the owned browser session for issuing commands and obtaining
+    /// backend handles.
     pub fn session(&self) -> &BrowserSession<ChromiumBackend> {
         &self.session
     }
 
+    /// Returns a cloned event stream handle for receiving backend events.
+    ///
+    /// Callers commonly move this clone to a dedicated forwarding thread while
+    /// retaining the runtime itself for lifecycle management.
     pub fn events(&self) -> EventStream<ChromiumBackend> {
         self.events.clone()
     }
 
+    /// Returns a shared reference to the spawned Chromium process handle.
     pub fn process(&self) -> &ChromiumProcess {
         &self.process
     }
 
+    /// Returns a mutable reference to the spawned Chromium process handle.
+    ///
+    /// This is intended for advanced process-level operations such as waiting
+    /// for exit or inspecting process state directly.
     pub fn process_mut(&mut self) -> &mut ChromiumProcess {
         &mut self.process
     }
 
+    /// Returns the current runtime shutdown state tracked by the shutdown
+    /// controller.
     pub fn shutdown_state(&self) -> ChromiumRuntimeShutdownState {
         self.shutdown_controller.shutdown_state()
     }
 
+    /// Returns a cloneable reader that can observe shutdown progress from other
+    /// threads without borrowing the runtime.
     pub fn shutdown_state_reader(&self) -> ChromiumRuntimeShutdownStateReader {
         self.shutdown_controller.shutdown_state_reader()
     }
 
+    /// Installs process-wide `SIGINT`/`SIGTERM` handlers that force runtime
+    /// shutdown when either signal is received.
+    ///
+    /// Handlers can only be installed once per process. A received signal uses
+    /// PID-based termination fallback so shutdown can continue even if the
+    /// normal event-processing path is stalled.
     pub fn install_signal_handlers(&self) -> Result<(), InstallSignalHandlersError> {
         if SIGNAL_HANDLERS_INSTALLED
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -501,6 +562,12 @@ impl ChromiumRuntime {
         Ok(())
     }
 
+    /// Starts runtime shutdown using the requested mode and waits for the child
+    /// process to exit, escalating to OS-level termination if needed.
+    ///
+    /// Repeated calls after shutdown has already started are treated as no-ops.
+    /// On drop, the runtime automatically invokes this with
+    /// [`ShutdownMode::Force`].
     pub fn shutdown(&mut self, mode: ShutdownMode) -> std::io::Result<()> {
         if !self.shutdown_controller.begin_shutdown(mode) {
             return Ok(());

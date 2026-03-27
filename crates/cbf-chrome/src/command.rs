@@ -1,3 +1,11 @@
+//! Chromium-specific command transport models and conversions.
+//!
+//! This module defines [`ChromeCommand`], the command vocabulary sent across
+//! the Chromium bridge, plus conversion logic from generic
+//! [`cbf::command::BrowserCommand`] values into Chrome-specific transport
+//! commands. It is the boundary where browser-generic concepts are mapped onto
+//! Chromium tab, popup, IME, download, and extension operations.
+
 use cbf::data::dialog::DialogResponse;
 use cbf::{
     command::{BrowserCommand, BrowserOperation},

@@ -1,3 +1,10 @@
+//! Chromium IPC backend integration for `cbf-chrome`.
+//!
+//! This module implements [`ChromiumBackend`], the `cbf` backend adapter that
+//! drives command dispatch and event processing over the Chromium bridge. It
+//! translates generic `cbf` backend flow into Chrome-aware transport behavior
+//! while keeping browser-generic API vocabulary above this layer.
+
 use std::{
     collections::VecDeque,
     sync::{
@@ -20,10 +27,10 @@ use cbf::{
 };
 
 use crate::{
+    bridge::{BridgeError as IpcError, EventWaitResult, IpcClient, IpcEvent, IpcEventWaitHandle},
     command::ChromeCommand,
     data::{custom_scheme::ChromeCustomSchemeRegistration, prompt_ui::PromptUiResponse},
     event::{ChromeEvent, to_generic_event},
-    bridge::{BridgeError as IpcError, EventWaitResult, IpcClient, IpcEvent, IpcEventWaitHandle},
 };
 
 /// Backend implementation that speaks the Chromium IPC protocol.
