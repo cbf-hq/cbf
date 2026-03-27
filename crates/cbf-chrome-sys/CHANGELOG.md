@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [146.1.0-alpha.2] - 2026-03-27
+
 ### Added
 
 - FFI support for host-driven custom scheme request/response transport in the bridge ABI, including request metadata, response result values, body bytes, MIME type, CSP, and `Access-Control-Allow-Origin`.

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.1] - 2026-03-27
+
 ### Added
 
 - Initial `cbf-compositor` implementation work for the first public alpha release.
@@ -30,4 +32,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marked as an alpha-target crate; compositor behavior and platform integration remain under active development and may still contain security bugs.
 
-[Unreleased]: https://github.com/cbf-hq/cbf/commits/HEAD/crates/cbf-compositor
+[Unreleased]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.1...HEAD
+[0.1.0-alpha.1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-compositor-v0.1.0-alpha.1

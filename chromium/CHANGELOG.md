@@ -14,6 +14,8 @@ source-built use rather than a downloadable binary bundle.
 
 ## [Unreleased]
 
+## [cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1] - 2026-03-27
+
 ### Added
 
 - Host-driven custom scheme responder flow for `app://...` resources across the Chromium bridge, browser service, and loader pipeline, including response metadata for body bytes, MIME type, CSP, and `Access-Control-Allow-Origin`.
@@ -83,5 +85,6 @@ source-built use rather than a downloadable binary bundle.
 - This entry exists to document the Chromium/runtime baseline expected by the
   initial alpha.1 runtime version.
 
-[Unreleased]: https://github.com/cbf-hq/cbf/commits/HEAD/chromium
+[Unreleased]: https://github.com/cbf-hq/cbf/compare/cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1...HEAD
+[cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1
 [cbf-chrome-runtime-v146.0.0-alpha.1+chromium-146.0.7680.31-r1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v146.0.0-alpha.1+chromium-146.0.7680.31-r1

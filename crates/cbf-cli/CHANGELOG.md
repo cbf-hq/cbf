@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.2] - 2026-03-27
+
 ### Added
 
 - `bundle macos` now bundles the configured `Chromium.app` as a CBF Runtime inside the generated application bundle.
@@ -27,5 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marked as an alpha release; commands, workflows, and output are still under active development and may still change.
 
-[Unreleased]: https://github.com/cbf-hq/cbf/compare/cbf-cli-v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/cbf-hq/cbf/compare/cbf-cli-v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/cbf-hq/cbf/releases/tag/cbf-cli-v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-cli-v0.1.0-alpha.1
