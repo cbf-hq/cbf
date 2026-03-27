@@ -16,7 +16,8 @@ from tool.chromium_patches import (
 )
 
 RELEASE_OUT_DIR = Path("out") / "Release"
-RELEASE_PACKAGE_NAME = "cbf-chrome-macos"
+RELEASE_PACKAGE_NAME = "cbf-chrome-runtime"
+RELEASE_ARCHIVE_SUFFIX = "macos-aarch64"
 RELEASE_TARGETS = ("chrome", "cbf_bridge")
 RELEASE_BUILD_COMMAND = "autoninja -C out/Release chrome cbf_bridge"
 REQUIRED_GN_ARGS = {
@@ -67,7 +68,7 @@ def resolve_release_paths(version: str) -> ReleasePaths:
     out_dir = chromium_src / RELEASE_OUT_DIR
     release_dir = root / "dist" / "release"
     version_dir = release_dir / version
-    archive_path = release_dir / f"{RELEASE_PACKAGE_NAME}-{version}.tar.gz"
+    archive_path = release_dir / f"{version}-{RELEASE_ARCHIVE_SUFFIX}.tar.gz"
 
     return ReleasePaths(
         root=root,

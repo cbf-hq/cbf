@@ -20,7 +20,7 @@ The MVP release bundle contains these top-level files:
 The default archive name is:
 
 ```text
-cbf-chrome-macos-<git-tag>.tar.gz
+<git-tag>-macos-aarch64.tar.gz
 ```
 
 The archive is written under `dist/release/`.
@@ -168,7 +168,7 @@ Generated outputs:
 The final release archive is written to:
 
 ```text
-dist/release/cbf-chrome-macos-<git-tag>.tar.gz
+dist/release/<git-tag>-macos-aarch64.tar.gz
 ```
 
 ## 6. Manual upload
@@ -179,7 +179,7 @@ After `task release` completes:
 
 1. Inspect the generated files under `dist/release/<git-tag>/`.
 2. Inspect `SOURCE_INFO.txt` and confirm the recorded revisions and GN args.
-3. Upload `dist/release/cbf-chrome-macos-<git-tag>.tar.gz` to the matching
+3. Upload `dist/release/<git-tag>-macos-aarch64.tar.gz` to the matching
    runtime bundle GitHub Release.
 
 ## 7. Release legal checklist

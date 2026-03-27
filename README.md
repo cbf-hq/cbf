@@ -103,7 +103,7 @@ For now, you must build the CBF-patched Chromium runtime and `cbf_bridge` librar
 
 When available, planned release artifacts are:
 
-- GitHub Releases: `cbf-chrome-macos-<git-tag>.tar.gz`
+- GitHub Releases: `<git-tag>-macos-aarch64.tar.gz`
   - Contains `Chromium.app` and `libcbf_bridge.dylib`
 - crates.io:
   - `cbf`
