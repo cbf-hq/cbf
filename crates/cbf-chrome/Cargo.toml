@@ -3,9 +3,11 @@ name = "cbf-chrome"
 version = "0.1.0-alpha.2"
 edition.workspace = true
 authors.workspace = true
-description = "Chromium-specific safe API layer for CBF"
+description = "Chromium-specific safe API layer for CBF."
 repository.workspace = true
+homepage.workspace = true
 keywords.workspace = true
+categories = ["api-bindings", "web-programming"]
 license.workspace = true
 readme = "README.md"
 

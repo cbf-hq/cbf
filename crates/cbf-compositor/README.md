@@ -1,7 +1,6 @@
 # cbf-compositor
 
-`cbf-compositor` is the scene-based browser surface compositor for CBF desktop
-applications.
+`cbf-compositor` is the scene-based browser surface compositor for CBF applications.
 
 - ownership tree: backend object relationships such as transient browsing
   contexts being owned by a parent browsing context

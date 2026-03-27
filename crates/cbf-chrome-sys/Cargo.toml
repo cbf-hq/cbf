@@ -3,9 +3,11 @@ name = "cbf-chrome-sys"
 version = "146.1.0-alpha.2"
 edition.workspace = true
 authors.workspace = true
-description = "Chromium-specific low-level Rust FFI/wire boundary for CBF"
+description = "Low-level Chromium bridge bindings for CBF."
 repository.workspace = true
+homepage.workspace = true
 keywords.workspace = true
+categories = ["api-bindings", "external-ffi-bindings", "web-programming"]
 license.workspace = true
 readme = "README.md"
 

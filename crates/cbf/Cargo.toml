@@ -3,9 +3,11 @@ name = "cbf"
 version = "0.1.0-alpha.2"
 edition.workspace = true
 authors.workspace = true
-description.workspace = true
+description = "A framework for developing Chromium-based browsers."
 repository.workspace = true
+homepage.workspace = true
 keywords.workspace = true
+categories = ["web-programming"]
 license.workspace = true
 readme = "README.md"
 

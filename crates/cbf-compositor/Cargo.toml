@@ -3,9 +3,11 @@ name = "cbf-compositor"
 version = "0.1.0-alpha.1"
 edition.workspace = true
 authors.workspace = true
-description = "Scene-based browser surface compositor for CBF desktop applications"
+description = "Scene-based browser surface compositor for CBF applications."
 repository.workspace = true
+homepage.workspace = true
 keywords.workspace = true
+categories = ["rendering", "gui"]
 license.workspace = true
 readme = "README.md"
 
