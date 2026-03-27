@@ -8,9 +8,7 @@ use cbf_chrome::data::choice_menu::ChromeChoiceMenu;
 
 use crate::{
     error::CompositorError,
-    model::{
-        CompositionItemId, HitTestPolicy, HitTestRegionSnapshot, Rect, SurfaceTarget,
-    },
+    model::{CompositionItemId, HitTestPolicy, HitTestRegionSnapshot, Rect, SurfaceTarget},
     window::WindowHost,
 };
 

@@ -571,24 +571,28 @@ mod tests {
             )
             .unwrap();
 
-        assert!(state
-            .set_item_hit_test_regions(
-                window_id,
-                item_id,
-                2,
-                HitTestCoordinateSpace::ItemLocalCssPx,
-                vec![HitTestRegion::new(1.0, 2.0, 3.0, 4.0)],
-            )
-            .unwrap());
-        assert!(!state
-            .set_item_hit_test_regions(
-                window_id,
-                item_id,
-                1,
-                HitTestCoordinateSpace::ItemLocalCssPx,
-                vec![HitTestRegion::new(5.0, 6.0, 7.0, 8.0)],
-            )
-            .unwrap());
+        assert!(
+            state
+                .set_item_hit_test_regions(
+                    window_id,
+                    item_id,
+                    2,
+                    HitTestCoordinateSpace::ItemLocalCssPx,
+                    vec![HitTestRegion::new(1.0, 2.0, 3.0, 4.0)],
+                )
+                .unwrap()
+        );
+        assert!(
+            !state
+                .set_item_hit_test_regions(
+                    window_id,
+                    item_id,
+                    1,
+                    HitTestCoordinateSpace::ItemLocalCssPx,
+                    vec![HitTestRegion::new(5.0, 6.0, 7.0, 8.0)],
+                )
+                .unwrap()
+        );
 
         let scene = state.window_scene_items(window_id).unwrap();
         let snapshot = scene
@@ -597,6 +601,9 @@ mod tests {
             .and_then(|item| item.hit_test_snapshot)
             .expect("snapshot should exist");
         assert_eq!(snapshot.snapshot_id, 2);
-        assert_eq!(snapshot.regions, vec![HitTestRegion::new(1.0, 2.0, 3.0, 4.0)]);
+        assert_eq!(
+            snapshot.regions,
+            vec![HitTestRegion::new(1.0, 2.0, 3.0, 4.0)]
+        );
     }
 }

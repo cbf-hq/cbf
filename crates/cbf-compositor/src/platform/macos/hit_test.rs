@@ -33,10 +33,8 @@ pub(crate) fn slot_hit_test_contains_point(
     match slot.hit_test {
         HitTestPolicy::Passthrough => false,
         HitTestPolicy::Bounds => true,
-        HitTestPolicy::RegionSnapshot => slot
-            .hit_test_snapshot
-            .as_ref()
-            .is_some_and(|snapshot| match snapshot.coordinate_space {
+        HitTestPolicy::RegionSnapshot => slot.hit_test_snapshot.as_ref().is_some_and(|snapshot| {
+            match snapshot.coordinate_space {
                 HitTestCoordinateSpace::ItemLocalCssPx => {
                     let local_x = point.x - slot.bounds.origin.x;
                     let local_y =
@@ -48,7 +46,8 @@ pub(crate) fn slot_hit_test_contains_point(
                             && local_y <= f64::from(region.y + region.height)
                     })
                 }
-            }),
+            }
+        }),
     }
 }
 

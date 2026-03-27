@@ -168,7 +168,9 @@ pub(crate) fn set_compositor_window_id_for_host_window(
             .host_window_to_compositor_window
             .insert(host_window_id, compositor_window_id);
     } else {
-        guard.host_window_to_compositor_window.remove(&host_window_id);
+        guard
+            .host_window_to_compositor_window
+            .remove(&host_window_id);
     }
 }
 
