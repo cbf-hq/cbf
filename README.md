@@ -64,7 +64,8 @@ Linux, Windows, and Intel macOS are not yet supported.
 - **Developer Tools & Built-in Pages**
   - 🚧 DevTools UI
   - ✅ `chrome://version`
-  - 🚧 `chrome://history` / `chrome://settings`
+  - 🚧 `chrome://history`
+  - 🚧 `chrome://settings` (disabled by default; development-only opt-in via Chromium extra args and `--cbf-allow-unsafe-settings`)
 
 → See the [Feature Matrix](https://cbf-hq.github.io/cbf/feature-matrix.html) for full details and notes.
 

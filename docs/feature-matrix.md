@@ -66,4 +66,4 @@ This document provides a high-level overview of the features supported by CBF, c
 | DevTools UI | 🚧 | macOS | You can embed DevTools in your app |
 | `chrome://version` | ✅ | macOS | |
 | `chrome://history` | 🚧 | macOS | Deleting all history at once is not yet supported |
-| `chrome://settings` | 🚧 | macOS | Some settings options are not yet available |
+| `chrome://settings` | 🚧 | macOS | Disabled by default; only available for development with `--cbf-allow-unsafe-settings` |

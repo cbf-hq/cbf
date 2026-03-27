@@ -1,7 +1,7 @@
 From 82d310c50348ca0e238a38e8495195f1d4307cad Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 18 Mar 2026 22:00:35 +0900
-Subject: [PATCH 32/46] Add browsing context background policy flow
+Subject: [PATCH 32/47] Add browsing context background policy flow
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.h        |  8 ++

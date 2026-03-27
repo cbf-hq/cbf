@@ -1,7 +1,7 @@
 From 8f1af598a58bf5403457978dd27ebc7b2f2457c2 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 22 Mar 2026 12:28:43 +0900
-Subject: [PATCH 35/46] Add browsing context IPC bridge flow
+Subject: [PATCH 35/47] Add browsing context IPC bridge flow
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   3 +

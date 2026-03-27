@@ -1,7 +1,7 @@
 From 87086dc6e778524e5ae97b2452109da551b8ee4a Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 27 Mar 2026 11:56:09 +0900
-Subject: [PATCH 45/46] Align bridge headers with generated bindings
+Subject: [PATCH 45/47] Align bridge headers with generated bindings
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.h     |  4 ----

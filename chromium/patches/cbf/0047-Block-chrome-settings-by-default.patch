@@ -1,0 +1,720 @@
+From 65feb921525236bd7ef33b45b639f4f0b9216a15 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Fri, 27 Mar 2026 14:53:58 +0900
+Subject: [PATCH 47/47] Block chrome://settings by default
+
+---
+ .../cbf/cbf_profile_service_browsertest.cc    |  81 ++++++-
+ .../browser/cbf/cbf_settings_browsertest.cc   | 214 ++----------------
+ chrome/browser/cbf/cbf_settings_policy.h      |  31 +++
+ chrome/browser/cbf/cbf_switches.h             |   2 +
+ .../browser/cbf/cbf_web_contents_delegate.cc  |  12 +-
+ .../cbf_profile_navigation_controller.cc      |   6 +-
+ .../profile/cbf_profile_page_controller.cc    |  10 +-
+ .../profile/cbf_profile_popup_controller.cc   |  12 +
+ .../cbf/test/cbf_test_profile_observer.cc     |  31 ++-
+ .../cbf/test/cbf_test_profile_observer.h      |  13 ++
+ 10 files changed, 209 insertions(+), 203 deletions(-)
+ create mode 100644 chrome/browser/cbf/cbf_settings_policy.h
+
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 14b237475f4ec..52bd04e95bafa 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -49,8 +49,10 @@
+ #include "components/tabs/public/tab_interface.h"
+ #include "content/browser/web_contents/web_contents_impl.h"
+ #include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/page_navigator.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
++#include "content/public/common/referrer.h"
+ #include "content/public/test/browser_test.h"
+ #include "content/public/test/browser_test_utils.h"
+ #include "content/public/test/slow_download_http_response.h"
+@@ -69,6 +71,7 @@
+ #include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
+ #include "third_party/skia/include/core/SkBitmap.h"
+ #include "third_party/skia/include/core/SkColor.h"
++#include "ui/base/page_transition_types.h"
+ #include "ui/gfx/codec/png_codec.h"
+ #include "ui/gfx/geometry/point.h"
+ #include "url/origin.h"
+@@ -2250,9 +2253,79 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   EXPECT_EQ(observer_.web_page_closed_events().front(), created_id);
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SettingsNavigateRequestKeepsCurrentPage) {
++  const TabId tab_id = CreatePage("about:blank");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  const size_t baseline_event_count =
++      observer_.navigation_state_changed_events().size();
++  profile_service_->Navigate(tab_id, "chrome://settings");
++  base::RunLoop().RunUntilIdle();
++
++  EXPECT_EQ(web_contents->GetLastCommittedURL(), GURL("about:blank"));
++  EXPECT_EQ(observer_.navigation_state_changed_events().size(),
++            baseline_event_count);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SettingsCurrentTabOpenRequestKeepsCurrentPage) {
++  const TabId tab_id = CreatePage("about:blank");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  const size_t baseline_event_count =
++      observer_.navigation_state_changed_events().size();
++  content::OpenURLParams params(GURL("chrome://settings"), content::Referrer(),
++                                WindowOpenDisposition::CURRENT_TAB,
++                                ui::PAGE_TRANSITION_LINK, false);
++  content::WebContents* returned_contents =
++      profile_service_->GetWebContentsDelegate()->OpenURLFromTab(
++          web_contents, params, {});
++  EXPECT_EQ(returned_contents, web_contents);
++  base::RunLoop().RunUntilIdle();
++
++  EXPECT_EQ(web_contents->GetLastCommittedURL(), GURL("about:blank"));
++  EXPECT_EQ(observer_.navigation_state_changed_events().size(),
++            baseline_event_count);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SettingsNewTabOpenRequestIsDenied) {
++  const TabId tab_id = CreatePage("about:blank");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  const size_t baseline_result_count =
++      observer_.tab_open_resolved_events().size();
++  const size_t baseline_tab_count = profile_service_->GetTabCount();
++  profile_service_->NotifyNewTabRequested(
++      web_contents, GURL("chrome://settings"),
++      WindowOpenDisposition::NEW_FOREGROUND_TAB, true);
++  observer_.WaitForTabOpenResolvedCount(baseline_result_count + 1);
++
++  const auto& result = observer_.tab_open_resolved_events().back();
++  EXPECT_EQ(result.result, mojom::CbfTabOpenResultKind::kDenied);
++  EXPECT_FALSE(result.target_tab_id.has_value());
++  EXPECT_EQ(profile_service_->GetTabCount(), baseline_tab_count);
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        BrowserBackedPageExposesTabAndBrowserWindowInterfaces) {
+-  const TabId tab_id = CreatePage("chrome://settings");
++  const TabId tab_id = CreatePage("chrome://history");
+   ASSERT_NE(tab_id, kInvalidTabId);
+ 
+   content::WebContents* web_contents =
+@@ -2308,7 +2381,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+ 
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        EmbeddedBrowserWindowNoOpUiCallsAreSafe) {
+-  const TabId tab_id = CreatePage("chrome://settings");
++  const TabId tab_id = CreatePage("chrome://history");
+   ASSERT_NE(tab_id, kInvalidTabId);
+ 
+   Browser* host_browser = GetHostBrowserForTab(tab_id);
+@@ -2323,7 +2396,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+ 
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        EmbeddedBrowserWindowUnavailableDialogHostsReturnNull) {
+-  const TabId tab_id = CreatePage("chrome://settings");
++  const TabId tab_id = CreatePage("chrome://history");
+   ASSERT_NE(tab_id, kInvalidTabId);
+ 
+   Browser* host_browser = GetHostBrowserForTab(tab_id);
+@@ -2342,7 +2415,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+ 
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        EmbeddedBrowserWindowExposesSafeStubHelpers) {
+-  const TabId tab_id = CreatePage("chrome://settings");
++  const TabId tab_id = CreatePage("chrome://history");
+   ASSERT_NE(tab_id, kInvalidTabId);
+ 
+   Browser* host_browser = GetHostBrowserForTab(tab_id);
+diff --git a/chrome/browser/cbf/cbf_settings_browsertest.cc b/chrome/browser/cbf/cbf_settings_browsertest.cc
+index b5497846b091b..20ed2518c858f 100644
+--- a/chrome/browser/cbf/cbf_settings_browsertest.cc
++++ b/chrome/browser/cbf/cbf_settings_browsertest.cc
+@@ -1,21 +1,16 @@
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ 
+-#include <array>
+ #include <string>
+ #include <utility>
+ 
++#include "base/command_line.h"
+ #include "base/functional/bind.h"
+ #include "base/run_loop.h"
+-#include "base/values.h"
+-#include "chrome/browser/cbf/test/cbf_test_profile_observer.h"
++#include "chrome/browser/cbf/cbf_switches.h"
+ #include "chrome/browser/profiles/profile.h"
+-#include "chrome/browser/ui/browser.h"
+-#include "chrome/common/pref_names.h"
+ #include "chrome/common/url_constants.h"
+-#include "components/prefs/pref_service.h"
+ #include "chrome/test/base/in_process_browser_test.h"
+ #include "content/public/browser/web_contents.h"
+-#include "content/public/browser/web_ui.h"
+ #include "content/public/common/url_constants.h"
+ #include "content/public/test/browser_test.h"
+ #include "content/public/test/browser_test_utils.h"
+@@ -31,7 +26,6 @@ class CbfSettingsBrowserTest : public InProcessBrowserTest {
+     InProcessBrowserTest::SetUpOnMainThread();
+     profile_service_ =
+         std::make_unique<CbfProfileService>(browser()->profile(), nullptr);
+-    profile_service_->SetObserver(observer_.BindNewPipeAndPassRemote());
+   }
+ 
+   void TearDownOnMainThread() override {
+@@ -73,205 +67,43 @@ class CbfSettingsBrowserTest : public InProcessBrowserTest {
+     ASSERT_TRUE(content::WaitForLoadStop(web_contents));
+   }
+ 
+-  content::WebUI* GetWebUI(TabId tab_id) const {
+-    content::WebContents* web_contents = GetWebContents(tab_id);
+-    return web_contents ? web_contents->GetWebUI() : nullptr;
+-  }
+-
+-  void ExpectSettingsPageStillAlive(TabId tab_id) {
+-    content::WebContents* web_contents = GetWebContents(tab_id);
+-    ASSERT_NE(web_contents, nullptr);
+-    EXPECT_NE(GetWebUI(tab_id), nullptr);
+-
+-    const GURL committed_url = web_contents->GetLastCommittedURL();
+-    EXPECT_TRUE(committed_url.SchemeIs(content::kChromeUIScheme));
+-    EXPECT_EQ(committed_url.host(), chrome::kChromeUISettingsHost);
+-  }
+-
+-  void ProcessMessage(TabId tab_id, const char* message, base::ListValue args) {
+-    content::WebUI* web_ui = GetWebUI(tab_id);
+-    ASSERT_NE(web_ui, nullptr);
+-    web_ui->ProcessWebUIMessage(GURL(), message, std::move(args));
+-    base::RunLoop().RunUntilIdle();
+-  }
+-
+   std::unique_ptr<CbfProfileService> profile_service_;
+-  cbf::test::CbfTestProfileObserver observer_;
+ };
+ 
+-IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest, SettingsRootLoadsWithoutCrash) {
+-  const TabId tab_id = CreatePage("chrome://settings");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-  ExpectSettingsPageStillAlive(tab_id);
+-}
+-
+-IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+-                       SettingsAppearanceSubPageLoadsWithoutCrash) {
+-  const TabId tab_id = CreatePage("chrome://settings/appearance");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-  ExpectSettingsPageStillAlive(tab_id);
+-}
+-
+-IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+-                       SettingsPrivacySubPageLoadsWithoutCrash) {
+-  const TabId tab_id = CreatePage("chrome://settings/privacy");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-  ExpectSettingsPageStillAlive(tab_id);
+-}
+-
+-IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+-                       SettingsPerformanceSubPageLoadsWithoutCrash) {
+-  const TabId tab_id = CreatePage("chrome://settings/performance");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-  ExpectSettingsPageStillAlive(tab_id);
+-}
+-
+-IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+-                       SelectedSettingsSubPagesLoadWithoutCrash) {
+-  constexpr std::array<const char*, 6> kUrls = {
+-      "chrome://settings/downloads",
+-      "chrome://settings/onStartup",
+-      "chrome://settings/search",
+-      "chrome://settings/languages",
+-      "chrome://settings/autofill",
+-      "chrome://settings/system",
+-  };
+-
+-  for (const char* url : kUrls) {
+-    const TabId tab_id = CreatePage(url);
+-    ASSERT_NE(tab_id, kInvalidTabId) << url;
+-
+-    WaitForLoad(tab_id);
+-    ExpectSettingsPageStillAlive(tab_id);
++class CbfUnsafeSettingsBrowserTest : public CbfSettingsBrowserTest {
++ protected:
++  void SetUpCommandLine(base::CommandLine* command_line) override {
++    CbfSettingsBrowserTest::SetUpCommandLine(command_line);
++    command_line->AppendSwitch(switches::kCbfAllowUnsafeSettings);
+   }
+-}
+-
+-IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+-                       SettingsAppearanceCustomizeToolbarRequestIsSafe) {
+-  const TabId tab_id = CreatePage("chrome://settings/appearance");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-  ProcessMessage(tab_id, "openCustomizeChromeToolbarSection", base::ListValue());
+-  ExpectSettingsPageStillAlive(tab_id);
+-}
+-
+-IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+-                       SettingsPerformanceOpenFeedbackRequestIsSafe) {
+-  const TabId tab_id = CreatePage("chrome://settings/performance");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-
+-  base::ListValue args;
+-  args.Append("cbf-settings");
+-  ProcessMessage(tab_id, "openPerformanceFeedbackDialog", std::move(args));
+-
+-  ExpectSettingsPageStillAlive(tab_id);
+-}
++};
+ 
+-IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+-                       SettingsPasswordManagerOpenRequestIsSafe) {
++IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest, SettingsRootIsBlockedByDefault) {
+   const TabId tab_id = CreatePage("chrome://settings");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-
+-  base::ListValue passwords_args;
+-  passwords_args.Append(0);
+-  ProcessMessage(tab_id, "showPasswordManager", std::move(passwords_args));
+-  ExpectSettingsPageStillAlive(tab_id);
+-
+-  base::ListValue checkup_args;
+-  checkup_args.Append(1);
+-  ProcessMessage(tab_id, "showPasswordManager", std::move(checkup_args));
+-  ExpectSettingsPageStillAlive(tab_id);
+-}
+-
+-IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+-                       SettingsAboutOpenHelpAndFeedbackRequestsAreSafe) {
+-  const TabId tab_id = CreatePage("chrome://settings/help");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-
+-  ProcessMessage(tab_id, "openFeedbackDialog", base::ListValue());
+-  ExpectSettingsPageStillAlive(tab_id);
+-
+-  ProcessMessage(tab_id, "openHelpPage", base::ListValue());
+-  ExpectSettingsPageStillAlive(tab_id);
++  EXPECT_EQ(tab_id, kInvalidTabId);
++  EXPECT_EQ(GetWebContents(tab_id), nullptr);
+ }
+ 
+ IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+-                       SettingsDownloadsSelectDownloadLocationIsSafe) {
+-  const TabId tab_id = CreatePage("chrome://settings/downloads");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-  ProcessMessage(tab_id, "selectDownloadLocation", base::ListValue());
+-  ExpectSettingsPageStillAlive(tab_id);
+-}
+-
+-IN_PROC_BROWSER_TEST_F(CbfSettingsBrowserTest,
+-                       SettingsImportDataSelectFileIsSafe) {
+-  const TabId tab_id = CreatePage("chrome://settings");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-  ProcessMessage(tab_id, "importFromBookmarksFile", base::ListValue());
+-  ExpectSettingsPageStillAlive(tab_id);
++                       SettingsSubPageWithQueryAndHashIsBlockedByDefault) {
++  const TabId tab_id =
++      CreatePage("chrome://settings/appearance?source=test#section");
++  EXPECT_EQ(tab_id, kInvalidTabId);
++  EXPECT_EQ(GetWebContents(tab_id), nullptr);
+ }
+ 
+-IN_PROC_BROWSER_TEST_F(
+-    CbfSettingsBrowserTest,
+-    SettingsMultipleUnsupportedActionsInSequenceRemainNonCrashing) {
+-  const TabId tab_id = CreatePage("chrome://settings");
+-  ASSERT_NE(tab_id, kInvalidTabId);
+-
+-  WaitForLoad(tab_id);
+-
+-  ProcessMessage(tab_id, "openHelpPage", base::ListValue());
+-  ExpectSettingsPageStillAlive(tab_id);
+-
+-  ProcessMessage(tab_id, "openFeedbackDialog", base::ListValue());
+-  ExpectSettingsPageStillAlive(tab_id);
+-
+-  ProcessMessage(tab_id, "selectDownloadLocation", base::ListValue());
+-  ExpectSettingsPageStillAlive(tab_id);
+-
+-  ProcessMessage(tab_id, "importFromBookmarksFile", base::ListValue());
+-  ExpectSettingsPageStillAlive(tab_id);
+-}
+-
+-IN_PROC_BROWSER_TEST_F(
+-    CbfSettingsBrowserTest,
+-    SettingsAppearanceResetPinnedToolbarActionsRemainsNonCrashingAndAppliesPref) {
++IN_PROC_BROWSER_TEST_F(CbfUnsafeSettingsBrowserTest,
++                       UnsafeSettingsSwitchAllowsRepresentativePageLoad) {
+   const TabId tab_id = CreatePage("chrome://settings/appearance");
+   ASSERT_NE(tab_id, kInvalidTabId);
+ 
+   WaitForLoad(tab_id);
+ 
+-  PrefService* prefs = browser()->profile()->GetPrefs();
+-  ASSERT_NE(prefs, nullptr);
+-  prefs->SetBoolean(prefs::kShowHomeButton, true);
+-  prefs->SetBoolean(prefs::kShowForwardButton, false);
+-
+-  EXPECT_TRUE(prefs->GetBoolean(prefs::kShowHomeButton));
+-  EXPECT_FALSE(prefs->GetBoolean(prefs::kShowForwardButton));
+-
+-  ProcessMessage(tab_id, "resetPinnedToolbarActions", base::ListValue());
+-
+-  ExpectSettingsPageStillAlive(tab_id);
+-  EXPECT_FALSE(prefs->GetBoolean(prefs::kShowHomeButton));
+-  EXPECT_TRUE(prefs->GetBoolean(prefs::kShowForwardButton));
++  content::WebContents* web_contents = GetWebContents(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  const GURL committed_url = web_contents->GetLastCommittedURL();
++  EXPECT_TRUE(committed_url.SchemeIs(content::kChromeUIScheme));
++  EXPECT_EQ(committed_url.host(), chrome::kChromeUISettingsHost);
+ }
+ 
+ }  // namespace
+diff --git a/chrome/browser/cbf/cbf_settings_policy.h b/chrome/browser/cbf/cbf_settings_policy.h
+new file mode 100644
+index 0000000000000..12e4f086b13d5
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_settings_policy.h
+@@ -0,0 +1,31 @@
++#ifndef CHROME_BROWSER_CBF_CBF_SETTINGS_POLICY_H_
++#define CHROME_BROWSER_CBF_CBF_SETTINGS_POLICY_H_
++
++#include "base/command_line.h"
++#include "chrome/browser/cbf/cbf_switches.h"
++#include "chrome/common/url_constants.h"
++#include "content/public/common/url_constants.h"
++#include "url/gurl.h"
++
++namespace cbf {
++
++inline bool IsSettingsUrlBlocked(const GURL& url) {
++  if (!url.is_valid()) {
++    return false;
++  }
++
++  const base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
++  const bool allow_unsafe_settings =
++      command_line &&
++      command_line->HasSwitch(switches::kCbfAllowUnsafeSettings);
++  if (allow_unsafe_settings) {
++    return false;
++  }
++
++  return url.SchemeIs(content::kChromeUIScheme) &&
++         url.host() == chrome::kChromeUISettingsHost;
++}
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_CBF_SETTINGS_POLICY_H_
+diff --git a/chrome/browser/cbf/cbf_switches.h b/chrome/browser/cbf/cbf_switches.h
+index 1d5555393211f..d771cb6f39c92 100644
+--- a/chrome/browser/cbf/cbf_switches.h
++++ b/chrome/browser/cbf/cbf_switches.h
+@@ -5,6 +5,8 @@ namespace cbf::switches {
+ 
+ inline constexpr char kCbfDisableHostOwnedDrag[] =
+     "cbf-disable-host-owned-drag";
++inline constexpr char kCbfAllowUnsafeSettings[] =
++    "cbf-allow-unsafe-settings";
+ inline constexpr char kCbfCustomSchemes[] = "cbf-custom-schemes";
+ inline constexpr char kCbfIpcHandle[] = "cbf-ipc-handle";
+ inline constexpr char kCbfSessionToken[] = "cbf-session-token";
+diff --git a/chrome/browser/cbf/cbf_web_contents_delegate.cc b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+index 39fc9f70bcbed..0efa2cdce912b 100644
+--- a/chrome/browser/cbf/cbf_web_contents_delegate.cc
++++ b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+@@ -6,6 +6,7 @@
+ #include "chrome/browser/cbf/cbf_java_script_dialog_manager.h"
+ #include "base/logging.h"
+ #include "chrome/browser/cbf/cbf_profile_service.h"
++#include "chrome/browser/cbf/cbf_settings_policy.h"
+ #include "chrome/browser/cbf/cbf_switches.h"
+ #include "chrome/browser/ui/browser_navigator.h"
+ #include "chrome/browser/ui/browser_navigator_params.h"
+@@ -57,6 +58,11 @@ content::WebContents* CbfWebContentsDelegate::OpenURLFromTab(
+     return nullptr;
+   }
+ 
++  if (params.disposition == WindowOpenDisposition::CURRENT_TAB &&
++      IsSettingsUrlBlocked(params.url)) {
++    return source;
++  }
++
+   if (params.disposition == WindowOpenDisposition::CURRENT_TAB) {
+     base::WeakPtr<content::NavigationHandle> navigation_handle =
+         source->GetController().LoadURLWithParams(
+@@ -91,8 +97,8 @@ content::WebContents* CbfWebContentsDelegate::OpenURLFromTab(
+     case WindowOpenDisposition::NEW_WINDOW:
+     case WindowOpenDisposition::NEW_POPUP:
+       profile_service_->NotifyNewTabRequested(source, params.url,
+-                                                  params.disposition,
+-                                                  params.user_gesture);
++                                              params.disposition,
++                                              params.user_gesture);
+       return nullptr;
+     default:
+       break;
+@@ -119,7 +125,7 @@ content::WebContents* CbfWebContentsDelegate::AddNewContents(
+ 
+   if (profile_service_ && source) {
+     profile_service_->NotifyNewTabRequested(source, target_url, disposition,
+-                                                user_gesture);
++                                            user_gesture);
+   }
+ 
+   return nullptr;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+index 2344fb30c8064..c19b20f2ce9a2 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+@@ -2,6 +2,8 @@
+ 
+ #include <string>
+ 
++#include "chrome/browser/cbf/cbf_settings_policy.h"
++#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
+ #include "content/browser/renderer_host/render_widget_host_impl.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/render_frame_host.h"
+@@ -9,7 +11,6 @@
+ #include "content/public/browser/render_widget_host.h"
+ #include "content/public/browser/render_widget_host_view.h"
+ #include "content/public/browser/web_contents.h"
+-#include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
+ #include "content/public/common/referrer.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/base/page_transition_types.h"
+@@ -80,6 +81,9 @@ void CbfProfileNavigationController::Navigate(TabId tab_id,
+   if (!gurl.is_valid()) {
+     return;
+   }
++  if (IsSettingsUrlBlocked(gurl)) {
++    return;
++  }
+ 
+   web_contents->GetController().LoadURL(
+       gurl, content::Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
+diff --git a/chrome/browser/cbf/profile/cbf_profile_page_controller.cc b/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
+index 89a99d8e6f473..e1d1a78947c0f 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
+@@ -1,8 +1,8 @@
+ #include "chrome/browser/cbf/profile/cbf_profile_page_controller.h"
+ 
+-#include "url/gurl.h"
+-
++#include "chrome/browser/cbf/cbf_settings_policy.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "url/gurl.h"
+ 
+ namespace cbf {
+ 
+@@ -13,7 +13,11 @@ CbfProfilePageController::CbfProfilePageController(
+ CbfProfilePageController::~CbfProfilePageController() = default;
+ 
+ TabId CbfProfilePageController::CreateTab(const std::string& initial_url) {
+-  return context_->tab_manager().CreateTab(GURL(initial_url));
++  const GURL url(initial_url);
++  if (IsSettingsUrlBlocked(url)) {
++    return kInvalidTabId;
++  }
++  return context_->tab_manager().CreateTab(url);
+ }
+ 
+ void CbfProfilePageController::RequestCloseTab(TabId tab_id) {
+diff --git a/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
+index 6bae5c39890c0..73a176bbb3ac4 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_popup_controller.cc
+@@ -1,5 +1,6 @@
+ #include "chrome/browser/cbf/profile/cbf_profile_popup_controller.h"
+ 
++#include "chrome/browser/cbf/cbf_settings_policy.h"
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_ime_controller.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_navigation_controller.h"
+@@ -36,6 +37,12 @@ void CbfProfilePopupController::RequestTabOpen(
+   }
+ 
+   const uint64_t request_id = next_open_request_id_++;
++  if (IsSettingsUrlBlocked(target_url)) {
++    ResolveOpenRequest(request_id, mojom::CbfTabOpenResultKind::kDenied,
++                       std::nullopt);
++    return;
++  }
++
+   PendingOpenRequest request;
+   request.request_id = request_id;
+   request.source_tab_id = source_tab_id;
+@@ -66,6 +73,11 @@ void CbfProfilePopupController::RespondTabOpen(
+     return;
+   }
+   const PendingOpenRequest request = it->second;
++  if (IsSettingsUrlBlocked(request.target_url)) {
++    ResolveOpenRequest(response->request_id,
++                       mojom::CbfTabOpenResultKind::kDenied, std::nullopt);
++    return;
++  }
+ 
+   switch (response->action) {
+     case mojom::CbfTabOpenResponseAction::kAllowNewContext: {
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.cc b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+index 790b06eba446f..bbcffb93a7a52 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.cc
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.cc
+@@ -533,6 +533,18 @@ void CbfTestProfileObserver::WaitForTabIpcMessageCount(size_t expected_count) {
+   quit_wait_loop_.Reset();
+ }
+ 
++void CbfTestProfileObserver::WaitForTabOpenResolvedCount(size_t expected_count) {
++  ResetWaitTargets();
++  wait_tab_open_resolved_count_ = expected_count;
++  if (tab_open_resolved_events_.size() >= wait_tab_open_resolved_count_) {
++    return;
++  }
++  base::RunLoop loop;
++  quit_wait_loop_ = loop.QuitClosure();
++  loop.Run();
++  quit_wait_loop_.Reset();
++}
++
+ void CbfTestProfileObserver::WaitForNavigationStateChangedCount(
+     size_t expected_count) {
+   ResetWaitTargets();
+@@ -748,7 +760,18 @@ void CbfTestProfileObserver::OnTabOpenRequested(
+     cbf::mojom::CbfTabOpenRequestPtr request) {}
+ 
+ void CbfTestProfileObserver::OnTabOpenResolved(
+-    cbf::mojom::CbfTabOpenResultPtr result) {}
++    cbf::mojom::CbfTabOpenResultPtr result) {
++  if (!result) {
++    return;
++  }
++
++  TabOpenResolvedEvent event;
++  event.request_id = result->request_id;
++  event.result = result->result;
++  event.target_tab_id = result->target_tab_id;
++  tab_open_resolved_events_.push_back(std::move(event));
++  MaybeQuitWaitLoop();
++}
+ 
+ void CbfTestProfileObserver::OnTitleUpdated(uint64_t tab_id,
+                                             const std::string& title) {}
+@@ -1143,6 +1166,11 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
+     quit_wait_loop_.Run();
+     return;
+   }
++  if (wait_tab_open_resolved_count_ > 0 &&
++      tab_open_resolved_events_.size() >= wait_tab_open_resolved_count_) {
++    quit_wait_loop_.Run();
++    return;
++  }
+   if (wait_navigation_state_changed_count_ > 0 &&
+       navigation_state_changed_events_.size() >=
+           wait_navigation_state_changed_count_) {
+@@ -1181,6 +1209,7 @@ void CbfTestProfileObserver::ResetWaitTargets() {
+   wait_choice_menu_count_ = 0;
+   wait_extension_popup_choice_menu_count_ = 0;
+   wait_tab_ipc_message_count_ = 0;
++  wait_tab_open_resolved_count_ = 0;
+   wait_navigation_state_changed_count_ = 0;
+   wait_find_reply_count_ = 0;
+ }
+diff --git a/chrome/browser/cbf/test/cbf_test_profile_observer.h b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+index 2ef1e44ac1654..e15b12598d1d5 100644
+--- a/chrome/browser/cbf/test/cbf_test_profile_observer.h
++++ b/chrome/browser/cbf/test/cbf_test_profile_observer.h
+@@ -357,6 +357,13 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+     bool final_update = false;
+   };
+ 
++  struct TabOpenResolvedEvent {
++    uint64_t request_id = 0;
++    cbf::mojom::CbfTabOpenResultKind result =
++        cbf::mojom::CbfTabOpenResultKind::kAborted;
++    std::optional<uint64_t> target_tab_id;
++  };
++
+   enum class DownloadEventKind {
+     kCreated,
+     kUpdated,
+@@ -467,6 +474,9 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   const std::vector<FindReplyEvent>& find_reply_events() const {
+     return find_reply_events_;
+   }
++  const std::vector<TabOpenResolvedEvent>& tab_open_resolved_events() const {
++    return tab_open_resolved_events_;
++  }
+   const std::vector<DownloadEventKind>& download_event_order() const {
+     return download_event_order_;
+   }
+@@ -496,6 +506,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   void WaitForChoiceMenuCount(size_t expected_count);
+   void WaitForExtensionPopupChoiceMenuCount(size_t expected_count);
+   void WaitForTabIpcMessageCount(size_t expected_count);
++  void WaitForTabOpenResolvedCount(size_t expected_count);
+   void WaitForNavigationStateChangedCount(size_t expected_count);
+   void WaitForFindReplyCount(size_t expected_count);
+ 
+@@ -663,6 +674,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   std::vector<ChoiceMenuEvent> choice_menu_events_;
+   std::vector<ExtensionPopupChoiceMenuEvent> extension_popup_choice_menu_events_;
+   std::vector<TabIpcMessageEvent> tab_ipc_message_events_;
++  std::vector<TabOpenResolvedEvent> tab_open_resolved_events_;
+   std::vector<NavigationStateChangedEvent> navigation_state_changed_events_;
+   std::vector<FindReplyEvent> find_reply_events_;
+   std::vector<DownloadEventKind> download_event_order_;
+@@ -692,6 +704,7 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
+   size_t wait_choice_menu_count_ = 0;
+   size_t wait_extension_popup_choice_menu_count_ = 0;
+   size_t wait_tab_ipc_message_count_ = 0;
++  size_t wait_tab_open_resolved_count_ = 0;
+   size_t wait_navigation_state_changed_count_ = 0;
+   size_t wait_find_reply_count_ = 0;
+   base::RepeatingClosure quit_wait_loop_;
+-- 
+2.50.1 (Apple Git-155)
+

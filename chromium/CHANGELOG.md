@@ -37,6 +37,7 @@ source-built use rather than a downloadable binary bundle.
 - Same-document `NavigationStateChanged` emission coverage for SPA-style history updates (`pushState`/`replaceState`/same-document back-forward traversal) with dedicated browser-test assertions.
 - Chromium find-in-page bridge flow for tabs, including bridge commands for `FindInPage` and `StopFinding`, `FindReply` observer/event transport, and host-visible match-count / active-match / selection-rect updates.
 - Browser-test coverage for find-in-page search, next/previous follow-up navigation, stop-finding behavior, and empty-query no-op handling in `CbfProfileServiceBrowserTest`.
+- Browser-test coverage for default-blocked `chrome://settings` behavior, including blocked new-page creation, no-op current-tab navigation, denied new-tab open flow, and unsafe runtime-switch opt-in re-enable coverage.
 
 ### Changed
 
@@ -44,6 +45,7 @@ source-built use rather than a downloadable binary bundle.
 - Updated navigation-state observer behavior to emit same-document history updates while suppressing duplicate `NavigationStateChanged` payloads via snapshot diffing.
 - macOS external drag pasteboard normalization now reuses Chromium `PopulateDropDataFromPasteboard()` behavior instead of collecting arbitrary platform pasteboard flavor strings into webpage-visible drag data.
 - Aligned the bridge headers with the generated Rust bindings by treating `cbf_bridge.h` and `cbf_bridge_ffi.h` as the source of truth for bindgen-generated `cbf-chrome-sys` artifacts.
+- `chrome://settings` is now blocked by default in the Chromium runtime across direct tab creation, explicit host navigation, current-tab page navigation, and host-mediated tab-open requests, while allowing development-only opt-in through `--cbf-allow-unsafe-settings`.
 
 ### Fixed
 
