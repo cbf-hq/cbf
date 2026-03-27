@@ -4,6 +4,7 @@ use cbf_chrome::event::ChromeEvent;
 #[derive(Debug, Clone)]
 pub(crate) enum MenuCommand {
     ReloadExtensions,
+    OpenExtensionsPage,
     OpenFind,
     ActivateExtension { extension_id: String },
 }

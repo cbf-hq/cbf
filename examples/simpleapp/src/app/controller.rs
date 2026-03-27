@@ -240,6 +240,19 @@ impl AppController {
                 self.extensions_loading = true;
                 vec![CoreAction::SetExtensionsMenuLoading]
             }
+            MenuCommand::OpenExtensionsPage => {
+                let Some(browsing_context_id) = primary_browsing_context_id(&self.shared) else {
+                    warn!("ignoring extensions page open without a primary browsing context");
+                    return Vec::new();
+                };
+                if let Err(err) = self
+                    .browser_handle
+                    .navigate(browsing_context_id, "chrome://extensions".to_string())
+                {
+                    warn!("failed to open extensions page: {err}");
+                }
+                Vec::new()
+            }
             MenuCommand::OpenFind => {
                 self.open_find_ui_for_target();
                 Vec::new()

@@ -13,6 +13,7 @@ use winit::event_loop::EventLoopProxy;
 use crate::app::events::{MenuCommand, UserEvent};
 
 const MENU_ID_RELOAD_EXTENSIONS: &str = "simpleapp.extensions.reload";
+const MENU_ID_OPEN_EXTENSIONS_PAGE: &str = "simpleapp.extensions.page";
 const MENU_ID_EXTENSION_PREFIX: &str = "simpleapp.extensions.item.";
 const MENU_ID_EXTENSIONS_STATUS: &str = "simpleapp.extensions.status";
 const MENU_ID_FIND: &str = "simpleapp.edit.find";
@@ -82,7 +83,13 @@ impl MacMenu {
         ])?;
 
         let reload_extensions_item =
-            MenuItem::with_id(MENU_ID_RELOAD_EXTENSIONS, "Reload Extensions", true, None);
+            MenuItem::with_id(MENU_ID_RELOAD_EXTENSIONS, "Reload extensions", true, None);
+        let open_extensions_page_item = MenuItem::with_id(
+            MENU_ID_OPEN_EXTENSIONS_PAGE,
+            "Manage extensions",
+            true,
+            None,
+        );
         let extensions_status_item = MenuItem::with_id(
             MENU_ID_EXTENSIONS_STATUS,
             "No extensions loaded",
@@ -92,6 +99,7 @@ impl MacMenu {
         let extensions_menu = Submenu::new("&Extensions", true);
         extensions_menu.append_items(&[
             &reload_extensions_item,
+            &open_extensions_page_item,
             &PredefinedMenuItem::separator(),
             &extensions_status_item,
         ])?;
@@ -205,6 +213,9 @@ fn extension_menu_id(extension_id: &str) -> String {
 fn menu_command_for_event(event: &MenuEvent) -> Option<MenuCommand> {
     if event.id == MENU_ID_RELOAD_EXTENSIONS {
         return Some(MenuCommand::ReloadExtensions);
+    }
+    if event.id == MENU_ID_OPEN_EXTENSIONS_PAGE {
+        return Some(MenuCommand::OpenExtensionsPage);
     }
     if event.id == MENU_ID_FIND {
         return Some(MenuCommand::OpenFind);
