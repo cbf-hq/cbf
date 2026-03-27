@@ -82,6 +82,9 @@ impl BridgeLoadOptions {
 
 impl BridgeLibrary {
     /// Load the bridge API using the provided search options.
+    ///
+    /// The library file path is resolved by [`resolve_bridge_library_path`].
+    /// See that function for the runtime search order and fallback behavior.
     pub fn load(options: &BridgeLoadOptions) -> Result<Self, BridgeLoadError> {
         let library_path = resolve_bridge_library_path(options)?;
         let bindings = unsafe { CbfBridge::new(&library_path) }.map_err(|source| {
@@ -133,6 +136,22 @@ pub fn bridge() -> Result<&'static BridgeLibrary, BridgeLoadError> {
 }
 
 /// Resolve the bridge library path from explicit options and known runtime locations.
+///
+/// Path resolution proceeds in this order:
+///
+/// 1. If [`BridgeLoadOptions::explicit_library_path`] is set and points to an
+///    existing file, return it as-is.
+/// 2. If [`BridgeLoadOptions::explicit_library_dir`] is set, append the
+///    platform-specific library file name and return that path when the file
+///    exists.
+/// 3. If the `CBF_BRIDGE_LIB_DIR` environment variable is set, append the same
+///    platform-specific file name and return that path when the file exists.
+/// 4. Fall back to locations derived from the current executable:
+///    - a sibling file next to the executable on all platforms
+///    - `Contents/Frameworks/<bridge-lib>` inside a macOS app bundle
+///
+/// The first existing file wins. If none of these locations contain the bridge
+/// library, this function returns [`BridgeLoadError::PathNotFound`].
 pub fn resolve_bridge_library_path(
     options: &BridgeLoadOptions,
 ) -> Result<PathBuf, BridgeLoadError> {
