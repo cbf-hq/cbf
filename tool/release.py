@@ -93,17 +93,22 @@ def current_release_version(root: Path, *, tag: str | None = None) -> str:
             check=False,
         )
         if result.returncode != 0:
-            raise ConfigError(f"Release tag does not exist: {tag}")
+            raise ConfigError(
+                "Runtime bundle tag does not exist: "
+                f"{tag}. Create it first using the canonical runtime bundle tag format."
+            )
         return tag
 
     result = run_with_return(["git", "tag", "--points-at", "HEAD"], cwd=root)
     tags = [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
     if not tags:
-        raise ConfigError("HEAD is not tagged. Create a release tag before packaging.")
+        raise ConfigError(
+            "HEAD is not tagged. Create a runtime bundle tag before packaging."
+        )
     if len(tags) > 1:
         raise ConfigError(
-            "HEAD has multiple tags. Keep exactly one release tag on HEAD for deterministic packaging."
+            "HEAD has multiple tags. Keep exactly one runtime bundle tag on HEAD for deterministic packaging."
         )
 
     return tags[0]

@@ -55,7 +55,7 @@ def _common_release_tag_option[FS: Callable[..., Any]](func: FS) -> FS:
         "--tag",
         default=None,
         help=(
-            "Release tag to package. "
+            "Runtime bundle tag to package. "
             "Defaults to the single tag pointing at HEAD."
         ),
     )(func)

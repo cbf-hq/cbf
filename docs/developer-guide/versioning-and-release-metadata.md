@@ -165,24 +165,45 @@ versions.
 The canonical tag format is:
 
 ```text
-cbf-chrome-runtime-v<cbf-chrome-version>+chromium-<chromium-version>-r<release-revision>
+cbf-chrome-runtime-v<runtime-version>+chromium-<chromium-version>-r<release-revision>
 ```
 
 Example:
 
 ```text
-cbf-chrome-runtime-v0.1.0+chromium-146.0.7632.160-r1
+cbf-chrome-runtime-v146.0.0+chromium-146.0.7632.160-r1
 ```
 
 Field meanings:
 
-- `<cbf-chrome-version>`: the published `cbf-chrome` crate line for this bundle
+- `<runtime-version>`: the runtime-bundle-specific SemVer line for this bundle
 - `<chromium-version>`: the full Chromium runtime version included in the bundle
 - `<release-revision>`: packaging and redistribution revision for the same
-  crate/runtime combination, starting at `1`
+  runtime version and Chromium version combination, starting at `1`
+
+`runtime-version` is independent from `cbf`, `cbf-chrome`, and
+`cbf-chrome-sys`.
+It identifies the compatibility and contents of the packaged runtime bundle
+itself rather than mirroring a crate version.
+
+Maintainers should change the left side of the tag whenever the runtime
+contents materially change.
+The `rN` suffix is reserved for repackaging or redistribution revisions of the
+same runtime version and the same Chromium version.
+
+Recommended bump rules for `runtime-version`:
+
+- bump `patch` when the exact bundled Chromium version changes without a
+  runtime-specific compatibility story change
+- bump `minor` when runtime-side functionality or packaged contents change
+  without changing the exact Chromium version
+- bump `major` when the packaged runtime introduces a breaking compatibility
+  change for downstream users
+- use `alpha.N`, `beta.N`, and `rc.N` as pre-release identifiers on the runtime
+  version before the corresponding stable line is published
 
 Release revision increments when maintainers republish artifacts for the same
-crate versions and the same Chromium version, for example:
+runtime version and the same Chromium version, for example:
 
 - refreshed `Chromium.app`
 - rebuilt `libcbf_bridge.dylib`
@@ -191,9 +212,11 @@ crate versions and the same Chromium version, for example:
 
 Examples:
 
-- `cbf-chrome-runtime-v0.1.0+chromium-146.0.7632.160-r1`
-- `cbf-chrome-runtime-v0.1.0+chromium-146.0.7632.160-r2`
-- `cbf-chrome-runtime-v0.1.0+chromium-147.0.7651.5-r1`
+- `cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1`
+- `cbf-chrome-runtime-v146.0.0+chromium-146.0.7632.160-r1`
+- `cbf-chrome-runtime-v146.0.0+chromium-146.0.7632.160-r2`
+- `cbf-chrome-runtime-v146.0.1+chromium-146.0.7680.154-r1`
+- `cbf-chrome-runtime-v146.1.0+chromium-146.0.7680.153-r1`
 
 ## 5. Runtime Bundle Release Titles
 
@@ -203,18 +226,19 @@ version obvious.
 Recommended format:
 
 ```text
-CBF Chrome v<cbf-chrome-version> for Chromium v<chromium-version> (Release <n>)
+CBF Chrome Runtime v<runtime-version> for Chromium v<chromium-version> (Release <n>)
 ```
 
 Examples:
 
-- `CBF Chrome v0.1.0 for Chromium v146.0.7632.160 (Release 1)`
-- `CBF Chrome v0.1.0 for Chromium v146.0.7632.160 (Release 2)`
+- `CBF Chrome Runtime v146.0.0 for Chromium v146.0.7632.160 (Release 1)`
+- `CBF Chrome Runtime v146.0.0 for Chromium v146.0.7632.160 (Release 2)`
 
 ## 6. Release Notes Metadata
 
 Each runtime bundle release should explicitly record:
 
+- runtime version
 - `cbf` version
 - `cbf-chrome` version
 - `cbf-chrome-sys` version
@@ -231,14 +255,15 @@ The runtime bundle release notes should be derived from:
 Recommended release note structure:
 
 ```text
+Runtime
+- version: 146.0.0
+- Chromium: 146.0.7632.160
+- Release revision: r1
+
 Crates
 - cbf: 0.1.0
 - cbf-chrome: 0.1.0
 - cbf-chrome-sys: 146.1.0
-
-Bundled runtime
-- Chromium: 146.0.7632.160
-- Release revision: r1
 
 Notes
 - Initial public prebuilt release for Chromium milestone 146.
@@ -293,6 +318,6 @@ Rules:
   rebuilt.
 - Publish a new `cbf-chrome-sys` version when ABI or wire-boundary compatibility
   changes should be visible to Cargo users.
-- Keep runtime bundle release notes explicit about both the crate line and the
-  packaged Chromium revision.
+- Keep runtime version, crate versions, exact Chromium version, and release
+  revision explicit as separate identifiers in release notes and changelogs.
 - Keep the crate tag namespace and runtime tag namespace distinct.

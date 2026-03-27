@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 This changelog tracks the Chromium-side runtime baseline associated with
 `cbf-chrome-runtime` tags, including `Chromium.app`, `libcbf_bridge.dylib`, and
-other Chromium-side changes that affect the runtime line used by CBF crates.
+other Chromium-side changes that affect the runtime version used by CBF crates.
 
 Runtime tags recorded here may exist even when no prebuilt runtime artifacts are
 published yet. In that case, the entry records the intended runtime baseline for
@@ -57,26 +57,31 @@ source-built use rather than a downloadable binary bundle.
 - Profile teardown stability in `CbfProfileService` by restoring download-prompt prefs before shutdown and removing stale profile-service registry entries during `OnProfileWillBeDestroyed`.
 - External drag operation masks now preserve Chromium/AppKit `Move` semantics for `dropEffect = "move"` targets instead of silently degrading the allowed-operation bitmask across the Rust/Chromium boundary.
 
-## [cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1] - 2026-03-17
+## [cbf-chrome-runtime-v146.0.0-alpha.1+chromium-146.0.7680.31-r1] - 2026-03-17
 
 ### Added
 
-- Established the initial Chromium-side runtime baseline for the `0.1.0-alpha.1` CBF crate line.
+- Established the initial Chromium-side runtime baseline for runtime version
+  `146.0.0-alpha.1`.
 - Recorded the Chromium milestone 146 runtime state corresponding to:
+  - runtime version `146.0.0-alpha.1`
   - `cbf` `0.1.0-alpha.1`
   - `cbf-chrome` `0.1.0-alpha.1`
   - `cbf-chrome-sys` `146.1.0-alpha.1`
 
 ### Changed
 
-- Captured the Chromium fork and bridge state used as the alpha.1 runtime reference point before the `alpha.2` crate cycle.
+- Captured the Chromium fork and bridge state used as the alpha.1 runtime
+  reference point before the next runtime pre-release cycle.
 
 ### Notes
 
 - Bundled runtime target: Chromium `146.0.7680.31`
+- Runtime version: `146.0.0-alpha.1`
 - Release revision: `r1`
 - No prebuilt runtime artifacts were published for this tag.
-- This entry exists to document the Chromium/runtime baseline expected by the alpha.1 crate line.
+- This entry exists to document the Chromium/runtime baseline expected by the
+  initial alpha.1 runtime version.
 
 [Unreleased]: https://github.com/cbf-hq/cbf/commits/HEAD/chromium
-[cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1
+[cbf-chrome-runtime-v146.0.0-alpha.1+chromium-146.0.7680.31-r1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v146.0.0-alpha.1+chromium-146.0.7680.31-r1

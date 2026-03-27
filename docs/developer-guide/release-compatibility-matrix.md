@@ -41,8 +41,8 @@ policy or replace Cargo dependency constraints.
 
 | Release set | Status | Release date | cbf | cbf-chrome | cbf-chrome-sys | cbf-cli | cbf-compositor | Chromium | Runtime bundle tag | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 2026-03 alpha.1 | released | 2026-03-16 / 2026-03-17 runtime | 0.1.0-alpha.1 | 0.1.0-alpha.1 | 146.1.0-alpha.1 | 0.1.0-alpha.1 | not released | 146.0.7680.31 | `cbf-chrome-runtime-v0.1.0-alpha.1+chromium-146.0.7680.31-r1` | First public pre-release set for milestone 146 |
-| 2026-03 alpha.2 | planned | TBD | 0.1.0-alpha.2 | 0.1.0-alpha.2 | 146.1.0-alpha.2 | 0.1.0-alpha.2 | 0.1.0-alpha.1 | 146.0.7680.153 | `cbf-chrome-runtime-v0.1.0-alpha.2+chromium-146.0.7680.153-r1` | First public `cbf-compositor` release |
+| 2026-03 alpha.1 | released | 2026-03-16 / 2026-03-17 runtime | 0.1.0-alpha.1 | 0.1.0-alpha.1 | 146.1.0-alpha.1 | 0.1.0-alpha.1 | not released | 146.0.7680.31 | `cbf-chrome-runtime-v146.0.0-alpha.1+chromium-146.0.7680.31-r1` | First public pre-release set for milestone 146 |
+| 2026-03 alpha.2 | planned | TBD | 0.1.0-alpha.2 | 0.1.0-alpha.2 | 146.1.0-alpha.2 | 0.1.0-alpha.2 | 0.1.0-alpha.1 | 146.0.7680.153 | `cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1` | First public `cbf-compositor` release |
 
 ## 4. Interpretation Notes
 
@@ -51,8 +51,12 @@ policy or replace Cargo dependency constraints.
 - `cbf-chrome-sys` tracks the Chromium milestone line. For example,
   `146.1.0-alpha.2` belongs to milestone `146`.
 - Runtime bundle tags identify packaged Chromium artifacts, not crate releases.
-  A runtime bundle rebuild for the same crate and Chromium versions should bump
-  only the runtime release revision (`r1`, `r2`, ...).
+  The left side of the runtime bundle tag is the runtime version, which is
+  tracked independently from the crate columns in this matrix.
+- A runtime bundle rebuild for the same runtime version and the same Chromium
+  version should bump only the runtime release revision (`r1`, `r2`, ...).
+- Each row still records crate releases together with the corresponding runtime
+  bundle, even though crate versions and runtime version evolve independently.
 - `cbf-compositor` participates in the documented release set only from its
   first public release onward. Earlier rows should keep it as `not released`
   rather than inferring backfilled compatibility.

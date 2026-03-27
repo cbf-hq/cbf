@@ -54,8 +54,17 @@ uv run tool release source-info
 uv run tool release package
 ```
 
-Each release command also accepts `--tag <tag>` to package a specific release
-tag instead of relying on the single tag pointing at `HEAD`.
+Each release command also accepts `--tag <tag>` to package a specific runtime
+bundle tag instead of relying on the single tag pointing at `HEAD`.
+
+The release helper treats the tag string literally for archive naming and
+`SOURCE_INFO.txt`.
+Use the canonical runtime bundle tag format documented in
+`docs/developer-guide/versioning-and-release-metadata.md`, for example:
+
+```text
+cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1
+```
 
 These commands are normally orchestrated from the repository root via
 `Taskfile.yml`.

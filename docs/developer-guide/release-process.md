@@ -98,8 +98,8 @@ in `docs/developer-guide/versioning-and-release-metadata.md`.
 If `HEAD` is untagged, the release flow fails.
 
 If a maintainer needs to package a different tagged revision or `HEAD` has
-multiple release-related tags, pass `--tag <tag>` to select the release tag
-explicitly.
+multiple release-related tags, pass `--tag <tag>` to select the runtime bundle
+tag explicitly.
 
 ## 4. Task entrypoints
 
@@ -114,7 +114,7 @@ task release:check
 Explicit tag:
 
 ```bash
-task release:check TAG=cbf-chrome-runtime-v0.1.0+chromium-146.0.7632.160-r1
+task release:check TAG=cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1
 ```
 
 Build release artifacts:
