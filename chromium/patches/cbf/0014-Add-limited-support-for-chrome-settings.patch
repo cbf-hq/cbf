@@ -1,7 +1,7 @@
 From 661e62218e7eda9cb8e683caa0afaa2d1d9ad329 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 4 Mar 2026 16:24:07 +0900
-Subject: [PATCH 14/44] Add limited support for chrome settings
+Subject: [PATCH 14/45] Add limited support for chrome settings
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   1 +

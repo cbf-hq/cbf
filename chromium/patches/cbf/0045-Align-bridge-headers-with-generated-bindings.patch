@@ -1,0 +1,52 @@
+From 87086dc6e778524e5ae97b2452109da551b8ee4a Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Fri, 27 Mar 2026 11:56:09 +0900
+Subject: [PATCH 45/45] Align bridge headers with generated bindings
+
+---
+ chrome/browser/cbf/bridge/cbf_bridge.h     |  4 ----
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h | 13 +++++++++++++
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index 2acd0447f72b7..f173223c053aa 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -82,10 +82,6 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_send_drag_cancel(
+     CbfBridgeClientHandle* client,
+     uint64_t session_id,
+     uint64_t tab_id);
+-CBF_BRIDGE_EXPORT bool cbf_bridge_client_send_mac_event(
+-    CbfBridgeClientHandle* client,
+-    uint64_t tab_id,
+-    void* nsevent);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_set_composition(
+     CbfBridgeClientHandle* client,
+     const CbfImeComposition* composition);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index cc8eb4c0a5322..a53cbd19b443c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -127,6 +127,19 @@ enum CbfPromptUiResolutionResult {
+   kCbfPromptUiResolutionResultAborted = 3,
+ };
+ 
++enum CbfPromptUiDialogResult {
++  kCbfPromptUiDialogResultUnknown = 0,
++  kCbfPromptUiDialogResultProceeded = 1,
++  kCbfPromptUiDialogResultCanceled = 2,
++  kCbfPromptUiDialogResultAborted = 3,
++};
++
++enum CbfDownloadPromptResult {
++  kCbfDownloadPromptResultAllowed = 1,
++  kCbfDownloadPromptResultDenied = 2,
++  kCbfDownloadPromptResultAborted = 3,
++};
++
+ enum CbfDownloadPromptReason {
+   kCbfDownloadPromptReasonNone = 0,
+   kCbfDownloadPromptReasonUnexpected = 1,
+-- 
+2.50.1 (Apple Git-155)
+

@@ -304,11 +304,6 @@ pub struct cbf_bridge {
         session_id: u64,
         tab_id: u64,
     ) -> bool,
-    pub cbf_bridge_client_send_mac_event: unsafe extern "C" fn(
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        nsevent: *mut ::std::os::raw::c_void,
-    ) -> bool,
     pub cbf_bridge_client_set_composition: unsafe extern "C" fn(
         client: *mut CbfBridgeClientHandle,
         composition: *const CbfImeComposition,
@@ -596,9 +591,6 @@ impl cbf_bridge {
         let cbf_bridge_client_send_drag_cancel = __library
             .get(b"cbf_bridge_client_send_drag_cancel\0")
             .map(|sym| *sym)?;
-        let cbf_bridge_client_send_mac_event = __library
-            .get(b"cbf_bridge_client_send_mac_event\0")
-            .map(|sym| *sym)?;
         let cbf_bridge_client_set_composition = __library
             .get(b"cbf_bridge_client_set_composition\0")
             .map(|sym| *sym)?;
@@ -720,7 +712,6 @@ impl cbf_bridge {
             cbf_bridge_client_send_drag_update,
             cbf_bridge_client_send_drag_drop,
             cbf_bridge_client_send_drag_cancel,
-            cbf_bridge_client_send_mac_event,
             cbf_bridge_client_set_composition,
             cbf_bridge_client_commit_text,
             cbf_bridge_client_finish_composing_text,
@@ -1350,14 +1341,6 @@ impl cbf_bridge {
         tab_id: u64,
     ) -> bool {
         (self.cbf_bridge_client_send_drag_cancel)(client, session_id, tab_id)
-    }
-    pub unsafe fn cbf_bridge_client_send_mac_event(
-        &self,
-        client: *mut CbfBridgeClientHandle,
-        tab_id: u64,
-        nsevent: *mut ::std::os::raw::c_void,
-    ) -> bool {
-        (self.cbf_bridge_client_send_mac_event)(client, tab_id, nsevent)
     }
     pub unsafe fn cbf_bridge_client_set_composition(
         &self,

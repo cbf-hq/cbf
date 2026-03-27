@@ -1,8 +1,10 @@
 //! Chrome-specific find-in-page data models.
+#![allow(non_upper_case_globals)]
 
 use cbf_chrome_sys::ffi::{
-    CBF_STOP_FIND_ACTION_ACTIVATE_SELECTION, CBF_STOP_FIND_ACTION_CLEAR_SELECTION,
-    CBF_STOP_FIND_ACTION_KEEP_SELECTION,
+    CbfStopFindAction_kCbfStopFindActionActivateSelection,
+    CbfStopFindAction_kCbfStopFindActionClearSelection,
+    CbfStopFindAction_kCbfStopFindActionKeepSelection,
 };
 
 /// Chromium stop-find action.
@@ -15,11 +17,11 @@ pub enum ChromeStopFindAction {
 
 impl ChromeStopFindAction {
     pub(crate) fn to_ffi(self) -> u8 {
-        match self {
-            Self::ClearSelection => CBF_STOP_FIND_ACTION_CLEAR_SELECTION,
-            Self::KeepSelection => CBF_STOP_FIND_ACTION_KEEP_SELECTION,
-            Self::ActivateSelection => CBF_STOP_FIND_ACTION_ACTIVATE_SELECTION,
-        }
+        (match self {
+            Self::ClearSelection => CbfStopFindAction_kCbfStopFindActionClearSelection,
+            Self::KeepSelection => CbfStopFindAction_kCbfStopFindActionKeepSelection,
+            Self::ActivateSelection => CbfStopFindAction_kCbfStopFindActionActivateSelection,
+        }) as u8
     }
 }
 

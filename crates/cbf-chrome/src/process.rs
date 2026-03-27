@@ -4,10 +4,7 @@ use cbf::{
     delegate::BackendDelegate,
     error::{ApiErrorKind, BackendErrorInfo, Error as CbfError},
 };
-use cbf_chrome_sys::{
-    bridge::bridge,
-    ffi::CbfBridgeClientHandle,
-};
+use cbf_chrome_sys::{bridge::bridge, ffi::CbfBridgeClientHandle};
 use futures_lite::future::block_on;
 use signal_hook::iterator::Signals;
 use std::{
@@ -630,13 +627,15 @@ pub fn start_chromium(
     }
 
     // Create the bridge client handle and prepare the Mojo channel pair.
-    let inner = bridge().map_err(|_| {
-        CbfError::BackendFailure(cbf::error::BackendErrorInfo {
-            kind: cbf::error::ApiErrorKind::ConnectTimeout,
-            operation: None,
-            detail: Some("cbf_bridge_client_create failed".to_owned()),
+    let inner = bridge()
+        .map_err(|_| {
+            CbfError::BackendFailure(cbf::error::BackendErrorInfo {
+                kind: cbf::error::ApiErrorKind::ConnectTimeout,
+                operation: None,
+                detail: Some("cbf_bridge_client_create failed".to_owned()),
+            })
         })
-    }).map(|bridge| unsafe { bridge.cbf_bridge_client_create() })?;
+        .map(|bridge| unsafe { bridge.cbf_bridge_client_create() })?;
     if inner.is_null() {
         return Err(CbfError::BackendFailure(cbf::error::BackendErrorInfo {
             kind: cbf::error::ApiErrorKind::ConnectTimeout,

@@ -1,9 +1,13 @@
 //! Chrome/Blink-shaped choice menu payload for host-owned `<select>` popups.
+#![allow(non_upper_case_globals)]
 
 use cbf_chrome_sys::ffi::{
-    CBF_CHOICE_MENU_ITEM_CHECKABLE_OPTION, CBF_CHOICE_MENU_ITEM_GROUP, CBF_CHOICE_MENU_ITEM_OPTION,
-    CBF_CHOICE_MENU_ITEM_SEPARATOR, CBF_CHOICE_MENU_ITEM_SUB_MENU,
-    CBF_CHOICE_MENU_TEXT_DIRECTION_LEFT_TO_RIGHT, CBF_CHOICE_MENU_TEXT_DIRECTION_RIGHT_TO_LEFT,
+    CbfChoiceMenuItemType_kCbfChoiceMenuItemCheckableOption,
+    CbfChoiceMenuItemType_kCbfChoiceMenuItemGroup, CbfChoiceMenuItemType_kCbfChoiceMenuItemOption,
+    CbfChoiceMenuItemType_kCbfChoiceMenuItemSeparator,
+    CbfChoiceMenuItemType_kCbfChoiceMenuItemSubMenu,
+    CbfChoiceMenuTextDirection_kCbfChoiceMenuTextDirectionLeftToRight,
+    CbfChoiceMenuTextDirection_kCbfChoiceMenuTextDirectionRightToLeft,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,20 +65,26 @@ pub struct ChromeChoiceMenuResponse {
 }
 
 pub(crate) fn choice_menu_item_type_from_ffi(value: u8) -> ChromeChoiceMenuItemType {
-    match value {
-        CBF_CHOICE_MENU_ITEM_OPTION => ChromeChoiceMenuItemType::Option,
-        CBF_CHOICE_MENU_ITEM_CHECKABLE_OPTION => ChromeChoiceMenuItemType::CheckableOption,
-        CBF_CHOICE_MENU_ITEM_GROUP => ChromeChoiceMenuItemType::Group,
-        CBF_CHOICE_MENU_ITEM_SEPARATOR => ChromeChoiceMenuItemType::Separator,
-        CBF_CHOICE_MENU_ITEM_SUB_MENU => ChromeChoiceMenuItemType::SubMenu,
+    match u32::from(value) {
+        CbfChoiceMenuItemType_kCbfChoiceMenuItemOption => ChromeChoiceMenuItemType::Option,
+        CbfChoiceMenuItemType_kCbfChoiceMenuItemCheckableOption => {
+            ChromeChoiceMenuItemType::CheckableOption
+        }
+        CbfChoiceMenuItemType_kCbfChoiceMenuItemGroup => ChromeChoiceMenuItemType::Group,
+        CbfChoiceMenuItemType_kCbfChoiceMenuItemSeparator => ChromeChoiceMenuItemType::Separator,
+        CbfChoiceMenuItemType_kCbfChoiceMenuItemSubMenu => ChromeChoiceMenuItemType::SubMenu,
         _ => ChromeChoiceMenuItemType::Option,
     }
 }
 
 pub(crate) fn choice_menu_text_direction_from_ffi(value: u8) -> ChromeChoiceMenuTextDirection {
-    match value {
-        CBF_CHOICE_MENU_TEXT_DIRECTION_RIGHT_TO_LEFT => ChromeChoiceMenuTextDirection::RightToLeft,
-        CBF_CHOICE_MENU_TEXT_DIRECTION_LEFT_TO_RIGHT => ChromeChoiceMenuTextDirection::LeftToRight,
+    match u32::from(value) {
+        CbfChoiceMenuTextDirection_kCbfChoiceMenuTextDirectionRightToLeft => {
+            ChromeChoiceMenuTextDirection::RightToLeft
+        }
+        CbfChoiceMenuTextDirection_kCbfChoiceMenuTextDirectionLeftToRight => {
+            ChromeChoiceMenuTextDirection::LeftToRight
+        }
         _ => ChromeChoiceMenuTextDirection::LeftToRight,
     }
 }

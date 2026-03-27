@@ -1,3 +1,5 @@
+#![allow(non_upper_case_globals)]
+
 use std::{
     ffi::{CStr, CString},
     os::raw::c_char,
@@ -136,7 +138,9 @@ impl IpcClient {
     /// `connect_inherited`. On macOS this registers the Mach port with the
     /// rendezvous server; on other platforms it completes channel bookkeeping.
     pub fn pass_child_pid(pid: u32) {
-        if let Err(err) = bridge_api().map(|bridge| unsafe { bridge.cbf_bridge_pass_child_pid(pid as i64) }) {
+        if let Err(err) =
+            bridge_api().map(|bridge| unsafe { bridge.cbf_bridge_pass_child_pid(pid as i64) })
+        {
             warn!(error = ?err, "failed to pass child pid to bridge");
         }
     }
@@ -157,8 +161,7 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        let connected =
-            bridge_call!(cbf_bridge_client_connect_inherited(inner));
+        let connected = bridge_call!(cbf_bridge_client_connect_inherited(inner));
 
         if !connected {
             warn!(
@@ -185,8 +188,7 @@ impl IpcClient {
         }
 
         let token = CString::new(token).map_err(|_| Error::InvalidInput)?;
-        if bridge_call!(cbf_bridge_client_authenticate(self.inner, token.as_ptr()))
-        {
+        if bridge_call!(cbf_bridge_client_authenticate(self.inner, token.as_ptr())) {
             Ok(())
         } else {
             Err(Error::ConnectionFailed)
@@ -241,8 +243,7 @@ impl IpcClient {
         }
 
         let mut list = CbfProfileList::default();
-        if !bridge_call!(cbf_bridge_client_get_profiles(self.inner, &mut list))
-        {
+        if !bridge_call!(cbf_bridge_client_get_profiles(self.inner, &mut list)) {
             return Err(Error::ConnectionFailed);
         }
 
@@ -278,8 +279,11 @@ impl IpcClient {
         let profile = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
 
         let mut list = CbfExtensionInfoList::default();
-        if !bridge_call!(cbf_bridge_client_list_extensions(self.inner, profile.as_ptr(), &mut list))
-        {
+        if !bridge_call!(cbf_bridge_client_list_extensions(
+            self.inner,
+            profile.as_ptr(),
+            &mut list
+        )) {
             return Err(Error::ConnectionFailed);
         }
 
@@ -302,13 +306,13 @@ impl IpcClient {
 
         let scheme = CString::new(scheme).map_err(|_| Error::InvalidInput)?;
         let host = CString::new(host).map_err(|_| Error::InvalidInput)?;
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_register_custom_scheme_handler(
-                    self.inner,
-                    scheme.as_ptr(),
-                    host.as_ptr(),
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_register_custom_scheme_handler(
+                self.inner,
+                scheme.as_ptr(),
+                host.as_ptr(),
+            )
+        ))
     }
 
     pub fn respond_custom_scheme_request(
@@ -328,12 +332,16 @@ impl IpcClient {
                 .map_err(|_| Error::InvalidInput)?;
 
         let result = match response.result {
-            ChromeCustomSchemeResponseResult::Ok => CBF_CUSTOM_SCHEME_RESPONSE_RESULT_OK,
-            ChromeCustomSchemeResponseResult::NotFound => {
-                CBF_CUSTOM_SCHEME_RESPONSE_RESULT_NOT_FOUND
+            ChromeCustomSchemeResponseResult::Ok => {
+                CbfCustomSchemeResponseResult_kCbfCustomSchemeResponseResultOk
             }
-            ChromeCustomSchemeResponseResult::Aborted => CBF_CUSTOM_SCHEME_RESPONSE_RESULT_ABORTED,
-        };
+            ChromeCustomSchemeResponseResult::NotFound => {
+                CbfCustomSchemeResponseResult_kCbfCustomSchemeResponseResultNotFound
+            }
+            ChromeCustomSchemeResponseResult::Aborted => {
+                CbfCustomSchemeResponseResult_kCbfCustomSchemeResponseResultAborted
+            }
+        } as u8;
 
         let body_ptr = if response.body.is_empty() {
             ptr::null()
@@ -341,22 +349,22 @@ impl IpcClient {
             response.body.as_ptr()
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_respond_custom_scheme_request(
-                    self.inner,
-                    response.request_id,
-                    result,
-                    mime_type.as_ptr(),
-                    content_security_policy
-                        .as_ref()
-                        .map_or(ptr::null(), |value| value.as_ptr()),
-                    access_control_allow_origin
-                        .as_ref()
-                        .map_or(ptr::null(), |value| value.as_ptr()),
-                    body_ptr,
-                    response.body.len() as u32,
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_respond_custom_scheme_request(
+                self.inner,
+                response.request_id,
+                result,
+                mime_type.as_ptr(),
+                content_security_policy
+                    .as_ref()
+                    .map_or(ptr::null(), |value| value.as_ptr()),
+                access_control_allow_origin
+                    .as_ref()
+                    .map_or(ptr::null(), |value| value.as_ptr()),
+                body_ptr,
+                response.body.len() as u32,
+            )
+        ))
     }
 
     pub fn activate_extension_action(
@@ -369,13 +377,11 @@ impl IpcClient {
         }
 
         let extension_id = CString::new(extension_id).map_err(|_| Error::InvalidInput)?;
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_activate_extension_action(
-                    self.inner,
-                    browsing_context_id.get(),
-                    extension_id.as_ptr(),
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_activate_extension_action(
+            self.inner,
+            browsing_context_id.get(),
+            extension_id.as_ptr(),
+        )))
     }
 
     /// Create a tab via the IPC bridge.
@@ -392,9 +398,12 @@ impl IpcClient {
         let url = CString::new(initial_url).map_err(|_| Error::InvalidInput)?;
         let profile = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_create_tab(self.inner, request_id, url.as_ptr(), profile.as_ptr())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_create_tab(
+            self.inner,
+            request_id,
+            url.as_ptr(),
+            profile.as_ptr()
+        )))
     }
 
     /// Request closing the specified tab.
@@ -403,9 +412,10 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_request_close_tab(self.inner, browsing_context_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_request_close_tab(
+            self.inner,
+            browsing_context_id.get()
+        )))
     }
 
     /// Update the surface size of the specified tab.
@@ -419,9 +429,12 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_set_tab_size(self.inner, browsing_context_id.get(), width, height)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_set_tab_size(
+            self.inner,
+            browsing_context_id.get(),
+            width,
+            height
+        )))
     }
 
     /// Update whether the specified tab should receive text input focus.
@@ -434,9 +447,11 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_set_tab_focus(self.inner, browsing_context_id.get(), focused)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_set_tab_focus(
+            self.inner,
+            browsing_context_id.get(),
+            focused
+        )))
     }
 
     /// Update whether the specified tab should be treated as visible.
@@ -450,17 +465,15 @@ impl IpcClient {
         }
 
         let visibility = match visibility {
-            ChromeTabVisibility::Visible => CBF_TAB_VISIBILITY_VISIBLE,
-            ChromeTabVisibility::Hidden => CBF_TAB_VISIBILITY_HIDDEN,
-        };
+            ChromeTabVisibility::Visible => CbfTabVisibility_kCbfTabVisibilityVisible,
+            ChromeTabVisibility::Hidden => CbfTabVisibility_kCbfTabVisibilityHidden,
+        } as u8;
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_set_tab_visibility(
-                    self.inner,
-                    browsing_context_id.get(),
-                    visibility,
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_set_tab_visibility(
+            self.inner,
+            browsing_context_id.get(),
+            visibility,
+        )))
     }
 
     /// Enable browsing context IPC with explicit origin allow list.
@@ -483,16 +496,18 @@ impl IpcClient {
 
         let list = CbfCommandList {
             items: if origin_ptrs.is_empty() {
-                ptr::null()
+                ptr::null_mut()
             } else {
-                origin_ptrs.as_ptr()
+                origin_ptrs.as_ptr() as *mut *const c_char
             },
             len: origin_ptrs.len() as u32,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_enable_tab_ipc(self.inner, browsing_context_id.get(), &list)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_enable_tab_ipc(
+            self.inner,
+            browsing_context_id.get(),
+            &list
+        )))
     }
 
     /// Disable browsing context IPC.
@@ -501,9 +516,10 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_disable_tab_ipc(self.inner, browsing_context_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_disable_tab_ipc(
+            self.inner,
+            browsing_context_id.get()
+        )))
     }
 
     /// Post host -> page IPC message.
@@ -520,14 +536,14 @@ impl IpcClient {
         let content_type =
             to_optional_cstring(&message.content_type).map_err(|_| Error::InvalidInput)?;
         let payload_kind = match message.payload {
-            TabIpcPayload::Text(_) => CBF_IPC_PAYLOAD_TEXT,
-            TabIpcPayload::Binary(_) => CBF_IPC_PAYLOAD_BINARY,
-        };
+            TabIpcPayload::Text(_) => CbfIpcPayloadKind_kCbfIpcPayloadText,
+            TabIpcPayload::Binary(_) => CbfIpcPayloadKind_kCbfIpcPayloadBinary,
+        } as u8;
         let message_type = ipc_message_type_to_ffi(message.message_type);
         let error_code = message
             .error_code
             .map(ipc_error_code_to_ffi)
-            .unwrap_or(CBF_IPC_ERROR_NONE);
+            .unwrap_or(CbfIpcErrorCode_kCbfIpcErrorNone as u8);
         let (payload_text, payload_binary) = match &message.payload {
             TabIpcPayload::Text(text) => (
                 Some(CString::new(text.as_str()).map_err(|_| Error::InvalidInput)?),
@@ -573,13 +589,11 @@ impl IpcClient {
 
         let transparent = matches!(policy, ChromeBackgroundPolicy::Transparent);
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_set_tab_background_policy(
-                    self.inner,
-                    browsing_context_id.get(),
-                    transparent,
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_set_tab_background_policy(
+            self.inner,
+            browsing_context_id.get(),
+            transparent,
+        )))
     }
 
     /// Respond to a beforeunload confirmation request.
@@ -593,14 +607,12 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_confirm_beforeunload(
-                    self.inner,
-                    browsing_context_id.get(),
-                    request_id,
-                    proceed,
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_confirm_beforeunload(
+            self.inner,
+            browsing_context_id.get(),
+            request_id,
+            proceed,
+        )))
     }
 
     /// Respond to a JavaScript dialog request for a tab.
@@ -618,15 +630,13 @@ impl IpcClient {
         let prompt_text = to_optional_cstring(&prompt_text.map(ToOwned::to_owned))
             .map_err(|_| Error::InvalidInput)?;
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_respond_javascript_dialog(
-                    self.inner,
-                    browsing_context_id.get(),
-                    request_id,
-                    accept,
-                    prompt_text.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_respond_javascript_dialog(
+            self.inner,
+            browsing_context_id.get(),
+            request_id,
+            accept,
+            prompt_text.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+        )))
     }
 
     /// Respond to a JavaScript dialog request for an extension popup.
@@ -644,15 +654,15 @@ impl IpcClient {
         let prompt_text = to_optional_cstring(&prompt_text.map(ToOwned::to_owned))
             .map_err(|_| Error::InvalidInput)?;
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_respond_extension_popup_javascript_dialog(
-                    self.inner,
-                    popup_id.get(),
-                    request_id,
-                    accept,
-                    prompt_text.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_respond_extension_popup_javascript_dialog(
+                self.inner,
+                popup_id.get(),
+                request_id,
+                accept,
+                prompt_text.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            )
+        ))
     }
 
     /// Navigate the page to the provided URL.
@@ -663,9 +673,11 @@ impl IpcClient {
 
         let url = CString::new(url).map_err(|_| Error::InvalidInput)?;
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_navigate(self.inner, browsing_context_id.get(), url.as_ptr())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_navigate(
+            self.inner,
+            browsing_context_id.get(),
+            url.as_ptr()
+        )))
     }
 
     /// Navigate back in history for the page.
@@ -674,9 +686,10 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_go_back(self.inner, browsing_context_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_go_back(
+            self.inner,
+            browsing_context_id.get()
+        )))
     }
 
     /// Navigate forward in history for the page.
@@ -685,9 +698,10 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_go_forward(self.inner, browsing_context_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_go_forward(
+            self.inner,
+            browsing_context_id.get()
+        )))
     }
 
     /// Reload the page, optionally ignoring caches.
@@ -696,9 +710,11 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_reload(self.inner, browsing_context_id.get(), ignore_cache)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_reload(
+            self.inner,
+            browsing_context_id.get(),
+            ignore_cache
+        )))
     }
 
     /// Open print preview for the page.
@@ -707,9 +723,10 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_print_preview(self.inner, browsing_context_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_print_preview(
+            self.inner,
+            browsing_context_id.get()
+        )))
     }
 
     /// Open DevTools for the specified page.
@@ -718,9 +735,10 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_open_dev_tools(self.inner, browsing_context_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_open_dev_tools(
+            self.inner,
+            browsing_context_id.get()
+        )))
     }
 
     /// Open DevTools and inspect the element at the given coordinates.
@@ -734,9 +752,12 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_inspect_element(self.inner, browsing_context_id.get(), x, y)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_inspect_element(
+            self.inner,
+            browsing_context_id.get(),
+            x,
+            y
+        )))
     }
 
     /// Request the DOM HTML for the specified page.
@@ -749,13 +770,11 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_get_tab_dom_html(
-                    self.inner,
-                    browsing_context_id.get(),
-                    request_id,
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_get_tab_dom_html(
+            self.inner,
+            browsing_context_id.get(),
+            request_id,
+        )))
     }
 
     pub fn find_in_page(
@@ -769,18 +788,16 @@ impl IpcClient {
         }
 
         let query = CString::new(options.query.as_str()).map_err(|_| Error::InvalidInput)?;
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_find_in_page(
-                    self.inner,
-                    browsing_context_id.get(),
-                    request_id,
-                    query.as_ptr(),
-                    options.forward,
-                    options.match_case,
-                    options.new_session,
-                    options.find_match,
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_find_in_page(
+            self.inner,
+            browsing_context_id.get(),
+            request_id,
+            query.as_ptr(),
+            options.forward,
+            options.match_case,
+            options.new_session,
+            options.find_match,
+        )))
     }
 
     pub fn stop_finding(
@@ -792,13 +809,11 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_stop_finding(
-                    self.inner,
-                    browsing_context_id.get(),
-                    action.to_ffi(),
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_stop_finding(
+            self.inner,
+            browsing_context_id.get(),
+            action.to_ffi(),
+        )))
     }
 
     /// Open Chromium default PromptUi for pending request.
@@ -811,13 +826,11 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
         let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_open_default_prompt_ui(
-                    self.inner,
-                    profile_id.as_ptr(),
-                    request_id,
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_open_default_prompt_ui(
+            self.inner,
+            profile_id.as_ptr(),
+            request_id,
+        )))
     }
 
     /// Respond to a pending chrome-specific PromptUi request.
@@ -832,20 +845,23 @@ impl IpcClient {
         }
         let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
         let (prompt_ui_kind, proceed, destination_path, report_abuse) = match response {
-            PromptUiResponse::PermissionPrompt { allow } => {
-                (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow, None, false)
-            }
+            PromptUiResponse::PermissionPrompt { allow } => (
+                CbfPromptUiKind_kCbfPromptUiKindPermissionPrompt,
+                *allow,
+                None,
+                false,
+            ),
             PromptUiResponse::DownloadPrompt {
                 allow,
                 destination_path,
             } => (
-                CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT,
+                CbfPromptUiKind_kCbfPromptUiKindDownloadPrompt,
                 *allow,
                 to_optional_cstring(destination_path)?,
                 false,
             ),
             PromptUiResponse::ExtensionInstallPrompt { proceed } => (
-                CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT,
+                CbfPromptUiKind_kCbfPromptUiKindExtensionInstallPrompt,
                 *proceed,
                 None,
                 false,
@@ -854,38 +870,38 @@ impl IpcClient {
                 proceed,
                 report_abuse,
             } => (
-                CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT,
+                CbfPromptUiKind_kCbfPromptUiKindExtensionUninstallPrompt,
                 *proceed,
                 None,
                 *report_abuse,
             ),
             PromptUiResponse::PrintPreviewDialog { proceed } => (
-                CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG,
+                CbfPromptUiKind_kCbfPromptUiKindPrintPreviewDialog,
                 *proceed,
                 None,
                 false,
             ),
             PromptUiResponse::FormResubmissionPrompt { proceed } => (
-                CBF_PROMPT_UI_KIND_FORM_RESUBMISSION_PROMPT,
+                CbfPromptUiKind_kCbfPromptUiKindFormResubmissionPrompt,
                 *proceed,
                 None,
                 false,
             ),
-            PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None, false),
+            PromptUiResponse::Unknown => {
+                (CbfPromptUiKind_kCbfPromptUiKindUnknown, false, None, false)
+            }
         };
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_respond_prompt_ui(
-                    self.inner,
-                    profile_id.as_ptr(),
-                    request_id,
-                    prompt_ui_kind,
-                    proceed,
-                    report_abuse,
-                    destination_path
-                        .as_ref()
-                        .map_or(ptr::null(), |path| path.as_ptr()),
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_respond_prompt_ui(
+            self.inner,
+            profile_id.as_ptr(),
+            request_id,
+            prompt_ui_kind as u8,
+            proceed,
+            report_abuse,
+            destination_path
+                .as_ref()
+                .map_or(ptr::null(), |path| path.as_ptr()),
+        )))
     }
 
     /// Respond to a page-originated prompt by resolving profile on the bridge side.
@@ -899,20 +915,23 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
         let (prompt_ui_kind, proceed, destination_path, report_abuse) = match response {
-            PromptUiResponse::PermissionPrompt { allow } => {
-                (CBF_PROMPT_UI_KIND_PERMISSION_PROMPT, *allow, None, false)
-            }
+            PromptUiResponse::PermissionPrompt { allow } => (
+                CbfPromptUiKind_kCbfPromptUiKindPermissionPrompt,
+                *allow,
+                None,
+                false,
+            ),
             PromptUiResponse::DownloadPrompt {
                 allow,
                 destination_path,
             } => (
-                CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT,
+                CbfPromptUiKind_kCbfPromptUiKindDownloadPrompt,
                 *allow,
                 to_optional_cstring(destination_path)?,
                 false,
             ),
             PromptUiResponse::ExtensionInstallPrompt { proceed } => (
-                CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT,
+                CbfPromptUiKind_kCbfPromptUiKindExtensionInstallPrompt,
                 *proceed,
                 None,
                 false,
@@ -921,38 +940,38 @@ impl IpcClient {
                 proceed,
                 report_abuse,
             } => (
-                CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT,
+                CbfPromptUiKind_kCbfPromptUiKindExtensionUninstallPrompt,
                 *proceed,
                 None,
                 *report_abuse,
             ),
             PromptUiResponse::PrintPreviewDialog { proceed } => (
-                CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG,
+                CbfPromptUiKind_kCbfPromptUiKindPrintPreviewDialog,
                 *proceed,
                 None,
                 false,
             ),
             PromptUiResponse::FormResubmissionPrompt { proceed } => (
-                CBF_PROMPT_UI_KIND_FORM_RESUBMISSION_PROMPT,
+                CbfPromptUiKind_kCbfPromptUiKindFormResubmissionPrompt,
                 *proceed,
                 None,
                 false,
             ),
-            PromptUiResponse::Unknown => (CBF_PROMPT_UI_KIND_UNKNOWN, false, None, false),
+            PromptUiResponse::Unknown => {
+                (CbfPromptUiKind_kCbfPromptUiKindUnknown, false, None, false)
+            }
         };
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_respond_prompt_ui_for_tab(
-                    self.inner,
-                    browsing_context_id.get(),
-                    request_id,
-                    prompt_ui_kind,
-                    proceed,
-                    report_abuse,
-                    destination_path
-                        .as_ref()
-                        .map_or(ptr::null(), |path| path.as_ptr()),
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_respond_prompt_ui_for_tab(
+            self.inner,
+            browsing_context_id.get(),
+            request_id,
+            prompt_ui_kind as u8,
+            proceed,
+            report_abuse,
+            destination_path
+                .as_ref()
+                .map_or(ptr::null(), |path| path.as_ptr()),
+        )))
     }
 
     /// Close a backend-managed PromptUi surface.
@@ -965,13 +984,11 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
         let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_close_prompt_ui(
-                    self.inner,
-                    profile_id.as_ptr(),
-                    prompt_ui_id.get(),
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_close_prompt_ui(
+            self.inner,
+            profile_id.as_ptr(),
+            prompt_ui_id.get(),
+        )))
     }
 
     /// Pause an in-progress download.
@@ -979,9 +996,10 @@ impl IpcClient {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_pause_download(self.inner, download_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_pause_download(
+            self.inner,
+            download_id.get()
+        )))
     }
 
     /// Resume a paused download.
@@ -989,9 +1007,10 @@ impl IpcClient {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_resume_download(self.inner, download_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_resume_download(
+            self.inner,
+            download_id.get()
+        )))
     }
 
     /// Cancel an active download.
@@ -999,9 +1018,10 @@ impl IpcClient {
         if self.inner.is_null() {
             return Err(Error::ConnectionFailed);
         }
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_cancel_download(self.inner, download_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_cancel_download(
+            self.inner,
+            download_id.get()
+        )))
     }
 
     /// Respond to host-mediated tab-open request.
@@ -1014,25 +1034,27 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
         let (response_kind, target_tab_id, activate) = match response {
-            ChromeBrowsingContextOpenResponse::AllowNewContext { activate } => {
-                (CBF_TAB_OPEN_RESPONSE_ALLOW_NEW_CONTEXT, 0, *activate)
-            }
+            ChromeBrowsingContextOpenResponse::AllowNewContext { activate } => (
+                CbfTabOpenResponseKind_kCbfTabOpenResponseAllowNewContext,
+                0,
+                *activate,
+            ),
             ChromeBrowsingContextOpenResponse::AllowExistingContext { tab_id, activate } => (
-                CBF_TAB_OPEN_RESPONSE_ALLOW_EXISTING_CONTEXT,
+                CbfTabOpenResponseKind_kCbfTabOpenResponseAllowExistingContext,
                 tab_id.get(),
                 *activate,
             ),
-            ChromeBrowsingContextOpenResponse::Deny => (CBF_TAB_OPEN_RESPONSE_DENY, 0, false),
+            ChromeBrowsingContextOpenResponse::Deny => {
+                (CbfTabOpenResponseKind_kCbfTabOpenResponseDeny, 0, false)
+            }
         };
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_respond_tab_open(
-                    self.inner,
-                    request_id,
-                    response_kind,
-                    target_tab_id,
-                    activate,
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_respond_tab_open(
+            self.inner,
+            request_id,
+            response_kind as u8,
+            target_tab_id,
+            activate,
+        )))
     }
 
     /// Respond to host-mediated window open request.
@@ -1078,7 +1100,7 @@ impl IpcClient {
 
         let ffi_event = CbfKeyEvent {
             tab_id: browsing_context_id.get(),
-            r#type: key_event_type_to_ffi(event.type_),
+            type_: key_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             windows_key_code: event.windows_key_code,
             native_key_code: event.native_key_code,
@@ -1094,16 +1116,18 @@ impl IpcClient {
 
         let ffi_commands = CbfCommandList {
             items: if command_ptrs.is_empty() {
-                ptr::null()
+                ptr::null_mut()
             } else {
-                command_ptrs.as_ptr()
+                command_ptrs.as_ptr() as *mut *const c_char
             },
             len: command_ptrs.len() as u32,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_key_event(self.inner, &ffi_event, &ffi_commands)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_send_key_event(
+            self.inner,
+            &ffi_event,
+            &ffi_commands
+        )))
     }
 
     /// Send a Chromium-shaped keyboard event to an extension popup.
@@ -1131,7 +1155,7 @@ impl IpcClient {
 
         let ffi_event = CbfKeyEvent {
             tab_id: 0,
-            r#type: key_event_type_to_ffi(event.type_),
+            type_: key_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             windows_key_code: event.windows_key_code,
             native_key_code: event.native_key_code,
@@ -1147,21 +1171,21 @@ impl IpcClient {
 
         let ffi_commands = CbfCommandList {
             items: if command_ptrs.is_empty() {
-                ptr::null()
+                ptr::null_mut()
             } else {
-                command_ptrs.as_ptr()
+                command_ptrs.as_ptr() as *mut *const c_char
             },
             len: command_ptrs.len() as u32,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_extension_popup_key_event(
-                    self.inner,
-                    popup_id.get(),
-                    &ffi_event,
-                    &ffi_commands,
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_send_extension_popup_key_event(
+                self.inner,
+                popup_id.get(),
+                &ffi_event,
+                &ffi_commands,
+            )
+        ))
     }
 
     /// Send a mouse event to the page.
@@ -1176,7 +1200,7 @@ impl IpcClient {
 
         let ffi_event = CbfMouseEvent {
             tab_id: browsing_context_id.get(),
-            r#type: mouse_event_type_to_ffi(event.type_),
+            type_: mouse_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             button: mouse_button_to_ffi(event.button),
             click_count: event.click_count,
@@ -1190,9 +1214,9 @@ impl IpcClient {
             pointer_type: pointer_type_to_ffi(event.pointer_type),
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_mouse_event(self.inner, &ffi_event)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_send_mouse_event(
+            self.inner, &ffi_event
+        )))
     }
 
     /// Send a mouse event to an extension popup.
@@ -1207,7 +1231,7 @@ impl IpcClient {
 
         let ffi_event = CbfMouseEvent {
             tab_id: 0,
-            r#type: mouse_event_type_to_ffi(event.type_),
+            type_: mouse_event_type_to_ffi(event.type_),
             modifiers: event.modifiers,
             button: mouse_button_to_ffi(event.button),
             click_count: event.click_count,
@@ -1221,13 +1245,13 @@ impl IpcClient {
             pointer_type: pointer_type_to_ffi(event.pointer_type),
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_extension_popup_mouse_event(
-                    self.inner,
-                    popup_id.get(),
-                    &ffi_event,
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_send_extension_popup_mouse_event(
+                self.inner,
+                popup_id.get(),
+                &ffi_event,
+            )
+        ))
     }
 
     /// Send a Chromium-shaped mouse wheel event to the page.
@@ -1259,9 +1283,9 @@ impl IpcClient {
             delta_units: scroll_granularity_to_ffi(event.delta_units),
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_mouse_wheel_event(self.inner, &ffi_event)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_send_mouse_wheel_event(
+            self.inner, &ffi_event
+        )))
     }
 
     /// Send a Chromium-shaped mouse wheel event to an extension popup.
@@ -1293,13 +1317,13 @@ impl IpcClient {
             delta_units: scroll_granularity_to_ffi(event.delta_units),
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_extension_popup_mouse_wheel_event(
-                    self.inner,
-                    popup_id.get(),
-                    &ffi_event,
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_send_extension_popup_mouse_wheel_event(
+                self.inner,
+                popup_id.get(),
+                &ffi_event,
+            )
+        ))
     }
 
     /// Send a drag update event for host-owned drag session.
@@ -1319,9 +1343,10 @@ impl IpcClient {
             position_in_screen_y: update.position_in_screen_y,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_drag_update(self.inner, &ffi_update)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_send_drag_update(
+            self.inner,
+            &ffi_update
+        )))
     }
 
     /// Send a drag drop event for host-owned drag session.
@@ -1340,9 +1365,9 @@ impl IpcClient {
             position_in_screen_y: drop.position_in_screen_y,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_drag_drop(self.inner, &ffi_drop)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_send_drag_drop(
+            self.inner, &ffi_drop
+        )))
     }
 
     /// Cancel a host-owned drag session.
@@ -1355,13 +1380,11 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_drag_cancel(
-                    self.inner,
-                    session_id,
-                    browsing_context_id.get(),
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_send_drag_cancel(
+            self.inner,
+            session_id,
+            browsing_context_id.get(),
+        )))
     }
 
     /// Send an external drag enter event for a native drag destination.
@@ -1385,9 +1408,9 @@ impl IpcClient {
             position_in_screen_y: event.position_in_screen_y,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_external_drag_enter(self.inner, &ffi_event)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_send_external_drag_enter(
+            self.inner, &ffi_event
+        )))
     }
 
     /// Send an external drag update event for a native drag destination.
@@ -1409,9 +1432,9 @@ impl IpcClient {
             position_in_screen_y: event.position_in_screen_y,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_external_drag_update(self.inner, &ffi_event)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_send_external_drag_update(
+            self.inner, &ffi_event
+        )))
     }
 
     /// Notify the backend that the active external drag left the page.
@@ -1420,9 +1443,10 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_external_drag_leave(self.inner, browsing_context_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_send_external_drag_leave(
+            self.inner,
+            browsing_context_id.get()
+        )))
     }
 
     /// Send an external drag drop event for a native drag destination.
@@ -1440,9 +1464,9 @@ impl IpcClient {
             position_in_screen_y: event.position_in_screen_y,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_send_external_drag_drop(self.inner, &ffi_event)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_send_external_drag_drop(
+            self.inner, &ffi_event
+        )))
     }
 
     /// Update the IME composition state.
@@ -1473,9 +1497,10 @@ impl IpcClient {
             spans: span_list,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_set_composition(self.inner, &ffi_composition)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_set_composition(
+            self.inner,
+            &ffi_composition
+        )))
     }
 
     /// Update the IME composition state for an extension popup.
@@ -1509,13 +1534,13 @@ impl IpcClient {
             spans: span_list,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_set_extension_popup_composition(
-                    self.inner,
-                    composition.popup_id.get(),
-                    &ffi_composition,
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_set_extension_popup_composition(
+                self.inner,
+                composition.popup_id.get(),
+                &ffi_composition,
+            )
+        ))
     }
 
     /// Commit IME text input to the page.
@@ -1545,9 +1570,10 @@ impl IpcClient {
             spans: span_list,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_commit_text(self.inner, &ffi_commit)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_commit_text(
+            self.inner,
+            &ffi_commit
+        )))
     }
 
     /// Commit IME text input to an extension popup.
@@ -1580,13 +1606,11 @@ impl IpcClient {
             spans: span_list,
         };
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_commit_extension_popup_text(
-                    self.inner,
-                    commit.popup_id.get(),
-                    &ffi_commit,
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_commit_extension_popup_text(
+            self.inner,
+            commit.popup_id.get(),
+            &ffi_commit,
+        )))
     }
 
     /// Finish composing IME text with the specified behavior.
@@ -1601,18 +1625,18 @@ impl IpcClient {
 
         let behavior = match behavior {
             ChromeConfirmCompositionBehavior::DoNotKeepSelection => {
-                CBF_IME_CONFIRM_DO_NOT_KEEP_SELECTION
+                CbfConfirmCompositionBehavior_kCbfConfirmCompositionDoNotKeepSelection
             }
-            ChromeConfirmCompositionBehavior::KeepSelection => CBF_IME_CONFIRM_KEEP_SELECTION,
-        };
+            ChromeConfirmCompositionBehavior::KeepSelection => {
+                CbfConfirmCompositionBehavior_kCbfConfirmCompositionKeepSelection
+            }
+        } as u8;
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_finish_composing_text(
-                    self.inner,
-                    browsing_context_id.get(),
-                    behavior,
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_finish_composing_text(
+            self.inner,
+            browsing_context_id.get(),
+            behavior,
+        )))
     }
 
     /// Finish composing IME text inside an extension popup.
@@ -1627,18 +1651,20 @@ impl IpcClient {
 
         let behavior = match behavior {
             ChromeConfirmCompositionBehavior::DoNotKeepSelection => {
-                CBF_IME_CONFIRM_DO_NOT_KEEP_SELECTION
+                CbfConfirmCompositionBehavior_kCbfConfirmCompositionDoNotKeepSelection
             }
-            ChromeConfirmCompositionBehavior::KeepSelection => CBF_IME_CONFIRM_KEEP_SELECTION,
-        };
+            ChromeConfirmCompositionBehavior::KeepSelection => {
+                CbfConfirmCompositionBehavior_kCbfConfirmCompositionKeepSelection
+            }
+        } as u8;
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_finish_extension_popup_composing_text(
-                    self.inner,
-                    popup_id.get(),
-                    behavior,
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_finish_extension_popup_composing_text(
+                self.inner,
+                popup_id.get(),
+                behavior,
+            )
+        ))
     }
 
     pub fn set_extension_popup_focus(
@@ -1650,9 +1676,11 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_set_extension_popup_focus(self.inner, popup_id.get(), focused)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_set_extension_popup_focus(
+            self.inner,
+            popup_id.get(),
+            focused
+        )))
     }
 
     pub fn set_extension_popup_size(
@@ -1665,14 +1693,12 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_set_extension_popup_size(
-                    self.inner,
-                    popup_id.get(),
-                    width,
-                    height,
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_set_extension_popup_size(
+            self.inner,
+            popup_id.get(),
+            width,
+            height,
+        )))
     }
 
     /// Update the page background policy of the specified extension popup.
@@ -1687,13 +1713,13 @@ impl IpcClient {
 
         let transparent = matches!(policy, ChromeBackgroundPolicy::Transparent);
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_set_extension_popup_background_policy(
-                    self.inner,
-                    popup_id.get(),
-                    transparent,
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_set_extension_popup_background_policy(
+                self.inner,
+                popup_id.get(),
+                transparent,
+            )
+        ))
     }
 
     pub fn close_extension_popup(&mut self, popup_id: PopupId) -> Result<(), Error> {
@@ -1701,9 +1727,10 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_close_extension_popup(self.inner, popup_id.get())),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_close_extension_popup(
+            self.inner,
+            popup_id.get()
+        )))
     }
 
     /// Execute a browser-generic edit action for the given page.
@@ -1716,13 +1743,11 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_execute_edit_action(
-                    self.inner,
-                    browsing_context_id.get(),
-                    edit_action_to_ffi(action),
-                )),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_execute_edit_action(
+            self.inner,
+            browsing_context_id.get(),
+            edit_action_to_ffi(action),
+        )))
     }
 
     /// Execute a browser-generic edit action for the given extension popup.
@@ -1735,13 +1760,13 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_execute_extension_popup_edit_action(
-                    self.inner,
-                    popup_id.get(),
-                    edit_action_to_ffi(action),
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_execute_extension_popup_edit_action(
+                self.inner,
+                popup_id.get(),
+                edit_action_to_ffi(action),
+            )
+        ))
     }
 
     /// Execute a context menu command for the given menu.
@@ -1755,14 +1780,14 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_execute_context_menu_command(
-                    self.inner,
-                    menu_id,
-                    command_id,
-                    event_flags,
-                )),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_execute_context_menu_command(
+                self.inner,
+                menu_id,
+                command_id,
+                event_flags,
+            )
+        ))
     }
 
     /// Accept a host-owned choice menu selection.
@@ -1779,9 +1804,9 @@ impl IpcClient {
             items: indices.as_ptr(),
             len: indices.len() as u32,
         };
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_accept_choice_menu_selection(self.inner, request_id, &ffi_indices)),
-        )
+        bridge_ok(bridge_call!(
+            cbf_bridge_client_accept_choice_menu_selection(self.inner, request_id, &ffi_indices)
+        ))
     }
 
     /// Dismiss a host-owned choice menu without a selection.
@@ -1790,9 +1815,9 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_dismiss_choice_menu(self.inner, request_id)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_dismiss_choice_menu(
+            self.inner, request_id
+        )))
     }
 
     /// Dismiss the context menu with the given id.
@@ -1801,9 +1826,9 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_dismiss_context_menu(self.inner, menu_id)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_dismiss_context_menu(
+            self.inner, menu_id
+        )))
     }
 
     /// Request a graceful shutdown from the backend.
@@ -1812,9 +1837,9 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_request_shutdown(self.inner, request_id)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_request_shutdown(
+            self.inner, request_id
+        )))
     }
 
     /// Respond to a shutdown confirmation request.
@@ -1823,9 +1848,9 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_confirm_shutdown(self.inner, request_id, proceed)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_confirm_shutdown(
+            self.inner, request_id, proceed
+        )))
     }
 
     /// Force an immediate shutdown without confirmations.
@@ -1834,9 +1859,7 @@ impl IpcClient {
             return Err(Error::ConnectionFailed);
         }
 
-        bridge_ok(
-            bridge_call!(cbf_bridge_client_force_shutdown(self.inner)),
-        )
+        bridge_ok(bridge_call!(cbf_bridge_client_force_shutdown(self.inner)))
     }
 
     /// Tear down the IPC client and free native resources.
@@ -1872,23 +1895,27 @@ fn wait_for_event_inner(
     let status = bridge_call!(cbf_bridge_client_wait_for_event(inner, timeout_ms));
 
     match status {
-        CBF_BRIDGE_EVENT_WAIT_STATUS_EVENT_AVAILABLE => Ok(EventWaitResult::EventAvailable),
-        CBF_BRIDGE_EVENT_WAIT_STATUS_TIMED_OUT => Ok(EventWaitResult::TimedOut),
-        CBF_BRIDGE_EVENT_WAIT_STATUS_DISCONNECTED => Ok(EventWaitResult::Disconnected),
-        CBF_BRIDGE_EVENT_WAIT_STATUS_CLOSED => Ok(EventWaitResult::Closed),
+        CbfBridgeEventWaitStatus_kCbfBridgeEventWaitStatusEventAvailable => {
+            Ok(EventWaitResult::EventAvailable)
+        }
+        CbfBridgeEventWaitStatus_kCbfBridgeEventWaitStatusTimedOut => Ok(EventWaitResult::TimedOut),
+        CbfBridgeEventWaitStatus_kCbfBridgeEventWaitStatusDisconnected => {
+            Ok(EventWaitResult::Disconnected)
+        }
+        CbfBridgeEventWaitStatus_kCbfBridgeEventWaitStatusClosed => Ok(EventWaitResult::Closed),
         _ => Err(Error::InvalidEvent),
     }
 }
 
 fn edit_action_to_ffi(action: EditAction) -> u8 {
-    match action {
-        EditAction::Undo => CBF_EDIT_ACTION_UNDO,
-        EditAction::Redo => CBF_EDIT_ACTION_REDO,
-        EditAction::Cut => CBF_EDIT_ACTION_CUT,
-        EditAction::Copy => CBF_EDIT_ACTION_COPY,
-        EditAction::Paste => CBF_EDIT_ACTION_PASTE,
-        EditAction::SelectAll => CBF_EDIT_ACTION_SELECT_ALL,
-    }
+    (match action {
+        EditAction::Undo => CbfEditAction_kCbfEditActionUndo,
+        EditAction::Redo => CbfEditAction_kCbfEditActionRedo,
+        EditAction::Cut => CbfEditAction_kCbfEditActionCut,
+        EditAction::Copy => CbfEditAction_kCbfEditActionCopy,
+        EditAction::Paste => CbfEditAction_kCbfEditActionPaste,
+        EditAction::SelectAll => CbfEditAction_kCbfEditActionSelectAll,
+    }) as u8
 }
 
 fn as_ffi_string_ptr(value: &CString) -> *mut c_char {
@@ -2039,23 +2066,23 @@ impl OwnedDragData {
 }
 
 fn ipc_message_type_to_ffi(message_type: TabIpcMessageType) -> u8 {
-    match message_type {
-        TabIpcMessageType::Request => CBF_IPC_MESSAGE_REQUEST,
-        TabIpcMessageType::Response => CBF_IPC_MESSAGE_RESPONSE,
-        TabIpcMessageType::Event => CBF_IPC_MESSAGE_EVENT,
-    }
+    (match message_type {
+        TabIpcMessageType::Request => CbfIpcMessageType_kCbfIpcMessageRequest,
+        TabIpcMessageType::Response => CbfIpcMessageType_kCbfIpcMessageResponse,
+        TabIpcMessageType::Event => CbfIpcMessageType_kCbfIpcMessageEvent,
+    }) as u8
 }
 
 fn ipc_error_code_to_ffi(error_code: TabIpcErrorCode) -> u8 {
-    match error_code {
-        TabIpcErrorCode::Timeout => CBF_IPC_ERROR_TIMEOUT,
-        TabIpcErrorCode::Aborted => CBF_IPC_ERROR_ABORTED,
-        TabIpcErrorCode::Disconnected => CBF_IPC_ERROR_DISCONNECTED,
-        TabIpcErrorCode::IpcDisabled => CBF_IPC_ERROR_IPC_DISABLED,
-        TabIpcErrorCode::ContextClosed => CBF_IPC_ERROR_CONTEXT_CLOSED,
-        TabIpcErrorCode::RemoteError => CBF_IPC_ERROR_REMOTE_ERROR,
-        TabIpcErrorCode::ProtocolError => CBF_IPC_ERROR_PROTOCOL_ERROR,
-    }
+    (match error_code {
+        TabIpcErrorCode::Timeout => CbfIpcErrorCode_kCbfIpcErrorTimeout,
+        TabIpcErrorCode::Aborted => CbfIpcErrorCode_kCbfIpcErrorAborted,
+        TabIpcErrorCode::Disconnected => CbfIpcErrorCode_kCbfIpcErrorDisconnected,
+        TabIpcErrorCode::IpcDisabled => CbfIpcErrorCode_kCbfIpcErrorIpcDisabled,
+        TabIpcErrorCode::ContextClosed => CbfIpcErrorCode_kCbfIpcErrorContextClosed,
+        TabIpcErrorCode::RemoteError => CbfIpcErrorCode_kCbfIpcErrorRemoteError,
+        TabIpcErrorCode::ProtocolError => CbfIpcErrorCode_kCbfIpcErrorProtocolError,
+    }) as u8
 }
 
 impl Drop for IpcClient {

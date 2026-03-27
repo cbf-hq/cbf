@@ -1,3 +1,5 @@
+#![allow(non_upper_case_globals)]
+
 #[cfg(target_os = "macos")]
 use std::{ffi::c_void, ptr::NonNull};
 
@@ -53,8 +55,8 @@ use crate::data::{
 };
 
 pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
-    match event.kind {
-        CBF_EVENT_SURFACE_HANDLE_UPDATED => {
+    match u32::from(event.kind) {
+        CbfEventKind_kEventSurfaceHandleUpdated => {
             let handle = parse_surface_handle(event.surface_handle)?;
 
             Ok(IpcEvent::SurfaceHandleUpdated {
@@ -63,14 +65,14 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 handle,
             })
         }
-        CBF_EVENT_EXTENSION_POPUP_OPENED => Ok(IpcEvent::ExtensionPopupOpened {
+        CbfEventKind_kEventExtensionPopupOpened => Ok(IpcEvent::ExtensionPopupOpened {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             popup_id: event.extension_popup_id,
             extension_id: c_string_to_string(event.extension_id),
             title: c_string_to_string(event.title),
         }),
-        CBF_EVENT_EXTENSION_POPUP_SURFACE_HANDLE_UPDATED => {
+        CbfEventKind_kEventExtensionPopupSurfaceHandleUpdated => {
             let handle = parse_surface_handle(event.surface_handle)?;
 
             Ok(IpcEvent::ExtensionPopupSurfaceHandleUpdated {
@@ -80,7 +82,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 handle,
             })
         }
-        CBF_EVENT_EXTENSION_POPUP_PREFERRED_SIZE_CHANGED => {
+        CbfEventKind_kEventExtensionPopupPreferredSizeChanged => {
             Ok(IpcEvent::ExtensionPopupPreferredSizeChanged {
                 profile_id: c_string_to_string(event.profile_id),
                 browsing_context_id: TabId::new(event.tab_id),
@@ -89,7 +91,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 height: event.height,
             })
         }
-        CBF_EVENT_EXTENSION_POPUP_CONTEXT_MENU_REQUESTED => {
+        CbfEventKind_kEventExtensionPopupContextMenuRequested => {
             Ok(IpcEvent::ExtensionPopupContextMenuRequested {
                 profile_id: c_string_to_string(event.profile_id),
                 browsing_context_id: TabId::new(event.tab_id),
@@ -97,7 +99,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 menu: parse_context_menu(event.context_menu),
             })
         }
-        CBF_EVENT_EXTENSION_POPUP_CHOICE_MENU_REQUESTED => {
+        CbfEventKind_kEventExtensionPopupChoiceMenuRequested => {
             Ok(IpcEvent::ExtensionPopupChoiceMenuRequested {
                 profile_id: c_string_to_string(event.profile_id),
                 browsing_context_id: TabId::new(event.tab_id),
@@ -106,19 +108,21 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 menu: parse_choice_menu(event.choice_menu),
             })
         }
-        CBF_EVENT_EXTENSION_POPUP_CURSOR_CHANGED => Ok(IpcEvent::ExtensionPopupCursorChanged {
-            profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: TabId::new(event.tab_id),
-            popup_id: PopupId::new(event.extension_popup_id),
-            cursor_type: cursor_icon_from_ffi(event.cursor_type),
-        }),
-        CBF_EVENT_EXTENSION_POPUP_TITLE_UPDATED => Ok(IpcEvent::ExtensionPopupTitleUpdated {
+        CbfEventKind_kEventExtensionPopupCursorChanged => {
+            Ok(IpcEvent::ExtensionPopupCursorChanged {
+                profile_id: c_string_to_string(event.profile_id),
+                browsing_context_id: TabId::new(event.tab_id),
+                popup_id: PopupId::new(event.extension_popup_id),
+                cursor_type: cursor_icon_from_ffi(event.cursor_type),
+            })
+        }
+        CbfEventKind_kEventExtensionPopupTitleUpdated => Ok(IpcEvent::ExtensionPopupTitleUpdated {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             popup_id: PopupId::new(event.extension_popup_id),
             title: c_string_to_string(event.title),
         }),
-        CBF_EVENT_EXTENSION_POPUP_JAVASCRIPT_DIALOG_REQUESTED => {
+        CbfEventKind_kEventExtensionPopupJavaScriptDialogRequested => {
             Ok(IpcEvent::ExtensionPopupJavaScriptDialogRequested {
                 profile_id: c_string_to_string(event.profile_id),
                 browsing_context_id: TabId::new(event.tab_id),
@@ -130,12 +134,14 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 reason: beforeunload_reason_from_ffi(event.beforeunload_reason),
             })
         }
-        CBF_EVENT_EXTENSION_POPUP_CLOSE_REQUESTED => Ok(IpcEvent::ExtensionPopupCloseRequested {
-            profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: TabId::new(event.tab_id),
-            popup_id: PopupId::new(event.extension_popup_id),
-        }),
-        CBF_EVENT_EXTENSION_POPUP_RENDER_PROCESS_GONE => {
+        CbfEventKind_kEventExtensionPopupCloseRequested => {
+            Ok(IpcEvent::ExtensionPopupCloseRequested {
+                profile_id: c_string_to_string(event.profile_id),
+                browsing_context_id: TabId::new(event.tab_id),
+                popup_id: PopupId::new(event.extension_popup_id),
+            })
+        }
+        CbfEventKind_kEventExtensionPopupRenderProcessGone => {
             Ok(IpcEvent::ExtensionPopupRenderProcessGone {
                 profile_id: c_string_to_string(event.profile_id),
                 browsing_context_id: TabId::new(event.tab_id),
@@ -143,27 +149,27 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 crashed: event.crashed,
             })
         }
-        CBF_EVENT_EXTENSION_POPUP_CLOSED => Ok(IpcEvent::ExtensionPopupClosed {
+        CbfEventKind_kEventExtensionPopupClosed => Ok(IpcEvent::ExtensionPopupClosed {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             popup_id: event.extension_popup_id,
         }),
-        CBF_EVENT_TAB_CREATED => Ok(IpcEvent::TabCreated {
+        CbfEventKind_kEventTabCreated => Ok(IpcEvent::TabCreated {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
         }),
-        CBF_EVENT_DEVTOOLS_OPENED => Ok(IpcEvent::DevToolsOpened {
+        CbfEventKind_kEventDevToolsOpened => Ok(IpcEvent::DevToolsOpened {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             inspected_browsing_context_id: TabId::new(event.inspected_tab_id),
         }),
-        CBF_EVENT_IME_BOUNDS_UPDATED => Ok(IpcEvent::ImeBoundsUpdated {
+        CbfEventKind_kEventImeBoundsUpdated => Ok(IpcEvent::ImeBoundsUpdated {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             update: parse_ime_bounds(event.ime_bounds),
         }),
-        CBF_EVENT_EXTENSION_POPUP_IME_BOUNDS_UPDATED => {
+        CbfEventKind_kEventExtensionPopupImeBoundsUpdated => {
             Ok(IpcEvent::ExtensionPopupImeBoundsUpdated {
                 profile_id: c_string_to_string(event.profile_id),
                 browsing_context_id: TabId::new(event.tab_id),
@@ -171,28 +177,28 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 update: parse_ime_bounds(event.ime_bounds),
             })
         }
-        CBF_EVENT_SHUTDOWN_BLOCKED => Ok(IpcEvent::ShutdownBlocked {
+        CbfEventKind_kEventShutdownBlocked => Ok(IpcEvent::ShutdownBlocked {
             request_id: event.request_id,
             dirty_browsing_context_ids: parse_browsing_context_ids(event.dirty_tab_ids),
         }),
-        CBF_EVENT_SHUTDOWN_PROCEEDING => Ok(IpcEvent::ShutdownProceeding {
+        CbfEventKind_kEventShutdownProceeding => Ok(IpcEvent::ShutdownProceeding {
             request_id: event.request_id,
         }),
-        CBF_EVENT_SHUTDOWN_CANCELLED => Ok(IpcEvent::ShutdownCancelled {
+        CbfEventKind_kEventShutdownCancelled => Ok(IpcEvent::ShutdownCancelled {
             request_id: event.request_id,
         }),
-        CBF_EVENT_CONTEXT_MENU_REQUESTED => Ok(IpcEvent::ContextMenuRequested {
+        CbfEventKind_kEventContextMenuRequested => Ok(IpcEvent::ContextMenuRequested {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             menu: parse_context_menu(event.context_menu),
         }),
-        CBF_EVENT_CHOICE_MENU_REQUESTED => Ok(IpcEvent::ChoiceMenuRequested {
+        CbfEventKind_kEventChoiceMenuRequested => Ok(IpcEvent::ChoiceMenuRequested {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
             menu: parse_choice_menu(event.choice_menu),
         }),
-        CBF_EVENT_TAB_OPEN_REQUESTED => Ok(IpcEvent::TabOpenRequested {
+        CbfEventKind_kEventTabOpenRequested => Ok(IpcEvent::TabOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
             request_id: event.request_id,
             source_tab_id: if event.tab_open_has_source {
@@ -204,7 +210,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             open_hint: tab_open_hint_from_ffi(event.tab_open_hint),
             user_gesture: event.tab_open_user_gesture,
         }),
-        CBF_EVENT_TAB_OPEN_RESOLVED => Ok(IpcEvent::TabOpenResolved {
+        CbfEventKind_kEventTabOpenResolved => Ok(IpcEvent::TabOpenResolved {
             profile_id: c_string_to_string(event.profile_id),
             request_id: event.request_id,
             result: tab_open_result_from_ffi(
@@ -213,7 +219,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.tab_open_target_tab_id,
             ),
         }),
-        CBF_EVENT_NAVIGATION_STATE_CHANGED => Ok(IpcEvent::NavigationStateChanged {
+        CbfEventKind_kEventNavigationStateChanged => Ok(IpcEvent::NavigationStateChanged {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             url: c_string_to_string(event.url),
@@ -221,22 +227,22 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             can_go_forward: event.can_go_forward,
             is_loading: event.is_loading,
         }),
-        CBF_EVENT_CURSOR_CHANGED => Ok(IpcEvent::CursorChanged {
+        CbfEventKind_kEventCursorChanged => Ok(IpcEvent::CursorChanged {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             cursor_type: cursor_icon_from_ffi(event.cursor_type),
         }),
-        CBF_EVENT_TITLE_UPDATED => Ok(IpcEvent::TitleUpdated {
+        CbfEventKind_kEventTitleUpdated => Ok(IpcEvent::TitleUpdated {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             title: c_string_to_string(event.title),
         }),
-        CBF_EVENT_FAVICON_URL_UPDATED => Ok(IpcEvent::FaviconUrlUpdated {
+        CbfEventKind_kEventFaviconUrlUpdated => Ok(IpcEvent::FaviconUrlUpdated {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             url: c_string_to_string(event.favicon_url),
         }),
-        CBF_EVENT_BEFOREUNLOAD_DIALOG_REQUESTED => {
+        CbfEventKind_kEventBeforeUnloadDialogRequested => {
             let profile_id = c_string_to_string(event.profile_id);
             let browsing_context_id = TabId::new(event.tab_id);
             let reason = beforeunload_reason_from_ffi(event.beforeunload_reason);
@@ -247,7 +253,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 reason,
             })
         }
-        CBF_EVENT_JAVASCRIPT_DIALOG_REQUESTED => Ok(IpcEvent::JavaScriptDialogRequested {
+        CbfEventKind_kEventJavaScriptDialogRequested => Ok(IpcEvent::JavaScriptDialogRequested {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
@@ -256,21 +262,21 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             default_prompt_text: optional_string_from_ffi(event.default_prompt_text),
             reason: beforeunload_reason_from_ffi(event.beforeunload_reason),
         }),
-        CBF_EVENT_TAB_CLOSED => Ok(IpcEvent::TabClosed {
+        CbfEventKind_kEventTabClosed => Ok(IpcEvent::TabClosed {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
         }),
-        CBF_EVENT_TAB_RESIZE_ACKNOWLEDGED => Ok(IpcEvent::TabResizeAcknowledged {
+        CbfEventKind_kEventTabResizeAcknowledged => Ok(IpcEvent::TabResizeAcknowledged {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
         }),
-        CBF_EVENT_TAB_DOM_HTML_READ => Ok(IpcEvent::TabDomHtmlRead {
+        CbfEventKind_kEventTabDomHtmlRead => Ok(IpcEvent::TabDomHtmlRead {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
             html: c_string_to_string(event.dom_html),
         }),
-        CBF_EVENT_FIND_REPLY => Ok(IpcEvent::FindReply {
+        CbfEventKind_kEventFindReply => Ok(IpcEvent::FindReply {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             request_id: event.request_id,
@@ -279,7 +285,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             selection_rect: find_rect_from_ffi(event.find_selection_rect),
             final_update: event.find_final_update,
         }),
-        CBF_EVENT_TAB_IPC_MESSAGE_RECEIVED => Ok(IpcEvent::TabIpcMessageReceived {
+        CbfEventKind_kEventTabIpcMessageReceived => Ok(IpcEvent::TabIpcMessageReceived {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             channel: c_string_to_string(event.ipc_channel),
@@ -294,7 +300,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             content_type: optional_string_from_ffi(event.ipc_content_type),
             error_code: ipc_error_code_from_ffi(event.ipc_error_code),
         }),
-        CBF_EVENT_DRAG_START_REQUESTED => {
+        CbfEventKind_kEventDragStartRequested => {
             let profile_id = c_string_to_string(event.profile_id);
             let request = parse_drag_start_request(event.drag_start_request);
             Ok(IpcEvent::DragStartRequested {
@@ -303,16 +309,18 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 request,
             })
         }
-        CBF_EVENT_EXTERNAL_DRAG_OPERATION_CHANGED => Ok(IpcEvent::ExternalDragOperationChanged {
-            profile_id: c_string_to_string(event.profile_id),
-            browsing_context_id: TabId::new(event.tab_id),
-            operation: drag_operation_from_ffi(event.drag_operation),
-        }),
-        CBF_EVENT_EXTENSIONS_LISTED => Ok(IpcEvent::ExtensionsListed {
+        CbfEventKind_kEventExternalDragOperationChanged => {
+            Ok(IpcEvent::ExternalDragOperationChanged {
+                profile_id: c_string_to_string(event.profile_id),
+                browsing_context_id: TabId::new(event.tab_id),
+                operation: drag_operation_from_ffi(event.drag_operation),
+            })
+        }
+        CbfEventKind_kEventExtensionsListed => Ok(IpcEvent::ExtensionsListed {
             profile_id: c_string_to_string(event.profile_id),
             extensions: parse_extension_list(event.extensions),
         }),
-        CBF_EVENT_PROMPT_UI_REQUESTED => Ok(IpcEvent::PromptUiOpenRequested {
+        CbfEventKind_kEventPromptUiRequested => Ok(IpcEvent::PromptUiOpenRequested {
             profile_id: c_string_to_string(event.profile_id),
             source_tab_id: event
                 .prompt_ui_has_source_tab_id
@@ -337,7 +345,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.prompt_ui_repost_target_url,
             ),
         }),
-        CBF_EVENT_PROMPT_UI_RESOLVED => Ok(IpcEvent::PromptUiResolved {
+        CbfEventKind_kEventPromptUiResolved => Ok(IpcEvent::PromptUiResolved {
             profile_id: c_string_to_string(event.profile_id),
             source_tab_id: event
                 .prompt_ui_has_source_tab_id
@@ -351,32 +359,34 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
                 event.download_id,
                 event.download_destination_path,
                 event.extension_id,
-                event.prompt_ui_extension_install_result,
-                event.prompt_ui_extension_uninstall_result,
-                event.prompt_ui_extension_install_detail,
+                event.extension_install_prompt_result,
+                event.extension_uninstall_prompt_result,
+                event.extension_install_prompt_detail,
                 event.prompt_ui_report_abuse,
                 event.prompt_ui_repost_reason,
                 event.prompt_ui_repost_target_url,
             ),
         }),
-        CBF_EVENT_CUSTOM_SCHEME_REQUEST_RECEIVED => Ok(IpcEvent::CustomSchemeRequestReceived {
-            request: ChromeCustomSchemeRequest {
-                request_id: event.request_id,
-                profile_id: c_string_to_string(event.profile_id),
-                url: c_string_to_string(event.url),
-                scheme: c_string_to_string(event.custom_scheme_scheme),
-                host: c_string_to_string(event.custom_scheme_host),
-                path: c_string_to_string(event.custom_scheme_path),
-                query: optional_string_from_ffi(event.custom_scheme_query),
-                method: custom_scheme_request_method_from_ffi(event.custom_scheme_method),
-            },
-        }),
-        CBF_EVENT_EXTENSION_RUNTIME_WARNING => Ok(IpcEvent::ExtensionRuntimeWarning {
+        CbfEventKind_kEventCustomSchemeRequestReceived => {
+            Ok(IpcEvent::CustomSchemeRequestReceived {
+                request: ChromeCustomSchemeRequest {
+                    request_id: event.request_id,
+                    profile_id: c_string_to_string(event.profile_id),
+                    url: c_string_to_string(event.url),
+                    scheme: c_string_to_string(event.custom_scheme_scheme),
+                    host: c_string_to_string(event.custom_scheme_host),
+                    path: c_string_to_string(event.custom_scheme_path),
+                    query: optional_string_from_ffi(event.custom_scheme_query),
+                    method: custom_scheme_request_method_from_ffi(event.custom_scheme_method),
+                },
+            })
+        }
+        CbfEventKind_kEventExtensionRuntimeWarning => Ok(IpcEvent::ExtensionRuntimeWarning {
             profile_id: c_string_to_string(event.profile_id),
             browsing_context_id: TabId::new(event.tab_id),
             detail: c_string_to_string(event.extension_runtime_warning),
         }),
-        CBF_EVENT_PROMPT_UI_OPENED => Ok(IpcEvent::PromptUiOpened {
+        CbfEventKind_kEventPromptUiOpened => Ok(IpcEvent::PromptUiOpened {
             profile_id: c_string_to_string(event.profile_id),
             source_tab_id: event
                 .prompt_ui_has_source_tab_id
@@ -406,7 +416,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             },
             modal: event.prompt_ui_modal,
         }),
-        CBF_EVENT_PROMPT_UI_CLOSED => Ok(IpcEvent::PromptUiClosed {
+        CbfEventKind_kEventPromptUiClosed => Ok(IpcEvent::PromptUiClosed {
             profile_id: c_string_to_string(event.profile_id),
             source_tab_id: event
                 .prompt_ui_has_source_tab_id
@@ -432,15 +442,15 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             ),
             reason: prompt_ui_close_reason_from_ffi(event.prompt_ui_close_reason),
         }),
-        CBF_EVENT_DOWNLOAD_CREATED => Ok(IpcEvent::DownloadCreated {
+        CbfEventKind_kEventDownloadCreated => Ok(IpcEvent::DownloadCreated {
             profile_id: c_string_to_string(event.profile_id),
             download: parse_download_snapshot(event),
         }),
-        CBF_EVENT_DOWNLOAD_UPDATED => Ok(IpcEvent::DownloadUpdated {
+        CbfEventKind_kEventDownloadUpdated => Ok(IpcEvent::DownloadUpdated {
             profile_id: c_string_to_string(event.profile_id),
             download: parse_download_progress(event),
         }),
-        CBF_EVENT_DOWNLOAD_COMPLETED => Ok(IpcEvent::DownloadCompleted {
+        CbfEventKind_kEventDownloadCompleted => Ok(IpcEvent::DownloadCompleted {
             profile_id: c_string_to_string(event.profile_id),
             download: parse_download_completion(event),
         }),
@@ -449,19 +459,19 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
 }
 
 fn tab_open_hint_from_ffi(value: u8) -> TabOpenHint {
-    match value {
-        CBF_TAB_OPEN_HINT_CURRENT_CONTEXT => TabOpenHint::CurrentTab,
-        CBF_TAB_OPEN_HINT_NEW_FOREGROUND_CONTEXT => TabOpenHint::NewForegroundTab,
-        CBF_TAB_OPEN_HINT_NEW_BACKGROUND_CONTEXT => TabOpenHint::NewBackgroundTab,
-        CBF_TAB_OPEN_HINT_NEW_WINDOW => TabOpenHint::NewWindow,
-        CBF_TAB_OPEN_HINT_POPUP => TabOpenHint::Popup,
+    match u32::from(value) {
+        CbfTabOpenHint_kCbfTabOpenHintCurrentContext => TabOpenHint::CurrentTab,
+        CbfTabOpenHint_kCbfTabOpenHintNewForegroundContext => TabOpenHint::NewForegroundTab,
+        CbfTabOpenHint_kCbfTabOpenHintNewBackgroundContext => TabOpenHint::NewBackgroundTab,
+        CbfTabOpenHint_kCbfTabOpenHintNewWindow => TabOpenHint::NewWindow,
+        CbfTabOpenHint_kCbfTabOpenHintPopup => TabOpenHint::Popup,
         _ => TabOpenHint::Unknown,
     }
 }
 
 fn tab_open_result_from_ffi(value: u8, has_target: bool, target_tab_id: u64) -> TabOpenResult {
-    match value {
-        CBF_TAB_OPEN_RESULT_OPENED_NEW_CONTEXT => {
+    match u32::from(value) {
+        CbfTabOpenResult_kCbfTabOpenResultOpenedNewContext => {
             if has_target {
                 TabOpenResult::OpenedNewTab {
                     tab_id: TabId::new(target_tab_id),
@@ -470,7 +480,7 @@ fn tab_open_result_from_ffi(value: u8, has_target: bool, target_tab_id: u64) -> 
                 TabOpenResult::Aborted
             }
         }
-        CBF_TAB_OPEN_RESULT_OPENED_EXISTING_CONTEXT => {
+        CbfTabOpenResult_kCbfTabOpenResultOpenedExistingContext => {
             if has_target {
                 TabOpenResult::OpenedExistingTab {
                     tab_id: TabId::new(target_tab_id),
@@ -479,8 +489,8 @@ fn tab_open_result_from_ffi(value: u8, has_target: bool, target_tab_id: u64) -> 
                 TabOpenResult::Aborted
             }
         }
-        CBF_TAB_OPEN_RESULT_DENIED => TabOpenResult::Denied,
-        CBF_TAB_OPEN_RESULT_ABORTED => TabOpenResult::Aborted,
+        CbfTabOpenResult_kCbfTabOpenResultDenied => TabOpenResult::Denied,
+        CbfTabOpenResult_kCbfTabOpenResultAborted => TabOpenResult::Aborted,
         _ => TabOpenResult::Aborted,
     }
 }
@@ -557,9 +567,9 @@ pub(crate) fn parse_extension_list(list: CbfExtensionInfoList) -> Vec<ChromeExte
 }
 
 pub(crate) fn parse_icon_data(icon: CbfIconData) -> Option<ChromeIconData> {
-    match icon.kind {
-        CBF_ICON_DATA_KIND_NONE => None,
-        CBF_ICON_DATA_KIND_URL => {
+    match u32::from(icon.kind) {
+        CbfIconDataKind_kCbfIconDataKindNone => None,
+        CbfIconDataKind_kCbfIconDataKindUrl => {
             let url = c_string_to_string(icon.url);
             if url.is_empty() {
                 None
@@ -567,7 +577,7 @@ pub(crate) fn parse_icon_data(icon: CbfIconData) -> Option<ChromeIconData> {
                 Some(ChromeIconData::Url(url))
             }
         }
-        CBF_ICON_DATA_KIND_PNG => {
+        CbfIconDataKind_kCbfIconDataKindPng => {
             if icon.bytes.is_null() || icon.len == 0 {
                 return None;
             }
@@ -578,7 +588,7 @@ pub(crate) fn parse_icon_data(icon: CbfIconData) -> Option<ChromeIconData> {
                 Some(ChromeIconData::Png(bytes.to_vec()))
             }
         }
-        CBF_ICON_DATA_KIND_BINARY => {
+        CbfIconDataKind_kCbfIconDataKindBinary => {
             if icon.bytes.is_null() || icon.len == 0 {
                 return None;
             }
@@ -713,7 +723,7 @@ fn parse_choice_menu_items(list: CbfChoiceMenuItemList) -> Vec<ChromeChoiceMenuI
 
 fn parse_choice_menu_item(item: &CbfChoiceMenuItem) -> ChromeChoiceMenuItem {
     ChromeChoiceMenuItem {
-        item_type: choice_menu_item_type_from_ffi(item.r#type),
+        item_type: choice_menu_item_type_from_ffi(item.type_),
         label: optional_string_from_ffi(item.label),
         tool_tip: optional_string_from_ffi(item.tool_tip),
         enabled: item.enabled,
@@ -736,7 +746,7 @@ fn parse_context_menu_items(list: CbfContextMenuItemList) -> Vec<ChromeContextMe
 
 fn parse_context_menu_item(item: &CbfContextMenuItem) -> ChromeContextMenuItem {
     ChromeContextMenuItem {
-        r#type: context_menu_item_type_from_ffi(item.r#type),
+        r#type: context_menu_item_type_from_ffi(item.type_),
         command_id: item.command_id,
         label: c_string_to_string(item.label),
         secondary_label: c_string_to_string(item.secondary_label),
@@ -782,16 +792,18 @@ fn parse_context_menu_accelerator(
 }
 
 fn context_menu_item_type_from_ffi(value: u8) -> ChromeContextMenuItemType {
-    match value {
-        CBF_MENU_ITEM_COMMAND => ChromeContextMenuItemType::Command,
-        CBF_MENU_ITEM_CHECK => ChromeContextMenuItemType::Check,
-        CBF_MENU_ITEM_RADIO => ChromeContextMenuItemType::Radio,
-        CBF_MENU_ITEM_SEPARATOR => ChromeContextMenuItemType::Separator,
-        CBF_MENU_ITEM_BUTTON_ITEM => ChromeContextMenuItemType::ButtonItem,
-        CBF_MENU_ITEM_SUBMENU => ChromeContextMenuItemType::Submenu,
-        CBF_MENU_ITEM_ACTIONABLE_SUBMENU => ChromeContextMenuItemType::ActionableSubmenu,
-        CBF_MENU_ITEM_HIGHLIGHTED => ChromeContextMenuItemType::Highlighted,
-        CBF_MENU_ITEM_TITLE => ChromeContextMenuItemType::Title,
+    match u32::from(value) {
+        CbfContextMenuItemType_kCbfMenuItemCommand => ChromeContextMenuItemType::Command,
+        CbfContextMenuItemType_kCbfMenuItemCheck => ChromeContextMenuItemType::Check,
+        CbfContextMenuItemType_kCbfMenuItemRadio => ChromeContextMenuItemType::Radio,
+        CbfContextMenuItemType_kCbfMenuItemSeparator => ChromeContextMenuItemType::Separator,
+        CbfContextMenuItemType_kCbfMenuItemButtonItem => ChromeContextMenuItemType::ButtonItem,
+        CbfContextMenuItemType_kCbfMenuItemSubmenu => ChromeContextMenuItemType::Submenu,
+        CbfContextMenuItemType_kCbfMenuItemActionableSubmenu => {
+            ChromeContextMenuItemType::ActionableSubmenu
+        }
+        CbfContextMenuItemType_kCbfMenuItemHighlighted => ChromeContextMenuItemType::Highlighted,
+        CbfContextMenuItemType_kCbfMenuItemTitle => ChromeContextMenuItemType::Title,
         _ => ChromeContextMenuItemType::Command,
     }
 }
@@ -815,30 +827,34 @@ fn find_rect_from_ffi(rect: CbfRect) -> ChromeFindRect {
 }
 
 fn beforeunload_reason_from_ffi(value: u8) -> ChromeBeforeUnloadReason {
-    match value {
-        CBF_BEFOREUNLOAD_REASON_CLOSE_TAB => ChromeBeforeUnloadReason::CloseBrowsingContext,
-        CBF_BEFOREUNLOAD_REASON_NAVIGATE => ChromeBeforeUnloadReason::Navigate,
-        CBF_BEFOREUNLOAD_REASON_RELOAD => ChromeBeforeUnloadReason::Reload,
-        CBF_BEFOREUNLOAD_REASON_WINDOW_CLOSE => ChromeBeforeUnloadReason::WindowClose,
+    match u32::from(value) {
+        CbfBeforeUnloadReason_kCbfBeforeUnloadReasonCloseTab => {
+            ChromeBeforeUnloadReason::CloseBrowsingContext
+        }
+        CbfBeforeUnloadReason_kCbfBeforeUnloadReasonNavigate => ChromeBeforeUnloadReason::Navigate,
+        CbfBeforeUnloadReason_kCbfBeforeUnloadReasonReload => ChromeBeforeUnloadReason::Reload,
+        CbfBeforeUnloadReason_kCbfBeforeUnloadReasonWindowClose => {
+            ChromeBeforeUnloadReason::WindowClose
+        }
         _ => ChromeBeforeUnloadReason::Unknown,
     }
 }
 
 fn javascript_dialog_type_from_ffi(value: u8) -> DialogType {
-    match value {
-        CBF_JAVASCRIPT_DIALOG_ALERT => DialogType::Alert,
-        CBF_JAVASCRIPT_DIALOG_CONFIRM => DialogType::Confirm,
-        CBF_JAVASCRIPT_DIALOG_PROMPT => DialogType::Prompt,
-        CBF_JAVASCRIPT_DIALOG_BEFOREUNLOAD => DialogType::BeforeUnload,
+    match u32::from(value) {
+        CbfJavaScriptDialogType_kCbfJavaScriptDialogAlert => DialogType::Alert,
+        CbfJavaScriptDialogType_kCbfJavaScriptDialogConfirm => DialogType::Confirm,
+        CbfJavaScriptDialogType_kCbfJavaScriptDialogPrompt => DialogType::Prompt,
+        CbfJavaScriptDialogType_kCbfJavaScriptDialogBeforeUnload => DialogType::BeforeUnload,
         _ => DialogType::Alert,
     }
 }
 
 fn ipc_message_type_from_ffi(value: u8) -> TabIpcMessageType {
-    match value {
-        CBF_IPC_MESSAGE_REQUEST => TabIpcMessageType::Request,
-        CBF_IPC_MESSAGE_RESPONSE => TabIpcMessageType::Response,
-        CBF_IPC_MESSAGE_EVENT => TabIpcMessageType::Event,
+    match u32::from(value) {
+        CbfIpcMessageType_kCbfIpcMessageRequest => TabIpcMessageType::Request,
+        CbfIpcMessageType_kCbfIpcMessageResponse => TabIpcMessageType::Response,
+        CbfIpcMessageType_kCbfIpcMessageEvent => TabIpcMessageType::Event,
         _ => TabIpcMessageType::Event,
     }
 }
@@ -849,8 +865,8 @@ fn ipc_payload_from_ffi(
     binary: *const u8,
     binary_len: u32,
 ) -> TabIpcPayload {
-    match kind {
-        CBF_IPC_PAYLOAD_BINARY if !binary.is_null() && binary_len > 0 => {
+    match u32::from(kind) {
+        CbfIpcPayloadKind_kCbfIpcPayloadBinary if !binary.is_null() && binary_len > 0 => {
             let bytes = unsafe { std::slice::from_raw_parts(binary, binary_len as usize) };
             TabIpcPayload::Binary(bytes.to_vec())
         }
@@ -859,15 +875,15 @@ fn ipc_payload_from_ffi(
 }
 
 fn ipc_error_code_from_ffi(value: u8) -> Option<TabIpcErrorCode> {
-    match value {
-        CBF_IPC_ERROR_NONE => None,
-        CBF_IPC_ERROR_TIMEOUT => Some(TabIpcErrorCode::Timeout),
-        CBF_IPC_ERROR_ABORTED => Some(TabIpcErrorCode::Aborted),
-        CBF_IPC_ERROR_DISCONNECTED => Some(TabIpcErrorCode::Disconnected),
-        CBF_IPC_ERROR_IPC_DISABLED => Some(TabIpcErrorCode::IpcDisabled),
-        CBF_IPC_ERROR_CONTEXT_CLOSED => Some(TabIpcErrorCode::ContextClosed),
-        CBF_IPC_ERROR_REMOTE_ERROR => Some(TabIpcErrorCode::RemoteError),
-        CBF_IPC_ERROR_PROTOCOL_ERROR => Some(TabIpcErrorCode::ProtocolError),
+    match u32::from(value) {
+        CbfIpcErrorCode_kCbfIpcErrorNone => None,
+        CbfIpcErrorCode_kCbfIpcErrorTimeout => Some(TabIpcErrorCode::Timeout),
+        CbfIpcErrorCode_kCbfIpcErrorAborted => Some(TabIpcErrorCode::Aborted),
+        CbfIpcErrorCode_kCbfIpcErrorDisconnected => Some(TabIpcErrorCode::Disconnected),
+        CbfIpcErrorCode_kCbfIpcErrorIpcDisabled => Some(TabIpcErrorCode::IpcDisabled),
+        CbfIpcErrorCode_kCbfIpcErrorContextClosed => Some(TabIpcErrorCode::ContextClosed),
+        CbfIpcErrorCode_kCbfIpcErrorRemoteError => Some(TabIpcErrorCode::RemoteError),
+        CbfIpcErrorCode_kCbfIpcErrorProtocolError => Some(TabIpcErrorCode::ProtocolError),
         _ => Some(TabIpcErrorCode::ProtocolError),
     }
 }
@@ -887,31 +903,37 @@ fn optional_string_from_ffi(value: *mut std::ffi::c_char) -> Option<String> {
 }
 
 fn prompt_ui_extension_install_result_from_ffi(value: u8) -> PromptUiExtensionInstallResult {
-    match value {
-        CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED => PromptUiExtensionInstallResult::Accepted,
-        CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS => {
+    match u32::from(value) {
+        CbfExtensionInstallPromptResult_kCbfExtensionInstallPromptResultAccepted => {
+            PromptUiExtensionInstallResult::Accepted
+        }
+        CbfExtensionInstallPromptResult_kCbfExtensionInstallPromptResultAcceptedWithWithheldPermissions => {
             PromptUiExtensionInstallResult::AcceptedWithWithheldPermissions
         }
-        CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_USER_CANCELED => {
+        CbfExtensionInstallPromptResult_kCbfExtensionInstallPromptResultUserCanceled => {
             PromptUiExtensionInstallResult::UserCanceled
         }
-        CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ABORTED => PromptUiExtensionInstallResult::Aborted,
+        CbfExtensionInstallPromptResult_kCbfExtensionInstallPromptResultAborted => {
+            PromptUiExtensionInstallResult::Aborted
+        }
         _ => PromptUiExtensionInstallResult::Aborted,
     }
 }
 
 fn prompt_ui_extension_uninstall_result_from_ffi(value: u8) -> PromptUiExtensionUninstallResult {
-    match value {
-        CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_ACCEPTED => {
+    match u32::from(value) {
+        CbfExtensionUninstallPromptResult_kCbfExtensionUninstallPromptResultAccepted => {
             PromptUiExtensionUninstallResult::Accepted
         }
-        CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_USER_CANCELED => {
+        CbfExtensionUninstallPromptResult_kCbfExtensionUninstallPromptResultUserCanceled => {
             PromptUiExtensionUninstallResult::UserCanceled
         }
-        CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_ABORTED => {
+        CbfExtensionUninstallPromptResult_kCbfExtensionUninstallPromptResultAborted => {
             PromptUiExtensionUninstallResult::Aborted
         }
-        CBF_PROMPT_UI_EXTENSION_UNINSTALL_RESULT_FAILED => PromptUiExtensionUninstallResult::Failed,
+        CbfExtensionUninstallPromptResult_kCbfExtensionUninstallPromptResultFailed => {
+            PromptUiExtensionUninstallResult::Failed
+        }
         _ => PromptUiExtensionUninstallResult::Aborted,
     }
 }
@@ -939,12 +961,12 @@ fn prompt_ui_kind_from_ffi(
         let value = c_string_to_string(permission_key);
         if value.is_empty() { None } else { Some(value) }
     };
-    match kind {
-        CBF_PROMPT_UI_KIND_PERMISSION_PROMPT => PromptUiKind::PermissionPrompt {
+    match u32::from(kind) {
+        CbfPromptUiKind_kCbfPromptUiKindPermissionPrompt => PromptUiKind::PermissionPrompt {
             permission: prompt_ui_permission_from_ffi(permission),
             permission_key,
         },
-        CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT => PromptUiKind::DownloadPrompt {
+        CbfPromptUiKind_kCbfPromptUiKindDownloadPrompt => PromptUiKind::DownloadPrompt {
             download_id: ChromeDownloadId::new(download_id),
             file_name: c_string_to_string(download_file_name),
             total_bytes: download_has_total_bytes.then_some(download_total_bytes),
@@ -954,32 +976,40 @@ fn prompt_ui_kind_from_ffi(
             },
             reason: download_prompt_reason_from_ffi(download_reason),
         },
-        CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT => PromptUiKind::ExtensionInstallPrompt {
-            extension_id: c_string_to_string(extension_id),
-            extension_name: c_string_to_string(extension_name),
-            permission_names: parse_string_list(permission_names),
-        },
-        CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT => PromptUiKind::ExtensionUninstallPrompt {
-            extension_id: c_string_to_string(extension_id),
-            extension_name: c_string_to_string(extension_name),
-            triggering_extension_name: optional_string_from_ffi(triggering_extension_name),
-            can_report_abuse,
-        },
-        CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG => PromptUiKind::PrintPreviewDialog,
-        CBF_PROMPT_UI_KIND_FORM_RESUBMISSION_PROMPT => PromptUiKind::FormResubmissionPrompt {
-            reason: prompt_ui_form_resubmission_reason_from_ffi(repost_reason),
-            target_url: optional_string_from_ffi(repost_target_url),
-        },
+        CbfPromptUiKind_kCbfPromptUiKindExtensionInstallPrompt => {
+            PromptUiKind::ExtensionInstallPrompt {
+                extension_id: c_string_to_string(extension_id),
+                extension_name: c_string_to_string(extension_name),
+                permission_names: parse_string_list(permission_names),
+            }
+        }
+        CbfPromptUiKind_kCbfPromptUiKindExtensionUninstallPrompt => {
+            PromptUiKind::ExtensionUninstallPrompt {
+                extension_id: c_string_to_string(extension_id),
+                extension_name: c_string_to_string(extension_name),
+                triggering_extension_name: optional_string_from_ffi(triggering_extension_name),
+                can_report_abuse,
+            }
+        }
+        CbfPromptUiKind_kCbfPromptUiKindPrintPreviewDialog => PromptUiKind::PrintPreviewDialog,
+        CbfPromptUiKind_kCbfPromptUiKindFormResubmissionPrompt => {
+            PromptUiKind::FormResubmissionPrompt {
+                reason: prompt_ui_form_resubmission_reason_from_ffi(repost_reason),
+                target_url: optional_string_from_ffi(repost_target_url),
+            }
+        }
         _ => PromptUiKind::Unknown,
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn prompt_ui_dialog_result_from_ffi(value: u8) -> PromptUiDialogResult {
-    match value {
-        CBF_PROMPT_UI_DIALOG_RESULT_PROCEEDED => PromptUiDialogResult::Proceeded,
-        CBF_PROMPT_UI_DIALOG_RESULT_CANCELED => PromptUiDialogResult::Canceled,
-        CBF_PROMPT_UI_DIALOG_RESULT_ABORTED => PromptUiDialogResult::Aborted,
+    match u32::from(value) {
+        CbfPromptUiDialogResult_kCbfPromptUiDialogResultProceeded => {
+            PromptUiDialogResult::Proceeded
+        }
+        CbfPromptUiDialogResult_kCbfPromptUiDialogResultCanceled => PromptUiDialogResult::Canceled,
+        CbfPromptUiDialogResult_kCbfPromptUiDialogResultAborted => PromptUiDialogResult::Aborted,
         _ => PromptUiDialogResult::Unknown,
     }
 }
@@ -1004,13 +1034,13 @@ fn prompt_ui_resolution_from_ffi(
         let value = c_string_to_string(permission_key);
         if value.is_empty() { None } else { Some(value) }
     };
-    match kind {
-        CBF_PROMPT_UI_KIND_PERMISSION_PROMPT => PromptUiResolution::PermissionPrompt {
+    match u32::from(kind) {
+        CbfPromptUiKind_kCbfPromptUiKindPermissionPrompt => PromptUiResolution::PermissionPrompt {
             permission: prompt_ui_permission_from_ffi(permission),
             permission_key,
             result: prompt_ui_resolution_result_from_ffi(permission_result),
         },
-        CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT => PromptUiResolution::DownloadPrompt {
+        CbfPromptUiKind_kCbfPromptUiKindDownloadPrompt => PromptUiResolution::DownloadPrompt {
             download_id: ChromeDownloadId::new(download_id),
             destination_path: {
                 let value = c_string_to_string(download_destination_path);
@@ -1018,15 +1048,17 @@ fn prompt_ui_resolution_from_ffi(
             },
             result: download_prompt_result_from_ffi(permission_result),
         },
-        CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT => PromptUiResolution::ExtensionInstallPrompt {
-            extension_id: c_string_to_string(extension_id),
-            result: prompt_ui_extension_install_result_from_ffi(extension_install_result),
-            detail: {
-                let value = c_string_to_string(detail);
-                if value.is_empty() { None } else { Some(value) }
-            },
-        },
-        CBF_PROMPT_UI_KIND_EXTENSION_UNINSTALL_PROMPT => {
+        CbfPromptUiKind_kCbfPromptUiKindExtensionInstallPrompt => {
+            PromptUiResolution::ExtensionInstallPrompt {
+                extension_id: c_string_to_string(extension_id),
+                result: prompt_ui_extension_install_result_from_ffi(extension_install_result),
+                detail: {
+                    let value = c_string_to_string(detail);
+                    if value.is_empty() { None } else { Some(value) }
+                },
+            }
+        }
+        CbfPromptUiKind_kCbfPromptUiKindExtensionUninstallPrompt => {
             PromptUiResolution::ExtensionUninstallPrompt {
                 extension_id: c_string_to_string(extension_id),
                 result: prompt_ui_extension_uninstall_result_from_ffi(extension_uninstall_result),
@@ -1037,61 +1069,85 @@ fn prompt_ui_resolution_from_ffi(
                 report_abuse,
             }
         }
-        CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG => PromptUiResolution::PrintPreviewDialog {
-            result: prompt_ui_dialog_result_from_ffi(permission_result),
-        },
-        CBF_PROMPT_UI_KIND_FORM_RESUBMISSION_PROMPT => PromptUiResolution::FormResubmissionPrompt {
-            reason: prompt_ui_form_resubmission_reason_from_ffi(repost_reason),
-            target_url: optional_string_from_ffi(repost_target_url),
-            result: prompt_ui_resolution_result_from_ffi(permission_result),
-        },
+        CbfPromptUiKind_kCbfPromptUiKindPrintPreviewDialog => {
+            PromptUiResolution::PrintPreviewDialog {
+                result: prompt_ui_dialog_result_from_ffi(permission_result),
+            }
+        }
+        CbfPromptUiKind_kCbfPromptUiKindFormResubmissionPrompt => {
+            PromptUiResolution::FormResubmissionPrompt {
+                reason: prompt_ui_form_resubmission_reason_from_ffi(repost_reason),
+                target_url: optional_string_from_ffi(repost_target_url),
+                result: prompt_ui_resolution_result_from_ffi(permission_result),
+            }
+        }
         _ => PromptUiResolution::Unknown,
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn download_prompt_result_from_ffi(value: u8) -> ChromeDownloadPromptResult {
-    match value {
-        CBF_DOWNLOAD_PROMPT_RESULT_ALLOWED => ChromeDownloadPromptResult::Allowed,
-        CBF_DOWNLOAD_PROMPT_RESULT_DENIED => ChromeDownloadPromptResult::Denied,
-        CBF_DOWNLOAD_PROMPT_RESULT_ABORTED => ChromeDownloadPromptResult::Aborted,
+    match u32::from(value) {
+        CbfDownloadPromptResult_kCbfDownloadPromptResultAllowed => {
+            ChromeDownloadPromptResult::Allowed
+        }
+        CbfDownloadPromptResult_kCbfDownloadPromptResultDenied => {
+            ChromeDownloadPromptResult::Denied
+        }
+        CbfDownloadPromptResult_kCbfDownloadPromptResultAborted => {
+            ChromeDownloadPromptResult::Aborted
+        }
         _ => ChromeDownloadPromptResult::Aborted,
     }
 }
 
 fn download_prompt_reason_from_ffi(value: u8) -> ChromeDownloadPromptReason {
-    match value {
-        CBF_DOWNLOAD_PROMPT_REASON_NONE => ChromeDownloadPromptReason::None,
-        CBF_DOWNLOAD_PROMPT_REASON_UNEXPECTED => ChromeDownloadPromptReason::Unexpected,
-        CBF_DOWNLOAD_PROMPT_REASON_SAVE_AS => ChromeDownloadPromptReason::SaveAs,
-        CBF_DOWNLOAD_PROMPT_REASON_PREFERENCE => ChromeDownloadPromptReason::Preference,
-        CBF_DOWNLOAD_PROMPT_REASON_NAME_TOO_LONG => ChromeDownloadPromptReason::NameTooLong,
-        CBF_DOWNLOAD_PROMPT_REASON_TARGET_CONFLICT => ChromeDownloadPromptReason::TargetConflict,
-        CBF_DOWNLOAD_PROMPT_REASON_TARGET_PATH_NOT_WRITEABLE => {
+    match u32::from(value) {
+        CbfDownloadPromptReason_kCbfDownloadPromptReasonNone => ChromeDownloadPromptReason::None,
+        CbfDownloadPromptReason_kCbfDownloadPromptReasonUnexpected => {
+            ChromeDownloadPromptReason::Unexpected
+        }
+        CbfDownloadPromptReason_kCbfDownloadPromptReasonSaveAs => {
+            ChromeDownloadPromptReason::SaveAs
+        }
+        CbfDownloadPromptReason_kCbfDownloadPromptReasonPreference => {
+            ChromeDownloadPromptReason::Preference
+        }
+        CbfDownloadPromptReason_kCbfDownloadPromptReasonNameTooLong => {
+            ChromeDownloadPromptReason::NameTooLong
+        }
+        CbfDownloadPromptReason_kCbfDownloadPromptReasonTargetConflict => {
+            ChromeDownloadPromptReason::TargetConflict
+        }
+        CbfDownloadPromptReason_kCbfDownloadPromptReasonTargetPathNotWriteable => {
             ChromeDownloadPromptReason::TargetPathNotWriteable
         }
-        CBF_DOWNLOAD_PROMPT_REASON_TARGET_NO_SPACE => ChromeDownloadPromptReason::TargetNoSpace,
-        CBF_DOWNLOAD_PROMPT_REASON_DLP_BLOCKED => ChromeDownloadPromptReason::DlpBlocked,
+        CbfDownloadPromptReason_kCbfDownloadPromptReasonTargetNoSpace => {
+            ChromeDownloadPromptReason::TargetNoSpace
+        }
+        CbfDownloadPromptReason_kCbfDownloadPromptReasonDlpBlocked => {
+            ChromeDownloadPromptReason::DlpBlocked
+        }
         _ => ChromeDownloadPromptReason::Unknown,
     }
 }
 
 fn download_state_from_ffi(value: u8) -> ChromeDownloadState {
-    match value {
-        CBF_DOWNLOAD_STATE_IN_PROGRESS => ChromeDownloadState::InProgress,
-        CBF_DOWNLOAD_STATE_PAUSED => ChromeDownloadState::Paused,
-        CBF_DOWNLOAD_STATE_COMPLETED => ChromeDownloadState::Completed,
-        CBF_DOWNLOAD_STATE_CANCELLED => ChromeDownloadState::Cancelled,
-        CBF_DOWNLOAD_STATE_INTERRUPTED => ChromeDownloadState::Interrupted,
+    match u32::from(value) {
+        CbfDownloadState_kCbfDownloadStateInProgress => ChromeDownloadState::InProgress,
+        CbfDownloadState_kCbfDownloadStatePaused => ChromeDownloadState::Paused,
+        CbfDownloadState_kCbfDownloadStateCompleted => ChromeDownloadState::Completed,
+        CbfDownloadState_kCbfDownloadStateCancelled => ChromeDownloadState::Cancelled,
+        CbfDownloadState_kCbfDownloadStateInterrupted => ChromeDownloadState::Interrupted,
         _ => ChromeDownloadState::Unknown,
     }
 }
 
 fn download_outcome_from_ffi(value: u8) -> ChromeDownloadOutcome {
-    match value {
-        CBF_DOWNLOAD_OUTCOME_SUCCEEDED => ChromeDownloadOutcome::Succeeded,
-        CBF_DOWNLOAD_OUTCOME_CANCELLED => ChromeDownloadOutcome::Cancelled,
-        CBF_DOWNLOAD_OUTCOME_INTERRUPTED => ChromeDownloadOutcome::Interrupted,
+    match u32::from(value) {
+        CbfDownloadOutcome_kCbfDownloadOutcomeSucceeded => ChromeDownloadOutcome::Succeeded,
+        CbfDownloadOutcome_kCbfDownloadOutcomeCancelled => ChromeDownloadOutcome::Cancelled,
+        CbfDownloadOutcome_kCbfDownloadOutcomeInterrupted => ChromeDownloadOutcome::Interrupted,
         _ => ChromeDownloadOutcome::Unknown,
     }
 }
@@ -1154,87 +1210,111 @@ fn parse_download_completion(event: CbfBridgeEvent) -> ChromeDownloadCompletion 
 }
 
 fn prompt_ui_permission_from_ffi(value: u8) -> PromptUiPermissionType {
-    match value {
-        CBF_PROMPT_UI_PERMISSION_TYPE_GEOLOCATION => PromptUiPermissionType::Geolocation,
-        CBF_PROMPT_UI_PERMISSION_TYPE_NOTIFICATIONS => PromptUiPermissionType::Notifications,
-        CBF_PROMPT_UI_PERMISSION_TYPE_AUDIO_CAPTURE => PromptUiPermissionType::AudioCapture,
-        CBF_PROMPT_UI_PERMISSION_TYPE_VIDEO_CAPTURE => PromptUiPermissionType::VideoCapture,
+    match u32::from(value) {
+        CbfPromptUiPermissionType_kCbfPromptUiPermissionTypeGeolocation => {
+            PromptUiPermissionType::Geolocation
+        }
+        CbfPromptUiPermissionType_kCbfPromptUiPermissionTypeNotifications => {
+            PromptUiPermissionType::Notifications
+        }
+        CbfPromptUiPermissionType_kCbfPromptUiPermissionTypeAudioCapture => {
+            PromptUiPermissionType::AudioCapture
+        }
+        CbfPromptUiPermissionType_kCbfPromptUiPermissionTypeVideoCapture => {
+            PromptUiPermissionType::VideoCapture
+        }
         _ => PromptUiPermissionType::Unknown,
     }
 }
 
 fn prompt_ui_form_resubmission_reason_from_ffi(value: u8) -> PromptUiFormResubmissionReason {
-    match value {
-        CBF_FORM_RESUBMISSION_REASON_RELOAD => PromptUiFormResubmissionReason::Reload,
-        CBF_FORM_RESUBMISSION_REASON_BACK_FORWARD => PromptUiFormResubmissionReason::BackForward,
-        CBF_FORM_RESUBMISSION_REASON_OTHER => PromptUiFormResubmissionReason::Other,
+    match u32::from(value) {
+        CbfFormResubmissionReason_kCbfFormResubmissionReasonReload => {
+            PromptUiFormResubmissionReason::Reload
+        }
+        CbfFormResubmissionReason_kCbfFormResubmissionReasonBackForward => {
+            PromptUiFormResubmissionReason::BackForward
+        }
+        CbfFormResubmissionReason_kCbfFormResubmissionReasonOther => {
+            PromptUiFormResubmissionReason::Other
+        }
         _ => PromptUiFormResubmissionReason::Unknown,
     }
 }
 
 fn prompt_ui_resolution_result_from_ffi(value: u8) -> PromptUiResolutionResult {
-    match value {
-        CBF_PROMPT_UI_RESOLUTION_RESULT_ALLOWED => PromptUiResolutionResult::Allowed,
-        CBF_PROMPT_UI_RESOLUTION_RESULT_DENIED => PromptUiResolutionResult::Denied,
-        CBF_PROMPT_UI_RESOLUTION_RESULT_ABORTED => PromptUiResolutionResult::Aborted,
+    match u32::from(value) {
+        CbfPromptUiResolutionResult_kCbfPromptUiResolutionResultAllowed => {
+            PromptUiResolutionResult::Allowed
+        }
+        CbfPromptUiResolutionResult_kCbfPromptUiResolutionResultDenied => {
+            PromptUiResolutionResult::Denied
+        }
+        CbfPromptUiResolutionResult_kCbfPromptUiResolutionResultAborted => {
+            PromptUiResolutionResult::Aborted
+        }
         _ => PromptUiResolutionResult::Unknown,
     }
 }
 
 fn prompt_ui_close_reason_from_ffi(value: u8) -> PromptUiCloseReason {
-    match value {
-        CBF_PROMPT_UI_CLOSE_REASON_USER_CANCELED => PromptUiCloseReason::UserCanceled,
-        CBF_PROMPT_UI_CLOSE_REASON_HOST_FORCED => PromptUiCloseReason::HostForced,
-        CBF_PROMPT_UI_CLOSE_REASON_SYSTEM_DISMISSED => PromptUiCloseReason::SystemDismissed,
+    match u32::from(value) {
+        CbfPromptUiCloseReason_kCbfPromptUiCloseReasonUserCanceled => {
+            PromptUiCloseReason::UserCanceled
+        }
+        CbfPromptUiCloseReason_kCbfPromptUiCloseReasonHostForced => PromptUiCloseReason::HostForced,
+        CbfPromptUiCloseReason_kCbfPromptUiCloseReasonSystemDismissed => {
+            PromptUiCloseReason::SystemDismissed
+        }
         _ => PromptUiCloseReason::Unknown,
     }
 }
 
 fn cursor_icon_from_ffi(value: u8) -> CursorIcon {
-    match value {
-        CBF_CURSOR_CROSSHAIR => CursorIcon::Crosshair,
-        CBF_CURSOR_POINTER => CursorIcon::Pointer,
-        CBF_CURSOR_MOVE => CursorIcon::Move,
-        CBF_CURSOR_TEXT => CursorIcon::Text,
-        CBF_CURSOR_WAIT => CursorIcon::Wait,
-        CBF_CURSOR_HELP => CursorIcon::Help,
-        CBF_CURSOR_PROGRESS => CursorIcon::Progress,
-        CBF_CURSOR_NOT_ALLOWED => CursorIcon::NotAllowed,
-        CBF_CURSOR_CONTEXT_MENU => CursorIcon::ContextMenu,
-        CBF_CURSOR_CELL => CursorIcon::Cell,
-        CBF_CURSOR_VERTICAL_TEXT => CursorIcon::VerticalText,
-        CBF_CURSOR_ALIAS => CursorIcon::Alias,
-        CBF_CURSOR_COPY => CursorIcon::Copy,
-        CBF_CURSOR_NO_DROP => CursorIcon::NoDrop,
-        CBF_CURSOR_GRAB => CursorIcon::Grab,
-        CBF_CURSOR_GRABBING => CursorIcon::Grabbing,
-        CBF_CURSOR_ALL_SCROLL => CursorIcon::AllScroll,
-        CBF_CURSOR_ZOOM_IN => CursorIcon::ZoomIn,
-        CBF_CURSOR_ZOOM_OUT => CursorIcon::ZoomOut,
-        CBF_CURSOR_E_RESIZE => CursorIcon::EResize,
-        CBF_CURSOR_N_RESIZE => CursorIcon::NResize,
-        CBF_CURSOR_NE_RESIZE => CursorIcon::NeResize,
-        CBF_CURSOR_NW_RESIZE => CursorIcon::NwResize,
-        CBF_CURSOR_S_RESIZE => CursorIcon::SResize,
-        CBF_CURSOR_SE_RESIZE => CursorIcon::SeResize,
-        CBF_CURSOR_SW_RESIZE => CursorIcon::SwResize,
-        CBF_CURSOR_W_RESIZE => CursorIcon::WResize,
-        CBF_CURSOR_EW_RESIZE => CursorIcon::EwResize,
-        CBF_CURSOR_NS_RESIZE => CursorIcon::NsResize,
-        CBF_CURSOR_NESW_RESIZE => CursorIcon::NeswResize,
-        CBF_CURSOR_NWSE_RESIZE => CursorIcon::NwseResize,
-        CBF_CURSOR_COL_RESIZE => CursorIcon::ColResize,
-        CBF_CURSOR_ROW_RESIZE => CursorIcon::RowResize,
+    match u32::from(value) {
+        CbfCursorType_kCbfCursorCrosshair => CursorIcon::Crosshair,
+        CbfCursorType_kCbfCursorPointer => CursorIcon::Pointer,
+        CbfCursorType_kCbfCursorMove => CursorIcon::Move,
+        CbfCursorType_kCbfCursorText => CursorIcon::Text,
+        CbfCursorType_kCbfCursorWait => CursorIcon::Wait,
+        CbfCursorType_kCbfCursorHelp => CursorIcon::Help,
+        CbfCursorType_kCbfCursorProgress => CursorIcon::Progress,
+        CbfCursorType_kCbfCursorNotAllowed => CursorIcon::NotAllowed,
+        CbfCursorType_kCbfCursorContextMenu => CursorIcon::ContextMenu,
+        CbfCursorType_kCbfCursorCell => CursorIcon::Cell,
+        CbfCursorType_kCbfCursorVerticalText => CursorIcon::VerticalText,
+        CbfCursorType_kCbfCursorAlias => CursorIcon::Alias,
+        CbfCursorType_kCbfCursorCopy => CursorIcon::Copy,
+        CbfCursorType_kCbfCursorNoDrop => CursorIcon::NoDrop,
+        CbfCursorType_kCbfCursorGrab => CursorIcon::Grab,
+        CbfCursorType_kCbfCursorGrabbing => CursorIcon::Grabbing,
+        CbfCursorType_kCbfCursorAllScroll => CursorIcon::AllScroll,
+        CbfCursorType_kCbfCursorZoomIn => CursorIcon::ZoomIn,
+        CbfCursorType_kCbfCursorZoomOut => CursorIcon::ZoomOut,
+        CbfCursorType_kCbfCursorEResize => CursorIcon::EResize,
+        CbfCursorType_kCbfCursorNResize => CursorIcon::NResize,
+        CbfCursorType_kCbfCursorNeResize => CursorIcon::NeResize,
+        CbfCursorType_kCbfCursorNwResize => CursorIcon::NwResize,
+        CbfCursorType_kCbfCursorSResize => CursorIcon::SResize,
+        CbfCursorType_kCbfCursorSeResize => CursorIcon::SeResize,
+        CbfCursorType_kCbfCursorSwResize => CursorIcon::SwResize,
+        CbfCursorType_kCbfCursorWResize => CursorIcon::WResize,
+        CbfCursorType_kCbfCursorEwResize => CursorIcon::EwResize,
+        CbfCursorType_kCbfCursorNsResize => CursorIcon::NsResize,
+        CbfCursorType_kCbfCursorNeswResize => CursorIcon::NeswResize,
+        CbfCursorType_kCbfCursorNwseResize => CursorIcon::NwseResize,
+        CbfCursorType_kCbfCursorColResize => CursorIcon::ColResize,
+        CbfCursorType_kCbfCursorRowResize => CursorIcon::RowResize,
         _ => CursorIcon::Default,
     }
 }
 
 fn parse_surface_handle(handle: CbfSurfaceHandle) -> Result<SurfaceHandle, Error> {
-    match handle.kind {
-        CBF_SURFACE_HANDLE_MAC_CA_CONTEXT_ID => {
+    match u32::from(handle.kind) {
+        CbfSurfaceHandleKind_kSurfaceHandleMacCaContextId => {
             Ok(SurfaceHandle::MacCaContextId(handle.ca_context_id))
         }
-        CBF_SURFACE_HANDLE_WINDOWS_HWND => {
+        CbfSurfaceHandleKind_kSurfaceHandleWindowsHwnd => {
             unimplemented!("Windows HWND surface handle parsing not implemented yet")
         }
         _ => Err(Error::InvalidEvent),
@@ -1242,126 +1322,138 @@ fn parse_surface_handle(handle: CbfSurfaceHandle) -> Result<SurfaceHandle, Error
 }
 
 pub(super) fn key_event_type_to_ffi(value: ChromeKeyEventType) -> u8 {
-    match value {
-        ChromeKeyEventType::RawKeyDown => CBF_KEY_EVENT_RAW_KEY_DOWN,
-        ChromeKeyEventType::KeyDown => CBF_KEY_EVENT_KEY_DOWN,
-        ChromeKeyEventType::KeyUp => CBF_KEY_EVENT_KEY_UP,
-        ChromeKeyEventType::Char => CBF_KEY_EVENT_CHAR,
-    }
+    (match value {
+        ChromeKeyEventType::RawKeyDown => CbfKeyEventType_kCbfKeyEventRawKeyDown,
+        ChromeKeyEventType::KeyDown => CbfKeyEventType_kCbfKeyEventKeyDown,
+        ChromeKeyEventType::KeyUp => CbfKeyEventType_kCbfKeyEventKeyUp,
+        ChromeKeyEventType::Char => CbfKeyEventType_kCbfKeyEventChar,
+    }) as u8
 }
 
 pub(super) fn mouse_event_type_to_ffi(value: ChromeMouseEventType) -> u8 {
-    match value {
-        ChromeMouseEventType::Down => CBF_MOUSE_EVENT_DOWN,
-        ChromeMouseEventType::Up => CBF_MOUSE_EVENT_UP,
-        ChromeMouseEventType::Move => CBF_MOUSE_EVENT_MOVE,
-        ChromeMouseEventType::Enter => CBF_MOUSE_EVENT_ENTER,
-        ChromeMouseEventType::Leave => CBF_MOUSE_EVENT_LEAVE,
-    }
+    (match value {
+        ChromeMouseEventType::Down => CbfMouseEventType_kCbfMouseEventDown,
+        ChromeMouseEventType::Up => CbfMouseEventType_kCbfMouseEventUp,
+        ChromeMouseEventType::Move => CbfMouseEventType_kCbfMouseEventMove,
+        ChromeMouseEventType::Enter => CbfMouseEventType_kCbfMouseEventEnter,
+        ChromeMouseEventType::Leave => CbfMouseEventType_kCbfMouseEventLeave,
+    }) as u8
 }
 
 fn mouse_event_type_from_ffi(value: u8) -> ChromeMouseEventType {
-    match value {
-        CBF_MOUSE_EVENT_DOWN => ChromeMouseEventType::Down,
-        CBF_MOUSE_EVENT_UP => ChromeMouseEventType::Up,
-        CBF_MOUSE_EVENT_MOVE => ChromeMouseEventType::Move,
-        CBF_MOUSE_EVENT_ENTER => ChromeMouseEventType::Enter,
-        CBF_MOUSE_EVENT_LEAVE => ChromeMouseEventType::Leave,
+    match u32::from(value) {
+        CbfMouseEventType_kCbfMouseEventDown => ChromeMouseEventType::Down,
+        CbfMouseEventType_kCbfMouseEventUp => ChromeMouseEventType::Up,
+        CbfMouseEventType_kCbfMouseEventMove => ChromeMouseEventType::Move,
+        CbfMouseEventType_kCbfMouseEventEnter => ChromeMouseEventType::Enter,
+        CbfMouseEventType_kCbfMouseEventLeave => ChromeMouseEventType::Leave,
         _ => ChromeMouseEventType::Move,
     }
 }
 
 pub(super) fn mouse_button_to_ffi(value: ChromeMouseButton) -> u8 {
-    match value {
-        ChromeMouseButton::None => CBF_MOUSE_BUTTON_NONE,
-        ChromeMouseButton::Left => CBF_MOUSE_BUTTON_LEFT,
-        ChromeMouseButton::Middle => CBF_MOUSE_BUTTON_MIDDLE,
-        ChromeMouseButton::Right => CBF_MOUSE_BUTTON_RIGHT,
-        ChromeMouseButton::Back => CBF_MOUSE_BUTTON_BACK,
-        ChromeMouseButton::Forward => CBF_MOUSE_BUTTON_FORWARD,
-    }
+    (match value {
+        ChromeMouseButton::None => CbfMouseButton_kCbfMouseButtonNone,
+        ChromeMouseButton::Left => CbfMouseButton_kCbfMouseButtonLeft,
+        ChromeMouseButton::Middle => CbfMouseButton_kCbfMouseButtonMiddle,
+        ChromeMouseButton::Right => CbfMouseButton_kCbfMouseButtonRight,
+        ChromeMouseButton::Back => CbfMouseButton_kCbfMouseButtonBack,
+        ChromeMouseButton::Forward => CbfMouseButton_kCbfMouseButtonForward,
+    }) as u8
 }
 
 fn mouse_button_from_ffi(value: u8) -> ChromeMouseButton {
-    match value {
-        CBF_MOUSE_BUTTON_LEFT => ChromeMouseButton::Left,
-        CBF_MOUSE_BUTTON_MIDDLE => ChromeMouseButton::Middle,
-        CBF_MOUSE_BUTTON_RIGHT => ChromeMouseButton::Right,
-        CBF_MOUSE_BUTTON_BACK => ChromeMouseButton::Back,
-        CBF_MOUSE_BUTTON_FORWARD => ChromeMouseButton::Forward,
+    match u32::from(value) {
+        CbfMouseButton_kCbfMouseButtonLeft => ChromeMouseButton::Left,
+        CbfMouseButton_kCbfMouseButtonMiddle => ChromeMouseButton::Middle,
+        CbfMouseButton_kCbfMouseButtonRight => ChromeMouseButton::Right,
+        CbfMouseButton_kCbfMouseButtonBack => ChromeMouseButton::Back,
+        CbfMouseButton_kCbfMouseButtonForward => ChromeMouseButton::Forward,
         _ => ChromeMouseButton::None,
     }
 }
 
 pub(super) fn pointer_type_to_ffi(value: ChromePointerType) -> u8 {
-    match value {
-        ChromePointerType::Unknown => CBF_POINTER_TYPE_UNKNOWN,
-        ChromePointerType::Mouse => CBF_POINTER_TYPE_MOUSE,
-        ChromePointerType::Pen => CBF_POINTER_TYPE_PEN,
-        ChromePointerType::Touch => CBF_POINTER_TYPE_TOUCH,
-        ChromePointerType::Eraser => CBF_POINTER_TYPE_ERASER,
-    }
+    (match value {
+        ChromePointerType::Unknown => CbfPointerType_kCbfPointerTypeUnknown,
+        ChromePointerType::Mouse => CbfPointerType_kCbfPointerTypeMouse,
+        ChromePointerType::Pen => CbfPointerType_kCbfPointerTypePen,
+        ChromePointerType::Touch => CbfPointerType_kCbfPointerTypeTouch,
+        ChromePointerType::Eraser => CbfPointerType_kCbfPointerTypeEraser,
+    }) as u8
 }
 
 fn pointer_type_from_ffi(value: u8) -> ChromePointerType {
-    match value {
-        CBF_POINTER_TYPE_MOUSE => ChromePointerType::Mouse,
-        CBF_POINTER_TYPE_PEN => ChromePointerType::Pen,
-        CBF_POINTER_TYPE_TOUCH => ChromePointerType::Touch,
-        CBF_POINTER_TYPE_ERASER => ChromePointerType::Eraser,
+    match u32::from(value) {
+        CbfPointerType_kCbfPointerTypeMouse => ChromePointerType::Mouse,
+        CbfPointerType_kCbfPointerTypePen => ChromePointerType::Pen,
+        CbfPointerType_kCbfPointerTypeTouch => ChromePointerType::Touch,
+        CbfPointerType_kCbfPointerTypeEraser => ChromePointerType::Eraser,
         _ => ChromePointerType::Unknown,
     }
 }
 
 pub(super) fn scroll_granularity_to_ffi(value: ChromeScrollGranularity) -> u8 {
-    match value {
-        ChromeScrollGranularity::PrecisePixel => CBF_SCROLL_BY_PRECISE_PIXEL,
-        ChromeScrollGranularity::Pixel => CBF_SCROLL_BY_PIXEL,
-        ChromeScrollGranularity::Line => CBF_SCROLL_BY_LINE,
-        ChromeScrollGranularity::Page => CBF_SCROLL_BY_PAGE,
-        ChromeScrollGranularity::Document => CBF_SCROLL_BY_DOCUMENT,
-    }
+    (match value {
+        ChromeScrollGranularity::PrecisePixel => CbfScrollGranularity_kCbfScrollByPrecisePixel,
+        ChromeScrollGranularity::Pixel => CbfScrollGranularity_kCbfScrollByPixel,
+        ChromeScrollGranularity::Line => CbfScrollGranularity_kCbfScrollByLine,
+        ChromeScrollGranularity::Page => CbfScrollGranularity_kCbfScrollByPage,
+        ChromeScrollGranularity::Document => CbfScrollGranularity_kCbfScrollByDocument,
+    }) as u8
 }
 
 fn scroll_granularity_from_ffi(value: u8) -> ChromeScrollGranularity {
-    match value {
-        CBF_SCROLL_BY_PRECISE_PIXEL => ChromeScrollGranularity::PrecisePixel,
-        CBF_SCROLL_BY_PIXEL => ChromeScrollGranularity::Pixel,
-        CBF_SCROLL_BY_LINE => ChromeScrollGranularity::Line,
-        CBF_SCROLL_BY_PAGE => ChromeScrollGranularity::Page,
-        CBF_SCROLL_BY_DOCUMENT => ChromeScrollGranularity::Document,
+    match u32::from(value) {
+        CbfScrollGranularity_kCbfScrollByPrecisePixel => ChromeScrollGranularity::PrecisePixel,
+        CbfScrollGranularity_kCbfScrollByPixel => ChromeScrollGranularity::Pixel,
+        CbfScrollGranularity_kCbfScrollByLine => ChromeScrollGranularity::Line,
+        CbfScrollGranularity_kCbfScrollByPage => ChromeScrollGranularity::Page,
+        CbfScrollGranularity_kCbfScrollByDocument => ChromeScrollGranularity::Document,
         _ => ChromeScrollGranularity::Pixel,
     }
 }
 
 fn ime_text_span_type_to_ffi(value: ChromeImeTextSpanType) -> u8 {
-    match value {
-        ChromeImeTextSpanType::Composition => CBF_IME_TEXT_SPAN_TYPE_COMPOSITION,
-        ChromeImeTextSpanType::Suggestion => CBF_IME_TEXT_SPAN_TYPE_SUGGESTION,
+    (match value {
+        ChromeImeTextSpanType::Composition => CbfImeTextSpanType_kCbfImeTextSpanTypeComposition,
+        ChromeImeTextSpanType::Suggestion => CbfImeTextSpanType_kCbfImeTextSpanTypeSuggestion,
         ChromeImeTextSpanType::MisspellingSuggestion => {
-            CBF_IME_TEXT_SPAN_TYPE_MISSPELLING_SUGGESTION
+            CbfImeTextSpanType_kCbfImeTextSpanTypeMisspellingSuggestion
         }
-        ChromeImeTextSpanType::Autocorrect => CBF_IME_TEXT_SPAN_TYPE_AUTOCORRECT,
-        ChromeImeTextSpanType::GrammarSuggestion => CBF_IME_TEXT_SPAN_TYPE_GRAMMAR_SUGGESTION,
-    }
+        ChromeImeTextSpanType::Autocorrect => CbfImeTextSpanType_kCbfImeTextSpanTypeAutocorrect,
+        ChromeImeTextSpanType::GrammarSuggestion => {
+            CbfImeTextSpanType_kCbfImeTextSpanTypeGrammarSuggestion
+        }
+    }) as u8
 }
 
 fn ime_text_span_thickness_to_ffi(value: ChromeImeTextSpanThickness) -> u8 {
-    match value {
-        ChromeImeTextSpanThickness::None => CBF_IME_TEXT_SPAN_THICKNESS_NONE,
-        ChromeImeTextSpanThickness::Thin => CBF_IME_TEXT_SPAN_THICKNESS_THIN,
-        ChromeImeTextSpanThickness::Thick => CBF_IME_TEXT_SPAN_THICKNESS_THICK,
-    }
+    (match value {
+        ChromeImeTextSpanThickness::None => CbfImeTextSpanThickness_kCbfImeTextSpanThicknessNone,
+        ChromeImeTextSpanThickness::Thin => CbfImeTextSpanThickness_kCbfImeTextSpanThicknessThin,
+        ChromeImeTextSpanThickness::Thick => CbfImeTextSpanThickness_kCbfImeTextSpanThicknessThick,
+    }) as u8
 }
 
 fn ime_text_span_underline_style_to_ffi(value: ChromeImeTextSpanUnderlineStyle) -> u8 {
-    match value {
-        ChromeImeTextSpanUnderlineStyle::None => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_NONE,
-        ChromeImeTextSpanUnderlineStyle::Solid => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SOLID,
-        ChromeImeTextSpanUnderlineStyle::Dot => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_DOT,
-        ChromeImeTextSpanUnderlineStyle::Dash => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_DASH,
-        ChromeImeTextSpanUnderlineStyle::Squiggle => CBF_IME_TEXT_SPAN_UNDERLINE_STYLE_SQUIGGLE,
-    }
+    (match value {
+        ChromeImeTextSpanUnderlineStyle::None => {
+            CbfImeTextSpanUnderlineStyle_kCbfImeTextSpanUnderlineStyleNone
+        }
+        ChromeImeTextSpanUnderlineStyle::Solid => {
+            CbfImeTextSpanUnderlineStyle_kCbfImeTextSpanUnderlineStyleSolid
+        }
+        ChromeImeTextSpanUnderlineStyle::Dot => {
+            CbfImeTextSpanUnderlineStyle_kCbfImeTextSpanUnderlineStyleDot
+        }
+        ChromeImeTextSpanUnderlineStyle::Dash => {
+            CbfImeTextSpanUnderlineStyle_kCbfImeTextSpanUnderlineStyleDash
+        }
+        ChromeImeTextSpanUnderlineStyle::Squiggle => {
+            CbfImeTextSpanUnderlineStyle_kCbfImeTextSpanUnderlineStyleSquiggle
+        }
+    }) as u8
 }
 
 fn chrome_ime_text_span_style_from_span(span: &ChromeImeTextSpan) -> ChromeImeTextSpanStyle {
@@ -1382,7 +1474,7 @@ pub(super) fn to_ffi_ime_text_spans(spans: &[ChromeImeTextSpan]) -> Vec<CbfImeTe
         .map(|span| {
             let chrome_style = chrome_ime_text_span_style_from_span(span);
             CbfImeTextSpan {
-                r#type: ime_text_span_type_to_ffi(span.r#type),
+                type_: ime_text_span_type_to_ffi(span.r#type),
                 start_offset: span.start_offset,
                 end_offset: span.end_offset,
                 underline_color: chrome_style.underline_color,
@@ -1423,11 +1515,11 @@ pub fn convert_nsevent_to_chrome_key_event(
     }
 
     let event = ChromeKeyEvent {
-        type_: match ffi_event.r#type {
-            CBF_KEY_EVENT_RAW_KEY_DOWN => ChromeKeyEventType::RawKeyDown,
-            CBF_KEY_EVENT_KEY_DOWN => ChromeKeyEventType::KeyDown,
-            CBF_KEY_EVENT_KEY_UP => ChromeKeyEventType::KeyUp,
-            CBF_KEY_EVENT_CHAR => ChromeKeyEventType::Char,
+        type_: match u32::from(ffi_event.type_) {
+            CbfKeyEventType_kCbfKeyEventRawKeyDown => ChromeKeyEventType::RawKeyDown,
+            CbfKeyEventType_kCbfKeyEventKeyDown => ChromeKeyEventType::KeyDown,
+            CbfKeyEventType_kCbfKeyEventKeyUp => ChromeKeyEventType::KeyUp,
+            CbfKeyEventType_kCbfKeyEventChar => ChromeKeyEventType::Char,
             _ => ChromeKeyEventType::RawKeyDown,
         },
         modifiers: ffi_event.modifiers,
@@ -1459,9 +1551,9 @@ pub fn convert_nsevent_to_chrome_key_event(
         location: ffi_event.location,
     };
 
-    if let Err(error) = bridge().map(|bridge| unsafe {
-        bridge.cbf_bridge_free_converted_key_event(&mut ffi_event)
-    }) {
+    if let Err(error) =
+        bridge().map(|bridge| unsafe { bridge.cbf_bridge_free_converted_key_event(&mut ffi_event) })
+    {
         warn!(error = ?error, "failed to free converted key event");
     }
 
@@ -1490,9 +1582,9 @@ pub fn convert_nspasteboard_to_drag_data(nspasteboard: NonNull<c_void>) -> DragD
         custom_data: parse_string_pair_list(ffi_data.custom_data),
     };
 
-    if let Err(error) = bridge().map(|bridge| unsafe {
-        bridge.cbf_bridge_free_converted_drag_data(&mut ffi_data)
-    }) {
+    if let Err(error) =
+        bridge().map(|bridge| unsafe { bridge.cbf_bridge_free_converted_drag_data(&mut ffi_data) })
+    {
         warn!(error = ?error, "failed to free converted drag data");
     }
 
@@ -1540,7 +1632,7 @@ pub fn convert_nsevent_to_chrome_mouse_event(
     }
 
     ChromeMouseEvent {
-        type_: mouse_event_type_from_ffi(ffi_event.r#type),
+        type_: mouse_event_type_from_ffi(ffi_event.type_),
         modifiers: ffi_event.modifiers,
         button: mouse_button_from_ffi(ffi_event.button),
         click_count: ffi_event.click_count,
@@ -1623,9 +1715,9 @@ mod tests {
 
     use super::{IpcEvent, parse_event};
 
-    fn make_event(kind: u8) -> CbfBridgeEvent {
+    fn make_event(kind: u32) -> CbfBridgeEvent {
         CbfBridgeEvent {
-            kind,
+            kind: kind as u8,
             ..Default::default()
         }
     }
@@ -1636,7 +1728,7 @@ mod tests {
 
     #[test]
     fn parse_event_tab_created_maps_tab_id() {
-        let mut event = make_event(CBF_EVENT_TAB_CREATED);
+        let mut event = make_event(CbfEventKind_kEventTabCreated);
         event.tab_id = 7;
         event.request_id = 11;
 
@@ -1654,7 +1746,7 @@ mod tests {
     #[test]
     fn parse_event_shutdown_blocked_maps_dirty_tab_ids() {
         let dirty_ids = [2_u64, 3_u64];
-        let mut event = make_event(CBF_EVENT_SHUTDOWN_BLOCKED);
+        let mut event = make_event(CbfEventKind_kEventShutdownBlocked);
         event.request_id = 9;
         event.dirty_tab_ids = CbfTabIdList {
             items: dirty_ids.as_ptr(),
@@ -1674,7 +1766,7 @@ mod tests {
 
     #[test]
     fn parse_event_extension_popup_ime_bounds_maps_popup_id() {
-        let mut event = make_event(CBF_EVENT_EXTENSION_POPUP_IME_BOUNDS_UPDATED);
+        let mut event = make_event(CbfEventKind_kEventExtensionPopupImeBoundsUpdated);
         event.tab_id = 44;
         event.extension_popup_id = 88;
         event.ime_bounds.has_selection = true;
@@ -1709,7 +1801,7 @@ mod tests {
 
     #[test]
     fn parse_event_find_reply_maps_selection_rect() {
-        let mut event = make_event(CBF_EVENT_FIND_REPLY);
+        let mut event = make_event(CbfEventKind_kEventFindReply);
         event.tab_id = 52;
         event.request_id = 7;
         event.find_number_of_matches = 9;
@@ -1745,9 +1837,9 @@ mod tests {
 
     #[test]
     fn parse_event_tab_open_resolved_maps_target_tab_id() {
-        let mut event = make_event(CBF_EVENT_TAB_OPEN_RESOLVED);
+        let mut event = make_event(CbfEventKind_kEventTabOpenResolved);
         event.request_id = 55;
-        event.tab_open_result_kind = CBF_TAB_OPEN_RESULT_OPENED_NEW_CONTEXT;
+        event.tab_open_result_kind = CbfTabOpenResult_kCbfTabOpenResultOpenedNewContext as u8;
         event.tab_open_has_target = true;
         event.tab_open_target_tab_id = 123;
 
@@ -1764,12 +1856,13 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_open_requested_maps_permission_kind() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_REQUESTED);
+        let mut event = make_event(CbfEventKind_kEventPromptUiRequested);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 21;
         event.request_id = 99;
-        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PERMISSION_PROMPT;
-        event.prompt_ui_permission = CBF_PROMPT_UI_PERMISSION_TYPE_GEOLOCATION;
+        event.prompt_ui_kind = CbfPromptUiKind_kCbfPromptUiKindPermissionPrompt as u8;
+        event.prompt_ui_permission =
+            CbfPromptUiPermissionType_kCbfPromptUiPermissionTypeGeolocation as u8;
         let permission_key = CString::new("geolocation").unwrap();
         event.prompt_ui_permission_key = permission_key.as_ptr() as *mut _;
 
@@ -1792,12 +1885,12 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_open_requested_maps_download_kind() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_REQUESTED);
+        let mut event = make_event(CbfEventKind_kEventPromptUiRequested);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 31;
         event.request_id = 109;
-        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT;
-        event.download_reason = CBF_DOWNLOAD_PROMPT_REASON_SAVE_AS;
+        event.prompt_ui_kind = CbfPromptUiKind_kCbfPromptUiKindDownloadPrompt as u8;
+        event.download_reason = CbfDownloadPromptReason_kCbfDownloadPromptReasonSaveAs as u8;
         event.download_id = 55;
         let file_name = CString::new("sample.zip").unwrap();
         let suggested_path = CString::new("/tmp/sample.zip").unwrap();
@@ -1830,10 +1923,10 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_open_requested_maps_unknown_download_reason() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_REQUESTED);
+        let mut event = make_event(CbfEventKind_kEventPromptUiRequested);
         event.tab_id = 31;
         event.request_id = 110;
-        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_DOWNLOAD_PROMPT;
+        event.prompt_ui_kind = CbfPromptUiKind_kCbfPromptUiKindDownloadPrompt as u8;
         event.download_reason = 250;
         event.download_id = 56;
         let file_name = CString::new("sample-2.zip").unwrap();
@@ -1854,13 +1947,15 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_resolved_maps_result() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_RESOLVED);
+        let mut event = make_event(CbfEventKind_kEventPromptUiResolved);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 18;
         event.request_id = 77;
-        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PERMISSION_PROMPT;
-        event.prompt_ui_permission = CBF_PROMPT_UI_PERMISSION_TYPE_NOTIFICATIONS;
-        event.prompt_ui_result = CBF_PROMPT_UI_RESOLUTION_RESULT_DENIED;
+        event.prompt_ui_kind = CbfPromptUiKind_kCbfPromptUiKindPermissionPrompt as u8;
+        event.prompt_ui_permission =
+            CbfPromptUiPermissionType_kCbfPromptUiPermissionTypeNotifications as u8;
+        event.prompt_ui_result =
+            CbfPromptUiResolutionResult_kCbfPromptUiResolutionResultDenied as u8;
         let permission_key = CString::new("notifications").unwrap();
         event.prompt_ui_permission_key = permission_key.as_ptr() as *mut _;
 
@@ -1884,11 +1979,11 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_opened_maps_extension_kind_and_metadata() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_OPENED);
+        let mut event = make_event(CbfEventKind_kEventPromptUiOpened);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 12;
         event.prompt_ui_id = 44;
-        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT;
+        event.prompt_ui_kind = CbfPromptUiKind_kCbfPromptUiKindExtensionInstallPrompt as u8;
         event.prompt_ui_title = CString::new("Install extension").unwrap().into_raw();
         event.prompt_ui_modal = true;
         event.extension_id = CString::new("ext-id").unwrap().into_raw();
@@ -1937,13 +2032,13 @@ mod tests {
             enabled: true,
             permission_names: CbfStringList::default(),
             icon: CbfIconData {
-                kind: CBF_ICON_DATA_KIND_PNG,
+                kind: CbfIconDataKind_kCbfIconDataKindPng as u8,
                 bytes: bytes.as_ptr(),
                 len: bytes.len() as u32,
                 ..Default::default()
             },
         }];
-        let mut event = make_event(CBF_EVENT_EXTENSIONS_LISTED);
+        let mut event = make_event(CbfEventKind_kEventExtensionsListed);
         event.extensions = CbfExtensionInfoList {
             items: extensions.as_ptr() as *mut _,
             len: 1,
@@ -1972,13 +2067,13 @@ mod tests {
             enabled: false,
             permission_names: CbfStringList::default(),
             icon: CbfIconData {
-                kind: CBF_ICON_DATA_KIND_PNG,
+                kind: CbfIconDataKind_kCbfIconDataKindPng as u8,
                 len: 0,
                 bytes: std::ptr::null(),
                 ..Default::default()
             },
         }];
-        let mut event = make_event(CBF_EVENT_EXTENSIONS_LISTED);
+        let mut event = make_event(CbfEventKind_kEventExtensionsListed);
         event.extensions = CbfExtensionInfoList {
             items: extensions.as_ptr() as *mut _,
             len: 1,
@@ -2005,14 +2100,14 @@ mod tests {
             enabled: true,
             permission_names: CbfStringList::default(),
             icon: CbfIconData {
-                kind: CBF_ICON_DATA_KIND_BINARY,
+                kind: CbfIconDataKind_kCbfIconDataKindBinary as u8,
                 bytes: bytes.as_ptr(),
                 len: bytes.len() as u32,
                 media_type: leaked_c_string("image/webp"),
                 ..Default::default()
             },
         }];
-        let mut event = make_event(CBF_EVENT_EXTENSIONS_LISTED);
+        let mut event = make_event(CbfEventKind_kEventExtensionsListed);
         event.extensions = CbfExtensionInfoList {
             items: extensions.as_ptr() as *mut _,
             len: 1,
@@ -2034,12 +2129,13 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_closed_maps_reason() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_CLOSED);
+        let mut event = make_event(CbfEventKind_kEventPromptUiClosed);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 8;
         event.prompt_ui_id = 19;
-        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG;
-        event.prompt_ui_close_reason = CBF_PROMPT_UI_CLOSE_REASON_HOST_FORCED;
+        event.prompt_ui_kind = CbfPromptUiKind_kCbfPromptUiKindPrintPreviewDialog as u8;
+        event.prompt_ui_close_reason =
+            CbfPromptUiCloseReason_kCbfPromptUiCloseReasonHostForced as u8;
 
         let parsed = parse_event(event).expect("prompt ui closed should parse");
         assert!(matches!(
@@ -2057,15 +2153,15 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_resolved_maps_extension_install_result() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_RESOLVED);
+        let mut event = make_event(CbfEventKind_kEventPromptUiResolved);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 99;
         event.request_id = 101;
-        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT;
+        event.prompt_ui_kind = CbfPromptUiKind_kCbfPromptUiKindExtensionInstallPrompt as u8;
         event.extension_id = CString::new("abc").unwrap().into_raw();
-        event.prompt_ui_extension_install_result =
-            CBF_PROMPT_UI_EXTENSION_INSTALL_RESULT_ACCEPTED_WITH_WITHHELD_PERMISSIONS;
-        event.prompt_ui_extension_install_detail = CString::new("withheld").unwrap().into_raw();
+        event.extension_install_prompt_result =
+            CbfExtensionInstallPromptResult_kCbfExtensionInstallPromptResultAcceptedWithWithheldPermissions as u8;
+        event.extension_install_prompt_detail = CString::new("withheld").unwrap().into_raw();
 
         let parsed = parse_event(event).expect("prompt ui resolved should parse");
         assert!(matches!(
@@ -2088,12 +2184,12 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_resolved_maps_print_preview_result() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_RESOLVED);
+        let mut event = make_event(CbfEventKind_kEventPromptUiResolved);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 41;
         event.request_id = 51;
-        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_PRINT_PREVIEW_DIALOG;
-        event.prompt_ui_result = CBF_PROMPT_UI_DIALOG_RESULT_CANCELED;
+        event.prompt_ui_kind = CbfPromptUiKind_kCbfPromptUiKindPrintPreviewDialog as u8;
+        event.prompt_ui_result = CbfPromptUiDialogResult_kCbfPromptUiDialogResultCanceled as u8;
 
         let parsed = parse_event(event).expect("prompt ui resolved should parse");
         assert!(matches!(
@@ -2112,11 +2208,11 @@ mod tests {
 
     #[test]
     fn parse_event_prompt_ui_requested_maps_extension_kind() {
-        let mut event = make_event(CBF_EVENT_PROMPT_UI_REQUESTED);
+        let mut event = make_event(CbfEventKind_kEventPromptUiRequested);
         event.prompt_ui_has_source_tab_id = true;
         event.prompt_ui_source_tab_id = 64;
         event.request_id = 808;
-        event.prompt_ui_kind = CBF_PROMPT_UI_KIND_EXTENSION_INSTALL_PROMPT;
+        event.prompt_ui_kind = CbfPromptUiKind_kCbfPromptUiKindExtensionInstallPrompt as u8;
         event.extension_id = CString::new("ext-aux").unwrap().into_raw();
         event.extension_name = CString::new("AuxExt").unwrap().into_raw();
 

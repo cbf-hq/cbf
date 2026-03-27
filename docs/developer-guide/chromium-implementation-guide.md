@@ -75,9 +75,11 @@ Concrete implementation checklist:
 
 - Keep `cbf_bridge` symbol loading in `cbf-chrome-sys`; higher crates should call
   through `bridge()` rather than maintaining their own symbol tables.
-- Regenerate the runtime bridge API with `uv run tool ffi generate` after bridge export
-  changes in `cbf_bridge.h`.
-- Do not hand-edit `bridge_api_generated.rs`; treat it as bindgen output.
+- Regenerate `ffi_generated.rs` and `bridge_api_generated.rs` with
+  `uv run tool ffi generate` after ABI/export changes in `cbf_bridge_ffi.h`
+  or `cbf_bridge.h`.
+- Use `uv run tool ffi verify` to confirm the checked-in generated output is current.
+- Do not hand-edit `ffi_generated.rs` or `bridge_api_generated.rs`; treat them as bindgen output.
 
 ## 5. Failure handling implementation
 

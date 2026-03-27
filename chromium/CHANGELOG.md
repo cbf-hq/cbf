@@ -43,10 +43,13 @@ source-built use rather than a downloadable binary bundle.
 - Moved `window.cbf` IPC bootstrap to renderer-side extension install and replaced browser-side navigation-time main-world script execution with isolated-world event dispatch for host->page IPC delivery.
 - Updated navigation-state observer behavior to emit same-document history updates while suppressing duplicate `NavigationStateChanged` payloads via snapshot diffing.
 - macOS external drag pasteboard normalization now reuses Chromium `PopulateDropDataFromPasteboard()` behavior instead of collecting arbitrary platform pasteboard flavor strings into webpage-visible drag data.
+- Aligned the bridge headers with the generated Rust bindings by treating `cbf_bridge.h` and `cbf_bridge_ffi.h` as the source of truth for bindgen-generated `cbf-chrome-sys` artifacts.
 
 ### Fixed
 
 - macOS production bundle startup for rebranded runtimes by resolving helper executables from the launched runtime name and by aligning Mach rendezvous bootstrap naming with the runtime bundle identifier used by the packaged Chromium engine.
+- Removed the undeclared-in-practice `cbf_bridge_client_send_mac_event` export from `cbf_bridge.h`, avoiding runtime bridge loader failure when Rust requires all declared bridge symbols to exist in `libcbf_bridge.dylib`.
+- Added prompt/dialog and download prompt enum definitions to `cbf_bridge_ffi.h` so the generated Rust ABI mirror stays in sync with the Chromium bridge header.
 - Custom-scheme HTML documents now commit and render as web content instead of source text by providing Chromium with the expected response metadata and first-class scheme registration.
 - Non-cryptographic custom-scheme subresource fetches no longer trigger renderer-side bad Mojo failures from unnecessary `SubresourceResponseStarted` IPC.
 - Profile teardown stability in `CbfProfileService` by restoring download-prompt prefs before shutdown and removing stale profile-service registry entries during `OnProfileWillBeDestroyed`.

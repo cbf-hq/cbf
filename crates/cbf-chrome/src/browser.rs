@@ -148,15 +148,15 @@ mod tests {
     fn stop_find_action_maps_to_expected_ffi_value() {
         assert_eq!(
             ChromeStopFindAction::ClearSelection.to_ffi(),
-            cbf_chrome_sys::ffi::CBF_STOP_FIND_ACTION_CLEAR_SELECTION
+            cbf_chrome_sys::ffi::CbfStopFindAction_kCbfStopFindActionClearSelection as u8
         );
         assert_eq!(
             ChromeStopFindAction::KeepSelection.to_ffi(),
-            cbf_chrome_sys::ffi::CBF_STOP_FIND_ACTION_KEEP_SELECTION
+            cbf_chrome_sys::ffi::CbfStopFindAction_kCbfStopFindActionKeepSelection as u8
         );
         assert_eq!(
             ChromeStopFindAction::ActivateSelection.to_ffi(),
-            cbf_chrome_sys::ffi::CBF_STOP_FIND_ACTION_ACTIVATE_SELECTION
+            cbf_chrome_sys::ffi::CbfStopFindAction_kCbfStopFindActionActivateSelection as u8
         );
     }
 
