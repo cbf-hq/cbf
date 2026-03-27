@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `bundle macos` now bundles the configured `Chromium.app` as a CBF Runtime inside the generated application bundle.
+- Added macOS runtime rebranding support for bundled runtimes, including custom runtime app names, bundle identifiers, helper bundle names, and runtime icons.
+
+### Security
+
+- Added optional code signing and post-sign validation for generated macOS app bundles via `--codesign-identity`.
+
 ## [0.1.0-alpha.1] - 2026-03-16
 
 ### Added
