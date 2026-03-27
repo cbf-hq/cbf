@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import difflib
 import subprocess
@@ -144,11 +142,17 @@ def verify() -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate cbf-chrome-sys FFI bindings.")
+    parser = argparse.ArgumentParser(
+        description="Generate cbf-chrome-sys FFI bindings."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("generate", help="Regenerate both generated Rust binding files.")
-    subparsers.add_parser("verify", help="Check that generated Rust binding files are up to date.")
+    subparsers.add_parser(
+        "generate", help="Regenerate both generated Rust binding files."
+    )
+    subparsers.add_parser(
+        "verify", help="Check that generated Rust binding files are up to date."
+    )
 
     args = parser.parse_args()
     if args.command == "generate":
