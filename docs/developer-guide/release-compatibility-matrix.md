@@ -42,7 +42,7 @@ policy or replace Cargo dependency constraints.
 | Release set | Status | Release date | cbf | cbf-chrome | cbf-chrome-sys | cbf-cli | cbf-compositor | Chromium | Runtime bundle tag | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 2026-03 alpha.1 | released | 2026-03-16 / 2026-03-17 runtime | 0.1.0-alpha.1 | 0.1.0-alpha.1 | 146.1.0-alpha.1 | 0.1.0-alpha.1 | not released | 146.0.7680.31 | `cbf-chrome-runtime-v146.0.0-alpha.1+chromium-146.0.7680.31-r1` | First public pre-release set for milestone 146 |
-| 2026-03 alpha.2 | planned | TBD | 0.1.0-alpha.2 | 0.1.0-alpha.2 | 146.1.0-alpha.2 | 0.1.0-alpha.2 | 0.1.0-alpha.1 | 146.0.7680.153 | `cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1` | First public `cbf-compositor` release |
+| 2026-03 alpha.2 | released | 2026-03-27 | 0.1.0-alpha.2 | 0.1.0-alpha.2 | 146.1.0-alpha.2 | 0.1.0-alpha.2 | 0.1.0-alpha.1 | 146.0.7680.153 | `cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1` | First public `cbf-compositor` release |
 
 ## 4. Interpretation Notes
 
