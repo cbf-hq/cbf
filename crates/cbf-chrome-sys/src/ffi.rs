@@ -3,6 +3,7 @@
 //! This module keeps the handwritten wrapper layer minimal so a future
 //! code-generation step can own most ABI declarations directly.
 
+/// Opaque handle to a bridge-owned IPC client instance.
 #[repr(C)]
 pub struct CbfBridgeClientHandle {
     _private: [u8; 0],

@@ -67,6 +67,7 @@ impl CommandExecutionError {
         match self {
             Self::IpcCall { operation, source } => BackendErrorInfo {
                 kind: match source {
+                    IpcError::BridgeLoadFailed => ApiErrorKind::CommandDispatchFailed,
                     IpcError::ConnectionFailed => ApiErrorKind::CommandDispatchFailed,
                     IpcError::InvalidInput => ApiErrorKind::InvalidInput,
                     IpcError::InvalidEvent => ApiErrorKind::ProtocolMismatch,
@@ -85,6 +86,7 @@ impl CommandExecutionError {
 
 fn backend_error_event(source: IpcError) -> BackendErrorInfo {
     let kind = match source {
+        IpcError::BridgeLoadFailed => ApiErrorKind::EventProcessingFailed,
         IpcError::InvalidEvent => ApiErrorKind::ProtocolMismatch,
         IpcError::InvalidInput => ApiErrorKind::InvalidInput,
         IpcError::ConnectionFailed => ApiErrorKind::EventProcessingFailed,

@@ -15,31 +15,47 @@ const BRIDGE_LIB_FILE_NAME: &str = "libcbf_bridge.so";
 #[cfg(target_os = "windows")]
 const BRIDGE_LIB_FILE_NAME: &str = "cbf_bridge.dll";
 
+/// Options for overriding how the bridge library is located at runtime.
 #[derive(Debug, Clone, Default)]
 pub struct BridgeLoadOptions {
+    /// An explicit full path to the bridge library file.
     pub explicit_library_path: Option<PathBuf>,
+    /// An explicit directory that contains the bridge library file.
     pub explicit_library_dir: Option<PathBuf>,
 }
 
+/// A loaded `cbf_bridge` dynamic library instance.
 pub struct BridgeLibrary {
     library_path: PathBuf,
     library: Library,
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
+/// Errors that can occur while locating or opening the bridge library.
 pub enum BridgeLoadError {
+    /// No supported runtime search location contained the bridge library.
     #[error("failed to resolve cbf bridge library path")]
     PathNotFound,
+    /// Opening the discovered bridge library file failed.
     #[error("failed to load cbf bridge library from {path}: {source}")]
     OpenLibrary {
+        /// The path of the library that failed to open.
         path: PathBuf,
         #[source]
+        /// The underlying dynamic loader error.
         source: ArcLibloadingError,
     },
 }
 
+/// A cloneable wrapper around `libloading::Error`.
 #[derive(Debug, Clone)]
 pub struct ArcLibloadingError(std::sync::Arc<libloading::Error>);
+
+impl From<libloading::Error> for ArcLibloadingError {
+    fn from(value: libloading::Error) -> Self {
+        Self(std::sync::Arc::new(value))
+    }
+}
 
 impl std::fmt::Display for ArcLibloadingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -58,11 +74,13 @@ impl std::fmt::Debug for BridgeLibrary {
 }
 
 impl BridgeLoadOptions {
+    /// Return options that load the bridge from an explicit file path.
     pub fn with_explicit_library_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.explicit_library_path = Some(path.into());
         self
     }
 
+    /// Return options that load the bridge from an explicit directory.
     pub fn with_explicit_library_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.explicit_library_dir = Some(path.into());
         self
@@ -70,6 +88,7 @@ impl BridgeLoadOptions {
 }
 
 impl BridgeLibrary {
+    /// Load the bridge library using the provided search options.
     pub fn load(options: &BridgeLoadOptions) -> Result<Self, BridgeLoadError> {
         let library_path = resolve_bridge_library_path(options)?;
         let library = unsafe { Library::new(&library_path) }.map_err(|source| {
@@ -84,6 +103,7 @@ impl BridgeLibrary {
         })
     }
 
+    /// Return the resolved filesystem path of the loaded bridge library.
     pub fn library_path(&self) -> &Path {
         &self.library_path
     }
@@ -96,6 +116,7 @@ impl BridgeLibrary {
     }
 }
 
+/// Return the process-wide bridge library instance, loading it on first use.
 pub fn bridge() -> Result<&'static BridgeLibrary, BridgeLoadError> {
     static BRIDGE: OnceLock<BridgeLibrary> = OnceLock::new();
 
@@ -108,6 +129,7 @@ pub fn bridge() -> Result<&'static BridgeLibrary, BridgeLoadError> {
     Ok(BRIDGE.get().expect("bridge library set"))
 }
 
+/// Resolve the bridge library path from explicit options and known runtime locations.
 pub fn resolve_bridge_library_path(
     options: &BridgeLoadOptions,
 ) -> Result<PathBuf, BridgeLoadError> {
