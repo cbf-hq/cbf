@@ -12,6 +12,9 @@
 //! - `native-dialogs`: native helper functions and [`dialogs::NativeDialogPresenter`]
 //!   for `alert` / `confirm`, plus macOS `prompt` support.
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, doc(auto_cfg))]
+
 pub mod backend_event_loop;
 pub mod browser;
 pub mod command;

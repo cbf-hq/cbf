@@ -63,6 +63,7 @@ use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 mod macos;
 
 #[cfg(all(feature = "native-dialogs", target_os = "macos"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "native-dialogs")))]
 pub use macos::{show_alert, show_confirm, show_prompt};
 
 /// Boxed future returned by [`DialogPresenter`].
@@ -109,6 +110,7 @@ pub trait DialogPresenter: Send + Sync + 'static {
 
 /// Native dialog presenter backed by platform dialog toolkits.
 #[cfg(feature = "native-dialogs")]
+#[cfg_attr(docsrs, doc(cfg(feature = "native-dialogs")))]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NativeDialogPresenter;
 
