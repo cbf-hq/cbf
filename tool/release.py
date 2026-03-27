@@ -30,6 +30,7 @@ REQUIRED_GN_ARGS = {
 }
 OPTIONAL_GN_ARGS = ("target_os",)
 REQUIRED_PRESENT_GN_ARGS = ("target_cpu",)
+RELEASE_EXCLUDED_FILENAMES = frozenset({".DS_Store"})
 
 
 @dataclass(frozen=True)
@@ -208,13 +209,25 @@ def sha256_file(path: Path) -> str:
 
 def sha256_tree(path: Path) -> str:
     digest = hashlib.sha256()
-    for entry in sorted(p for p in path.rglob("*") if p.is_file()):
+    for entry in sorted(
+        p for p in path.rglob("*") if p.is_file() and not should_exclude_release_file(p)
+    ):
         digest.update(entry.relative_to(path).as_posix().encode("utf-8"))
         digest.update(b"\0")
         with entry.open("rb") as fh:
             for chunk in iter(lambda: fh.read(1024 * 1024), b""):
                 digest.update(chunk)
     return digest.hexdigest()
+
+
+def should_exclude_release_file(path: Path) -> bool:
+    return path.name in RELEASE_EXCLUDED_FILENAMES
+
+
+def release_archive_filter(tarinfo: tarfile.TarInfo) -> tarfile.TarInfo | None:
+    if Path(tarinfo.name).name in RELEASE_EXCLUDED_FILENAMES:
+        return None
+    return tarinfo
 
 
 def git_rev_parse(cwd: Path, rev: str) -> str:
@@ -366,7 +379,11 @@ def create_release_archive(
     paths.release_dir.mkdir(parents=True, exist_ok=True)
 
     with tarfile.open(paths.archive_path, "w:gz") as archive:
-        archive.add(paths.chromium_app, arcname="Chromium.app")
+        archive.add(
+            paths.chromium_app,
+            arcname="Chromium.app",
+            filter=release_archive_filter,
+        )
         archive.add(paths.bridge_dylib, arcname="libcbf_bridge.dylib")
         archive.add(paths.cbf_license, arcname="CBF_LICENSE.txt")
         archive.add(paths.third_party_licenses, arcname="THIRD_PARTY_LICENSES.txt")
