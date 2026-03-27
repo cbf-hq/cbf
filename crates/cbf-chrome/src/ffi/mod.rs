@@ -22,14 +22,18 @@ pub use map::{
 };
 
 /// Errors that can occur in the IPC bridge layer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     /// Failed to load the runtime bridge library or one of its required symbols.
+    #[error("failed to load the runtime bridge library")]
     BridgeLoadFailed,
     /// Failed to connect to the IPC channel.
+    #[error("failed to connect to the IPC channel")]
     ConnectionFailed,
     /// Input data was invalid for the FFI layer.
+    #[error("invalid input for the FFI layer")]
     InvalidInput,
     /// An IPC event could not be parsed.
+    #[error("failed to parse IPC event")]
     InvalidEvent,
 }

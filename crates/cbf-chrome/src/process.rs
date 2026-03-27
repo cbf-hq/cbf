@@ -2,9 +2,12 @@ use async_process::{Child, Command};
 use cbf::{
     browser::{BrowserHandle, BrowserSession, EventStream},
     delegate::BackendDelegate,
-    error::{ApiErrorKind, BackendErrorInfo, Error as CbfError},
+    error::Error as CbfError,
 };
-use cbf_chrome_sys::{bridge::bridge, ffi::CbfBridgeClientHandle};
+use cbf_chrome_sys::{
+    bridge::{BridgeLoadError, bridge},
+    ffi::CbfBridgeClientHandle,
+};
 use futures_lite::future::block_on;
 use signal_hook::iterator::Signals;
 use std::{
@@ -24,7 +27,7 @@ use thiserror::Error;
 use crate::{
     backend::{ChromiumBackend, ChromiumBackendOptions},
     data::custom_scheme::ChromeCustomSchemeRegistration,
-    ffi::IpcClient,
+    ffi::{Error as IpcError, IpcClient},
 };
 
 /// Resolves Chromium executable path for CBF applications.
@@ -117,19 +120,36 @@ impl std::str::FromStr for RuntimeSelection {
     }
 }
 
-fn validate_runtime_selection(runtime: RuntimeSelection) -> Result<(), CbfError> {
+#[derive(Debug, Error)]
+pub enum StartChromiumError {
+    #[error("unsupported chromium runtime '{runtime}': use 'chrome'")]
+    UnsupportedRuntime { runtime: RuntimeSelection },
+    #[error("invalid custom scheme registration: {detail}")]
+    InvalidCustomScheme { detail: String },
+    #[error("failed to load cbf bridge: {0}")]
+    BridgeLoad(#[from] BridgeLoadError),
+    #[error("cbf_bridge_client_create returned null")]
+    BridgeClientCreateReturnedNull,
+    #[error("failed to prepare IPC channel: {0}")]
+    PrepareChannel(#[source] IpcError),
+    #[error("failed to generate session token: {0}")]
+    TokenGeneration(#[source] getrandom::Error),
+    #[error("failed to spawn chromium process: {0}")]
+    ProcessSpawn(#[source] std::io::Error),
+    #[error("failed to connect inherited IPC channel: {0}")]
+    ConnectInherited(#[source] IpcError),
+    #[error("failed to authenticate chromium bridge session: {0}")]
+    Authenticate(#[source] IpcError),
+    #[error("failed to initialize browser session: {0}")]
+    SessionConnect(#[source] CbfError),
+}
+
+fn validate_runtime_selection(runtime: RuntimeSelection) -> Result<(), StartChromiumError> {
     if matches!(runtime, RuntimeSelection::Chrome) {
         return Ok(());
     }
 
-    Err(CbfError::BackendFailure(BackendErrorInfo {
-        kind: ApiErrorKind::Unsupported,
-        operation: None,
-        detail: Some(format!(
-            "runtime '{}' is not available in this phase; use 'chrome'",
-            runtime
-        )),
-    }))
+    Err(StartChromiumError::UnsupportedRuntime { runtime })
 }
 
 /// Options for launching the Chromium process.
@@ -188,16 +208,14 @@ pub struct StartChromiumOptions {
 
 fn build_custom_schemes_switch_value(
     registrations: &[ChromeCustomSchemeRegistration],
-) -> Result<Option<String>, CbfError> {
+) -> Result<Option<String>, StartChromiumError> {
     let mut scheme_names = BTreeSet::new();
     for registration in registrations {
         let scheme = registration.scheme.trim().to_ascii_lowercase();
         if scheme.is_empty() {
-            return Err(CbfError::BackendFailure(BackendErrorInfo {
-                kind: ApiErrorKind::InvalidInput,
-                operation: None,
-                detail: Some("custom scheme registration contains an empty scheme".to_owned()),
-            }));
+            return Err(StartChromiumError::InvalidCustomScheme {
+                detail: "custom scheme registration contains an empty scheme".to_owned(),
+            });
         }
         scheme_names.insert(scheme);
     }
@@ -585,7 +603,7 @@ pub fn start_chromium(
         EventStream<ChromiumBackend>,
         ChromiumProcess,
     ),
-    CbfError,
+    StartChromiumError,
 > {
     let StartChromiumOptions { process, backend } = options;
     let custom_schemes_switch_value =
@@ -627,41 +645,19 @@ pub fn start_chromium(
     }
 
     // Create the bridge client handle and prepare the Mojo channel pair.
-    let inner = bridge()
-        .map_err(|_| {
-            CbfError::BackendFailure(cbf::error::BackendErrorInfo {
-                kind: cbf::error::ApiErrorKind::ConnectTimeout,
-                operation: None,
-                detail: Some("cbf_bridge_client_create failed".to_owned()),
-            })
-        })
-        .map(|bridge| unsafe { bridge.cbf_bridge_client_create() })?;
+    let inner = bridge().map(|bridge| unsafe { bridge.cbf_bridge_client_create() })?;
     if inner.is_null() {
-        return Err(CbfError::BackendFailure(cbf::error::BackendErrorInfo {
-            kind: cbf::error::ApiErrorKind::ConnectTimeout,
-            operation: None,
-            detail: Some("cbf_bridge_client_create returned null".to_owned()),
-        }));
+        return Err(StartChromiumError::BridgeClientCreateReturnedNull);
     }
 
-    let (remote_fd, switch_arg) = IpcClient::prepare_channel().map_err(|_| {
+    let (remote_fd, switch_arg) = IpcClient::prepare_channel().map_err(|error| {
         cleanup_bridge_destroy(inner);
-        CbfError::BackendFailure(cbf::error::BackendErrorInfo {
-            kind: cbf::error::ApiErrorKind::ConnectTimeout,
-            operation: None,
-            detail: Some("prepare_channel failed".to_owned()),
-        })
+        StartChromiumError::PrepareChannel(error)
     })?;
 
     // Generate a per-session token.
     let mut token_bytes = [0u8; 32];
-    getrandom::fill(&mut token_bytes).map_err(|_| {
-        CbfError::BackendFailure(cbf::error::BackendErrorInfo {
-            kind: cbf::error::ApiErrorKind::ConnectTimeout,
-            operation: None,
-            detail: Some("token generation failed".to_owned()),
-        })
-    })?;
+    getrandom::fill(&mut token_bytes).map_err(StartChromiumError::TokenGeneration)?;
     let session_token: String = token_bytes.iter().map(|b| format!("{b:02x}")).collect();
 
     let mut command = Command::new(&executable_path);
@@ -715,7 +711,7 @@ pub fn start_chromium(
 
     command.args(&extra_args);
 
-    let child = command.spawn().map_err(CbfError::ProcessSpawnError)?;
+    let child = command.spawn().map_err(StartChromiumError::ProcessSpawn)?;
 
     // Notify the bridge of the child PID: on macOS this registers the Mach
     // port with the rendezvous server; on other platforms it is bookkeeping.
@@ -731,25 +727,17 @@ pub fn start_chromium(
     }
 
     // Complete the Mojo handshake: send the OutgoingInvitation and bind the remote.
-    let client = unsafe { IpcClient::connect_inherited(inner) }.map_err(|_| {
-        CbfError::BackendFailure(cbf::error::BackendErrorInfo {
-            kind: cbf::error::ApiErrorKind::ConnectTimeout,
-            operation: None,
-            detail: Some("connect_inherited failed".to_owned()),
-        })
-    })?;
+    let client = unsafe { IpcClient::connect_inherited(inner) }
+        .map_err(StartChromiumError::ConnectInherited)?;
 
     // Authenticate and set up the browser observer.
-    client.authenticate(&session_token).map_err(|_| {
-        CbfError::BackendFailure(cbf::error::BackendErrorInfo {
-            kind: cbf::error::ApiErrorKind::ConnectTimeout,
-            operation: None,
-            detail: Some("authenticate failed".to_owned()),
-        })
-    })?;
+    client
+        .authenticate(&session_token)
+        .map_err(StartChromiumError::Authenticate)?;
 
     let backend = ChromiumBackend::new(backend, client);
-    let (session, events) = BrowserSession::connect(backend, delegate, None)?;
+    let (session, events) = BrowserSession::connect(backend, delegate, None)
+        .map_err(StartChromiumError::SessionConnect)?;
 
     Ok((session, events, ChromiumProcess { child }))
 }
@@ -777,12 +765,8 @@ mod tests {
         let err = validate_runtime_selection(RuntimeSelection::Alloy).unwrap_err();
 
         match err {
-            CbfError::BackendFailure(info) => {
-                assert_eq!(info.kind, ApiErrorKind::Unsupported);
-                assert_eq!(
-                    info.detail.as_deref(),
-                    Some("runtime 'alloy' is not available in this phase; use 'chrome'")
-                );
+            StartChromiumError::UnsupportedRuntime { runtime } => {
+                assert_eq!(runtime, RuntimeSelection::Alloy);
             }
             other => panic!("unexpected error: {other:?}"),
         }
@@ -827,11 +811,10 @@ mod tests {
         let err = build_custom_schemes_switch_value(&registrations).unwrap_err();
 
         match err {
-            CbfError::BackendFailure(info) => {
-                assert_eq!(info.kind, ApiErrorKind::InvalidInput);
+            StartChromiumError::InvalidCustomScheme { detail } => {
                 assert_eq!(
-                    info.detail.as_deref(),
-                    Some("custom scheme registration contains an empty scheme")
+                    detail,
+                    "custom scheme registration contains an empty scheme"
                 );
             }
             other => panic!("unexpected error: {other:?}"),
