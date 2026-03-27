@@ -4,19 +4,13 @@
 //! relationships. A transient browsing context remains owned by a parent page,
 //! but may still be rendered in any compositor-managed window.
 
-pub mod backend;
+mod backend;
 pub mod core;
-pub mod error;
+mod error;
 pub mod model;
 pub(crate) mod platform;
 pub(crate) mod state;
-pub mod window;
+mod window;
 
-pub use core::{AttachWindowOptions, CompositionCommand, Compositor};
 pub use error::CompositorError;
-pub use model::{
-    BackgroundPolicy, CompositionItemId, CompositionItemSpec, CompositorWindowId,
-    HitTestCoordinateSpace, HitTestPolicy, HitTestRegion, HitTestRegionSnapshot, Rect,
-    SurfaceTarget, TransientOwnership, WindowCompositionSpec,
-};
 pub use window::WindowHost;

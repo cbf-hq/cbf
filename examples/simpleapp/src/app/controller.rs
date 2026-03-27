@@ -32,9 +32,9 @@ use cbf_chrome::{
     process::{ChromiumRuntimeShutdownState, ChromiumRuntimeShutdownStateReader},
 };
 use cbf_compositor::{
+    WindowHost,
     core::{AttachWindowOptions, CompositionCommand, Compositor},
     model::{CompositorWindowId, SurfaceTarget},
-    window::WindowHost,
 };
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use tracing::{debug, error, info, warn};
