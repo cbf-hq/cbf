@@ -13,7 +13,7 @@ use cbf_chrome_sys::{bridge::bridge, ffi::*};
 use cursor_icon::CursorIcon;
 use tracing::warn;
 
-use super::{Error, IpcEvent, utils::c_string_to_string};
+use super::{BridgeError, IpcEvent, utils::c_string_to_string};
 use crate::data::{
     choice_menu::{
         ChromeChoiceMenu, ChromeChoiceMenuItem, ChromeChoiceMenuSelectionMode,
@@ -54,7 +54,7 @@ use crate::data::{
     tab_open::{TabOpenHint, TabOpenResult},
 };
 
-pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
+pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, BridgeError> {
     match u32::from(event.kind) {
         CbfEventKind_kEventSurfaceHandleUpdated => {
             let handle = parse_surface_handle(event.surface_handle)?;
@@ -454,7 +454,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, Error> {
             profile_id: c_string_to_string(event.profile_id),
             download: parse_download_completion(event),
         }),
-        _ => Err(Error::InvalidEvent),
+        _ => Err(BridgeError::InvalidEvent),
     }
 }
 
@@ -1309,7 +1309,7 @@ fn cursor_icon_from_ffi(value: u8) -> CursorIcon {
     }
 }
 
-fn parse_surface_handle(handle: CbfSurfaceHandle) -> Result<SurfaceHandle, Error> {
+fn parse_surface_handle(handle: CbfSurfaceHandle) -> Result<SurfaceHandle, BridgeError> {
     match u32::from(handle.kind) {
         CbfSurfaceHandleKind_kSurfaceHandleMacCaContextId => {
             Ok(SurfaceHandle::MacCaContextId(handle.ca_context_id))
@@ -1317,7 +1317,7 @@ fn parse_surface_handle(handle: CbfSurfaceHandle) -> Result<SurfaceHandle, Error
         CbfSurfaceHandleKind_kSurfaceHandleWindowsHwnd => {
             unimplemented!("Windows HWND surface handle parsing not implemented yet")
         }
-        _ => Err(Error::InvalidEvent),
+        _ => Err(BridgeError::InvalidEvent),
     }
 }
 

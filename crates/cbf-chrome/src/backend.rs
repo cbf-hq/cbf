@@ -23,7 +23,7 @@ use crate::{
     command::ChromeCommand,
     data::{custom_scheme::ChromeCustomSchemeRegistration, prompt_ui::PromptUiResponse},
     event::{ChromeEvent, to_generic_event},
-    ffi::{Error as IpcError, EventWaitResult, IpcClient, IpcEvent, IpcEventWaitHandle},
+    ffi::{BridgeError as IpcError, EventWaitResult, IpcClient, IpcEvent, IpcEventWaitHandle},
 };
 
 /// Backend implementation that speaks the Chromium IPC protocol.

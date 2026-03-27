@@ -2,7 +2,7 @@ use async_process::{Child, Command};
 use cbf::{
     browser::{BrowserHandle, BrowserSession, EventStream},
     delegate::BackendDelegate,
-    error::Error as CbfError,
+    error::Error,
 };
 use cbf_chrome_sys::{
     bridge::{BridgeLoadError, bridge},
@@ -22,12 +22,11 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use thiserror::Error;
 
 use crate::{
     backend::{ChromiumBackend, ChromiumBackendOptions},
     data::custom_scheme::ChromeCustomSchemeRegistration,
-    ffi::{Error as IpcError, IpcClient},
+    ffi::{BridgeError, IpcClient},
 };
 
 /// Resolves Chromium executable path for CBF applications.
@@ -120,7 +119,7 @@ impl std::str::FromStr for RuntimeSelection {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum StartChromiumError {
     #[error("unsupported chromium runtime '{runtime}': use 'chrome'")]
     UnsupportedRuntime { runtime: RuntimeSelection },
@@ -131,17 +130,17 @@ pub enum StartChromiumError {
     #[error("cbf_bridge_client_create returned null")]
     BridgeClientCreateReturnedNull,
     #[error("failed to prepare IPC channel: {0}")]
-    PrepareChannel(#[source] IpcError),
+    PrepareChannel(#[source] BridgeError),
     #[error("failed to generate session token: {0}")]
     TokenGeneration(#[source] getrandom::Error),
     #[error("failed to spawn chromium process: {0}")]
     ProcessSpawn(#[source] std::io::Error),
     #[error("failed to connect inherited IPC channel: {0}")]
-    ConnectInherited(#[source] IpcError),
+    ConnectInherited(#[source] BridgeError),
     #[error("failed to authenticate chromium bridge session: {0}")]
-    Authenticate(#[source] IpcError),
+    Authenticate(#[source] BridgeError),
     #[error("failed to initialize browser session: {0}")]
-    SessionConnect(#[source] CbfError),
+    SessionConnect(#[source] Error),
 }
 
 fn validate_runtime_selection(runtime: RuntimeSelection) -> Result<(), StartChromiumError> {
@@ -338,7 +337,7 @@ impl ChromiumRuntimeShutdownStateReader {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum InstallSignalHandlersError {
     #[error("signal handlers are already installed for a Chromium runtime")]
     AlreadyInstalled,

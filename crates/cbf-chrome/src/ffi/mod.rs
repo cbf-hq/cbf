@@ -21,9 +21,9 @@ pub use map::{
     convert_nspasteboard_to_drag_data,
 };
 
-/// Errors that can occur in the IPC bridge layer.
+/// Errors that can occur in the `cbf-chrome-sys` (`cbf_bridge`) layer.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum Error {
+pub enum BridgeError {
     /// Failed to load the runtime bridge library or one of its required symbols.
     #[error("failed to load the runtime bridge library")]
     BridgeLoadFailed,

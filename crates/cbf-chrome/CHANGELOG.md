@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS surface embedding guidance now points applications to `cbf-compositor` as the standard host-side integration path instead of the old `cbf-chrome`-local view helper.
 - `cbf-chrome` now dispatches bridge calls through `cbf-chrome-sys` runtime-loaded symbol wrappers instead of relying on downstream crate `build.rs` linkage setup.
 - `cbf-chrome` now consumes bindgen-generated `cbf-chrome-sys` ABI names and bridge loader methods directly, removing dependence on the old handwritten bridge symbol wrapper layer.
+- Renamed the `cbf-chrome` bridge/FFI transport error type from `Error` to `BridgeError` so it is not confused with browser-generic `cbf::error::Error` and other crate-level error types.
 - `start_chromium` now returns a `cbf-chrome`-specific startup error enum instead of flattening bridge/bootstrap failures into browser-generic `cbf` backend timeout categories.
 - `simpleapp` now serves embedded toolbar assets over `app://simpleapp/...` instead of resolving `file://` URLs from the Cargo manifest location, so the same UI loading path works in development and packaged builds.
 - Hardened shutdown flow to use explicit force-close handling, staged process termination, and best-effort cleanup instead of relying on session drop side effects.

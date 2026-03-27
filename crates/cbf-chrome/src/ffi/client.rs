@@ -20,7 +20,7 @@ use super::map::{
     to_ffi_ime_text_spans,
 };
 use super::utils::{c_string_to_string, to_optional_cstring};
-use super::{Error, IpcEvent};
+use super::{BridgeError, IpcEvent};
 use crate::data::{
     background::ChromeBackgroundPolicy,
     browsing_context_open::ChromeBrowsingContextOpenResponse,
@@ -95,8 +95,8 @@ impl IpcClient {
     /// Override the base bundle ID used for Mach rendezvous on macOS.
     ///
     /// Must be called before `prepare_channel`.
-    pub fn set_base_bundle_id(bundle_id: &str) -> Result<(), Error> {
-        let bundle_id = CString::new(bundle_id).map_err(|_| Error::InvalidInput)?;
+    pub fn set_base_bundle_id(bundle_id: &str) -> Result<(), BridgeError> {
+        let bundle_id = CString::new(bundle_id).map_err(|_| BridgeError::InvalidInput)?;
         bridge_call!(cbf_bridge_set_base_bundle_id(bundle_id.as_ptr()));
 
         Ok(())
@@ -109,7 +109,7 @@ impl IpcClient {
     ///   must be inherited by the child process (Unix only; -1 on other platforms).
     /// - `switch_arg` is the command-line switch that Chromium needs to recover
     ///   the endpoint (e.g. `--cbf-ipc-handle=...`).
-    pub fn prepare_channel() -> Result<(i32, String), Error> {
+    pub fn prepare_channel() -> Result<(i32, String), BridgeError> {
         let mut buf = [0u8; 512];
 
         let fd = {
@@ -121,12 +121,12 @@ impl IpcClient {
         };
 
         let switch_arg = CStr::from_bytes_until_nul(&buf)
-            .map_err(|_| Error::ConnectionFailed)?
+            .map_err(|_| BridgeError::ConnectionFailed)?
             .to_str()
-            .map_err(|_| Error::ConnectionFailed)?
+            .map_err(|_| BridgeError::ConnectionFailed)?
             .to_owned();
         if switch_arg.is_empty() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         Ok((fd, switch_arg))
@@ -156,9 +156,9 @@ impl IpcClient {
     /// `inner` must be a valid, live `CbfBridgeClientHandle` allocated by
     /// `cbf_bridge_client_create()`. Ownership is transferred to the returned
     /// `IpcClient` on success and consumed by this function on failure.
-    pub unsafe fn connect_inherited(inner: *mut CbfBridgeClientHandle) -> Result<Self, Error> {
+    pub unsafe fn connect_inherited(inner: *mut CbfBridgeClientHandle) -> Result<Self, BridgeError> {
         if inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let connected = bridge_call!(cbf_bridge_client_connect_inherited(inner));
@@ -173,7 +173,7 @@ impl IpcClient {
                 unsafe { bridge.cbf_bridge_client_destroy(inner) };
             });
 
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         Ok(Self { inner })
@@ -182,21 +182,21 @@ impl IpcClient {
     /// Authenticate with the session token and set up the browser observer.
     ///
     /// Must be called once after `connect_inherited` and before any other method.
-    pub fn authenticate(&self, token: &str) -> Result<(), Error> {
+    pub fn authenticate(&self, token: &str) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let token = CString::new(token).map_err(|_| Error::InvalidInput)?;
+        let token = CString::new(token).map_err(|_| BridgeError::InvalidInput)?;
         if bridge_call!(cbf_bridge_client_authenticate(self.inner, token.as_ptr())) {
             Ok(())
         } else {
-            Err(Error::ConnectionFailed)
+            Err(BridgeError::ConnectionFailed)
         }
     }
 
     /// Wait until an event is available or the bridge closes.
-    pub fn wait_for_event(&self, timeout: Option<Duration>) -> Result<EventWaitResult, Error> {
+    pub fn wait_for_event(&self, timeout: Option<Duration>) -> Result<EventWaitResult, BridgeError> {
         wait_for_event_inner(self.inner, timeout)
     }
 
@@ -205,7 +205,7 @@ impl IpcClient {
     }
 
     /// Poll the next IPC event, if any, from the backend.
-    pub fn poll_event(&mut self) -> Option<Result<IpcEvent, Error>> {
+    pub fn poll_event(&mut self) -> Option<Result<IpcEvent, BridgeError>> {
         if self.inner.is_null() {
             return None;
         }
@@ -237,14 +237,14 @@ impl IpcClient {
     }
 
     /// Retrieve the list of browser profiles from the backend.
-    pub fn list_profiles(&mut self) -> Result<Vec<ChromeProfileInfo>, Error> {
+    pub fn list_profiles(&mut self) -> Result<Vec<ChromeProfileInfo>, BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let mut list = CbfProfileList::default();
         if !bridge_call!(cbf_bridge_client_get_profiles(self.inner, &mut list)) {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let profiles = if list.len == 0 || list.profiles.is_null() {
@@ -271,12 +271,12 @@ impl IpcClient {
     }
 
     /// Retrieve the list of extensions from the backend.
-    pub fn list_extensions(&mut self, profile_id: &str) -> Result<Vec<ChromeExtensionInfo>, Error> {
+    pub fn list_extensions(&mut self, profile_id: &str) -> Result<Vec<ChromeExtensionInfo>, BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let profile = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
+        let profile = CString::new(profile_id).map_err(|_| BridgeError::InvalidInput)?;
 
         let mut list = CbfExtensionInfoList::default();
         if !bridge_call!(cbf_bridge_client_list_extensions(
@@ -284,7 +284,7 @@ impl IpcClient {
             profile.as_ptr(),
             &mut list
         )) {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let result = parse_extension_list(list);
@@ -299,13 +299,13 @@ impl IpcClient {
         &mut self,
         scheme: &str,
         host: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let scheme = CString::new(scheme).map_err(|_| Error::InvalidInput)?;
-        let host = CString::new(host).map_err(|_| Error::InvalidInput)?;
+        let scheme = CString::new(scheme).map_err(|_| BridgeError::InvalidInput)?;
+        let host = CString::new(host).map_err(|_| BridgeError::InvalidInput)?;
         bridge_ok(bridge_call!(
             cbf_bridge_client_register_custom_scheme_handler(
                 self.inner,
@@ -318,18 +318,18 @@ impl IpcClient {
     pub fn respond_custom_scheme_request(
         &mut self,
         response: &ChromeCustomSchemeResponse,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let mime_type =
-            CString::new(response.mime_type.as_str()).map_err(|_| Error::InvalidInput)?;
+            CString::new(response.mime_type.as_str()).map_err(|_| BridgeError::InvalidInput)?;
         let content_security_policy = to_optional_cstring(&response.content_security_policy)
-            .map_err(|_| Error::InvalidInput)?;
+            .map_err(|_| BridgeError::InvalidInput)?;
         let access_control_allow_origin =
             to_optional_cstring(&response.access_control_allow_origin)
-                .map_err(|_| Error::InvalidInput)?;
+                .map_err(|_| BridgeError::InvalidInput)?;
 
         let result = match response.result {
             ChromeCustomSchemeResponseResult::Ok => {
@@ -371,12 +371,12 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         extension_id: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let extension_id = CString::new(extension_id).map_err(|_| Error::InvalidInput)?;
+        let extension_id = CString::new(extension_id).map_err(|_| BridgeError::InvalidInput)?;
         bridge_ok(bridge_call!(cbf_bridge_client_activate_extension_action(
             self.inner,
             browsing_context_id.get(),
@@ -390,13 +390,13 @@ impl IpcClient {
         request_id: u64,
         initial_url: &str,
         profile_id: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let url = CString::new(initial_url).map_err(|_| Error::InvalidInput)?;
-        let profile = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
+        let url = CString::new(initial_url).map_err(|_| BridgeError::InvalidInput)?;
+        let profile = CString::new(profile_id).map_err(|_| BridgeError::InvalidInput)?;
 
         bridge_ok(bridge_call!(cbf_bridge_client_create_tab(
             self.inner,
@@ -407,9 +407,9 @@ impl IpcClient {
     }
 
     /// Request closing the specified tab.
-    pub fn request_close_tab(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
+    pub fn request_close_tab(&mut self, browsing_context_id: TabId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_request_close_tab(
@@ -424,9 +424,9 @@ impl IpcClient {
         browsing_context_id: TabId,
         width: u32,
         height: u32,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_set_tab_size(
@@ -442,9 +442,9 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         focused: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_set_tab_focus(
@@ -459,9 +459,9 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         visibility: ChromeTabVisibility,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let visibility = match visibility {
@@ -481,9 +481,9 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         config: &TabIpcConfig,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let origin_cstrings: Result<Vec<CString>, _> = config
@@ -491,7 +491,7 @@ impl IpcClient {
             .iter()
             .map(|origin| CString::new(origin.as_str()))
             .collect();
-        let origin_cstrings = origin_cstrings.map_err(|_| Error::InvalidInput)?;
+        let origin_cstrings = origin_cstrings.map_err(|_| BridgeError::InvalidInput)?;
         let origin_ptrs: Vec<*const c_char> = origin_cstrings.iter().map(|s| s.as_ptr()).collect();
 
         let list = CbfCommandList {
@@ -511,9 +511,9 @@ impl IpcClient {
     }
 
     /// Disable browsing context IPC.
-    pub fn disable_tab_ipc(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
+    pub fn disable_tab_ipc(&mut self, browsing_context_id: TabId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_disable_tab_ipc(
@@ -527,14 +527,14 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         message: &TabIpcMessage,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let channel = CString::new(message.channel.as_str()).map_err(|_| Error::InvalidInput)?;
+        let channel = CString::new(message.channel.as_str()).map_err(|_| BridgeError::InvalidInput)?;
         let content_type =
-            to_optional_cstring(&message.content_type).map_err(|_| Error::InvalidInput)?;
+            to_optional_cstring(&message.content_type).map_err(|_| BridgeError::InvalidInput)?;
         let payload_kind = match message.payload {
             TabIpcPayload::Text(_) => CbfIpcPayloadKind_kCbfIpcPayloadText,
             TabIpcPayload::Binary(_) => CbfIpcPayloadKind_kCbfIpcPayloadBinary,
@@ -546,7 +546,7 @@ impl IpcClient {
             .unwrap_or(CbfIpcErrorCode_kCbfIpcErrorNone as u8);
         let (payload_text, payload_binary) = match &message.payload {
             TabIpcPayload::Text(text) => (
-                Some(CString::new(text.as_str()).map_err(|_| Error::InvalidInput)?),
+                Some(CString::new(text.as_str()).map_err(|_| BridgeError::InvalidInput)?),
                 Vec::new(),
             ),
             TabIpcPayload::Binary(binary) => (None, binary.clone()),
@@ -582,9 +582,9 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         policy: ChromeBackgroundPolicy,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let transparent = matches!(policy, ChromeBackgroundPolicy::Transparent);
@@ -602,9 +602,9 @@ impl IpcClient {
         browsing_context_id: TabId,
         request_id: u64,
         proceed: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_confirm_beforeunload(
@@ -622,13 +622,13 @@ impl IpcClient {
         request_id: u64,
         accept: bool,
         prompt_text: Option<&str>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let prompt_text = to_optional_cstring(&prompt_text.map(ToOwned::to_owned))
-            .map_err(|_| Error::InvalidInput)?;
+            .map_err(|_| BridgeError::InvalidInput)?;
 
         bridge_ok(bridge_call!(cbf_bridge_client_respond_javascript_dialog(
             self.inner,
@@ -646,13 +646,13 @@ impl IpcClient {
         request_id: u64,
         accept: bool,
         prompt_text: Option<&str>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let prompt_text = to_optional_cstring(&prompt_text.map(ToOwned::to_owned))
-            .map_err(|_| Error::InvalidInput)?;
+            .map_err(|_| BridgeError::InvalidInput)?;
 
         bridge_ok(bridge_call!(
             cbf_bridge_client_respond_extension_popup_javascript_dialog(
@@ -666,12 +666,12 @@ impl IpcClient {
     }
 
     /// Navigate the page to the provided URL.
-    pub fn navigate(&mut self, browsing_context_id: TabId, url: &str) -> Result<(), Error> {
+    pub fn navigate(&mut self, browsing_context_id: TabId, url: &str) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let url = CString::new(url).map_err(|_| Error::InvalidInput)?;
+        let url = CString::new(url).map_err(|_| BridgeError::InvalidInput)?;
 
         bridge_ok(bridge_call!(cbf_bridge_client_navigate(
             self.inner,
@@ -681,9 +681,9 @@ impl IpcClient {
     }
 
     /// Navigate back in history for the page.
-    pub fn go_back(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
+    pub fn go_back(&mut self, browsing_context_id: TabId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_go_back(
@@ -693,9 +693,9 @@ impl IpcClient {
     }
 
     /// Navigate forward in history for the page.
-    pub fn go_forward(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
+    pub fn go_forward(&mut self, browsing_context_id: TabId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_go_forward(
@@ -705,9 +705,9 @@ impl IpcClient {
     }
 
     /// Reload the page, optionally ignoring caches.
-    pub fn reload(&mut self, browsing_context_id: TabId, ignore_cache: bool) -> Result<(), Error> {
+    pub fn reload(&mut self, browsing_context_id: TabId, ignore_cache: bool) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_reload(
@@ -718,9 +718,9 @@ impl IpcClient {
     }
 
     /// Open print preview for the page.
-    pub fn print_preview(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
+    pub fn print_preview(&mut self, browsing_context_id: TabId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_print_preview(
@@ -730,9 +730,9 @@ impl IpcClient {
     }
 
     /// Open DevTools for the specified page.
-    pub fn open_dev_tools(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
+    pub fn open_dev_tools(&mut self, browsing_context_id: TabId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_open_dev_tools(
@@ -747,9 +747,9 @@ impl IpcClient {
         browsing_context_id: TabId,
         x: i32,
         y: i32,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_inspect_element(
@@ -765,9 +765,9 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         request_id: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_get_tab_dom_html(
@@ -782,12 +782,12 @@ impl IpcClient {
         browsing_context_id: TabId,
         request_id: u64,
         options: &ChromeFindInPageOptions,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let query = CString::new(options.query.as_str()).map_err(|_| Error::InvalidInput)?;
+        let query = CString::new(options.query.as_str()).map_err(|_| BridgeError::InvalidInput)?;
         bridge_ok(bridge_call!(cbf_bridge_client_find_in_page(
             self.inner,
             browsing_context_id.get(),
@@ -804,9 +804,9 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         action: ChromeStopFindAction,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_stop_finding(
@@ -821,11 +821,11 @@ impl IpcClient {
         &mut self,
         profile_id: &str,
         request_id: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
-        let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
+        let profile_id = CString::new(profile_id).map_err(|_| BridgeError::InvalidInput)?;
         bridge_ok(bridge_call!(cbf_bridge_client_open_default_prompt_ui(
             self.inner,
             profile_id.as_ptr(),
@@ -839,11 +839,11 @@ impl IpcClient {
         profile_id: &str,
         request_id: u64,
         response: &PromptUiResponse,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
-        let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
+        let profile_id = CString::new(profile_id).map_err(|_| BridgeError::InvalidInput)?;
         let (prompt_ui_kind, proceed, destination_path, report_abuse) = match response {
             PromptUiResponse::PermissionPrompt { allow } => (
                 CbfPromptUiKind_kCbfPromptUiKindPermissionPrompt,
@@ -910,9 +910,9 @@ impl IpcClient {
         browsing_context_id: TabId,
         request_id: u64,
         response: &PromptUiResponse,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
         let (prompt_ui_kind, proceed, destination_path, report_abuse) = match response {
             PromptUiResponse::PermissionPrompt { allow } => (
@@ -979,11 +979,11 @@ impl IpcClient {
         &mut self,
         profile_id: &str,
         prompt_ui_id: PromptUiId,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
-        let profile_id = CString::new(profile_id).map_err(|_| Error::InvalidInput)?;
+        let profile_id = CString::new(profile_id).map_err(|_| BridgeError::InvalidInput)?;
         bridge_ok(bridge_call!(cbf_bridge_client_close_prompt_ui(
             self.inner,
             profile_id.as_ptr(),
@@ -992,9 +992,9 @@ impl IpcClient {
     }
 
     /// Pause an in-progress download.
-    pub fn pause_download(&mut self, download_id: ChromeDownloadId) -> Result<(), Error> {
+    pub fn pause_download(&mut self, download_id: ChromeDownloadId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
         bridge_ok(bridge_call!(cbf_bridge_client_pause_download(
             self.inner,
@@ -1003,9 +1003,9 @@ impl IpcClient {
     }
 
     /// Resume a paused download.
-    pub fn resume_download(&mut self, download_id: ChromeDownloadId) -> Result<(), Error> {
+    pub fn resume_download(&mut self, download_id: ChromeDownloadId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
         bridge_ok(bridge_call!(cbf_bridge_client_resume_download(
             self.inner,
@@ -1014,9 +1014,9 @@ impl IpcClient {
     }
 
     /// Cancel an active download.
-    pub fn cancel_download(&mut self, download_id: ChromeDownloadId) -> Result<(), Error> {
+    pub fn cancel_download(&mut self, download_id: ChromeDownloadId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
         bridge_ok(bridge_call!(cbf_bridge_client_cancel_download(
             self.inner,
@@ -1029,9 +1029,9 @@ impl IpcClient {
         &mut self,
         request_id: u64,
         response: &ChromeBrowsingContextOpenResponse,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
         let (response_kind, target_tab_id, activate) = match response {
             ChromeBrowsingContextOpenResponse::AllowNewContext { activate } => (
@@ -1064,7 +1064,7 @@ impl IpcClient {
         &mut self,
         request_id: u64,
         response: &WindowOpenResponse,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         let tab_open_response = match response {
             WindowOpenResponse::AllowExistingWindow { .. }
             | WindowOpenResponse::AllowNewWindow { .. } => {
@@ -1081,9 +1081,9 @@ impl IpcClient {
         browsing_context_id: TabId,
         event: &ChromeKeyEvent,
         commands: &[String],
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let dom_code = to_optional_cstring(&event.dom_code)?;
@@ -1093,7 +1093,7 @@ impl IpcClient {
 
         let command_cstrings = commands
             .iter()
-            .map(|command| CString::new(command.as_str()).map_err(|_| Error::InvalidInput))
+            .map(|command| CString::new(command.as_str()).map_err(|_| BridgeError::InvalidInput))
             .collect::<Result<Vec<_>, _>>()?;
         let command_ptrs: Vec<*const std::os::raw::c_char> =
             command_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
@@ -1136,9 +1136,9 @@ impl IpcClient {
         popup_id: PopupId,
         event: &ChromeKeyEvent,
         commands: &[String],
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let dom_code = to_optional_cstring(&event.dom_code)?;
@@ -1148,7 +1148,7 @@ impl IpcClient {
 
         let command_cstrings = commands
             .iter()
-            .map(|command| CString::new(command.as_str()).map_err(|_| Error::InvalidInput))
+            .map(|command| CString::new(command.as_str()).map_err(|_| BridgeError::InvalidInput))
             .collect::<Result<Vec<_>, _>>()?;
         let command_ptrs: Vec<*const std::os::raw::c_char> =
             command_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
@@ -1193,9 +1193,9 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         event: &ChromeMouseEvent,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let ffi_event = CbfMouseEvent {
@@ -1224,9 +1224,9 @@ impl IpcClient {
         &mut self,
         popup_id: PopupId,
         event: &ChromeMouseEvent,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let ffi_event = CbfMouseEvent {
@@ -1259,9 +1259,9 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         event: &ChromeMouseWheelEvent,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let ffi_event = CbfMouseWheelEvent {
@@ -1293,9 +1293,9 @@ impl IpcClient {
         &mut self,
         popup_id: PopupId,
         event: &ChromeMouseWheelEvent,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let ffi_event = CbfMouseWheelEvent {
@@ -1327,9 +1327,9 @@ impl IpcClient {
     }
 
     /// Send a drag update event for host-owned drag session.
-    pub fn send_drag_update(&mut self, update: &ChromeDragUpdate) -> Result<(), Error> {
+    pub fn send_drag_update(&mut self, update: &ChromeDragUpdate) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let ffi_update = CbfDragUpdate {
@@ -1350,9 +1350,9 @@ impl IpcClient {
     }
 
     /// Send a drag drop event for host-owned drag session.
-    pub fn send_drag_drop(&mut self, drop: &ChromeDragDrop) -> Result<(), Error> {
+    pub fn send_drag_drop(&mut self, drop: &ChromeDragDrop) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let ffi_drop = CbfDragDrop {
@@ -1375,9 +1375,9 @@ impl IpcClient {
         &mut self,
         session_id: u64,
         browsing_context_id: TabId,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_send_drag_cancel(
@@ -1391,9 +1391,9 @@ impl IpcClient {
     pub fn send_external_drag_enter(
         &mut self,
         event: &ChromeExternalDragEnter,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let mut owned_data = OwnedDragData::new(&event.data)?;
@@ -1417,9 +1417,9 @@ impl IpcClient {
     pub fn send_external_drag_update(
         &mut self,
         event: &ChromeExternalDragUpdate,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let ffi_event = CbfExternalDragUpdate {
@@ -1438,9 +1438,9 @@ impl IpcClient {
     }
 
     /// Notify the backend that the active external drag left the page.
-    pub fn send_external_drag_leave(&mut self, browsing_context_id: TabId) -> Result<(), Error> {
+    pub fn send_external_drag_leave(&mut self, browsing_context_id: TabId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_send_external_drag_leave(
@@ -1450,9 +1450,9 @@ impl IpcClient {
     }
 
     /// Send an external drag drop event for a native drag destination.
-    pub fn send_external_drag_drop(&mut self, event: &ChromeExternalDragDrop) -> Result<(), Error> {
+    pub fn send_external_drag_drop(&mut self, event: &ChromeExternalDragDrop) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let ffi_event = CbfExternalDragDrop {
@@ -1470,12 +1470,12 @@ impl IpcClient {
     }
 
     /// Update the IME composition state.
-    pub fn set_composition(&mut self, composition: &ChromeImeComposition) -> Result<(), Error> {
+    pub fn set_composition(&mut self, composition: &ChromeImeComposition) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let text = CString::new(composition.text.as_str()).map_err(|_| Error::InvalidInput)?;
+        let text = CString::new(composition.text.as_str()).map_err(|_| BridgeError::InvalidInput)?;
         let spans = to_ffi_ime_text_spans(&composition.spans);
         let span_list = CbfImeTextSpanList {
             items: if spans.is_empty() {
@@ -1507,12 +1507,12 @@ impl IpcClient {
     pub fn set_extension_popup_composition(
         &mut self,
         composition: &ChromeTransientImeComposition,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let text = CString::new(composition.text.as_str()).map_err(|_| Error::InvalidInput)?;
+        let text = CString::new(composition.text.as_str()).map_err(|_| BridgeError::InvalidInput)?;
         let spans = to_ffi_ime_text_spans(&composition.spans);
         let span_list = CbfImeTextSpanList {
             items: if spans.is_empty() {
@@ -1544,12 +1544,12 @@ impl IpcClient {
     }
 
     /// Commit IME text input to the page.
-    pub fn commit_text(&mut self, commit: &ChromeImeCommitText) -> Result<(), Error> {
+    pub fn commit_text(&mut self, commit: &ChromeImeCommitText) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let text = CString::new(commit.text.as_str()).map_err(|_| Error::InvalidInput)?;
+        let text = CString::new(commit.text.as_str()).map_err(|_| BridgeError::InvalidInput)?;
         let spans = to_ffi_ime_text_spans(&commit.spans);
         let span_list = CbfImeTextSpanList {
             items: if spans.is_empty() {
@@ -1580,12 +1580,12 @@ impl IpcClient {
     pub fn commit_extension_popup_text(
         &mut self,
         commit: &ChromeTransientImeCommitText,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
-        let text = CString::new(commit.text.as_str()).map_err(|_| Error::InvalidInput)?;
+        let text = CString::new(commit.text.as_str()).map_err(|_| BridgeError::InvalidInput)?;
         let spans = to_ffi_ime_text_spans(&commit.spans);
         let span_list = CbfImeTextSpanList {
             items: if spans.is_empty() {
@@ -1618,9 +1618,9 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         behavior: ChromeConfirmCompositionBehavior,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let behavior = match behavior {
@@ -1644,9 +1644,9 @@ impl IpcClient {
         &mut self,
         popup_id: PopupId,
         behavior: ChromeConfirmCompositionBehavior,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let behavior = match behavior {
@@ -1671,9 +1671,9 @@ impl IpcClient {
         &mut self,
         popup_id: PopupId,
         focused: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_set_extension_popup_focus(
@@ -1688,9 +1688,9 @@ impl IpcClient {
         popup_id: PopupId,
         width: u32,
         height: u32,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_set_extension_popup_size(
@@ -1706,9 +1706,9 @@ impl IpcClient {
         &mut self,
         popup_id: PopupId,
         policy: ChromeBackgroundPolicy,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let transparent = matches!(policy, ChromeBackgroundPolicy::Transparent);
@@ -1722,9 +1722,9 @@ impl IpcClient {
         ))
     }
 
-    pub fn close_extension_popup(&mut self, popup_id: PopupId) -> Result<(), Error> {
+    pub fn close_extension_popup(&mut self, popup_id: PopupId) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_close_extension_popup(
@@ -1738,9 +1738,9 @@ impl IpcClient {
         &mut self,
         browsing_context_id: TabId,
         action: EditAction,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_execute_edit_action(
@@ -1755,9 +1755,9 @@ impl IpcClient {
         &mut self,
         popup_id: PopupId,
         action: EditAction,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(
@@ -1775,9 +1775,9 @@ impl IpcClient {
         menu_id: u64,
         command_id: i32,
         event_flags: i32,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(
@@ -1795,9 +1795,9 @@ impl IpcClient {
         &mut self,
         request_id: u64,
         indices: &[i32],
-    ) -> Result<(), Error> {
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         let ffi_indices = CbfChoiceMenuSelectedIndices {
@@ -1810,9 +1810,9 @@ impl IpcClient {
     }
 
     /// Dismiss a host-owned choice menu without a selection.
-    pub fn dismiss_choice_menu(&mut self, request_id: u64) -> Result<(), Error> {
+    pub fn dismiss_choice_menu(&mut self, request_id: u64) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_dismiss_choice_menu(
@@ -1821,9 +1821,9 @@ impl IpcClient {
     }
 
     /// Dismiss the context menu with the given id.
-    pub fn dismiss_context_menu(&mut self, menu_id: u64) -> Result<(), Error> {
+    pub fn dismiss_context_menu(&mut self, menu_id: u64) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_dismiss_context_menu(
@@ -1832,9 +1832,9 @@ impl IpcClient {
     }
 
     /// Request a graceful shutdown from the backend.
-    pub fn request_shutdown(&mut self, request_id: u64) -> Result<(), Error> {
+    pub fn request_shutdown(&mut self, request_id: u64) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_request_shutdown(
@@ -1843,9 +1843,9 @@ impl IpcClient {
     }
 
     /// Respond to a shutdown confirmation request.
-    pub fn confirm_shutdown(&mut self, request_id: u64, proceed: bool) -> Result<(), Error> {
+    pub fn confirm_shutdown(&mut self, request_id: u64, proceed: bool) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_confirm_shutdown(
@@ -1854,9 +1854,9 @@ impl IpcClient {
     }
 
     /// Force an immediate shutdown without confirmations.
-    pub fn force_shutdown(&mut self) -> Result<(), Error> {
+    pub fn force_shutdown(&mut self) -> Result<(), BridgeError> {
         if self.inner.is_null() {
-            return Err(Error::ConnectionFailed);
+            return Err(BridgeError::ConnectionFailed);
         }
 
         bridge_ok(bridge_call!(cbf_bridge_client_force_shutdown(self.inner)))
@@ -1876,7 +1876,7 @@ impl IpcEventWaitHandle {
     pub(crate) fn wait_for_event(
         &self,
         timeout: Option<Duration>,
-    ) -> Result<EventWaitResult, Error> {
+    ) -> Result<EventWaitResult, BridgeError> {
         wait_for_event_inner(self.inner, timeout)
     }
 }
@@ -1884,7 +1884,7 @@ impl IpcEventWaitHandle {
 fn wait_for_event_inner(
     inner: *mut CbfBridgeClientHandle,
     timeout: Option<Duration>,
-) -> Result<EventWaitResult, Error> {
+) -> Result<EventWaitResult, BridgeError> {
     if inner.is_null() {
         return Ok(EventWaitResult::Closed);
     }
@@ -1903,7 +1903,7 @@ fn wait_for_event_inner(
             Ok(EventWaitResult::Disconnected)
         }
         CbfBridgeEventWaitStatus_kCbfBridgeEventWaitStatusClosed => Ok(EventWaitResult::Closed),
-        _ => Err(Error::InvalidEvent),
+        _ => Err(BridgeError::InvalidEvent),
     }
 }
 
@@ -1928,10 +1928,10 @@ struct OwnedStringList {
 }
 
 impl OwnedStringList {
-    fn new(values: &[String]) -> Result<Self, Error> {
+    fn new(values: &[String]) -> Result<Self, BridgeError> {
         let strings = values
             .iter()
-            .map(|value| CString::new(value.as_str()).map_err(|_| Error::InvalidInput))
+            .map(|value| CString::new(value.as_str()).map_err(|_| BridgeError::InvalidInput))
             .collect::<Result<Vec<_>, _>>()?;
         let ptrs = strings.iter().map(as_ffi_string_ptr).collect::<Vec<_>>();
         Ok(Self { strings, ptrs })
@@ -1956,16 +1956,16 @@ struct OwnedDragUrlList {
 }
 
 impl OwnedDragUrlList {
-    fn new(values: &[crate::data::drag::ChromeDragUrlInfo]) -> Result<Self, Error> {
+    fn new(values: &[crate::data::drag::ChromeDragUrlInfo]) -> Result<Self, BridgeError> {
         let strings = values
             .iter()
             .map(|value| {
                 Ok((
-                    CString::new(value.url.as_str()).map_err(|_| Error::InvalidInput)?,
-                    CString::new(value.title.as_str()).map_err(|_| Error::InvalidInput)?,
+                    CString::new(value.url.as_str()).map_err(|_| BridgeError::InvalidInput)?,
+                    CString::new(value.title.as_str()).map_err(|_| BridgeError::InvalidInput)?,
                 ))
             })
-            .collect::<Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, BridgeError>>()?;
         let items = strings
             .iter()
             .map(|(url, title)| CbfDragUrlInfo {
@@ -1995,16 +1995,16 @@ struct OwnedStringPairList {
 }
 
 impl OwnedStringPairList {
-    fn new(values: &std::collections::BTreeMap<String, String>) -> Result<Self, Error> {
+    fn new(values: &std::collections::BTreeMap<String, String>) -> Result<Self, BridgeError> {
         let strings = values
             .iter()
             .map(|(key, value)| {
                 Ok((
-                    CString::new(key.as_str()).map_err(|_| Error::InvalidInput)?,
-                    CString::new(value.as_str()).map_err(|_| Error::InvalidInput)?,
+                    CString::new(key.as_str()).map_err(|_| BridgeError::InvalidInput)?,
+                    CString::new(value.as_str()).map_err(|_| BridgeError::InvalidInput)?,
                 ))
             })
-            .collect::<Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, BridgeError>>()?;
         let items = strings
             .iter()
             .map(|(key, value)| CbfStringPair {
@@ -2039,12 +2039,12 @@ struct OwnedDragData {
 }
 
 impl OwnedDragData {
-    fn new(data: &ChromeDragData) -> Result<Self, Error> {
+    fn new(data: &ChromeDragData) -> Result<Self, BridgeError> {
         Ok(Self {
-            text: CString::new(data.text.as_str()).map_err(|_| Error::InvalidInput)?,
-            html: CString::new(data.html.as_str()).map_err(|_| Error::InvalidInput)?,
+            text: CString::new(data.text.as_str()).map_err(|_| BridgeError::InvalidInput)?,
+            html: CString::new(data.html.as_str()).map_err(|_| BridgeError::InvalidInput)?,
             html_base_url: CString::new(data.html_base_url.as_str())
-                .map_err(|_| Error::InvalidInput)?,
+                .map_err(|_| BridgeError::InvalidInput)?,
             url_infos: OwnedDragUrlList::new(&data.url_infos)?,
             filenames: OwnedStringList::new(&data.filenames)?,
             file_mime_types: OwnedStringList::new(&data.file_mime_types)?,
@@ -2096,19 +2096,19 @@ impl Drop for IpcClient {
     }
 }
 
-fn bridge_api() -> Result<&'static BridgeLibrary, Error> {
+fn bridge_api() -> Result<&'static BridgeLibrary, BridgeError> {
     bridge().map_err(map_bridge_load_error)
 }
 
-fn map_bridge_load_error(_: BridgeLoadError) -> Error {
-    Error::BridgeLoadFailed
+fn map_bridge_load_error(_: BridgeLoadError) -> BridgeError {
+    BridgeError::BridgeLoadFailed
 }
 
-fn bridge_ok(success: bool) -> Result<(), Error> {
+fn bridge_ok(success: bool) -> Result<(), BridgeError> {
     if success {
         Ok(())
     } else {
-        Err(Error::ConnectionFailed)
+        Err(BridgeError::ConnectionFailed)
     }
 }
 
