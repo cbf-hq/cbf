@@ -23,8 +23,9 @@ use cbf::{
     event::{BackendStopReason, BrowserEvent, BrowsingContextEvent, TransientBrowsingContextEvent},
 };
 use cbf_chrome::{
+    ChromiumBrowserHandleExt,
     backend::ChromiumBackend,
-    browser::ChromiumBrowserHandleExt,
+    bridge::IpcEvent,
     command::ChromeCommand,
     data::find::{ChromeFindInPageOptions, ChromeStopFindAction},
     event::ChromeEvent,
