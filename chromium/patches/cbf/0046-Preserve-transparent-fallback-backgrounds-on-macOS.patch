@@ -1,0 +1,81 @@
+From 0a0048572c5570bac84a22005c5588cc598b72a7 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Fri, 27 Mar 2026 14:08:11 +0900
+Subject: [PATCH 46/46] Preserve transparent fallback backgrounds on macOS
+
+---
+ .../render_widget_host_view_mac.mm            |  7 ++--
+ .../render_widget_host_view_mac_unittest.mm   | 39 +++++++++++++++++++
+ 2 files changed, 43 insertions(+), 3 deletions(-)
+
+diff --git a/content/browser/renderer_host/render_widget_host_view_mac.mm b/content/browser/renderer_host/render_widget_host_view_mac.mm
+index ff3d012ad3db3..89ee6a598a33c 100644
+--- a/content/browser/renderer_host/render_widget_host_view_mac.mm
++++ b/content/browser/renderer_host/render_widget_host_view_mac.mm
+@@ -1150,9 +1150,10 @@ void CombineTextNodesAndMakeCallback(SpeechCallback callback,
+   RenderWidgetHostViewMac* view_mac =
+       static_cast<RenderWidgetHostViewMac*>(view);
+   ScopedCAActionDisabler disabler;
+-  std::optional<SkColor> color = view_mac->GetBackgroundColor();
+-  if (color)
+-    SetBackgroundColor(*color);
++  // Preserve the raw background state, including transparent backgrounds,
++  // instead of using GetBackgroundColor(), which intentionally reports white
++  // for transparent content on macOS.
++  CopyBackgroundColorIfPresentFrom(*view);
+ 
+   // Make the NSView for |this| display the same content as is being displayed
+   // in the NSView for |view_mac|.
+diff --git a/content/browser/renderer_host/render_widget_host_view_mac_unittest.mm b/content/browser/renderer_host/render_widget_host_view_mac_unittest.mm
+index 9666ce054e4c9..77b8ebdcf6443 100644
+--- a/content/browser/renderer_host/render_widget_host_view_mac_unittest.mm
++++ b/content/browser/renderer_host/render_widget_host_view_mac_unittest.mm
+@@ -1207,6 +1207,45 @@ void ActivateViewWithTextInputManager(RenderWidgetHostViewBase* view,
+   }
+ }
+ 
++TEST_F(RenderWidgetHostViewMacTest,
++       TakeFallbackContentFromPreservesTransparentBackgroundState) {
++  EXPECT_CALL(mock_owner_delegate_, SetBackgroundOpaque(false));
++  rwhv_mac_->SetBackgroundColor(SK_ColorTRANSPARENT);
++
++  auto source_background =
++      rwhv_mac_->RenderWidgetHostViewBase::GetBackgroundColor();
++  ASSERT_TRUE(source_background);
++  EXPECT_EQ(unsigned{SK_ColorTRANSPARENT}, *source_background);
++
++  testing::NiceMock<MockRenderWidgetHostOwnerDelegate> other_owner_delegate;
++  auto other_host = std::make_unique<MockRenderWidgetHostImpl>(
++      &delegate_, site_instance_group_->GetSafeRef(),
++      process_host_->GetNextRoutingID(),
++      /*for_frame_widget=*/true);
++  other_host->set_owner_delegate(&other_owner_delegate);
++
++  auto* other_view = new RenderWidgetHostViewMac(other_host.get());
++  RenderWidgetHostViewCocoa* __strong other_cocoa =
++      other_view->GetInProcessNSView();
++  [window_.contentView addSubview:other_cocoa];
++  [other_cocoa setFrame:window_.contentView.bounds];
++  other_view->Show();
++  other_host->InitializePaintHolding(false);
++  base::RunLoop().RunUntilIdle();
++
++  other_view->TakeFallbackContentFrom(rwhv_mac_);
++
++  auto copied_background =
++      other_view->RenderWidgetHostViewBase::GetBackgroundColor();
++  ASSERT_TRUE(copied_background);
++  EXPECT_EQ(unsigned{SK_ColorTRANSPARENT}, *copied_background);
++  EXPECT_EQ(unsigned{SK_ColorWHITE}, *other_view->GetBackgroundColor());
++
++  other_cocoa = nil;
++  other_host->ShutdownAndDestroyWidget(/*also_delete=*/false);
++  other_host.reset();
++}
++
+ // Scrolling with a mouse wheel device on Mac won't give phase information.
+ // MouseWheelPhaseHandler adds timer based phase information to wheel events
+ // generated from this type of devices.
+-- 
+2.50.1 (Apple Git-155)
+

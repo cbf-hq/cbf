@@ -1,7 +1,7 @@
 From 59f47439caac240ed5a3ade2d1991e9dbd504839 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 23 Feb 2026 17:16:20 +0900
-Subject: [PATCH 04/45] Add browser and unit tests for profile controllers
+Subject: [PATCH 04/46] Add browser and unit tests for profile controllers
 
 ---
  chrome/browser/cbf/BUILD.gn                   |  43 +++++++

@@ -1,7 +1,7 @@
 From b4e890c3c79f862dd0b109a15e2fd16d3bf1160b Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 6 Mar 2026 11:35:06 +0900
-Subject: [PATCH 18/45] Add tab-named bridge aliases for web-page ABI
+Subject: [PATCH 18/46] Add tab-named bridge aliases for web-page ABI
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.h        | 21 +++++++++++
