@@ -7,7 +7,7 @@ It provides a stable, application-agnostic API surface for controlling browsing 
 
 - Pre-1.0 alpha. Breaking changes are expected.
 - CBF is still under active development. Unexpected crashes, incomplete features, and security bugs are still possible.
-- You must build your own CBF-patched Chromium runtime for now. Prebuilt runtimes will be provided in the future.
+- Prebuilt CBF Chromium runtime artifacts are available on GitHub Releases under the `cbf-chrome-runtime` tags.
 - Currently supported runtime target: macOS on Apple Silicon (`aarch64-apple-darwin`).
 - If you discover a security issue, do not open a public issue. See `SECURITY.md`.
 
@@ -98,13 +98,14 @@ For setup and first-run instructions, start with:
 - User Setup: [User Setup](https://cbf-hq.github.io/cbf/getting-started/user-setup.html)
 - Feature Matrix: [Feature Matrix](https://cbf-hq.github.io/cbf/feature-matrix.html)
 
-Prebuilt release artifacts are planned, but are not available yet.
-For now, you must build the CBF-patched Chromium runtime and `cbf_bridge` library yourself.
+Prebuilt release artifacts for the CBF Chromium runtime and `cbf_bridge` library are available on GitHub Releases.
+Download the artifact published under the `cbf-chrome-runtime` tag for your platform, or build locally if you need a custom runtime.
 
-When available, planned release artifacts are:
+Current release distribution includes:
 
-- GitHub Releases: `<git-tag>-macos-aarch64.tar.gz`
+- GitHub Releases (`cbf-chrome-runtime` tags): `cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1-macos-aarch64.tar.gz`
   - Contains `Chromium.app` and `libcbf_bridge.dylib`
+  - Latest release: [cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1](https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v146.0.0-alpha.2%2Bchromium-146.0.7680.153-r1)
 - crates.io:
   - `cbf`
   - `cbf-compositor`

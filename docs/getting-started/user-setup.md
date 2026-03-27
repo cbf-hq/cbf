@@ -7,38 +7,39 @@ If you will modify Chromium-side code or bridge internals, use [Contributor Setu
 
 - Stable Rust toolchain (install from https://rustup.rs/)
 
-## 2. Obtain the Chromium fork binary
+## 2. Prepare the CBF runtime artifacts
+
+The CBF Chromium fork and `cbf_bridge` library are distributed together in the same runtime artifact on GitHub Releases.
+Most users should download the prebuilt runtime package from the `cbf-chrome-runtime` tags.
+
+Latest runtime release: [cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1](https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v146.0.0-alpha.2%2Bchromium-146.0.7680.153-r1)
+
+If you need a custom build instead, you can also build both artifacts locally from the Chromium tree; see [Contributor Setup](../developer-guide/contributor-setup.md).
+
+### Chromium fork binary
 
 The CBF Chromium fork is a patched Chromium build required as the browser backend.
 **Do not use stock Chromium** — it does not include the CBF bridge patches.
 
-You can obtain it from:
-- GitHub Releases (planned): download the prebuilt artifact for your platform
-- Local build: build from the `chromium/` directory (this can take considerable time, see [../developer-guide/contributor-setup.md])
-
 Platform-specific artifact names and `executable_path` values:
 
-| Platform | Artifact | `executable_path` |
-|---|---|---|
-| macOS | `Chromium.app` | `Chromium.app/Contents/MacOS/Chromium` |
-| Linux | currently unsupported | ... |
-| Windows | currently unsupported | ... |
+| Platform | Artifact              | `executable_path`                      |
+| -------- | --------------------- | -------------------------------------- |
+| macOS    | `Chromium.app`        | `Chromium.app/Contents/MacOS/Chromium` |
+| Linux    | currently unsupported | ...                                    |
+| Windows  | currently unsupported | ...                                    |
 
 On macOS, `executable_path` must point to the binary inside the `.app` bundle, not the bundle itself.
 
-## 3. Configure bridge library path
-
-You can obtain the bridge library from:
-- GitHub Releases (planned): download the prebuilt artifact for your platform
-- Local build: use the output directory from your Chromium build (this can take considerable time, see [../developer-guide/contributor-setup.md])
+### Bridge library path
 
 Platform-specific library names:
 
-| Platform | Library |
-|---|---|
-| macOS | `libcbf_bridge.dylib` |
-| Linux | `libcbf_bridge.so` (currently unsupported) |
-| Windows | `cbf_bridge.dll` (currently unsupported) |
+| Platform | Library                                    |
+| -------- | ------------------------------------------ |
+| macOS    | `libcbf_bridge.dylib`                      |
+| Linux    | `libcbf_bridge.so` (currently unsupported) |
+| Windows  | `cbf_bridge.dll` (currently unsupported)   |
 
 Set `CBF_BRIDGE_LIB_DIR` to the directory containing the bridge library. `cbf-chrome-sys` uses this as a runtime lookup hint:
 
@@ -61,7 +62,7 @@ cargo check -p cbf-chrome
 cargo check -p cbf-chrome-sys
 ```
 
-## 4. Launch Chromium through CBF
+## 3. Launch Chromium through CBF
 
 ### Try it with simpleapp first
 
@@ -130,13 +131,13 @@ Displaying browser content requires two additional steps that the application is
 `simpleapp` implements this full cycle using `winit` and `cbf-compositor`.
 See `examples/simpleapp/src/` for the platform-specific surface attachment and event loop wiring.
 
-## 5. Validate behavior
+## 4. Validate behavior
 
 - `start_chromium` launches and connects successfully.
 - Baseline lifecycle events (`BackendReady`, `BackendStopped`) are observable.
 - Crash/disconnect paths surface as events/errors, not silent hangs.
 
-## 6. macOS app bundling
+## 5. macOS app bundling
 
 `cbf-cli` can package an app binary with Chromium + bridge into a `.app` bundle.
 
@@ -181,14 +182,14 @@ Environment variable alternatives:
 
 CLI arguments take priority over Cargo metadata values when both are present:
 
-| Cargo metadata key    | CLI override flag        |
-|-----------------------|--------------------------|
-| `app-name`            | `--app-name`             |
-| `bundle-identifier`   | `--bundle-identifier`    |
-| `icon`                | `--icon`                 |
-| `runtime-app-name`    | `--runtime-app-name`     |
+| Cargo metadata key          | CLI override flag             |
+| --------------------------- | ----------------------------- |
+| `app-name`                  | `--app-name`                  |
+| `bundle-identifier`         | `--bundle-identifier`         |
+| `icon`                      | `--icon`                      |
+| `runtime-app-name`          | `--runtime-app-name`          |
 | `runtime-bundle-identifier` | `--runtime-bundle-identifier` |
-| `runtime-icon`        | `--runtime-icon`         |
+| `runtime-icon`              | `--runtime-icon`              |
 
 `category` and `minimum-system-version` are metadata-only (no CLI equivalent).
 
