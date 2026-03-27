@@ -16,8 +16,8 @@ default = ["macos-choice-menu-default"]
 macos-choice-menu-default = []
 
 [dependencies]
-cbf.path = "../cbf"
-cbf-chrome-sys.path = "../cbf-chrome-sys"
+cbf = { path = "../cbf", version = "0.1.0-alpha.2" }
+cbf-chrome-sys = { path = "../cbf-chrome-sys", version = "146.1.0-alpha.2" }
 thiserror.workspace = true
 cursor-icon = { workspace = true }
 async-channel.workspace = true
