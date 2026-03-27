@@ -29,7 +29,6 @@ use cbf_chrome::{
     command::ChromeCommand,
     data::find::{ChromeFindInPageOptions, ChromeStopFindAction},
     event::ChromeEvent,
-    ffi::IpcEvent,
     process::{ChromiumRuntimeShutdownState, ChromiumRuntimeShutdownStateReader},
 };
 use cbf_compositor::{

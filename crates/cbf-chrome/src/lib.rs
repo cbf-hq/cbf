@@ -4,11 +4,11 @@
 //! integration while keeping `cbf` browser-generic.
 
 pub mod backend;
+pub mod bridge;
 mod browser;
 pub mod command;
 pub mod data;
 pub mod event;
-pub mod bridge;
 pub mod platform;
 pub mod process;
 

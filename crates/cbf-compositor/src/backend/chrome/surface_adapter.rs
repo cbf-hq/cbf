@@ -1,6 +1,6 @@
 use cbf_chrome::{
-    data::{ids::PopupId, surface::SurfaceHandle},
     bridge::IpcEvent,
+    data::{ids::PopupId, surface::SurfaceHandle},
 };
 
 use crate::{

@@ -32,13 +32,13 @@ use cbf::{
     },
 };
 use cbf_chrome::{
-    data::choice_menu::{
-        ChromeChoiceMenu, ChromeChoiceMenuItem, ChromeChoiceMenuItemType,
-        ChromeChoiceMenuSelectionMode,
-    },
     bridge::{
         convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
         convert_nsevent_to_mouse_wheel_event, convert_nspasteboard_to_drag_data,
+    },
+    data::choice_menu::{
+        ChromeChoiceMenu, ChromeChoiceMenuItem, ChromeChoiceMenuItemType,
+        ChromeChoiceMenuSelectionMode,
     },
     platform::macos::bindings::CALayerHost,
 };

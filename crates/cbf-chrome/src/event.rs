@@ -36,6 +36,7 @@ use cbf::data::{
 };
 use cbf::event::{BrowserEvent, BrowsingContextEvent, TransientBrowsingContextEvent};
 
+use crate::bridge::IpcEvent;
 use crate::data::{
     browsing_context_open::ChromeBrowsingContextOpenResult,
     download::ChromeDownloadPromptResult,
@@ -51,7 +52,6 @@ use crate::data::{
     },
     tab_open::{TabOpenHint, TabOpenResult},
 };
-use crate::bridge::IpcEvent;
 
 /// Chromium-specific raw event stream payload.
 #[derive(Debug, Clone)]
@@ -904,6 +904,7 @@ mod tests {
 
     use super::map_ipc_event_to_generic;
     use crate::{
+        bridge::IpcEvent,
         data::{
             download::ChromeDownloadPromptReason,
             ids::{PopupId, TabId},
@@ -913,7 +914,6 @@ mod tests {
                 PromptUiExtensionUninstallResult, PromptUiId, PromptUiKind, PromptUiResolution,
             },
         },
-        bridge::IpcEvent,
     };
 
     #[test]
