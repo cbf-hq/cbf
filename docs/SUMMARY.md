@@ -12,6 +12,7 @@
 
 - [Contributor Setup](./developer-guide/contributor-setup.md)
 - [Versioning and Release Metadata](./developer-guide/versioning-and-release-metadata.md)
+- [Release Compatibility Matrix](./developer-guide/release-compatibility-matrix.md)
 - [Release Process](./developer-guide/release-process.md)
 - [Chromium Integration Rules](./developer-guide/chromium-integration-rules.md)
 - [Chromium Implementation Guide](./developer-guide/chromium-implementation-guide.md)
