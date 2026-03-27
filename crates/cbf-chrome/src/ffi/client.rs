@@ -156,7 +156,9 @@ impl IpcClient {
     /// `inner` must be a valid, live `CbfBridgeClientHandle` allocated by
     /// `cbf_bridge_client_create()`. Ownership is transferred to the returned
     /// `IpcClient` on success and consumed by this function on failure.
-    pub unsafe fn connect_inherited(inner: *mut CbfBridgeClientHandle) -> Result<Self, BridgeError> {
+    pub unsafe fn connect_inherited(
+        inner: *mut CbfBridgeClientHandle,
+    ) -> Result<Self, BridgeError> {
         if inner.is_null() {
             return Err(BridgeError::ConnectionFailed);
         }
@@ -196,7 +198,10 @@ impl IpcClient {
     }
 
     /// Wait until an event is available or the bridge closes.
-    pub fn wait_for_event(&self, timeout: Option<Duration>) -> Result<EventWaitResult, BridgeError> {
+    pub fn wait_for_event(
+        &self,
+        timeout: Option<Duration>,
+    ) -> Result<EventWaitResult, BridgeError> {
         wait_for_event_inner(self.inner, timeout)
     }
 
@@ -271,7 +276,10 @@ impl IpcClient {
     }
 
     /// Retrieve the list of extensions from the backend.
-    pub fn list_extensions(&mut self, profile_id: &str) -> Result<Vec<ChromeExtensionInfo>, BridgeError> {
+    pub fn list_extensions(
+        &mut self,
+        profile_id: &str,
+    ) -> Result<Vec<ChromeExtensionInfo>, BridgeError> {
         if self.inner.is_null() {
             return Err(BridgeError::ConnectionFailed);
         }
@@ -532,7 +540,8 @@ impl IpcClient {
             return Err(BridgeError::ConnectionFailed);
         }
 
-        let channel = CString::new(message.channel.as_str()).map_err(|_| BridgeError::InvalidInput)?;
+        let channel =
+            CString::new(message.channel.as_str()).map_err(|_| BridgeError::InvalidInput)?;
         let content_type =
             to_optional_cstring(&message.content_type).map_err(|_| BridgeError::InvalidInput)?;
         let payload_kind = match message.payload {
@@ -705,7 +714,11 @@ impl IpcClient {
     }
 
     /// Reload the page, optionally ignoring caches.
-    pub fn reload(&mut self, browsing_context_id: TabId, ignore_cache: bool) -> Result<(), BridgeError> {
+    pub fn reload(
+        &mut self,
+        browsing_context_id: TabId,
+        ignore_cache: bool,
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
             return Err(BridgeError::ConnectionFailed);
         }
@@ -1438,7 +1451,10 @@ impl IpcClient {
     }
 
     /// Notify the backend that the active external drag left the page.
-    pub fn send_external_drag_leave(&mut self, browsing_context_id: TabId) -> Result<(), BridgeError> {
+    pub fn send_external_drag_leave(
+        &mut self,
+        browsing_context_id: TabId,
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
             return Err(BridgeError::ConnectionFailed);
         }
@@ -1450,7 +1466,10 @@ impl IpcClient {
     }
 
     /// Send an external drag drop event for a native drag destination.
-    pub fn send_external_drag_drop(&mut self, event: &ChromeExternalDragDrop) -> Result<(), BridgeError> {
+    pub fn send_external_drag_drop(
+        &mut self,
+        event: &ChromeExternalDragDrop,
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
             return Err(BridgeError::ConnectionFailed);
         }
@@ -1470,12 +1489,16 @@ impl IpcClient {
     }
 
     /// Update the IME composition state.
-    pub fn set_composition(&mut self, composition: &ChromeImeComposition) -> Result<(), BridgeError> {
+    pub fn set_composition(
+        &mut self,
+        composition: &ChromeImeComposition,
+    ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
             return Err(BridgeError::ConnectionFailed);
         }
 
-        let text = CString::new(composition.text.as_str()).map_err(|_| BridgeError::InvalidInput)?;
+        let text =
+            CString::new(composition.text.as_str()).map_err(|_| BridgeError::InvalidInput)?;
         let spans = to_ffi_ime_text_spans(&composition.spans);
         let span_list = CbfImeTextSpanList {
             items: if spans.is_empty() {
@@ -1512,7 +1535,8 @@ impl IpcClient {
             return Err(BridgeError::ConnectionFailed);
         }
 
-        let text = CString::new(composition.text.as_str()).map_err(|_| BridgeError::InvalidInput)?;
+        let text =
+            CString::new(composition.text.as_str()).map_err(|_| BridgeError::InvalidInput)?;
         let spans = to_ffi_ime_text_spans(&composition.spans);
         let span_list = CbfImeTextSpanList {
             items: if spans.is_empty() {
