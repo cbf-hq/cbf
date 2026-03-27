@@ -4,7 +4,7 @@ from typing import Any
 
 import click
 
-from tool.ffi import compare_snapshots, write_snapshot
+from tool.ffi import compare_snapshots, generate_bridge_api, write_snapshot
 from tool.chromium_patches import (
     ConfigError,
     apply_series,
@@ -433,6 +433,19 @@ def release_package_command(*, series: str, tag: str | None, allow_dirty: bool) 
 def ffi_snapshot_command(*, ref: str | None, output_dir: Path) -> None:
     output_path = write_snapshot(repo_root=repo_root(), ref=ref, output_dir=output_dir)
     click.echo(f"Wrote FFI snapshot: {output_path}")
+
+
+@ffi_group.command("generate", help="Regenerate the runtime bridge API bindings.")
+@click.option(
+    "--output",
+    "output_path",
+    default=None,
+    type=click.Path(path_type=Path),
+    help="Optional output path. Defaults to crates/cbf-chrome-sys/src/bridge_api_generated.rs.",
+)
+def ffi_generate_command(*, output_path: Path | None) -> None:
+    generated = generate_bridge_api(repo_root=repo_root(), output_path=output_path)
+    click.echo(f"Wrote bridge API bindings: {generated}")
 
 
 @ffi_group.command("compare", help="Compare two FFI snapshots.")

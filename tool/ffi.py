@@ -11,6 +11,16 @@ from typing import Any
 # Temporary #64 migration helper. Keep this module until #65 completes so the
 # generated FFI rollout can be checked against the pre-generation snapshots.
 
+BINDGEN_WRAPPER_HEADER = "crates/cbf-chrome-sys/include/cbf_bridge_bindgen_wrapper.h"
+BRIDGE_API_GENERATED = "crates/cbf-chrome-sys/src/bridge_api_generated.rs"
+BRIDGE_API_ALLOW_ATTR = """#![allow(
+    non_camel_case_types,
+    unsafe_op_in_unsafe_fn,
+    clippy::missing_safety_doc,
+    clippy::too_many_arguments
+)]"""
+
+
 @dataclass
 class SnapshotSource:
     ref: str | None
@@ -57,10 +67,12 @@ def create_ffi_snapshot(*, repo_root: Path, ref: str | None) -> dict[str, Any]:
         "crates/cbf-chrome-sys/src/ffi.rs",
     )
     rust_generated = source.read_text("crates/cbf-chrome-sys/src/ffi_generated.rs")
+    rust_bridge_api = source.read_text(BRIDGE_API_GENERATED)
 
     rust = parse_rust_ffi(
         wrapper_text=rust_wrapper,
         generated_text=rust_generated,
+        bridge_api_text=rust_bridge_api,
     )
     c = parse_c_ffi(
         ffi_header_text=c_header,
@@ -87,6 +99,46 @@ def write_snapshot(
     return output_path
 
 
+def generate_bridge_api(*, repo_root: Path, output_path: Path | None = None) -> Path:
+    wrapper_path = repo_root / BINDGEN_WRAPPER_HEADER
+    output = output_path or (repo_root / BRIDGE_API_GENERATED)
+    result = subprocess.run(
+        [
+            "bindgen",
+            str(wrapper_path),
+            "--dynamic-loading",
+            "cbf_bridge",
+            "--dynamic-link-require-all",
+            "--allowlist-function",
+            "cbf_bridge_.*",
+            "--blocklist-type",
+            "Cbf.*",
+            "--raw-line",
+            "use super::*;",
+            "--no-layout-tests",
+            "--formatter",
+            "rustfmt",
+            "--",
+            "-Ichromium/src",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "bindgen bridge generation failed")
+
+    output_text = result.stdout
+    if BRIDGE_API_ALLOW_ATTR not in output_text:
+        output_text = _insert_inner_attr_after_first_line(
+            output_text, BRIDGE_API_ALLOW_ATTR
+        )
+
+    output.write_text(output_text)
+    return output
+
+
 def compare_snapshots(
     *,
     baseline_path: Path,
@@ -106,26 +158,41 @@ def compare_snapshots(
     return differences, baseline, candidate
 
 
-def normalize_snapshot(snapshot: dict[str, Any], allowlist: dict[str, Any]) -> dict[str, Any]:
+def normalize_snapshot(
+    snapshot: dict[str, Any], allowlist: dict[str, Any]
+) -> dict[str, Any]:
     normalized = json.loads(json.dumps(snapshot))
 
-    _drop_items(normalized["c"]["functions"], set(allowlist.get("remove_c_functions", [])))
-    _drop_items(normalized["rust"]["functions"], set(allowlist.get("remove_rust_functions", [])))
-    _drop_items(normalized["c"]["constants"], set(allowlist.get("remove_c_constants", [])))
+    _drop_items(
+        normalized["c"]["functions"], set(allowlist.get("remove_c_functions", []))
+    )
+    _drop_items(
+        normalized["rust"]["functions"], set(allowlist.get("remove_rust_functions", []))
+    )
+    _drop_items(
+        normalized["c"]["constants"], set(allowlist.get("remove_c_constants", []))
+    )
     _drop_items(
         normalized["rust"]["constants"],
         set(allowlist.get("remove_rust_constants", [])),
     )
-    _drop_items(normalized["c"]["opaque_handles"], set(allowlist.get("remove_c_opaque_handles", [])))
+    _drop_items(
+        normalized["c"]["opaque_handles"],
+        set(allowlist.get("remove_c_opaque_handles", [])),
+    )
     _drop_items(
         normalized["rust"]["opaque_handles"],
         set(allowlist.get("remove_rust_opaque_handles", [])),
     )
 
     _rename_items(normalized["c"]["functions"], allowlist.get("rename_c_functions", {}))
-    _rename_items(normalized["rust"]["functions"], allowlist.get("rename_rust_functions", {}))
+    _rename_items(
+        normalized["rust"]["functions"], allowlist.get("rename_rust_functions", {})
+    )
     _rename_items(normalized["c"]["constants"], allowlist.get("rename_c_constants", {}))
-    _rename_items(normalized["rust"]["constants"], allowlist.get("rename_rust_constants", {}))
+    _rename_items(
+        normalized["rust"]["constants"], allowlist.get("rename_rust_constants", {})
+    )
 
     _normalize_fields(
         normalized["c"]["structs"],
@@ -177,16 +244,25 @@ def parse_c_ffi(*, ffi_header_text: str, exports_header_text: str) -> dict[str, 
     }
 
 
-def parse_rust_ffi(*, wrapper_text: str, generated_text: str | None) -> dict[str, Any]:
+def parse_rust_ffi(
+    *,
+    wrapper_text: str,
+    generated_text: str | None,
+    bridge_api_text: str | None,
+) -> dict[str, Any]:
     texts = [wrapper_text]
     if generated_text:
         texts.append(generated_text)
+    if bridge_api_text:
+        texts.append(bridge_api_text)
     combined_text = "\n".join(texts)
     constants = parse_rust_constants("\n".join(texts))
     structs = parse_rust_structs("\n".join(texts))
     functions = parse_rust_functions("\n".join(texts))
     opaque_handles = parse_rust_opaque_handles(wrapper_text)
-    c_void_matches = re.findall(r"(?:std::)?ffi::c_void|std::ffi::c_void", combined_text)
+    c_void_matches = re.findall(
+        r"(?:std::)?ffi::c_void|std::ffi::c_void", combined_text
+    )
     c_void_usages = ["std::ffi::c_void"] if c_void_matches else []
     return {
         "constants": constants,
@@ -281,12 +357,33 @@ def parse_rust_structs(text: str) -> dict[str, list[dict[str, str]]]:
 
 
 def parse_rust_functions(text: str) -> dict[str, str]:
-    pattern = re.compile(r"pub fn (cbf_bridge_[^(]+)\((?P<params>.*?)\)(?: -> (?P<ret>[^;]+))?;", re.S)
+    field_pattern = re.compile(
+        r"pub (?P<name>cbf_bridge_[^:]+):\s*unsafe extern \"C\" fn\((?P<params>.*?)\)"
+        r"(?:\s*->\s*(?P<ret>[^,]+))?,",
+        re.S,
+    )
+    functions: dict[str, str] = {}
+    for match in field_pattern.finditer(text):
+        name = match.group("name")
+        params = " ".join(match.group("params").split())
+        ret = (
+            f" -> {' '.join(match.group('ret').split())}" if match.group("ret") else ""
+        )
+        functions[name] = f"{name}({params}){ret}"
+
+    if functions:
+        return dict(sorted(functions.items()))
+
+    pattern = re.compile(
+        r"pub fn (cbf_bridge_[^(]+)\((?P<params>.*?)\)(?: -> (?P<ret>[^;]+))?;", re.S
+    )
     functions: dict[str, str] = {}
     for match in pattern.finditer(text):
         name = match.group(1)
         params = " ".join(match.group("params").split())
-        ret = f" -> {' '.join(match.group('ret').split())}" if match.group("ret") else ""
+        ret = (
+            f" -> {' '.join(match.group('ret').split())}" if match.group("ret") else ""
+        )
         functions[name] = f"{name}({params}){ret}"
     return dict(sorted(functions.items()))
 
@@ -390,3 +487,10 @@ def _require_text(text: str | None, path: str) -> str:
     if text is None:
         raise FileNotFoundError(path)
     return text
+
+
+def _insert_inner_attr_after_first_line(text: str, attr: str) -> str:
+    first_line, sep, rest = text.partition("\n")
+    if not sep:
+        return f"{first_line}\n\n{attr}\n"
+    return f"{first_line}\n\n{attr}\n{rest}"

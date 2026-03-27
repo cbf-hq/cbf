@@ -20,7 +20,7 @@ repository = "https://github.com/cbf-hq/cbf"
 
 [workspace.dependencies]
 thiserror = "2"
-libloading = "0.9"
+libloading = "0.8"
 libc = "0.2"
 getrandom = "0.4"
 cursor-icon = "1.2"

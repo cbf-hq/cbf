@@ -2,11 +2,12 @@
 
 use std::{
     env,
+    ops::Deref,
     path::{Path, PathBuf},
     sync::OnceLock,
 };
 
-use libloading::{Library, Symbol};
+use crate::ffi::CbfBridge;
 
 #[cfg(target_os = "macos")]
 const BRIDGE_LIB_FILE_NAME: &str = "libcbf_bridge.dylib";
@@ -24,10 +25,10 @@ pub struct BridgeLoadOptions {
     pub explicit_library_dir: Option<PathBuf>,
 }
 
-/// A loaded `cbf_bridge` dynamic library instance.
+/// A process-wide loaded bridge API wrapper.
 pub struct BridgeLibrary {
     library_path: PathBuf,
-    library: Library,
+    bindings: CbfBridge,
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
@@ -36,10 +37,10 @@ pub enum BridgeLoadError {
     /// No supported runtime search location contained the bridge library.
     #[error("failed to resolve cbf bridge library path")]
     PathNotFound,
-    /// Opening the discovered bridge library file failed.
+    /// Loading the discovered bridge library file or one of its required symbols failed.
     #[error("failed to load cbf bridge library from {path}: {source}")]
-    OpenLibrary {
-        /// The path of the library that failed to open.
+    LoadLibrary {
+        /// The path of the library that failed to load.
         path: PathBuf,
         #[source]
         /// The underlying dynamic loader error.
@@ -65,14 +66,6 @@ impl std::fmt::Display for ArcLibloadingError {
 
 impl std::error::Error for ArcLibloadingError {}
 
-impl std::fmt::Debug for BridgeLibrary {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BridgeLibrary")
-            .field("library_path", &self.library_path)
-            .finish_non_exhaustive()
-    }
-}
-
 impl BridgeLoadOptions {
     /// Return options that load the bridge from an explicit file path.
     pub fn with_explicit_library_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -88,18 +81,19 @@ impl BridgeLoadOptions {
 }
 
 impl BridgeLibrary {
-    /// Load the bridge library using the provided search options.
+    /// Load the bridge API using the provided search options.
     pub fn load(options: &BridgeLoadOptions) -> Result<Self, BridgeLoadError> {
         let library_path = resolve_bridge_library_path(options)?;
-        let library = unsafe { Library::new(&library_path) }.map_err(|source| {
-            BridgeLoadError::OpenLibrary {
+        let bindings = unsafe { CbfBridge::new(&library_path) }.map_err(|source| {
+            BridgeLoadError::LoadLibrary {
                 path: library_path.clone(),
-                source: ArcLibloadingError(std::sync::Arc::new(source)),
+                source: source.into(),
             }
         })?;
+
         Ok(Self {
             library_path,
-            library,
+            bindings,
         })
     }
 
@@ -107,16 +101,25 @@ impl BridgeLibrary {
     pub fn library_path(&self) -> &Path {
         &self.library_path
     }
+}
 
-    pub(crate) unsafe fn get<T>(
-        &self,
-        symbol_name: &'static [u8],
-    ) -> Result<Symbol<'_, T>, libloading::Error> {
-        unsafe { self.library.get(symbol_name) }
+impl std::fmt::Debug for BridgeLibrary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BridgeApi")
+            .field("library_path", &self.library_path)
+            .finish_non_exhaustive()
     }
 }
 
-/// Return the process-wide bridge library instance, loading it on first use.
+impl Deref for BridgeLibrary {
+    type Target = CbfBridge;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bindings
+    }
+}
+
+/// Return the process-wide bridge API instance, loading it on first use.
 pub fn bridge() -> Result<&'static BridgeLibrary, BridgeLoadError> {
     static BRIDGE: OnceLock<BridgeLibrary> = OnceLock::new();
 
@@ -125,8 +128,8 @@ pub fn bridge() -> Result<&'static BridgeLibrary, BridgeLoadError> {
     }
 
     let loaded = BridgeLibrary::load(&BridgeLoadOptions::default())?;
-    let _ = BRIDGE.set(loaded);
-    Ok(BRIDGE.get().expect("bridge library set"))
+    BRIDGE.set(loaded).ok();
+    Ok(BRIDGE.get().expect("bridge api set"))
 }
 
 /// Resolve the bridge library path from explicit options and known runtime locations.

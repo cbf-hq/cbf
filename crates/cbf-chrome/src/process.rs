@@ -4,7 +4,10 @@ use cbf::{
     delegate::BackendDelegate,
     error::{ApiErrorKind, BackendErrorInfo, Error as CbfError},
 };
-use cbf_chrome_sys::calls::{BridgeCallError, cbf_bridge_client_create, cbf_bridge_client_destroy};
+use cbf_chrome_sys::{
+    bridge::bridge,
+    ffi::CbfBridgeClientHandle,
+};
 use futures_lite::future::block_on;
 use signal_hook::iterator::Signals;
 use std::{
@@ -627,13 +630,13 @@ pub fn start_chromium(
     }
 
     // Create the bridge client handle and prepare the Mojo channel pair.
-    let inner = unsafe { cbf_bridge_client_create() }.map_err(|_| {
+    let inner = bridge().map_err(|_| {
         CbfError::BackendFailure(cbf::error::BackendErrorInfo {
             kind: cbf::error::ApiErrorKind::ConnectTimeout,
             operation: None,
             detail: Some("cbf_bridge_client_create failed".to_owned()),
         })
-    })?;
+    }).map(|bridge| unsafe { bridge.cbf_bridge_client_create() })?;
     if inner.is_null() {
         return Err(CbfError::BackendFailure(cbf::error::BackendErrorInfo {
             kind: cbf::error::ApiErrorKind::ConnectTimeout,
@@ -643,7 +646,7 @@ pub fn start_chromium(
     }
 
     let (remote_fd, switch_arg) = IpcClient::prepare_channel().map_err(|_| {
-        cleanup_bridge_destroy(unsafe { cbf_bridge_client_destroy(inner) });
+        cleanup_bridge_destroy(inner);
         CbfError::BackendFailure(cbf::error::BackendErrorInfo {
             kind: cbf::error::ApiErrorKind::ConnectTimeout,
             operation: None,
@@ -752,8 +755,8 @@ pub fn start_chromium(
     Ok((session, events, ChromiumProcess { child }))
 }
 
-fn cleanup_bridge_destroy(result: Result<(), BridgeCallError>) {
-    if let Err(error) = result {
+fn cleanup_bridge_destroy(inner: *mut CbfBridgeClientHandle) {
+    if let Err(error) = bridge().map(|bridge| unsafe { bridge.cbf_bridge_client_destroy(inner) }) {
         tracing::warn!(error = ?error, "failed to destroy bridge client after startup error");
     }
 }

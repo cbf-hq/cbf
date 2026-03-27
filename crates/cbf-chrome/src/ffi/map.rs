@@ -7,7 +7,7 @@ use cbf::data::{
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent, PointerType},
 };
-use cbf_chrome_sys::{calls::*, ffi::*};
+use cbf_chrome_sys::{bridge::bridge, ffi::*};
 use cursor_icon::CursorIcon;
 use tracing::warn;
 
@@ -1416,9 +1416,9 @@ pub fn convert_nsevent_to_chrome_key_event(
     nsevent: NonNull<c_void>,
 ) -> ChromeKeyEvent {
     let mut ffi_event = CbfKeyEvent::default();
-    if let Err(error) =
-        unsafe { cbf_bridge_convert_nsevent(nsevent.as_ptr(), browsing_context_id, &mut ffi_event) }
-    {
+    if let Err(error) = bridge().map(|bridge| unsafe {
+        bridge.cbf_bridge_convert_nsevent(nsevent.as_ptr(), browsing_context_id, &mut ffi_event)
+    }) {
         warn!(error = ?error, "failed to convert NSEvent to key event");
     }
 
@@ -1459,7 +1459,9 @@ pub fn convert_nsevent_to_chrome_key_event(
         location: ffi_event.location,
     };
 
-    if let Err(error) = unsafe { cbf_bridge_free_converted_key_event(&mut ffi_event) } {
+    if let Err(error) = bridge().map(|bridge| unsafe {
+        bridge.cbf_bridge_free_converted_key_event(&mut ffi_event)
+    }) {
         warn!(error = ?error, "failed to free converted key event");
     }
 
@@ -1469,9 +1471,9 @@ pub fn convert_nsevent_to_chrome_key_event(
 #[cfg(target_os = "macos")]
 pub fn convert_nspasteboard_to_drag_data(nspasteboard: NonNull<c_void>) -> DragData {
     let mut ffi_data = CbfDragData::default();
-    if let Err(error) = unsafe {
-        cbf_bridge_convert_nspasteboard_to_drag_data(nspasteboard.as_ptr(), &mut ffi_data)
-    } {
+    if let Err(error) = bridge().map(|bridge| unsafe {
+        bridge.cbf_bridge_convert_nspasteboard_to_drag_data(nspasteboard.as_ptr(), &mut ffi_data)
+    }) {
         warn!(error = ?error, "failed to convert NSPasteboard to drag data");
     }
 
@@ -1488,7 +1490,9 @@ pub fn convert_nspasteboard_to_drag_data(nspasteboard: NonNull<c_void>) -> DragD
         custom_data: parse_string_pair_list(ffi_data.custom_data),
     };
 
-    if let Err(error) = unsafe { cbf_bridge_free_converted_drag_data(&mut ffi_data) } {
+    if let Err(error) = bridge().map(|bridge| unsafe {
+        bridge.cbf_bridge_free_converted_drag_data(&mut ffi_data)
+    }) {
         warn!(error = ?error, "failed to free converted drag data");
     }
 
@@ -1522,8 +1526,8 @@ pub fn convert_nsevent_to_chrome_mouse_event(
     unaccelerated_movement: bool,
 ) -> ChromeMouseEvent {
     let mut ffi_event = CbfMouseEvent::default();
-    if let Err(error) = unsafe {
-        cbf_bridge_convert_nsevent_to_mouse_event(
+    if let Err(error) = bridge().map(|bridge| unsafe {
+        bridge.cbf_bridge_convert_nsevent_to_mouse_event(
             nsevent.as_ptr(),
             nsview.as_ptr(),
             browsing_context_id,
@@ -1531,7 +1535,7 @@ pub fn convert_nsevent_to_chrome_mouse_event(
             unaccelerated_movement,
             &mut ffi_event,
         )
-    } {
+    }) {
         warn!(error = ?error, "failed to convert NSEvent to mouse event");
     }
 
@@ -1571,14 +1575,14 @@ pub fn convert_nsevent_to_chrome_mouse_wheel_event(
     nsview: NonNull<c_void>,
 ) -> ChromeMouseWheelEvent {
     let mut ffi_event = CbfMouseWheelEvent::default();
-    if let Err(error) = unsafe {
-        cbf_bridge_convert_nsevent_to_mouse_wheel_event(
+    if let Err(error) = bridge().map(|bridge| unsafe {
+        bridge.cbf_bridge_convert_nsevent_to_mouse_wheel_event(
             nsevent.as_ptr(),
             nsview.as_ptr(),
             browsing_context_id,
             &mut ffi_event,
         )
-    } {
+    }) {
         warn!(error = ?error, "failed to convert NSEvent to mouse wheel event");
     }
 

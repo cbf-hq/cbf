@@ -71,6 +71,14 @@ Concrete implementation checklist:
 - Prefer native Chromium values from bridge outputs.
 - Treat bridge outputs as the source of truth and avoid reconstructing Chromium state in `cbf`.
 
+### Runtime bridge loader rule
+
+- Keep `cbf_bridge` symbol loading in `cbf-chrome-sys`; higher crates should call
+  through `bridge()` rather than maintaining their own symbol tables.
+- Regenerate the runtime bridge API with `uv run tool ffi generate` after bridge export
+  changes in `cbf_bridge.h`.
+- Do not hand-edit `bridge_api_generated.rs`; treat it as bindgen output.
+
 ## 5. Failure handling implementation
 
 Failure policy is defined in [Chromium Integration Rules §5](./chromium-integration-rules.md).
