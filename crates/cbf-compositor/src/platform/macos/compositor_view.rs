@@ -36,7 +36,7 @@ use cbf_chrome::{
         ChromeChoiceMenu, ChromeChoiceMenuItem, ChromeChoiceMenuItemType,
         ChromeChoiceMenuSelectionMode,
     },
-    ffi::{
+    bridge::{
         convert_nsevent_to_key_event, convert_nsevent_to_mouse_event,
         convert_nsevent_to_mouse_wheel_event, convert_nspasteboard_to_drag_data,
     },

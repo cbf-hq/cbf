@@ -23,7 +23,7 @@ use crate::{
     command::ChromeCommand,
     data::{custom_scheme::ChromeCustomSchemeRegistration, prompt_ui::PromptUiResponse},
     event::{ChromeEvent, to_generic_event},
-    ffi::{BridgeError as IpcError, EventWaitResult, IpcClient, IpcEvent, IpcEventWaitHandle},
+    bridge::{BridgeError as IpcError, EventWaitResult, IpcClient, IpcEvent, IpcEventWaitHandle},
 };
 
 /// Backend implementation that speaks the Chromium IPC protocol.
@@ -1314,7 +1314,7 @@ mod tests {
         WakeStateInner, classify_deadline, classify_ready_wake, classify_timeout_wake,
         stop_reason_from_wake_state, update_shutdown_state,
     };
-    use crate::ffi::IpcEvent;
+    use crate::bridge::IpcEvent;
 
     struct StubWaiter {
         rx: std::sync::mpsc::Receiver<Result<EventWaitResult, super::IpcError>>,

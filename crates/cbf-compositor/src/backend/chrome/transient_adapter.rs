@@ -1,4 +1,4 @@
-use cbf_chrome::{data::ids::PopupId, ffi::IpcEvent};
+use cbf_chrome::{data::ids::PopupId, bridge::IpcEvent};
 
 use crate::{core::Compositor, error::CompositorError};
 

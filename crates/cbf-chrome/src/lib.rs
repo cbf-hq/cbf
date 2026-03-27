@@ -8,7 +8,7 @@ mod browser;
 pub mod command;
 pub mod data;
 pub mod event;
-pub mod ffi;
+pub mod bridge;
 pub mod platform;
 pub mod process;
 

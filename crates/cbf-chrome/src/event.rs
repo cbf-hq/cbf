@@ -10,7 +10,7 @@
 //!
 //! - [`to_generic_event`] — converts a [`ChromeEvent`] into a
 //!   [`cbf::event::BrowserEvent`].
-//! - [`map_ipc_event_to_generic`] — converts a [`crate::ffi::IpcEvent`]
+//! - [`map_ipc_event_to_generic`] — converts a [`crate::bridge::IpcEvent`]
 //!   received over the IPC bridge into a [`cbf::event::BrowserEvent`].
 //!
 //! Not every Chrome-specific event has a generic counterpart; those return
@@ -51,7 +51,7 @@ use crate::data::{
     },
     tab_open::{TabOpenHint, TabOpenResult},
 };
-use crate::ffi::IpcEvent;
+use crate::bridge::IpcEvent;
 
 /// Chromium-specific raw event stream payload.
 #[derive(Debug, Clone)]
@@ -913,7 +913,7 @@ mod tests {
                 PromptUiExtensionUninstallResult, PromptUiId, PromptUiKind, PromptUiResolution,
             },
         },
-        ffi::IpcEvent,
+        bridge::IpcEvent,
     };
 
     #[test]

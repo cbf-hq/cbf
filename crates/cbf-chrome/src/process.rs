@@ -26,7 +26,7 @@ use std::{
 use crate::{
     backend::{ChromiumBackend, ChromiumBackendOptions},
     data::custom_scheme::ChromeCustomSchemeRegistration,
-    ffi::{BridgeError, IpcClient},
+    bridge::{BridgeError, IpcClient},
 };
 
 /// Resolves Chromium executable path for CBF applications.
