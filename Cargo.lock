@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "cbf-compositor"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "cbf",
  "cbf-chrome",

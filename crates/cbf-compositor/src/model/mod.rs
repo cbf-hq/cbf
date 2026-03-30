@@ -11,7 +11,7 @@ mod target;
 
 pub use composition::{
     BackgroundPolicy, CompositionItemSpec, HitTestCoordinateSpace, HitTestPolicy, HitTestRegion,
-    HitTestRegionSnapshot, WindowCompositionSpec,
+    HitTestRegionMode, HitTestRegionSnapshot, WindowCompositionSpec,
 };
 pub use geometry::Rect;
 pub use ids::{CompositionItemId, CompositorWindowId};

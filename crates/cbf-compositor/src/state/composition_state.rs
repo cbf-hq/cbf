@@ -4,7 +4,8 @@ use crate::{
     error::CompositorError,
     model::{
         CompositionItemId, CompositionItemSpec, CompositorWindowId, HitTestCoordinateSpace,
-        HitTestPolicy, HitTestRegion, HitTestRegionSnapshot, Rect, SurfaceTarget,
+        HitTestPolicy, HitTestRegion, HitTestRegionMode, HitTestRegionSnapshot, Rect,
+        SurfaceTarget,
         WindowCompositionSpec,
     },
 };
@@ -149,6 +150,7 @@ impl CompositionState {
         item_id: CompositionItemId,
         snapshot_id: u64,
         coordinate_space: HitTestCoordinateSpace,
+        mode: HitTestRegionMode,
         regions: Vec<HitTestRegion>,
     ) -> Result<bool, CompositorError> {
         let item = self.item_state_mut(window_id, item_id)?;
@@ -167,6 +169,7 @@ impl CompositionState {
         item.hit_test_snapshot = Some(HitTestRegionSnapshot {
             snapshot_id,
             coordinate_space,
+            mode,
             regions,
         });
         Ok(true)
@@ -315,8 +318,8 @@ mod tests {
     use crate::CompositorError;
     use crate::model::{
         BackgroundPolicy, CompositionItemId, CompositionItemSpec, CompositorWindowId,
-        HitTestCoordinateSpace, HitTestPolicy, HitTestRegion, Rect, SurfaceTarget,
-        WindowCompositionSpec,
+        HitTestCoordinateSpace, HitTestPolicy, HitTestRegion, HitTestRegionMode, Rect,
+        SurfaceTarget, WindowCompositionSpec,
     };
 
     fn item(item_id: u64, target: SurfaceTarget) -> CompositionItemSpec {
@@ -543,6 +546,7 @@ mod tests {
                 item_id,
                 1,
                 HitTestCoordinateSpace::ItemLocalCssPx,
+                HitTestRegionMode::ConsumeListedRegions,
                 vec![HitTestRegion::new(0.0, 0.0, 10.0, 10.0)],
             )
             .unwrap_err();
@@ -578,6 +582,7 @@ mod tests {
                     item_id,
                     2,
                     HitTestCoordinateSpace::ItemLocalCssPx,
+                    HitTestRegionMode::ConsumeListedRegions,
                     vec![HitTestRegion::new(1.0, 2.0, 3.0, 4.0)],
                 )
                 .unwrap()
@@ -589,6 +594,7 @@ mod tests {
                     item_id,
                     1,
                     HitTestCoordinateSpace::ItemLocalCssPx,
+                    HitTestRegionMode::PassthroughListedRegions,
                     vec![HitTestRegion::new(5.0, 6.0, 7.0, 8.0)],
                 )
                 .unwrap()
@@ -601,6 +607,7 @@ mod tests {
             .and_then(|item| item.hit_test_snapshot)
             .expect("snapshot should exist");
         assert_eq!(snapshot.snapshot_id, 2);
+        assert_eq!(snapshot.mode, HitTestRegionMode::ConsumeListedRegions);
         assert_eq!(
             snapshot.regions,
             vec![HitTestRegion::new(1.0, 2.0, 3.0, 4.0)]

@@ -37,7 +37,7 @@
 
 <body>
   <div style="position: absolute; left: 0; top: 0;">Top-left</div>
-  <div class="label" data-cbf-hit-test="consume">Overlay test</div>
+  <div class="label" data-cbf-hit-test-region>Overlay test</div>
 
   <script src="/overlay-hit-test.js"></script>
   <script>
@@ -51,7 +51,12 @@
         return;
       }
 
+      const hitTestMode =
+        new URL(window.location.href).searchParams.get('hit-test-mode') ||
+        'consume-listed-regions';
+
       window.CbfOverlayHitTest.install({
+        mode: hitTestMode,
         sendSnapshot(snapshot) {
           window.cbf.invoke(
             'simpleapp.overlay.hit_test.update',

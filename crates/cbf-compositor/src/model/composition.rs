@@ -30,6 +30,15 @@ pub enum HitTestPolicy {
     RegionSnapshot,
 }
 
+/// How a hit-test snapshot interprets its listed regions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HitTestRegionMode {
+    /// Listed regions consume pointer input and all other bounds pass through.
+    ConsumeListedRegions,
+    /// Listed regions pass pointer input through and all other bounds consume it.
+    PassthroughListedRegions,
+}
+
 /// Coordinate space used by pushed hit-test regions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HitTestCoordinateSpace {
@@ -69,7 +78,9 @@ pub struct HitTestRegionSnapshot {
     pub snapshot_id: u64,
     /// Coordinate space for every region in this snapshot.
     pub coordinate_space: HitTestCoordinateSpace,
-    /// Regions that should consume pointer input.
+    /// Interpretation mode for the listed regions.
+    pub mode: HitTestRegionMode,
+    /// Regions interpreted according to [`Self::mode`].
     pub regions: Vec<HitTestRegion>,
 }
 

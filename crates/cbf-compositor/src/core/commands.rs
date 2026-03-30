@@ -1,6 +1,6 @@
 use crate::model::{
-    CompositionItemId, CompositorWindowId, HitTestCoordinateSpace, HitTestRegion, Rect,
-    WindowCompositionSpec,
+    CompositionItemId, CompositorWindowId, HitTestCoordinateSpace, HitTestRegion,
+    HitTestRegionMode, Rect, WindowCompositionSpec,
 };
 
 /// Declarative scene updates applied to a compositor-managed window.
@@ -41,7 +41,9 @@ pub enum CompositionCommand {
         snapshot_id: u64,
         /// Coordinate space used by the provided regions.
         coordinate_space: HitTestCoordinateSpace,
-        /// Regions that should consume pointer input.
+        /// How the listed regions should participate in hit-testing.
+        mode: HitTestRegionMode,
+        /// Regions interpreted according to `mode`.
         regions: Vec<HitTestRegion>,
     },
     /// Remove one scene item from a window.

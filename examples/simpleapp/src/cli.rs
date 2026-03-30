@@ -20,6 +20,9 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub(crate) test_overlay_surface: bool,
 
+    #[arg(long, requires = "test_overlay_surface")]
+    pub(crate) passthrough_only_overlay_region: bool,
+
     #[arg(long)]
     pub(crate) chromium_executable: Option<PathBuf>,
 

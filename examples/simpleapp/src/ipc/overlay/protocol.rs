@@ -1,5 +1,5 @@
 use cbf::data::ipc::IpcPayload;
-use cbf_compositor::model::{HitTestCoordinateSpace, HitTestRegion};
+use cbf_compositor::model::{HitTestCoordinateSpace, HitTestRegion, HitTestRegionMode};
 use serde::Deserialize;
 
 pub(crate) const CHANNEL_HIT_TEST_UPDATE: &str = "simpleapp.overlay.hit_test.update";
@@ -8,6 +8,7 @@ pub(crate) const CHANNEL_HIT_TEST_UPDATE: &str = "simpleapp.overlay.hit_test.upd
 pub(crate) struct OverlayHitTestSnapshot {
     pub(crate) snapshot_id: u64,
     pub(crate) coordinate_space: HitTestCoordinateSpace,
+    pub(crate) mode: HitTestRegionMode,
     pub(crate) regions: Vec<HitTestRegion>,
 }
 
@@ -22,6 +23,7 @@ pub(crate) enum ParseError {
     UnknownChannel,
     InvalidJson,
     UnsupportedCoordinateSpace,
+    UnsupportedMode,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -29,6 +31,7 @@ pub(crate) enum ParseError {
 struct SnapshotRequest {
     snapshot_id: u64,
     coordinate_space: String,
+    mode: String,
     #[serde(default)]
     regions: Vec<RegionPayload>,
 }
@@ -58,10 +61,16 @@ pub(crate) fn parse_request(
                 "item-local-css-px" => HitTestCoordinateSpace::ItemLocalCssPx,
                 _ => return Err(ParseError::UnsupportedCoordinateSpace),
             };
+            let mode = match snapshot.mode.as_str() {
+                "consume-listed-regions" => HitTestRegionMode::ConsumeListedRegions,
+                "passthrough-listed-regions" => HitTestRegionMode::PassthroughListedRegions,
+                _ => return Err(ParseError::UnsupportedMode),
+            };
             Ok(OverlayRequest::UpdateHitTest {
                 snapshot: OverlayHitTestSnapshot {
                     snapshot_id: snapshot.snapshot_id,
                     coordinate_space,
+                    mode,
                     regions: snapshot
                         .regions
                         .into_iter()
@@ -85,7 +94,7 @@ mod tests {
         let request = parse_request(
             CHANNEL_HIT_TEST_UPDATE,
             &IpcPayload::Text(
-                "{\"snapshotId\":2,\"coordinateSpace\":\"item-local-css-px\",\"regions\":[{\"x\":1,\"y\":2,\"width\":3,\"height\":4}]}"
+                "{\"snapshotId\":2,\"coordinateSpace\":\"item-local-css-px\",\"mode\":\"consume-listed-regions\",\"regions\":[{\"x\":1,\"y\":2,\"width\":3,\"height\":4}]}"
                     .to_string(),
             ),
         )
@@ -97,6 +106,7 @@ mod tests {
                 snapshot: OverlayHitTestSnapshot {
                     snapshot_id: 2,
                     coordinate_space: HitTestCoordinateSpace::ItemLocalCssPx,
+                    mode: HitTestRegionMode::ConsumeListedRegions,
                     regions: vec![HitTestRegion::new(1.0, 2.0, 3.0, 4.0)],
                 }
             }

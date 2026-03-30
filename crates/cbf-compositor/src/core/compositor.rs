@@ -161,6 +161,7 @@ impl Compositor {
                 item_id,
                 snapshot_id,
                 coordinate_space,
+                mode,
                 regions,
             } => {
                 self.ensure_window(window_id)?;
@@ -169,6 +170,7 @@ impl Compositor {
                     item_id,
                     snapshot_id,
                     coordinate_space,
+                    mode,
                     regions,
                 )? {
                     self.sync_window_scene(window_id)
@@ -606,7 +608,7 @@ mod tests {
     use crate::{
         model::{
             BackgroundPolicy, CompositionItemId, CompositionItemSpec, HitTestCoordinateSpace,
-            HitTestPolicy, HitTestRegion, Rect, WindowCompositionSpec,
+            HitTestPolicy, HitTestRegion, HitTestRegionMode, Rect, WindowCompositionSpec,
         },
         platform::host::{PlatformInputState, PlatformSceneItem},
     };
@@ -1068,6 +1070,7 @@ mod tests {
                     item_id: CompositionItemId::new(1),
                     snapshot_id: 3,
                     coordinate_space: HitTestCoordinateSpace::ItemLocalCssPx,
+                    mode: HitTestRegionMode::ConsumeListedRegions,
                     regions: vec![HitTestRegion::new(10.0, 20.0, 30.0, 40.0)],
                 },
                 |_| {},
@@ -1080,6 +1083,7 @@ mod tests {
             .and_then(|item| item.hit_test_snapshot.as_ref())
             .expect("snapshot should be synced");
         assert_eq!(snapshot.snapshot_id, 3);
+        assert_eq!(snapshot.mode, HitTestRegionMode::ConsumeListedRegions);
         assert_eq!(
             snapshot.regions,
             vec![HitTestRegion::new(10.0, 20.0, 30.0, 40.0)]
@@ -1114,6 +1118,7 @@ mod tests {
                     item_id: CompositionItemId::new(1),
                     snapshot_id: 1,
                     coordinate_space: HitTestCoordinateSpace::ItemLocalCssPx,
+                    mode: HitTestRegionMode::ConsumeListedRegions,
                     regions: vec![HitTestRegion::new(0.0, 0.0, 10.0, 10.0)],
                 },
                 |_| {},

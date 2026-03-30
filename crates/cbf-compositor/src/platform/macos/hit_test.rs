@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use objc2_core_foundation::CGPoint;
 
-use crate::model::{CompositionItemId, HitTestCoordinateSpace, HitTestPolicy};
+use crate::model::{
+    CompositionItemId, HitTestCoordinateSpace, HitTestPolicy, HitTestRegionMode,
+};
 
 use super::surface_slot::SurfaceSlot;
 
@@ -34,7 +36,7 @@ pub(crate) fn slot_hit_test_contains_point(
         HitTestPolicy::Passthrough => false,
         HitTestPolicy::Bounds => true,
         HitTestPolicy::RegionSnapshot => slot.hit_test_snapshot.as_ref().is_some_and(|snapshot| {
-            match snapshot.coordinate_space {
+            let matched = match snapshot.coordinate_space {
                 HitTestCoordinateSpace::ItemLocalCssPx => {
                     let local_x = point.x - slot.bounds.origin.x;
                     let local_y =
@@ -46,6 +48,11 @@ pub(crate) fn slot_hit_test_contains_point(
                             && local_y <= f64::from(region.y + region.height)
                     })
                 }
+            };
+
+            match snapshot.mode {
+                HitTestRegionMode::ConsumeListedRegions => matched,
+                HitTestRegionMode::PassthroughListedRegions => !matched,
             }
         }),
     }
@@ -70,7 +77,7 @@ mod tests {
     use crate::{
         model::{
             CompositionItemId, HitTestCoordinateSpace, HitTestPolicy, HitTestRegion,
-            HitTestRegionSnapshot, SurfaceTarget,
+            HitTestRegionMode, HitTestRegionSnapshot, SurfaceTarget,
         },
         platform::{host::PlatformSurfaceHandle, macos::surface_slot::SurfaceSlot},
     };
@@ -181,6 +188,7 @@ mod tests {
         region_slot.hit_test_snapshot = Some(HitTestRegionSnapshot {
             snapshot_id: 1,
             coordinate_space: HitTestCoordinateSpace::ItemLocalCssPx,
+            mode: HitTestRegionMode::ConsumeListedRegions,
             regions: vec![HitTestRegion::new(10.0, 10.0, 20.0, 20.0)],
         });
         slots.insert(first, region_slot);
@@ -190,5 +198,30 @@ mod tests {
 
         assert_eq!(hit, Some(first));
         assert_eq!(miss, None);
+    }
+
+    #[test]
+    fn topmost_item_at_point_uses_passthrough_regions_inside_bounds() {
+        let first = CompositionItemId::new(1);
+        let mut slots = HashMap::new();
+        let mut region_slot = slot(
+            1,
+            SurfaceTarget::BrowsingContext(cbf::data::ids::BrowsingContextId::new(10)),
+            true,
+        );
+        region_slot.hit_test = HitTestPolicy::RegionSnapshot;
+        region_slot.hit_test_snapshot = Some(HitTestRegionSnapshot {
+            snapshot_id: 1,
+            coordinate_space: HitTestCoordinateSpace::ItemLocalCssPx,
+            mode: HitTestRegionMode::PassthroughListedRegions,
+            regions: vec![HitTestRegion::new(10.0, 10.0, 20.0, 20.0)],
+        });
+        slots.insert(first, region_slot);
+
+        let passthrough = topmost_item_at_point(&[first], &slots, CGPoint::new(15.0, 15.0), 100.0);
+        let consume = topmost_item_at_point(&[first], &slots, CGPoint::new(5.0, 5.0), 100.0);
+
+        assert_eq!(passthrough, None);
+        assert_eq!(consume, Some(first));
     }
 }

@@ -1382,6 +1382,7 @@ impl AppController {
                         item_id: composition::overlay_item_id(overlay_browsing_context_id),
                         snapshot_id: snapshot.snapshot_id,
                         coordinate_space: snapshot.coordinate_space,
+                        mode: snapshot.mode,
                         regions: snapshot.regions,
                     },
                     |_| {},
@@ -1432,7 +1433,10 @@ impl AppController {
             if self.cli.test_overlay_surface
                 && let Err(err) = self.browser_handle.create_browsing_context(
                     OVERLAY_CREATE_REQUEST_ID,
-                    Some(overlay_test_ui_url().unwrap_or_else(|_| "about:blank".to_string())),
+                    Some(
+                        overlay_test_ui_url(self.cli.passthrough_only_overlay_region)
+                            .unwrap_or_else(|_| "about:blank".to_string()),
+                    ),
                     profile_id.clone(),
                 )
             {

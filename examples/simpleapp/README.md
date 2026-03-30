@@ -23,9 +23,13 @@ bundled builds without resolving `file://` paths from the Cargo manifest tree.
 
 When `--test-overlay-surface` is enabled, `overlay.html` loads
 `overlay-hit-test.js` and pushes hit-test region snapshots for elements marked
-with `data-cbf-hit-test="consume"`. The sample transport uses
-`window.cbf.invoke("simpleapp.overlay.hit_test.update", ...)` so the overlay
-label consumes clicks while transparent regions pass input through to the page.
+with `data-cbf-hit-test-region`. The sample transport uses
+`window.cbf.invoke("simpleapp.overlay.hit_test.update", ...)` and chooses the
+snapshot mode from the overlay URL. With `--test-overlay-surface`, the centered
+overlay label consumes clicks while transparent regions pass input through to
+the page. Adding `--passthrough-only-overlay-region` flips that interpretation
+so only the centered label passes input through and the rest of the overlay
+consumes it.
 
 ## License
 
