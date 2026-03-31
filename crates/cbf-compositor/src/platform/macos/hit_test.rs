@@ -3,31 +3,27 @@ use std::collections::HashMap;
 use objc2_core_foundation::CGPoint;
 
 use crate::model::{
-    CompositionItemId, HitTestCoordinateSpace, HitTestPolicy, HitTestRegionMode,
+    CompositionItemId, HitTestPolicy,
 };
 
 use super::surface_slot::SurfaceSlot;
+use crate::platform::hit_test::{snapshot_contains_point, ItemLocalCssPoint};
 
 pub(crate) fn topmost_item_at_point(
     order: &[CompositionItemId],
     slots: &HashMap<CompositionItemId, SurfaceSlot>,
     point: CGPoint,
-    view_height: f64,
 ) -> Option<CompositionItemId> {
     order.iter().copied().find(|item_id| {
         let Some(slot) = slots.get(item_id) else {
             return false;
         };
 
-        slot.visible && slot_hit_test_contains_point(slot, point, view_height)
+        slot.visible && slot_hit_test_contains_point(slot, point)
     })
 }
 
-pub(crate) fn slot_hit_test_contains_point(
-    slot: &SurfaceSlot,
-    point: CGPoint,
-    view_height: f64,
-) -> bool {
+pub(crate) fn slot_hit_test_contains_point(slot: &SurfaceSlot, point: CGPoint) -> bool {
     if !bounds_contains_point(slot, point) {
         return false;
     }
@@ -36,26 +32,22 @@ pub(crate) fn slot_hit_test_contains_point(
         HitTestPolicy::Passthrough => false,
         HitTestPolicy::Bounds => true,
         HitTestPolicy::RegionSnapshot => slot.hit_test_snapshot.as_ref().is_some_and(|snapshot| {
-            let matched = match snapshot.coordinate_space {
-                HitTestCoordinateSpace::ItemLocalCssPx => {
-                    let local_x = point.x - slot.bounds.origin.x;
-                    let local_y =
-                        point.y - (view_height - (slot.bounds.origin.y + slot.bounds.size.height));
-                    snapshot.regions.iter().any(|region| {
-                        local_x >= f64::from(region.x)
-                            && local_y >= f64::from(region.y)
-                            && local_x <= f64::from(region.x + region.width)
-                            && local_y <= f64::from(region.y + region.height)
-                    })
-                }
-            };
-
-            match snapshot.mode {
-                HitTestRegionMode::ConsumeListedRegions => matched,
-                HitTestRegionMode::PassthroughListedRegions => !matched,
-            }
+            // Native points must be normalized before snapshot comparison.
+            // Hit-test snapshots are always interpreted in item-local CSS px
+            // with a top-left origin and positive y downward.
+            snapshot_contains_point(snapshot, native_point_to_item_local_css_point(slot, point))
         }),
     }
+}
+
+pub(crate) fn native_point_to_item_local_css_point(
+    slot: &SurfaceSlot,
+    point: CGPoint,
+) -> ItemLocalCssPoint {
+    let local_x = point.x - slot.bounds.origin.x;
+    let local_y_from_bottom = point.y - slot.bounds.origin.y;
+    let local_y = slot.bounds.size.height - local_y_from_bottom;
+    ItemLocalCssPoint::new(local_x, local_y)
 }
 
 fn bounds_contains_point(slot: &SurfaceSlot, point: CGPoint) -> bool {
@@ -73,13 +65,18 @@ mod tests {
     use objc2::AnyThread;
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 
-    use super::topmost_item_at_point;
+    use super::{
+        native_point_to_item_local_css_point, slot_hit_test_contains_point, topmost_item_at_point,
+    };
     use crate::{
         model::{
             CompositionItemId, HitTestCoordinateSpace, HitTestPolicy, HitTestRegion,
             HitTestRegionMode, HitTestRegionSnapshot, SurfaceTarget,
         },
-        platform::{host::PlatformSurfaceHandle, macos::surface_slot::SurfaceSlot},
+        platform::{
+            hit_test::ItemLocalCssPoint, host::PlatformSurfaceHandle,
+            macos::surface_slot::SurfaceSlot,
+        },
     };
 
     fn slot(item_id: u64, target: SurfaceTarget, visible: bool) -> SurfaceSlot {
@@ -118,7 +115,7 @@ mod tests {
         );
 
         let topmost =
-            topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0), 100.0);
+            topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0));
         assert_eq!(topmost, Some(first));
     }
 
@@ -145,7 +142,7 @@ mod tests {
         );
 
         let topmost =
-            topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0), 100.0);
+            topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0));
         assert_eq!(topmost, Some(second));
     }
 
@@ -171,7 +168,7 @@ mod tests {
         );
 
         let topmost =
-            topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0), 100.0);
+            topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0));
         assert_eq!(topmost, Some(second));
     }
 
@@ -193,8 +190,8 @@ mod tests {
         });
         slots.insert(first, region_slot);
 
-        let hit = topmost_item_at_point(&[first], &slots, CGPoint::new(15.0, 15.0), 100.0);
-        let miss = topmost_item_at_point(&[first], &slots, CGPoint::new(5.0, 5.0), 100.0);
+        let hit = topmost_item_at_point(&[first], &slots, CGPoint::new(15.0, 85.0));
+        let miss = topmost_item_at_point(&[first], &slots, CGPoint::new(5.0, 95.0));
 
         assert_eq!(hit, Some(first));
         assert_eq!(miss, None);
@@ -218,10 +215,49 @@ mod tests {
         });
         slots.insert(first, region_slot);
 
-        let passthrough = topmost_item_at_point(&[first], &slots, CGPoint::new(15.0, 15.0), 100.0);
-        let consume = topmost_item_at_point(&[first], &slots, CGPoint::new(5.0, 5.0), 100.0);
+        let passthrough = topmost_item_at_point(&[first], &slots, CGPoint::new(15.0, 85.0));
+        let consume = topmost_item_at_point(&[first], &slots, CGPoint::new(5.0, 95.0));
 
         assert_eq!(passthrough, None);
         assert_eq!(consume, Some(first));
+    }
+
+    #[test]
+    fn native_point_to_item_local_css_point_flips_y_to_top_left_origin() {
+        let mut region_slot = slot(
+            1,
+            SurfaceTarget::BrowsingContext(cbf::data::ids::BrowsingContextId::new(10)),
+            true,
+        );
+        region_slot.bounds = CGRect::new(CGPoint::new(40.0, 30.0), CGSize::new(100.0, 120.0));
+        let point = native_point_to_item_local_css_point(&region_slot, CGPoint::new(55.0, 130.0));
+
+        assert_eq!(point, ItemLocalCssPoint::new(15.0, 20.0));
+    }
+
+    #[test]
+    fn slot_hit_test_contains_point_uses_normalized_item_local_point() {
+        let mut region_slot = slot(
+            1,
+            SurfaceTarget::BrowsingContext(cbf::data::ids::BrowsingContextId::new(10)),
+            true,
+        );
+        region_slot.bounds = CGRect::new(CGPoint::new(40.0, 30.0), CGSize::new(100.0, 120.0));
+        region_slot.hit_test = HitTestPolicy::RegionSnapshot;
+        region_slot.hit_test_snapshot = Some(HitTestRegionSnapshot {
+            snapshot_id: 1,
+            coordinate_space: HitTestCoordinateSpace::ItemLocalCssPx,
+            mode: HitTestRegionMode::ConsumeListedRegions,
+            regions: vec![HitTestRegion::new(10.0, 15.0, 20.0, 25.0)],
+        });
+
+        assert!(slot_hit_test_contains_point(
+            &region_slot,
+            CGPoint::new(55.0, 130.0)
+        ));
+        assert!(!slot_hit_test_contains_point(
+            &region_slot,
+            CGPoint::new(55.0, 60.0)
+        ));
     }
 }

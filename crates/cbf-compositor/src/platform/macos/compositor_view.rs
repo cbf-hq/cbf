@@ -1492,7 +1492,7 @@ impl CompositorViewMac {
         let point = self.local_point(event);
         let slots = self.ivars().slots.borrow();
         let order = self.ivars().order.borrow();
-        let item_id = topmost_item_at_point(&order, &slots, point, self.bounds().size.height)?;
+        let item_id = topmost_item_at_point(&order, &slots, point)?;
         let target = slots.get(&item_id).map(|slot| (item_id, slot.target))?;
         drop(order);
         drop(slots);
@@ -1512,7 +1512,7 @@ impl CompositorViewMac {
     fn target_at_point(&self, point: CGPoint) -> Option<(CompositionItemId, SurfaceTarget)> {
         let slots = self.ivars().slots.borrow();
         let order = self.ivars().order.borrow();
-        let item_id = topmost_item_at_point(&order, &slots, point, self.bounds().size.height)?;
+        let item_id = topmost_item_at_point(&order, &slots, point)?;
         slots.get(&item_id).map(|slot| (item_id, slot.target))
     }
 
@@ -1604,9 +1604,9 @@ impl CompositorViewMac {
     ) -> Option<(CompositionItemId, BrowsingContextId)> {
         let slots = self.ivars().slots.borrow();
         let order = self.ivars().order.borrow();
-        let item_id = topmost_item_at_point(&order, &slots, point, self.bounds().size.height)?;
+        let item_id = topmost_item_at_point(&order, &slots, point)?;
         let slot = slots.get(&item_id)?;
-        if !slot.visible || !slot_hit_test_contains_point(slot, point, self.bounds().size.height) {
+        if !slot.visible || !slot_hit_test_contains_point(slot, point) {
             return None;
         }
         match slot.target {

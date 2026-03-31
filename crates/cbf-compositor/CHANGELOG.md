@@ -5,10 +5,12 @@ All notable changes to `cbf-compositor` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0-alpha.3] - 2026-03-31
 
 ### Changed
 
+- Refactored region-snapshot hit testing to normalize native platform coordinates into shared item-local CSS coordinates before evaluating `HitTestRegionSnapshot`, so future platform backends can reuse the same snapshot matcher.
+- macOS region-snapshot hit testing now converts native bottom-left `CGPoint` input into top-left item-local CSS coordinates before comparing hole and consume regions, fixing vertically mirrored hit-test holes.
 - Removed the stale `BackgroundPolicy::Transparent` documentation note that claimed transparent backgrounds were unimplemented now that the compositor-backed overlay flow supports transparent embedded surfaces.
 
 ## [0.1.0-alpha.2] - 2026-03-30
@@ -47,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marked as an alpha-target crate; compositor behavior and platform integration remain under active development and may still contain security bugs.
 
-[Unreleased]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.2...HEAD
+[Unreleased]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.2...cbf-compositor-v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.1...cbf-compositor-v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-compositor-v0.1.0-alpha.1
