@@ -6,7 +6,6 @@ pub enum BackgroundPolicy {
     /// The item should use a non-transparent background.
     Opaque,
     /// The item should clear its background to transparent.
-    /// Currently, it is not working because it is not implemented.
     Transparent,
 }
 

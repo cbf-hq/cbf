@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Removed the stale `BackgroundPolicy::Transparent` documentation note that claimed transparent backgrounds were unimplemented now that the compositor-backed overlay flow supports transparent embedded surfaces.
+
 ## [0.1.0-alpha.2] - 2026-03-30
 
 ### Added
