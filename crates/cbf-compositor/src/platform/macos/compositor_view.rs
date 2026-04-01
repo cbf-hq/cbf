@@ -97,11 +97,14 @@ pub(crate) struct CompositorViewMacIvars {
     has_marked_text: Cell<bool>,
     marked_range: Cell<NSRange>,
     selected_range: Cell<NSRange>,
+    is_handling_key_down: Cell<bool>,
     ime_handled: Cell<bool>,
     suppress_key_up: Cell<bool>,
     ime_insert_expected: Cell<bool>,
+    unmark_text_called: Cell<bool>,
     saw_insert_command: Cell<bool>,
     sent_char_event: Cell<bool>,
+    text_to_be_inserted: RefCell<String>,
     edit_commands: RefCell<Vec<String>>,
     pending_char_event: RefCell<Option<KeyEvent>>,
     context_menu_id: Cell<u64>,
@@ -182,10 +185,14 @@ define_class!(
             // NSTextInputClient callbacks, then forward the residual key event
             // if IME did not fully consume it.
             let had_marked_text = self.ivars().has_marked_text.get();
+            self.ivars().is_handling_key_down.set(true);
             self.ivars().ime_handled.set(false);
             self.ivars().suppress_key_up.set(false);
+            self.ivars().ime_insert_expected.set(false);
+            self.ivars().unmark_text_called.set(false);
             self.ivars().saw_insert_command.set(false);
             self.ivars().sent_char_event.set(false);
+            self.ivars().text_to_be_inserted.borrow_mut().clear();
             self.ivars().edit_commands.borrow_mut().clear();
             self.ivars().pending_char_event.borrow_mut().take();
 
@@ -195,8 +202,23 @@ define_class!(
 
             let events = NSArray::arrayWithObject(event);
             self.interpretKeyEvents(&events);
+            self.ivars().is_handling_key_down.set(false);
+
+            let text_to_be_inserted = std::mem::take(&mut *self.ivars().text_to_be_inserted.borrow_mut());
+            let text_inserted = !text_to_be_inserted.is_empty();
+            let text_inserted_as_commit = text_to_be_inserted.encode_utf16().count()
+                > if self.ivars().has_marked_text.get() || had_marked_text {
+                    0
+                } else {
+                    1
+                };
 
             if self.ivars().ime_handled.get() {
+                if text_inserted {
+                    self.send_inserted_text(text_to_be_inserted, text_inserted_as_commit);
+                } else if had_marked_text && self.ivars().unmark_text_called.get() {
+                    self.send_finish_composing(false);
+                }
                 self.ivars().pending_char_event.borrow_mut().take();
                 self.ivars().suppress_key_up.set(true);
                 return;
@@ -209,6 +231,11 @@ define_class!(
             }
 
             self.forward_key_event(event);
+            if text_inserted {
+                self.send_inserted_text(text_to_be_inserted, text_inserted_as_commit);
+            } else if had_marked_text && self.ivars().unmark_text_called.get() {
+                self.send_finish_composing(false);
+            }
             if self.ivars().saw_insert_command.get() && !self.ivars().sent_char_event.get() {
                 let pending_char_event = self.ivars().pending_char_event.borrow().clone();
                 if let Some(text) = synthesized_char_text(pending_char_event.as_ref())
@@ -365,7 +392,14 @@ define_class!(
                 return;
             };
 
-            if self.ivars().ime_insert_expected.get() {
+            if self.ivars().is_handling_key_down.get() && replacement_range.location == NSNotFound as usize {
+                if self.ivars().ime_insert_expected.get() {
+                    self.mark_ime_handled();
+                    self.ivars().ime_insert_expected.set(false);
+                    self.update_marked_state(false, ns_not_found_range(), ns_not_found_range());
+                }
+                self.ivars().text_to_be_inserted.borrow_mut().push_str(&text);
+            } else if self.ivars().ime_insert_expected.get() {
                 self.mark_ime_handled();
                 self.ivars().ime_insert_expected.set(false);
                 self.update_marked_state(false, ns_not_found_range(), ns_not_found_range());
@@ -375,11 +409,7 @@ define_class!(
                     0,
                 );
             } else {
-                let pending_char_event = self.ivars().pending_char_event.borrow().clone();
-                if let Some(event) = build_char_event(pending_char_event, text) {
-                    self.ivars().sent_char_event.set(true);
-                    self.send_char_event(event);
-                }
+                self.send_commit_text(text, nsrange_to_text_range(replacement_range), 0);
             }
         }
 
@@ -419,11 +449,14 @@ define_class!(
 
         #[unsafe(method(unmarkText))]
         fn unmarkText(&self) {
-            self.mark_ime_handled();
             let had_marked = self.ivars().has_marked_text.get();
             self.ivars().ime_insert_expected.set(had_marked);
             self.update_marked_state(false, ns_not_found_range(), ns_not_found_range());
-            self.send_finish_composing(false);
+            if self.ivars().is_handling_key_down.get() {
+                self.ivars().unmark_text_called.set(true);
+            } else {
+                self.send_finish_composing(false);
+            }
         }
 
         #[unsafe(method(selectedRange))]
@@ -705,11 +738,14 @@ impl CompositorViewMac {
             has_marked_text: Cell::new(false),
             marked_range: Cell::new(ns_not_found_range()),
             selected_range: Cell::new(ns_not_found_range()),
+            is_handling_key_down: Cell::new(false),
             ime_handled: Cell::new(false),
             suppress_key_up: Cell::new(false),
             ime_insert_expected: Cell::new(false),
+            unmark_text_called: Cell::new(false),
             saw_insert_command: Cell::new(false),
             sent_char_event: Cell::new(false),
+            text_to_be_inserted: RefCell::new(String::new()),
             edit_commands: RefCell::new(Vec::new()),
             pending_char_event: RefCell::new(None),
             context_menu_id: Cell::new(NO_MENU_ID),
@@ -1426,6 +1462,19 @@ impl CompositorViewMac {
                     },
                 );
             }
+        }
+    }
+
+    fn send_inserted_text(&self, text: String, as_commit: bool) {
+        if as_commit {
+            self.send_commit_text(text, None, 0);
+            return;
+        }
+
+        let pending_char_event = self.ivars().pending_char_event.borrow().clone();
+        if let Some(event) = build_char_event(pending_char_event, text) {
+            self.ivars().sent_char_event.set(true);
+            self.send_char_event(event);
         }
     }
 
