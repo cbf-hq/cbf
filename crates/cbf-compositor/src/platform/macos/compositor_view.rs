@@ -683,6 +683,14 @@ define_class!(
             screen_point: NSPoint,
             operation: NSDragOperation,
         ) {
+            // AppKit owns the native drag loop and may consume the matching
+            // mouse-up, so clear compositor-side capture explicitly when the
+            // drag session ends.
+            let mut input_state = self.ivars().view.ivars().input_state.borrow_mut();
+            input_state.pointer_capture_item_id = None;
+            drop(input_state);
+            self.ivars().view.ivars().active_drag_source.replace(None);
+
             let treat_as_drop = operation != NSDragOperation::None
                 || self.ivars().view.is_same_context_drag_drop_point(
                     self.ivars().browsing_context_id,
@@ -1860,7 +1868,9 @@ impl CompositorViewMac {
         let base_point = window.convertPointFromScreen(screen_point);
         let local_point = self.convertPoint_fromView(base_point, None);
         self.drag_target_at_point(local_point)
-            .map(|(_, target_browsing_context_id)| target_browsing_context_id == browsing_context_id)
+            .map(|(_, target_browsing_context_id)| {
+                target_browsing_context_id == browsing_context_id
+            })
             .unwrap_or(false)
     }
 
