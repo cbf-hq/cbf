@@ -47,20 +47,24 @@
       box-sizing: border-box;
     }
 
+    html,
     body {
       margin: 0;
-      min-height: 100vh;
+      width: 100%;
+      height: 100%;
       font-family: "Avenir Next", "Helvetica Neue", sans-serif;
       color: var(--text);
       background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0)),
         linear-gradient(135deg, var(--bg-top), var(--bg-bottom));
+      overflow: hidden;
     }
 
     .toolbar {
-      height: 100vh;
+      width: 100%;
+      height: 56px;
       display: grid;
-      grid-template-columns: auto auto auto minmax(0, 1fr);
+      grid-template-columns: auto auto auto auto minmax(0, 1fr);
       gap: 10px;
       align-items: center;
       padding: 10px 14px;
@@ -70,6 +74,7 @@
         linear-gradient(135deg, var(--accent-soft), transparent 55%);
       backdrop-filter: blur(18px) saturate(1.15);
       box-shadow: var(--shadow);
+      overflow: hidden;
     }
 
     button,
@@ -117,11 +122,43 @@
       background: var(--accent-soft);
     }
 
-    .hint {
-      font-size: 12px;
+    .status-icon {
+      width: 26px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       color: var(--muted);
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
+      overflow: hidden;
+      position: relative;
+      flex: 0 0 auto;
+    }
+
+    .status-icon svg,
+    .status-icon img {
+      width: 18px;
+      height: 18px;
+      display: block;
+      position: absolute;
+      inset: 0;
+      margin: auto;
+    }
+
+    .status-icon img[hidden],
+    .status-icon svg[hidden] {
+      display: none;
+    }
+
+    .status-icon.is-loading {
+      color: var(--accent);
+    }
+
+    .status-icon.is-error {
+      color: #c94e44;
+    }
+
+    .status-icon.is-loading .spinner-icon {
+      animation: spin 900ms linear infinite;
     }
 
     .toolbar-center {
@@ -157,11 +194,32 @@
       padding: 0 8px;
       white-space: nowrap;
     }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
   </style>
 </head>
 
 <body>
   <div class="toolbar">
+    <div id="status-icon" class="status-icon" aria-live="polite" aria-label="Page status: default">
+      <img id="status-favicon" alt="" hidden>
+      <svg id="status-default-icon" viewBox="0 0 16 16" aria-hidden="true" hidden>
+        <path fill="currentColor"
+          d="M8 1.25a6.75 6.75 0 1 0 0 13.5A6.75 6.75 0 0 0 8 1.25Zm4.79 4H10.7a11.5 11.5 0 0 0-.87-2.39 5.28 5.28 0 0 1 2.96 2.39ZM8 2.62c.47.5 1.08 1.47 1.47 2.63H6.53C6.92 4.09 7.53 3.12 8 2.62ZM5.17 2.86a11.5 11.5 0 0 0-.87 2.39H2.21a5.28 5.28 0 0 1 2.96-2.39ZM1.75 8c0-.45.06-.88.17-1.29h2.1A12.8 12.8 0 0 0 4 8c0 .44.02.87.08 1.29h-2.1A5.3 5.3 0 0 1 1.75 8Zm.46 2.75H4.3c.2.85.5 1.66.87 2.39a5.28 5.28 0 0 1-2.96-2.39ZM8 13.38c-.47-.5-1.08-1.47-1.47-2.63h2.94c-.39 1.16-1 2.13-1.47 2.63Zm1.8-4.09H6.2A11.2 11.2 0 0 1 6.13 8c0-.44.03-.87.08-1.29H9.8c.05.42.08.85.08 1.29 0 .44-.03.87-.08 1.29Zm.03 3.85c.37-.73.67-1.54.87-2.39h2.09a5.28 5.28 0 0 1-2.96 2.39ZM11.98 9.29c.06-.42.08-.85.08-1.29 0-.44-.02-.87-.08-1.29h2.1c.11.41.17.84.17 1.29 0 .45-.06.88-.17 1.29h-2.1Z" />
+      </svg>
+      <svg id="status-error-icon" viewBox="0 0 16 16" aria-hidden="true" hidden>
+        <path fill="currentColor"
+          d="M3.22 3.22a.75.75 0 0 1 1.06 0L8 6.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L9.06 8l3.72 3.72a.75.75 0 1 1-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 0 1 0-1.06Z" />
+      </svg>
+      <svg id="status-loading-icon" class="spinner-icon" viewBox="0 0 16 16" aria-hidden="true" hidden>
+        <path fill="currentColor"
+          d="M8 1.25a.75.75 0 0 1 .75.75v1.54a.75.75 0 0 1-1.5 0V2A.75.75 0 0 1 8 1.25Zm0 9.71a.75.75 0 0 1 .75.75v2.29a.75.75 0 0 1-1.5 0v-2.29a.75.75 0 0 1 .75-.75Zm4.77-4.46a.75.75 0 0 1 0 1.5h-1.54a.75.75 0 0 1 0-1.5h1.54Zm-7.46 0a.75.75 0 0 1 0 1.5H2.77a.75.75 0 0 1 0-1.5h2.54Zm5.1-3.6a.75.75 0 0 1 1.06 1.06l-1.09 1.09a.75.75 0 0 1-1.06-1.06l1.09-1.09Zm-4.73 4.73a.75.75 0 0 1 1.06 1.06L5.6 9.78A.75.75 0 1 1 4.54 8.72l1.14-1.09Zm5.79 2.15a.75.75 0 0 1 0 1.06l-1.09 1.14a.75.75 0 0 1-1.06-1.06l1.09-1.14a.75.75 0 0 1 1.06 0Zm-5.79-5.24a.75.75 0 0 1 0 1.06L4.54 5.6A.75.75 0 0 1 3.48 4.54l1.14-1.09a.75.75 0 0 1 1.06 0Z" />
+      </svg>
+    </div>
     <button id="back" aria-label="Back">&larr;</button>
     <button id="forward" aria-label="Forward">&rarr;</button>
     <button id="reload" aria-label="Reload">&#8635;</button>
@@ -179,7 +237,6 @@
       </div>
     </div>
   </div>
-  <div id="status" class="hint" style="padding: 8px 14px;">Connecting…</div>
 
   <script>
     (function () {
@@ -202,6 +259,11 @@
       const reloadButton = document.getElementById('reload');
       const openButton = document.getElementById('open');
       const addressInput = document.getElementById('address');
+      const statusIcon = document.getElementById('status-icon');
+      const statusFavicon = document.getElementById('status-favicon');
+      const statusDefaultIcon = document.getElementById('status-default-icon');
+      const statusErrorIcon = document.getElementById('status-error-icon');
+      const statusLoadingIcon = document.getElementById('status-loading-icon');
       const navPanel = document.getElementById('nav-panel');
       const findPanel = document.getElementById('find-panel');
       const findInput = document.getElementById('find-query');
@@ -209,9 +271,16 @@
       const findNextButton = document.getElementById('find-next');
       const findCloseButton = document.getElementById('find-close');
       const findResultNode = document.getElementById('find-result');
-      const statusNode = document.getElementById('status');
       let findDebounceTimer = null;
       let lastFindFocusSignal = 0;
+      let currentNavigationState = {
+        url: '',
+        can_go_back: false,
+        can_go_forward: false,
+        is_loading: false,
+        favicon_url: null,
+      };
+      let hasStatusError = false;
       let currentFindState = {
         visible: false,
         query: '',
@@ -220,9 +289,69 @@
         pending: false,
       };
 
-      function setStatus(text) {
-        statusNode.textContent = text;
+      function setStatusError() {
+        hasStatusError = true;
+        renderStatusIcon();
       }
+
+      function clearStatusError() {
+        if (!hasStatusError) {
+          return;
+        }
+        hasStatusError = false;
+        renderStatusIcon();
+      }
+
+      function resetStatusIconNodes() {
+        statusIcon.classList.remove('is-loading', 'is-error');
+        statusFavicon.hidden = true;
+        statusDefaultIcon.hidden = true;
+        statusErrorIcon.hidden = true;
+        statusLoadingIcon.hidden = true;
+      }
+
+      function setStatusAriaLabel(label) {
+        statusIcon.setAttribute('aria-label', `Page status: ${label}`);
+      }
+
+      function renderStatusIcon() {
+        resetStatusIconNodes();
+
+        if (hasStatusError) {
+          statusIcon.classList.add('is-error');
+          statusErrorIcon.hidden = false;
+          setStatusAriaLabel('error');
+          return;
+        }
+
+        if (currentNavigationState.is_loading) {
+          statusIcon.classList.add('is-loading');
+          statusLoadingIcon.hidden = false;
+          setStatusAriaLabel('loading');
+          return;
+        }
+
+        if (currentNavigationState.favicon_url) {
+          statusFavicon.src = currentNavigationState.favicon_url;
+          statusFavicon.hidden = false;
+          setStatusAriaLabel('favicon');
+          return;
+        }
+
+        statusDefaultIcon.hidden = false;
+        setStatusAriaLabel('default');
+      }
+
+      statusFavicon.addEventListener('error', () => {
+        currentNavigationState.favicon_url = null;
+        renderStatusIcon();
+      });
+
+      statusFavicon.addEventListener('load', () => {
+        if (!hasStatusError && !currentNavigationState.is_loading) {
+          setStatusAriaLabel('favicon');
+        }
+      });
 
       function normalizeUrl(raw) {
         const value = (raw || '').trim();
@@ -257,12 +386,22 @@
 
       function applyNavigationState(state) {
         if (!state || typeof state !== 'object') return;
+        currentNavigationState = {
+          url: typeof state.url === 'string' ? state.url : '',
+          can_go_back: !!state.can_go_back,
+          can_go_forward: !!state.can_go_forward,
+          is_loading: !!state.is_loading,
+          favicon_url: typeof state.favicon_url === 'string' && state.favicon_url.length > 0
+            ? state.favicon_url
+            : null,
+        };
         if (typeof state.url === 'string' && state.url.length > 0) {
           addressInput.value = state.url;
         }
         backButton.disabled = !state.can_go_back;
         forwardButton.disabled = !state.can_go_forward;
-        setStatus(state.is_loading ? 'Loading…' : 'Ready');
+        clearStatusError();
+        renderStatusIcon();
       }
 
       async function requestState() {
@@ -272,8 +411,7 @@
             applyNavigationState(response.value);
           }
         } catch (error) {
-          const code = error && error.code ? error.code : 'UNKNOWN';
-          setStatus(`State sync failed (${code})`);
+          setStatusError();
         }
       }
 
@@ -339,12 +477,10 @@
           try {
             const response = await invokeJson(CHANNELS.FIND_SET_QUERY, { query: findInput.value });
             if (!response || !response.ok) {
-              const code = response && response.code ? response.code : 'UNKNOWN';
-              setStatus(`Find failed (${code})`);
+              setStatusError();
             }
           } catch (error) {
-            const code = error && error.code ? error.code : 'UNKNOWN';
-            setStatus(`Find failed (${code})`);
+            setStatusError();
           }
         }, 150);
       }
@@ -355,14 +491,14 @@
         try {
           const response = await invokeJson(CHANNELS.OPEN, { url });
           if (!response || !response.ok) {
-            const code = response && response.code ? response.code : 'UNKNOWN';
-            setStatus(`Open failed (${code})`);
+            setStatusError();
             return;
           }
-          setStatus('Navigating…');
+          hasStatusError = false;
+          currentNavigationState.is_loading = true;
+          renderStatusIcon();
         } catch (error) {
-          const code = error && error.code ? error.code : 'UNKNOWN';
-          setStatus(`Open failed (${code})`);
+          setStatusError();
         }
       }
 
@@ -370,12 +506,10 @@
         try {
           const response = await invokeJson(channel, {});
           if (!response || !response.ok) {
-            const code = response && response.code ? response.code : 'UNKNOWN';
-            setStatus(`Action failed (${code})`);
+            setStatusError();
           }
         } catch (error) {
-          const code = error && error.code ? error.code : 'UNKNOWN';
-          setStatus(`Action failed (${code})`);
+          setStatusError();
         }
       }
 
@@ -387,12 +521,10 @@
         try {
           const response = await invokeJson(CHANNELS.FIND_CLOSE, {});
           if (!response || !response.ok) {
-            const code = response && response.code ? response.code : 'UNKNOWN';
-            setStatus(`Find failed (${code})`);
+            setStatusError();
           }
         } catch (error) {
-          const code = error && error.code ? error.code : 'UNKNOWN';
-          setStatus(`Find failed (${code})`);
+          setStatusError();
         }
       }
 
@@ -446,11 +578,12 @@
           }
         });
       } else {
-        setStatus('IPC unavailable');
+        setStatusError();
       }
 
       requestState();
       updateFindButtons();
+      renderStatusIcon();
     })();
   </script>
 </body>

@@ -41,6 +41,7 @@ pub(crate) struct NavigationState {
     pub(crate) can_go_back: bool,
     pub(crate) can_go_forward: bool,
     pub(crate) is_loading: bool,
+    pub(crate) favicon_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -202,5 +203,21 @@ mod tests {
         let request = parse_request(CHANNEL_FIND_NEXT, &IpcPayload::Text("{}".to_string()))
             .expect("find next should parse");
         assert_eq!(request, ToolbarRequest::FindNext);
+    }
+
+    #[test]
+    fn navigation_state_round_trips_with_favicon_url() {
+        let state = NavigationState {
+            url: "https://example.com".to_string(),
+            can_go_back: true,
+            can_go_forward: false,
+            is_loading: false,
+            favicon_url: Some("https://example.com/favicon.ico".to_string()),
+        };
+
+        let json = serde_json::to_string(&state).expect("navigation state should serialize");
+        let parsed: NavigationState =
+            serde_json::from_str(&json).expect("navigation state should deserialize");
+        assert_eq!(parsed, state);
     }
 }

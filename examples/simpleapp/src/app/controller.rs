@@ -134,6 +134,16 @@ impl FindSessionState {
     }
 }
 
+fn navigation_state_with_favicon(
+    state: &toolbar_protocol::NavigationState,
+    favicon_url: Option<&str>,
+) -> toolbar_protocol::NavigationState {
+    toolbar_protocol::NavigationState {
+        favicon_url: favicon_url.map(ToOwned::to_owned),
+        ..state.clone()
+    }
+}
+
 pub(crate) struct AppController {
     cli: Cli,
     browser_handle: BrowserHandle<ChromiumBackend>,
@@ -150,6 +160,7 @@ pub(crate) struct AppController {
     resolved_profile_id: Option<String>,
     extensions_loading: bool,
     navigation_state_by_page: HashMap<BrowsingContextId, toolbar_protocol::NavigationState>,
+    favicon_url_by_page: HashMap<BrowsingContextId, String>,
     find_state_by_page: HashMap<BrowsingContextId, FindSessionState>,
     focused_host_window_id: Option<HostWindowId>,
 }
@@ -177,6 +188,7 @@ impl AppController {
             resolved_profile_id: None,
             extensions_loading: false,
             navigation_state_by_page: HashMap::new(),
+            favicon_url_by_page: HashMap::new(),
             find_state_by_page: HashMap::new(),
             focused_host_window_id: None,
         }
@@ -921,10 +933,10 @@ impl AppController {
         toolbar_browsing_context_id: BrowsingContextId,
         page_browsing_context_id: BrowsingContextId,
     ) {
-        let Some(state) = self.navigation_state_by_page.get(&page_browsing_context_id) else {
+        let Some(state) = self.navigation_state_for_page(page_browsing_context_id) else {
             return;
         };
-        let message = toolbar_publisher::navigation_state_event_message(state);
+        let message = toolbar_publisher::navigation_state_event_message(&state);
         self.post_toolbar_ipc_message(toolbar_browsing_context_id, message);
     }
 
@@ -971,6 +983,22 @@ impl AppController {
         self.find_state_by_page
             .entry(page_browsing_context_id)
             .or_default()
+    }
+
+    fn navigation_state_for_page(
+        &self,
+        page_browsing_context_id: BrowsingContextId,
+    ) -> Option<toolbar_protocol::NavigationState> {
+        self.navigation_state_by_page
+            .get(&page_browsing_context_id)
+            .map(|state| {
+                navigation_state_with_favicon(
+                    state,
+                    self.favicon_url_by_page
+                        .get(&page_browsing_context_id)
+                        .map(String::as_str),
+                )
+            })
     }
 
     fn resolve_find_target(&self) -> Option<(HostWindowId, BrowsingContextId)> {
@@ -1304,7 +1332,7 @@ impl AppController {
                 self.handle_find_close(page_browsing_context_id, request_id)
             }
             toolbar_protocol::ToolbarRequest::StateRequest => {
-                if let Some(state) = self.navigation_state_by_page.get(&page_browsing_context_id) {
+                if let Some(state) = self.navigation_state_for_page(page_browsing_context_id) {
                     toolbar_publisher::response_success_message(
                         &response_channel,
                         request_id,
@@ -1318,7 +1346,8 @@ impl AppController {
                             "url": "",
                             "can_go_back": false,
                             "can_go_forward": false,
-                            "is_loading": false
+                            "is_loading": false,
+                            "favicon_url": null
                         }),
                     )
                 }
@@ -1635,6 +1664,7 @@ impl AppController {
             }
             BrowsingContextEvent::Closed => {
                 self.navigation_state_by_page.remove(&browsing_context_id);
+                self.favicon_url_by_page.remove(&browsing_context_id);
                 self.find_state_by_page.remove(&browsing_context_id);
                 self.handle_closed_browsing_context(browsing_context_id)
             }
@@ -1668,6 +1698,7 @@ impl AppController {
                         can_go_back,
                         can_go_forward,
                         is_loading,
+                        favicon_url: None,
                     },
                 );
 
@@ -1689,6 +1720,30 @@ impl AppController {
                 }
                 Vec::new()
             }
+            BrowsingContextEvent::FaviconUrlUpdated { url } => {
+                if window_id_for_toolbar_browsing_context(&self.shared, browsing_context_id)
+                    .is_some()
+                    || Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared)
+                    || Some(browsing_context_id) == overlay_browsing_context_id(&self.shared)
+                {
+                    return Vec::new();
+                }
+
+                self.favicon_url_by_page.insert(browsing_context_id, url);
+
+                if let Some(window_id) =
+                    window_id_for_page_browsing_context(&self.shared, browsing_context_id)
+                    && let Some(toolbar_browsing_context_id) =
+                        toolbar_browsing_context_id_for_window(&self.shared, window_id)
+                {
+                    self.publish_navigation_state_to_toolbar(
+                        toolbar_browsing_context_id,
+                        browsing_context_id,
+                    );
+                }
+
+                Vec::new()
+            }
             BrowsingContextEvent::IpcMessageReceived { message } => {
                 if window_id_for_toolbar_browsing_context(&self.shared, browsing_context_id)
                     .is_some()
@@ -1700,8 +1755,7 @@ impl AppController {
                 }
                 Vec::new()
             }
-            BrowsingContextEvent::FaviconUrlUpdated { .. }
-            | BrowsingContextEvent::UpdateTargetUrl { .. }
+            BrowsingContextEvent::UpdateTargetUrl { .. }
             | BrowsingContextEvent::FullscreenToggled { .. }
             | BrowsingContextEvent::ImeBoundsUpdated { .. }
             | BrowsingContextEvent::ChoiceMenuRequested { .. }
@@ -2151,6 +2205,51 @@ impl AppController {
             );
         }
         Some(format!("{} downloads active", active.len()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::navigation_state_with_favicon;
+    use crate::ipc::toolbar::protocol::NavigationState;
+
+    #[test]
+    fn navigation_state_with_favicon_overrides_favicon_field() {
+        let state = NavigationState {
+            url: "https://example.com".to_string(),
+            can_go_back: true,
+            can_go_forward: false,
+            is_loading: false,
+            favicon_url: None,
+        };
+
+        let merged = navigation_state_with_favicon(&state, Some("https://example.com/favicon.ico"));
+
+        assert_eq!(
+            merged.favicon_url.as_deref(),
+            Some("https://example.com/favicon.ico")
+        );
+        assert_eq!(merged.url, state.url);
+        assert_eq!(merged.can_go_back, state.can_go_back);
+        assert_eq!(merged.can_go_forward, state.can_go_forward);
+        assert_eq!(merged.is_loading, state.is_loading);
+    }
+
+    #[test]
+    fn navigation_state_with_favicon_clears_missing_favicon() {
+        let state = NavigationState {
+            url: "https://example.com".to_string(),
+            can_go_back: false,
+            can_go_forward: false,
+            is_loading: true,
+            favicon_url: Some("https://stale.example/favicon.ico".to_string()),
+        };
+
+        let merged = navigation_state_with_favicon(&state, None);
+
+        assert_eq!(merged.favicon_url, None);
+        assert_eq!(merged.url, state.url);
+        assert_eq!(merged.is_loading, state.is_loading);
     }
 }
 

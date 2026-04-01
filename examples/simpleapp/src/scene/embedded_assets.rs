@@ -12,7 +12,7 @@ const DEFAULT_CONTENT_SECURITY_POLICY: &str = concat!(
     "default-src 'self'; ",
     "script-src 'self' 'unsafe-inline'; ",
     "style-src 'self' 'unsafe-inline'; ",
-    "img-src 'self' data:; ",
+    "img-src 'self' data: https:; ",
     "connect-src 'self'; ",
     "object-src 'none'; ",
     "base-uri 'none'; ",

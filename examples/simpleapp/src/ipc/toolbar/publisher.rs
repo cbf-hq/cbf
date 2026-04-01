@@ -47,8 +47,7 @@ pub(crate) fn response_error_message(
 
 pub(crate) fn navigation_state_event_message(state: &NavigationState) -> BrowsingContextIpcMessage {
     let payload_text = serde_json::to_string(state).unwrap_or_else(|_| {
-        "{\"url\":\"\",\"can_go_back\":false,\"can_go_forward\":false,\"is_loading\":false}"
-            .to_string()
+        "{\"url\":\"\",\"can_go_back\":false,\"can_go_forward\":false,\"is_loading\":false,\"favicon_url\":null}".to_string()
     });
 
     BrowsingContextIpcMessage {
@@ -91,6 +90,7 @@ mod tests {
             can_go_back: true,
             can_go_forward: false,
             is_loading: false,
+            favicon_url: Some("https://example.com/favicon.ico".to_string()),
         };
 
         let message = navigation_state_event_message(&state);
@@ -102,6 +102,10 @@ mod tests {
                     serde_json::from_str(&text).expect("payload should parse");
                 assert_eq!(parsed.url, "https://example.com");
                 assert!(parsed.can_go_back);
+                assert_eq!(
+                    parsed.favicon_url.as_deref(),
+                    Some("https://example.com/favicon.ico")
+                );
             }
             IpcPayload::Binary(_) => panic!("expected text payload"),
         }
