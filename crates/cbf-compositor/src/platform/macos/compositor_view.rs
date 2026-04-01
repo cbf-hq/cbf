@@ -683,7 +683,12 @@ define_class!(
             screen_point: NSPoint,
             operation: NSDragOperation,
         ) {
-            if operation == NSDragOperation::None {
+            let treat_as_drop = operation != NSDragOperation::None
+                || self.ivars().view.is_same_context_drag_drop_point(
+                    self.ivars().browsing_context_id,
+                    screen_point,
+                );
+            if !treat_as_drop {
                 self.ivars().view.emit_native_drag_cancel(
                     self.ivars().session_id,
                     self.ivars().browsing_context_id,
@@ -1054,8 +1059,7 @@ impl CompositorViewMac {
             return Ok(false);
         };
 
-        let operation_mask =
-            NSDragOperation::from_bits_truncate(request.allowed_operations.bits() as _);
+        let operation_mask = ns_drag_operations_from_generic(request.allowed_operations);
         let source = HostDragSource::new(
             mtm,
             Retained::from(self),
@@ -1845,6 +1849,21 @@ impl CompositorViewMac {
             .unwrap_or(NSDragOperation::None)
     }
 
+    fn is_same_context_drag_drop_point(
+        &self,
+        browsing_context_id: BrowsingContextId,
+        screen_point: NSPoint,
+    ) -> bool {
+        let Some(window) = self.window() else {
+            return false;
+        };
+        let base_point = window.convertPointFromScreen(screen_point);
+        let local_point = self.convertPoint_fromView(base_point, None);
+        self.drag_target_at_point(local_point)
+            .map(|(_, target_browsing_context_id)| target_browsing_context_id == browsing_context_id)
+            .unwrap_or(false)
+    }
+
     fn drag_points(
         &self,
         item_id: CompositionItemId,
@@ -2004,6 +2023,20 @@ fn drag_operations_from_ns(operation: NSDragOperation) -> DragOperations {
         bits |= DragOperations::MOVE.bits();
     }
     DragOperations::from_bits(bits)
+}
+
+fn ns_drag_operations_from_generic(operations: DragOperations) -> NSDragOperation {
+    let mut mask = NSDragOperation::None;
+    if operations.contains(DragOperation::Copy) {
+        mask |= NSDragOperation::Copy;
+    }
+    if operations.contains(DragOperation::Link) {
+        mask |= NSDragOperation::Link;
+    }
+    if operations.contains(DragOperation::Move) {
+        mask |= NSDragOperation::Move;
+    }
+    mask
 }
 
 fn ns_drag_operation_from_generic(operation: DragOperation) -> NSDragOperation {

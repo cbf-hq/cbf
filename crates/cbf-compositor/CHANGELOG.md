@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Aligned macOS `CompositorViewMac` text-input sequencing with Chromium so plain keyboard text inserted through AppKit during `keyDown:` is buffered until the key event finishes, restoring normal character entry immediately after `Backspace`.
+- Fixed macOS host-owned drag-and-drop operation masks to translate browser-generic drag operations into native `NSDragOperation` values before starting `NSDraggingSession`, so `Move` no longer degrades into AppKit's generic operation bit.
+- Fixed macOS host-owned drag completion to treat drops ending over the same browsing context as successful even when AppKit reports `NSDragOperationNone`, restoring DOM `drop` delivery for internal page drops.
 
 ## [0.1.0-alpha.3] - 2026-03-31
 
