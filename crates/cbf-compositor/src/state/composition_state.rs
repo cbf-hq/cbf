@@ -5,8 +5,7 @@ use crate::{
     model::{
         CompositionItemId, CompositionItemSpec, CompositorWindowId, HitTestCoordinateSpace,
         HitTestPolicy, HitTestRegion, HitTestRegionMode, HitTestRegionSnapshot, Rect,
-        SurfaceTarget,
-        WindowCompositionSpec,
+        SurfaceTarget, WindowCompositionSpec,
     },
 };
 

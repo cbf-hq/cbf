@@ -2,12 +2,10 @@ use std::collections::HashMap;
 
 use objc2_core_foundation::CGPoint;
 
-use crate::model::{
-    CompositionItemId, HitTestPolicy,
-};
+use crate::model::{CompositionItemId, HitTestPolicy};
 
 use super::surface_slot::SurfaceSlot;
-use crate::platform::hit_test::{snapshot_contains_point, ItemLocalCssPoint};
+use crate::platform::hit_test::{ItemLocalCssPoint, snapshot_contains_point};
 
 pub(crate) fn topmost_item_at_point(
     order: &[CompositionItemId],
@@ -114,8 +112,7 @@ mod tests {
             ),
         );
 
-        let topmost =
-            topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0));
+        let topmost = topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0));
         assert_eq!(topmost, Some(first));
     }
 
@@ -141,8 +138,7 @@ mod tests {
             ),
         );
 
-        let topmost =
-            topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0));
+        let topmost = topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0));
         assert_eq!(topmost, Some(second));
     }
 
@@ -167,8 +163,7 @@ mod tests {
             ),
         );
 
-        let topmost =
-            topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0));
+        let topmost = topmost_item_at_point(&[first, second], &slots, CGPoint::new(10.0, 10.0));
         assert_eq!(topmost, Some(second));
     }
 

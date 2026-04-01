@@ -1,4 +1,4 @@
-use crate::model::{HitTestCoordinateSpace, HitTestRegionSnapshot, HitTestRegionMode};
+use crate::model::{HitTestCoordinateSpace, HitTestRegionMode, HitTestRegionSnapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ItemLocalCssPoint {
@@ -37,7 +37,7 @@ mod tests {
         HitTestCoordinateSpace, HitTestRegion, HitTestRegionMode, HitTestRegionSnapshot,
     };
 
-    use super::{snapshot_contains_point, ItemLocalCssPoint};
+    use super::{ItemLocalCssPoint, snapshot_contains_point};
 
     fn snapshot(mode: HitTestRegionMode) -> HitTestRegionSnapshot {
         HitTestRegionSnapshot {
