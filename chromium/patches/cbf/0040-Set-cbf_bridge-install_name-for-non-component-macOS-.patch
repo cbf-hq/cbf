@@ -1,4 +1,4 @@
-From 74d113039542d08a3f81e9d2dacb4c06106664cd Mon Sep 17 00:00:00 2001
+From 8e04c43977ed134ff4a9679e1af1768594584d09 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Mar 2026 11:00:11 +0900
 Subject: [PATCH 40/47] Set cbf_bridge install_name for non-component macOS

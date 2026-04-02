@@ -1,4 +1,4 @@
-From 7994d935694f9729d67ed5f345c2c60d2b5643a0 Mon Sep 17 00:00:00 2001
+From d73c80d29e05342b447283dbf5d7c59d3e341f89 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 23 Mar 2026 10:26:03 +0900
 Subject: [PATCH 38/47] Add host-driven custom scheme responder

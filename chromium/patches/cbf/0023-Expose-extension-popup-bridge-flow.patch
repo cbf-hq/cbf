@@ -1,4 +1,4 @@
-From 461e6172164104ee57ef4ce210e35c64af70dd2d Mon Sep 17 00:00:00 2001
+From dfd7436c61e0f6c80d66241607ab24fcbc6ecd93 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 10 Mar 2026 15:49:25 +0900
 Subject: [PATCH 23/47] Expose extension popup bridge flow
@@ -3268,10 +3268,10 @@ index f8144f13abf01..2967152f359a2 100644
  
  }  // namespace cbf
 diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
-index 16e0e9fdb7e9d..0635841a84083 100644
+index 18e450b148364..c9feaf63de01a 100644
 --- a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
 +++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
-@@ -131,6 +131,13 @@ void CbfProfileInputController::SendKeyEvent(
+@@ -130,6 +130,13 @@ void CbfProfileInputController::SendKeyEvent(
      const std::optional<std::vector<std::string>>& commands) {
    content::WebContents* web_contents =
        context_->tab_manager().GetWebContents(event->tab_id);
@@ -3285,7 +3285,7 @@ index 16e0e9fdb7e9d..0635841a84083 100644
    if (!web_contents) {
      return;
    }
-@@ -183,6 +190,12 @@ void CbfProfileInputController::SendKeyEvent(
+@@ -182,6 +189,12 @@ void CbfProfileInputController::SendKeyEvent(
  void CbfProfileInputController::SendMouseEvent(mojom::CbfMouseEventPtr event) {
    content::WebContents* web_contents =
        context_->tab_manager().GetWebContents(event->tab_id);
@@ -3298,7 +3298,7 @@ index 16e0e9fdb7e9d..0635841a84083 100644
    if (!web_contents) {
      return;
    }
-@@ -229,6 +242,12 @@ void CbfProfileInputController::SendMouseWheelEvent(
+@@ -227,6 +240,12 @@ void CbfProfileInputController::SendMouseWheelEvent(
      mojom::CbfMouseWheelEventPtr event) {
    content::WebContents* web_contents =
        context_->tab_manager().GetWebContents(event->tab_id);

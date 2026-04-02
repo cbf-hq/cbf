@@ -14,6 +14,10 @@ source-built use rather than a downloadable binary bundle.
 
 ## [Unreleased]
 
+### Fixed
+
+- Extension popups that query the last-focused CBF embedded browser window now resolve the active page origin correctly instead of falling back to `about:` in site-specific UI such as Dark Reader's per-site dark mode toggle. Embedded browser windows now track logical activation through `SetTabFocus()` and participate in Chromium's last-active browser resolution path.
+- Mouse input forwarded into CBF embedded browser tabs now routes through Chromium's input event router even for embedded-browser windows, restoring OOPIF iframe hit testing and click delivery instead of dropping forwarded mouse events on out-of-process subframes.
 ## [cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1] - 2026-03-27
 
 ### Added

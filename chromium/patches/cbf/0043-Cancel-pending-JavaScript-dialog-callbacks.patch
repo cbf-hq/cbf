@@ -1,4 +1,4 @@
-From c1b351a830738e341e9d94c25232c6fb43bbee88 Mon Sep 17 00:00:00 2001
+From ebfbb99ffeb85a455b5beb3b87e81782365a1359 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Mar 2026 20:02:54 +0900
 Subject: [PATCH 43/47] Cancel pending JavaScript dialog callbacks

@@ -1,4 +1,4 @@
-From 692bf1cefa02cfe52cddd776f83e0ecc47c4c825 Mon Sep 17 00:00:00 2001
+From b6754f5140571f125607c4dcd5baf888f2384fa0 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 16 Mar 2026 09:35:38 +0900
 Subject: [PATCH 29/47] Add host-driven edit action flow
@@ -328,10 +328,10 @@ index b1e97878f3f40..5b81aa31be80f 100644
    SendExtensionPopupMouseWheelEvent(uint64 popup_id, CbfMouseWheelEvent event);
    SetExtensionPopupComposition(uint64 popup_id, CbfImeComposition composition);
 diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
-index 0635841a84083..bce9748ddc8ea 100644
+index c9feaf63de01a..93c4c480bcb4b 100644
 --- a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
 +++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
-@@ -187,6 +187,42 @@ void CbfProfileInputController::SendKeyEventToWebContents(
+@@ -186,6 +186,42 @@ void CbfProfileInputController::SendKeyEventToWebContents(
        key_event, ui::LatencyInfo(), std::move(edit_commands));
  }
  

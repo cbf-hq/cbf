@@ -1,4 +1,4 @@
-From 957e87105ac52bfec14f3f12bd88c9901237630d Mon Sep 17 00:00:00 2001
+From 413031e29e0ec04243469aabf0aa4ef0306171b2 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 7 Mar 2026 10:51:45 +0900
 Subject: [PATCH 20/47] Add CBF download prompt and lifecycle events
@@ -19,7 +19,7 @@ Subject: [PATCH 20/47] Add CBF download prompt and lifecycle events
  .../cbf/cbf_profile_service_browsertest.cc    | 434 +++++++++++++
  .../browser/cbf/cbf_web_contents_delegate.cc  |  22 +
  chrome/browser/cbf/mojom/cbf_browser.mojom    |  76 +++
- .../profile/cbf_profile_input_controller.cc   |  15 +-
+ .../profile/cbf_profile_input_controller.cc   |  11 +-
  .../cbf/test/cbf_test_profile_observer.cc     | 335 +++++++++-
  .../cbf/test/cbf_test_profile_observer.h      | 184 ++++++
  .../download/download_core_service_impl.cc    |  29 +
@@ -28,7 +28,7 @@ Subject: [PATCH 20/47] Add CBF download prompt and lifecycle events
  .../internal/common/resource_downloader.cc    |  15 +-
  .../internal/common/resource_downloader.h     |   7 +-
  .../browser/download/download_manager_impl.cc |   3 +-
- 24 files changed, 2324 insertions(+), 39 deletions(-)
+ 24 files changed, 2321 insertions(+), 38 deletions(-)
  create mode 100644 chrome/browser/cbf/cbf_download_manager_delegate.cc
  create mode 100644 chrome/browser/cbf/cbf_download_manager_delegate.h
 
@@ -2367,18 +2367,10 @@ index 1b3e8408079f3..3b31b1580a53d 100644
    RespondTabOpen(CbfTabOpenResponse response);
  };
 diff --git a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
-index ddc7d15298584..16e0e9fdb7e9d 100644
+index ddc7d15298584..18e450b148364 100644
 --- a/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
 +++ b/chrome/browser/cbf/profile/cbf_profile_input_controller.cc
-@@ -8,6 +8,7 @@
- #include "base/logging.h"
- #include "base/strings/utf_string_conversions.h"
- #include "base/time/time.h"
-+#include "chrome/browser/cbf/cbf_embedded_browser_window.h"
- #include "chrome/browser/cbf/mojo/cbf_mojom_converters.h"
- #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
- #include "components/input/render_widget_host_input_event_router.h"
-@@ -199,19 +200,25 @@ void CbfProfileInputController::SendMouseEvent(mojom::CbfMouseEventPtr event) {
+@@ -199,19 +199,24 @@ void CbfProfileInputController::SendMouseEvent(mojom::CbfMouseEventPtr event) {
    mouse_event.is_raw_movement_event = event->is_raw_movement_event;
    mouse_event.pointer_type = mojo_converters::ToWebPointerType(event->pointer_type);
  
@@ -2391,9 +2383,7 @@ index ddc7d15298584..16e0e9fdb7e9d 100644
 +  }
 +
    ui::LatencyInfo latency_info;
--  if (RouteMouseEventViaInputRouter(web_contents, &mouse_event, latency_info)) {
-+  if (!IsCbfEmbeddedBrowser(web_contents) &&
-+      RouteMouseEventViaInputRouter(web_contents, &mouse_event, latency_info)) {
+   if (RouteMouseEventViaInputRouter(web_contents, &mouse_event, latency_info)) {
      return;
    }
  
