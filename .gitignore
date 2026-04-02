@@ -2,7 +2,7 @@
 .venv
 .dev
 __pycache__
-/target
+target
 .cargo
 dist
 
@@ -21,4 +21,3 @@ depot_tools
 
 # OS
 .DS_Store
-
