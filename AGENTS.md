@@ -85,6 +85,9 @@ Common targets: `chrome`, `cbf_bridge`, `cbf_tests`, `cbf_browser_tests` `browse
 Tooling helpers (from repo root):
 - `uv run tool build -t chrome -t cbf_bridge`
 - `uv run tool apply` / `export` / `git <args>` / `commit -m "<msg>"`
+- If `cbf_bridge` C ABI or its Chromium-side headers change, regenerate `crates/cbf-chrome-sys/src/ffi_data_generated.rs`
+  and `crates/cbf-chrome-sys/src/ffi_bridge_generated.rs` with `uv run tool ffi generate`, then check with
+  `uv run tool ffi verify`.
 
 ## Chromium Runtime and Linking
 
