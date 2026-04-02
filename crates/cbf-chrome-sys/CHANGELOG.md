@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `cbf-chrome-sys` now resolves `libcbf_bridge` at runtime with `libloading` instead of relying on Cargo link-time bridge configuration.
 - `ffi_generated.rs` is removed and new `ffi_data_generated.rs` and `ffi_bridge_generated.rs` are now a complete bindgen mirror of `cbf_bridge_ffi.h` instead of a handwritten Rust-side ABI copy.
-- `bridge_api_generated.rs` is now generated with bindgen dynamic loading from `cbf_bridge.h`, replacing the handwritten symbol table and bridge-call wrapper layer.
+- `ffi_bridge_generated.rs` (former `bridge_api_generated.rs`) is now generated with bindgen dynamic loading from `cbf_bridge.h`, replacing the handwritten symbol table and bridge-call wrapper layer.
 - FFI generation ownership now lives under `crates/cbf-chrome-sys`, with the repo-level tool entrypoint acting as a thin wrapper around the crate-local generator.
 
 ## [146.1.0-alpha.1] - 2026-03-16
