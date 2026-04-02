@@ -225,6 +225,11 @@ define_class!(
             }
 
             if had_marked_text && should_ignore_accelerator_with_marked_text(event) {
+                if text_inserted {
+                    self.send_inserted_text(text_to_be_inserted, text_inserted_as_commit);
+                } else if self.ivars().unmark_text_called.get() {
+                    self.send_finish_composing(false);
+                }
                 self.ivars().pending_char_event.borrow_mut().take();
                 self.ivars().suppress_key_up.set(true);
                 return;
