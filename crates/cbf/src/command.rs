@@ -62,7 +62,7 @@ pub enum BrowserCommand {
         allow: bool,
     },
 
-    /// Create a new web page (tab).
+    /// Create a new browsing context.
     ///
     /// - `initial_url`: If `None`, the backend may create an empty page.
     /// - `profile_id`: A canonical backend-issued profile identifier from `ListProfiles`.

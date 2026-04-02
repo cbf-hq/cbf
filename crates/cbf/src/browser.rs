@@ -242,7 +242,7 @@ impl<B: Backend> BrowserHandle<B> {
         self.command_tx.send_raw(raw)
     }
 
-    /// Create a new web page (tab) with an optional initial URL and a canonical profile id.
+    /// Create a new browsing context with an optional initial URL and a canonical profile id.
     pub fn create_browsing_context(
         &self,
         request_id: u64,

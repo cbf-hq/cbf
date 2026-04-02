@@ -43,7 +43,7 @@ pub enum BrowserEvent {
         terminal_hint: bool,
     },
 
-    /// An event scoped to a specific web page (tab).
+    /// An event scoped to a specific browsing context.
     BrowsingContext {
         profile_id: String,
         browsing_context_id: BrowsingContextId,
@@ -203,11 +203,11 @@ pub enum BackendStopReason {
     Error(BackendErrorInfo),
 }
 
-/// Events emitted from a specific web page (tab).
+/// Events emitted from a specific browsing context.
 /// The host application consumes these events to update UI and state.
 #[derive(Debug, Clone)]
 pub enum BrowsingContextEvent {
-    /// The web page was created.
+    /// The browsing context was created.
     Created { request_id: u64 },
 
     // --- Navigation & History ---
@@ -229,7 +229,7 @@ pub enum BrowsingContextEvent {
         is_loading: bool,
     },
 
-    /// The page title was updated.
+    /// The browsing context title was updated.
     TitleUpdated { title: String },
 
     /// The favicon URL was updated.
@@ -248,10 +248,10 @@ pub enum BrowsingContextEvent {
     /// Fullscreen state toggled.
     FullscreenToggled { is_fullscreen: bool },
 
-    /// A tab close was requested (e.g., window.close).
+    /// A browsing context close was requested (e.g., window.close).
     CloseRequested,
 
-    /// The web page was closed.
+    /// The browsing context was closed.
     Closed,
 
     /// IME bounds information was updated.
