@@ -12,8 +12,8 @@ INCLUDE_DIR = CRATE_ROOT / "include"
 FFI_WRAPPER_HEADER = INCLUDE_DIR / "cbf_bridge_ffi_bindgen_wrapper.h"
 BRIDGE_WRAPPER_HEADER = INCLUDE_DIR / "cbf_bridge_bindgen_wrapper.h"
 
-FFI_GENERATED = SRC_DIR / "ffi_generated.rs"
-BRIDGE_API_GENERATED = SRC_DIR / "bridge_api_generated.rs"
+FFI_DATA_GENERATED = SRC_DIR / "ffi_data_generated.rs"
+FFI_BRIDGE_GENERATED = SRC_DIR / "ffi_bridge_generated.rs"
 
 FFI_ALLOW_ATTR = """#![allow(
     dead_code,
@@ -56,7 +56,7 @@ def _run_bindgen(args: list[str]) -> str:
 
 
 def generate_ffi_types(*, output_path: Path | None = None) -> Path:
-    output = output_path or FFI_GENERATED
+    output = output_path or FFI_DATA_GENERATED
     text = _run_bindgen(
         [
             "bindgen",
@@ -81,7 +81,7 @@ def generate_ffi_types(*, output_path: Path | None = None) -> Path:
 
 
 def generate_bridge_api(*, output_path: Path | None = None) -> Path:
-    output = output_path or BRIDGE_API_GENERATED
+    output = output_path or FFI_BRIDGE_GENERATED
     text = _run_bindgen(
         [
             "bindgen",
@@ -126,13 +126,13 @@ def _verify_file(expected: Path, generated: Path) -> list[str]:
 def verify() -> int:
     with tempfile.TemporaryDirectory(prefix="cbf-ffi-") as temp_dir:
         temp_root = Path(temp_dir)
-        ffi_temp = temp_root / "ffi_generated.rs"
-        bridge_temp = temp_root / "bridge_api_generated.rs"
+        ffi_temp = temp_root / FFI_DATA_GENERATED
+        bridge_temp = temp_root / FFI_BRIDGE_GENERATED
         generate_ffi_types(output_path=ffi_temp)
         generate_bridge_api(output_path=bridge_temp)
 
-        diffs = _verify_file(FFI_GENERATED, ffi_temp) + _verify_file(
-            BRIDGE_API_GENERATED, bridge_temp
+        diffs = _verify_file(FFI_DATA_GENERATED, ffi_temp) + _verify_file(
+            FFI_BRIDGE_GENERATED, bridge_temp
         )
         if diffs:
             print("\n".join(diffs))
@@ -158,8 +158,8 @@ def main() -> int:
     if args.command == "generate":
         generate_ffi_types()
         generate_bridge_api()
-        print(f"Wrote {FFI_GENERATED.relative_to(REPO_ROOT)}")
-        print(f"Wrote {BRIDGE_API_GENERATED.relative_to(REPO_ROOT)}")
+        print(f"Wrote {FFI_DATA_GENERATED.relative_to(REPO_ROOT)}")
+        print(f"Wrote {FFI_BRIDGE_GENERATED.relative_to(REPO_ROOT)}")
         return 0
     if args.command == "verify":
         return verify()
