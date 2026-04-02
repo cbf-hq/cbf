@@ -12,7 +12,7 @@ If you will modify Chromium-side code or bridge internals, use [Contributor Setu
 The CBF Chromium fork and `cbf_bridge` library are distributed together in the same runtime artifact on GitHub Releases.
 Most users should download the prebuilt runtime package from the `cbf-chrome-runtime` tags.
 
-Latest runtime release: [cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1](https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v146.0.0-alpha.2%2Bchromium-146.0.7680.153-r1)
+Latest runtime release: [cbf-chrome-runtime-v146.0.0-alpha.3+chromium-146.0.7680.153-r1](https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v146.0.0-alpha.3%2Bchromium-146.0.7680.153-r1)
 
 If you need a custom build instead, you can also build both artifacts locally from the Chromium tree; see [Contributor Setup](../developer-guide/contributor-setup.md).
 

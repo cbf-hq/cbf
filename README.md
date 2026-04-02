@@ -103,9 +103,9 @@ Download the artifact published under the `cbf-chrome-runtime` tag for your plat
 
 Current release distribution includes:
 
-- GitHub Releases (`cbf-chrome-runtime` tags): `cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1-macos-aarch64.tar.gz`
+- GitHub Releases (`cbf-chrome-runtime` tags): `cbf-chrome-runtime-v146.0.0-alpha.3+chromium-146.0.7680.153-r1-macos-aarch64.tar.gz`
   - Contains `Chromium.app` and `libcbf_bridge.dylib`
-  - Latest release: [cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1](https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v146.0.0-alpha.2%2Bchromium-146.0.7680.153-r1)
+  - Latest release: [cbf-chrome-runtime-v146.0.0-alpha.3+chromium-146.0.7680.153-r1](https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-runtime-v146.0.0-alpha.3%2Bchromium-146.0.7680.153-r1)
 - crates.io:
   - `cbf`
   - `cbf-compositor`

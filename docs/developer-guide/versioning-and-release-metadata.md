@@ -212,7 +212,7 @@ runtime version and the same Chromium version, for example:
 
 Examples:
 
-- `cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1`
+- `cbf-chrome-runtime-v146.0.0-alpha.3+chromium-146.0.7680.153-r1`
 - `cbf-chrome-runtime-v146.0.0+chromium-146.0.7632.160-r1`
 - `cbf-chrome-runtime-v146.0.0+chromium-146.0.7632.160-r2`
 - `cbf-chrome-runtime-v146.0.1+chromium-146.0.7680.154-r1`
