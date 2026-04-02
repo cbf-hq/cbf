@@ -1,6 +1,6 @@
 [package]
 name = "cbf-chrome-sys"
-version = "146.1.0-alpha.2"
+version = "146.1.0-alpha.3"
 edition.workspace = true
 authors.workspace = true
 description = "Low-level Chromium bridge bindings for CBF."
