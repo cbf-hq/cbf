@@ -4,8 +4,8 @@
 
 It defines the bridge-facing ABI used by `cbf-chrome`, loads `libcbf_bridge` at runtime, and tracks compatibility by Chromium milestone line.
 
-The ABI mirror in `ffi_generated.rs` and the runtime bridge loader in
-`bridge_api_generated.rs` are both generated with bindgen. `bridge.rs` owns
+The ABI mirror in `ffi_data_generated.rs` and the runtime bridge loader in
+`ffi_bridge_generated.rs` are both generated with bindgen. `bridge.rs` owns
 CBF-specific library path resolution and singleton management.
 
 Regenerate both generated files with `uv run tool ffi generate`, and verify
