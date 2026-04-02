@@ -1,7 +1,7 @@
 From 6f4f6304c67bddc7d470bf1c11f51e9d482321ab Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 27 Mar 2026 14:08:11 +0900
-Subject: [PATCH 46/47] Preserve transparent fallback backgrounds on macOS
+Subject: [PATCH 46/48] Preserve transparent fallback backgrounds on macOS
 
 ---
  .../render_widget_host_view_mac.mm            |  7 ++--

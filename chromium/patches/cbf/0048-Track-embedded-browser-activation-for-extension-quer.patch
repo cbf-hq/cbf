@@ -1,0 +1,560 @@
+From 839788e93c957a586f93f2867eacec4c6db93fca Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 2 Apr 2026 11:34:19 +0900
+Subject: [PATCH 48/48] Track embedded browser activation for extension queries
+
+---
+ .../cbf/cbf_embedded_browser_window.cc        | 61 +++++++++-----
+ .../browser/cbf/cbf_embedded_browser_window.h |  1 +
+ .../cbf/cbf_profile_service_browsertest.cc    | 81 ++++++++++++++++---
+ chrome/browser/cbf/cbf_tab_manager.cc         | 39 +++++----
+ chrome/browser/cbf/cbf_tab_manager.h          | 12 +--
+ .../cbf_profile_navigation_controller.cc      | 42 ++++++++--
+ 6 files changed, 179 insertions(+), 57 deletions(-)
+
+diff --git a/chrome/browser/cbf/cbf_embedded_browser_window.cc b/chrome/browser/cbf/cbf_embedded_browser_window.cc
+index 7664bf93a731a..707c8aaa78cf4 100644
+--- a/chrome/browser/cbf/cbf_embedded_browser_window.cc
++++ b/chrome/browser/cbf/cbf_embedded_browser_window.cc
+@@ -13,19 +13,19 @@
+ #include "build/buildflag.h"
+ #include "chrome/browser/ui/autofill/autofill_bubble_handler.h"
+ #include "chrome/browser/ui/autofill/save_address_bubble_controller.h"
+-#include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
+-#include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/autofill/update_address_bubble_controller.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_list.h"
+ #include "chrome/browser/ui/browser_list_observer.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+-#include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "chrome/browser/ui/dialogs/browser_dialogs.h"
++#include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
+ #include "chrome/browser/ui/find_bar/find_bar.h"
+ #include "chrome/browser/ui/location_bar/location_bar.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/views/bubble_anchor_util_views.h"
++#include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "components/sharing_message/sharing_dialog_data.h"
+ #include "content/public/browser/eye_dropper.h"
+ #include "content/public/browser/keyboard_event_processing_result.h"
+@@ -89,7 +89,8 @@ class CbfEmbeddedBrowserWindow final : public BrowserWindow,
+     LocationBarTesting* GetLocationBarForTesting() override { return nullptr; }
+   };
+ 
+-  class StubAutofillBubbleHandler final : public autofill::AutofillBubbleHandler {
++  class StubAutofillBubbleHandler final
++      : public autofill::AutofillBubbleHandler {
+    public:
+     StubAutofillBubbleHandler() = default;
+     StubAutofillBubbleHandler(const StubAutofillBubbleHandler&) = delete;
+@@ -199,8 +200,7 @@ class CbfEmbeddedBrowserWindow final : public BrowserWindow,
+   }
+ 
+   CbfEmbeddedBrowserWindow(const CbfEmbeddedBrowserWindow&) = delete;
+-  CbfEmbeddedBrowserWindow& operator=(const CbfEmbeddedBrowserWindow&) =
+-      delete;
++  CbfEmbeddedBrowserWindow& operator=(const CbfEmbeddedBrowserWindow&) = delete;
+ 
+   ~CbfEmbeddedBrowserWindow() override {
+     if (browser_) {
+@@ -223,9 +223,29 @@ class CbfEmbeddedBrowserWindow final : public BrowserWindow,
+     }
+     is_closed_ = true;
+   }
+-  void Activate() override {}
+-  void Deactivate() override {}
+-  bool IsActive() const override { return false; }
++  void Activate() override {
++    if (is_active_) {
++      return;
++    }
++
++    // Embedded CBF tabs do not own an OS browser window; activation is driven
++    // by host-app focus and mirrored into Chromium's browser activation state.
++    is_active_ = true;
++    if (browser_) {
++      browser_->DidBecomeActive();
++    }
++  }
++  void Deactivate() override {
++    if (!is_active_) {
++      return;
++    }
++
++    is_active_ = false;
++    if (browser_) {
++      browser_->DidBecomeInactive();
++    }
++  }
++  bool IsActive() const override { return is_active_; }
+   void FlashFrame(bool flash) override {}
+   ui::ZOrderLevel GetZOrderLevel() const override {
+     return ui::ZOrderLevel::kNormal;
+@@ -243,9 +263,7 @@ class CbfEmbeddedBrowserWindow final : public BrowserWindow,
+     return false;
+   }
+   ui::NativeTheme* GetNativeTheme() override { return nullptr; }
+-  const ui::ThemeProvider* GetThemeProvider() const override {
+-    return nullptr;
+-  }
++  const ui::ThemeProvider* GetThemeProvider() const override { return nullptr; }
+   const ui::ColorProvider* GetColorProvider() const override {
+     return ui::ColorProviderManager::Get().GetColorProviderFor(
+         ui::ColorProviderKey());
+@@ -329,7 +347,8 @@ class CbfEmbeddedBrowserWindow final : public BrowserWindow,
+       const input::NativeWebKeyboardEvent& event) override {
+     return content::KeyboardEventProcessingResult::NOT_HANDLED;
+   }
+-  bool HandleKeyboardEvent(const input::NativeWebKeyboardEvent& event) override {
++  bool HandleKeyboardEvent(
++      const input::NativeWebKeyboardEvent& event) override {
+     return false;
+   }
+   bool IsBookmarkBarVisible() const override { return false; }
+@@ -430,9 +449,7 @@ class CbfEmbeddedBrowserWindow final : public BrowserWindow,
+   void ShowIncognitoClearBrowsingDataDialog() override {}
+   void ShowIncognitoHistoryDisclaimerDialog() override {}
+ #endif
+-  ExclusiveAccessContext* GetExclusiveAccessContext() override {
+-    return this;
+-  }
++  ExclusiveAccessContext* GetExclusiveAccessContext() override { return this; }
+ 
+   // ExclusiveAccessContext:
+   Profile* GetProfile() override {
+@@ -481,11 +498,15 @@ class CbfEmbeddedBrowserWindow final : public BrowserWindow,
+   void OnBrowserAdded(Browser* browser) override {
+     if (browser->create_params().window == this) {
+       browser_ = browser;
++      if (is_active_) {
++        browser_->DidBecomeActive();
++      }
+       browser_list_observer_.Reset();
+     }
+   }
+ 
+   bool is_closed_ = false;
++  bool is_active_ = false;
+   bool is_tab_modal_popup_deprecated_ = false;
+   StubAutofillBubbleHandler autofill_bubble_handler_;
+   StubLocationBar location_bar_;
+@@ -508,6 +529,11 @@ Browser* CreateCbfEmbeddedBrowser(Profile* profile, bool for_devtools) {
+   return Browser::Create(params);
+ }
+ 
++bool IsCbfEmbeddedBrowser(Browser* browser) {
++  return browser && browser->omit_from_session_restore() && browser->window() &&
++         browser->window()->AsBrowserView() == nullptr;
++}
++
+ bool IsCbfEmbeddedBrowser(content::WebContents* web_contents) {
+   if (!web_contents) {
+     return false;
+@@ -520,8 +546,7 @@ bool IsCbfEmbeddedBrowser(content::WebContents* web_contents) {
+   }
+ 
+   Browser* browser = browser_window_interface->GetBrowserForMigrationOnly();
+-  return browser && browser->omit_from_session_restore() &&
+-         browser->window() && browser->window()->AsBrowserView() == nullptr;
++  return IsCbfEmbeddedBrowser(browser);
+ }
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_embedded_browser_window.h b/chrome/browser/cbf/cbf_embedded_browser_window.h
+index 91e48712a1e6f..08189a2b5a475 100644
+--- a/chrome/browser/cbf/cbf_embedded_browser_window.h
++++ b/chrome/browser/cbf/cbf_embedded_browser_window.h
+@@ -12,6 +12,7 @@ namespace cbf {
+ // Creates a browser-backed shell for embedded CBF tabs without creating a
+ // visible Chromium browser window.
+ Browser* CreateCbfEmbeddedBrowser(Profile* profile, bool for_devtools);
++bool IsCbfEmbeddedBrowser(Browser* browser);
+ bool IsCbfEmbeddedBrowser(content::WebContents* web_contents);
+ 
+ }  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 52bd04e95bafa..421a75783ff43 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -16,8 +16,8 @@
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/stringprintf.h"
+ #include "base/task/cancelable_task_tracker.h"
+-#include "base/test/scoped_feature_list.h"
+ #include "base/test/run_until.h"
++#include "base/test/scoped_feature_list.h"
+ #include "base/threading/thread_restrictions.h"
+ #include "base/values.h"
+ #include "build/build_config.h"
+@@ -40,6 +40,7 @@
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+ #include "chrome/browser/ui/webui/webui_embedding_context.h"
+ #include "chrome/common/url_constants.h"
+ #include "chrome/test/base/in_process_browser_test.h"
+@@ -2289,8 +2290,8 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                                 WindowOpenDisposition::CURRENT_TAB,
+                                 ui::PAGE_TRANSITION_LINK, false);
+   content::WebContents* returned_contents =
+-      profile_service_->GetWebContentsDelegate()->OpenURLFromTab(
+-          web_contents, params, {});
++      profile_service_->GetWebContentsDelegate()->OpenURLFromTab(web_contents,
++                                                                 params, {});
+   EXPECT_EQ(returned_contents, web_contents);
+   base::RunLoop().RunUntilIdle();
+ 
+@@ -2427,6 +2428,67 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   EXPECT_FALSE(host_browser->window()->IsLocationBarVisible());
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SetTabFocusActivatesEmbeddedBrowserWindow) {
++  const TabId tab_id = CreatePage();
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  Browser* host_browser = GetHostBrowserForTab(tab_id);
++  ASSERT_NE(host_browser, nullptr);
++  ASSERT_NE(host_browser->window(), nullptr);
++
++  profile_service_->SetTabFocus(tab_id, true);
++
++  EXPECT_TRUE(host_browser->window()->IsActive());
++  EXPECT_TRUE(host_browser->IsActive());
++  EXPECT_EQ(GetLastActiveBrowserWindowInterfaceWithAnyProfile(),
++            static_cast<BrowserWindowInterface*>(host_browser));
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SetTabFocusTransfersActivationBetweenEmbeddedBrowsers) {
++  const TabId first_tab_id = CreatePage();
++  const TabId second_tab_id = CreatePage();
++  ASSERT_NE(first_tab_id, kInvalidTabId);
++  ASSERT_NE(second_tab_id, kInvalidTabId);
++
++  Browser* first_browser = GetHostBrowserForTab(first_tab_id);
++  Browser* second_browser = GetHostBrowserForTab(second_tab_id);
++  ASSERT_NE(first_browser, nullptr);
++  ASSERT_NE(second_browser, nullptr);
++  ASSERT_NE(first_browser->window(), nullptr);
++  ASSERT_NE(second_browser->window(), nullptr);
++
++  profile_service_->SetTabFocus(first_tab_id, true);
++  profile_service_->SetTabFocus(second_tab_id, true);
++
++  EXPECT_FALSE(first_browser->window()->IsActive());
++  EXPECT_FALSE(first_browser->IsActive());
++  EXPECT_TRUE(second_browser->window()->IsActive());
++  EXPECT_TRUE(second_browser->IsActive());
++  EXPECT_EQ(GetLastActiveBrowserWindowInterfaceWithAnyProfile(),
++            static_cast<BrowserWindowInterface*>(second_browser));
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SetTabFocusFalseDeactivatesEmbeddedBrowserWindow) {
++  const TabId tab_id = CreatePage();
++  ASSERT_NE(tab_id, kInvalidTabId);
++
++  Browser* host_browser = GetHostBrowserForTab(tab_id);
++  ASSERT_NE(host_browser, nullptr);
++  ASSERT_NE(host_browser->window(), nullptr);
++
++  profile_service_->SetTabFocus(tab_id, true);
++  ASSERT_TRUE(host_browser->window()->IsActive());
++  ASSERT_TRUE(host_browser->IsActive());
++
++  profile_service_->SetTabFocus(tab_id, false);
++
++  EXPECT_FALSE(host_browser->window()->IsActive());
++  EXPECT_FALSE(host_browser->IsActive());
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        HistoryPageHidesSyncedTabsUiInCbfTabs) {
+   const TabId tab_id = CreatePage("chrome://history");
+@@ -2680,7 +2742,8 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+ 
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest, FindInPageEmitsReply) {
+   const TabId tab_id = CreatePage(
+-      "data:text/html,<html><body>needle alpha needle beta needle</body></html>");
++      "data:text/html,<html><body>needle alpha needle beta "
++      "needle</body></html>");
+   ASSERT_NE(tab_id, kInvalidTabId);
+   WaitForLoad(tab_id);
+ 
+@@ -2716,8 +2779,8 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                                       baseline_count, tab_id) >= 1;
+   }));
+ 
+-  profile_service_remote_->FindInPage(tab_id, 202, "needle", true, false,
+-                                      false, true);
++  profile_service_remote_->FindInPage(tab_id, 202, "needle", true, false, false,
++                                      true);
+   ASSERT_TRUE(base::test::RunUntil([&]() {
+     return CountFinalFindRepliesSince(observer_.find_reply_events(),
+                                       baseline_count, tab_id) >= 2;
+@@ -2744,7 +2807,8 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   EXPECT_EQ(initial_event->request_id, 201u);
+   EXPECT_EQ(next_event->request_id, 202u);
+   EXPECT_EQ(previous_event->request_id, 203u);
+-  EXPECT_GT(next_event->active_match_ordinal, initial_event->active_match_ordinal);
++  EXPECT_GT(next_event->active_match_ordinal,
++            initial_event->active_match_ordinal);
+   EXPECT_EQ(previous_event->active_match_ordinal,
+             initial_event->active_match_ordinal);
+ }
+@@ -2779,8 +2843,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   WaitForLoad(tab_id);
+ 
+   const size_t baseline_count = observer_.find_reply_events().size();
+-  profile_service_remote_->FindInPage(tab_id, 401, "", true, false, true,
+-                                      true);
++  profile_service_remote_->FindInPage(tab_id, 401, "", true, false, true, true);
+   base::RunLoop().RunUntilIdle();
+ 
+   EXPECT_EQ(observer_.find_reply_events().size(), baseline_count);
+diff --git a/chrome/browser/cbf/cbf_tab_manager.cc b/chrome/browser/cbf/cbf_tab_manager.cc
+index ebefdcfe22a3d..74aeeb88c278f 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.cc
++++ b/chrome/browser/cbf/cbf_tab_manager.cc
+@@ -50,8 +50,7 @@ CbfTabManager::BrowserRecord::~BrowserRecord() = default;
+ 
+ CbfTabManager::CbfTabManager(::Profile* profile,
+                              CbfProfileService* profile_service)
+-    : profile_(profile),
+-      profile_service_(profile_service) {}
++    : profile_(profile), profile_service_(profile_service) {}
+ 
+ CbfTabManager::~CbfTabManager() {
+   profile_service_ = nullptr;
+@@ -144,9 +143,9 @@ TabId CbfTabManager::CreateTab(const GURL& initial_url) {
+                                                profile_service_);
+ 
+   if (initial_url.is_valid()) {
+-    web_contents_ptr->GetController().LoadURL(
+-        initial_url, content::Referrer(), ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
+-        std::string());
++    web_contents_ptr->GetController().LoadURL(initial_url, content::Referrer(),
++                                              ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
++                                              std::string());
+   }
+ 
+   web_contents_ptr->UpdateWebContentsVisibility(content::Visibility::VISIBLE);
+@@ -155,8 +154,15 @@ TabId CbfTabManager::CreateTab(const GURL& initial_url) {
+   return tab_id;
+ }
+ 
+-content::WebContents* CbfTabManager::GetWebContents(
+-    TabId tab_id) const {
++Browser* CbfTabManager::GetBrowser(TabId tab_id) const {
++  auto it = tabs_.find(tab_id);
++  if (it == tabs_.end()) {
++    return nullptr;
++  }
++  return it->second.browser.get();
++}
++
++content::WebContents* CbfTabManager::GetWebContents(TabId tab_id) const {
+   return ResolveWebContentsForTab(tab_id);
+ }
+ 
+@@ -303,9 +309,9 @@ void CbfTabManager::CloseAllTabs() {
+ }
+ 
+ void CbfTabManager::SetTabSize(TabId tab_id,
+-                                   std::uint32_t width,
+-                                   std::uint32_t height,
+-                                   base::OnceClosure callback) {
++                               std::uint32_t width,
++                               std::uint32_t height,
++                               base::OnceClosure callback) {
+   if (!ResolveWebContentsForTab(tab_id)) {
+     std::move(callback).Run();
+     return;
+@@ -332,9 +338,8 @@ void CbfTabManager::PerformResize(TabId tab_id,
+   in_flight_resizes_.insert(tab_id);
+   web_contents->Resize(gfx::Rect(0, 0, width, height));
+ 
+-  web_contents->GetPrimaryMainFrame()->InsertVisualStateCallback(
+-      base::BindOnce(&CbfTabManager::OnResizeFinished,
+-                     weak_factory_.GetWeakPtr(), tab_id));
++  web_contents->GetPrimaryMainFrame()->InsertVisualStateCallback(base::BindOnce(
++      &CbfTabManager::OnResizeFinished, weak_factory_.GetWeakPtr(), tab_id));
+ }
+ 
+ void CbfTabManager::OnResizeFinished(TabId tab_id, bool success) {
+@@ -404,10 +409,10 @@ content::WebContents* CbfTabManager::ResolveWebContentsForTab(
+   return it->second.web_contents;
+ }
+ 
+-void CbfTabManager::RefreshReverseLookup(TabId tab_id,
+-                                         content::WebContents* new_contents,
+-                                         content::WebContents* old_contents)
+-    const {
++void CbfTabManager::RefreshReverseLookup(
++    TabId tab_id,
++    content::WebContents* new_contents,
++    content::WebContents* old_contents) const {
+   if (old_contents && old_contents != new_contents) {
+     auto it = reverse_lookup_.find(old_contents);
+     if (it != reverse_lookup_.end() && it->second == tab_id) {
+diff --git a/chrome/browser/cbf/cbf_tab_manager.h b/chrome/browser/cbf/cbf_tab_manager.h
+index 1b1152d074bde..d3a3e2f628b39 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.h
++++ b/chrome/browser/cbf/cbf_tab_manager.h
+@@ -5,6 +5,7 @@
+ #include <cstdint>
+ #include <memory>
+ #include <vector>
++
+ #include "base/containers/flat_map.h"
+ #include "base/containers/flat_set.h"
+ #include "base/functional/callback_forward.h"
+@@ -39,6 +40,7 @@ class CbfTabManager {
+   ~CbfTabManager();
+ 
+   TabId CreateTab(const GURL& initial_url);
++  Browser* GetBrowser(TabId tab_id) const;
+   content::WebContents* GetWebContents(TabId tab_id) const;
+   TabId GetTabIdForWebContents(content::WebContents* web_contents) const;
+   std::vector<TabId> GetDirtyTabIds() const;
+@@ -50,9 +52,9 @@ class CbfTabManager {
+   void CloseWebContents(content::WebContents* web_contents);
+   void CloseAllTabs();
+   void SetTabSize(TabId tab_id,
+-                      std::uint32_t width,
+-                      std::uint32_t height,
+-                      base::OnceClosure callback);
++                  std::uint32_t width,
++                  std::uint32_t height,
++                  base::OnceClosure callback);
+ 
+  private:
+   struct BrowserRecord {
+@@ -74,9 +76,7 @@ class CbfTabManager {
+                             content::WebContents* new_contents,
+                             content::WebContents* old_contents) const;
+   void EraseTabRecord(TabId tab_id) const;
+-  void PerformResize(TabId tab_id,
+-                     std::uint32_t width,
+-                     std::uint32_t height);
++  void PerformResize(TabId tab_id, std::uint32_t width, std::uint32_t height);
+   void OnResizeFinished(TabId tab_id, bool success);
+ 
+   raw_ptr<::Profile> profile_;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+index c19b20f2ce9a2..3d869d9db07b1 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_navigation_controller.cc
+@@ -2,12 +2,17 @@
+ 
+ #include <string>
+ 
++#include "chrome/browser/cbf/cbf_embedded_browser_window.h"
+ #include "chrome/browser/cbf/cbf_settings_policy.h"
+ #include "chrome/browser/cbf/profile/cbf_profile_service_context.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_window.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+ #include "content/browser/renderer_host/render_widget_host_impl.h"
+ #include "content/public/browser/navigation_controller.h"
+-#include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/reload_type.h"
++#include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/render_widget_host.h"
+ #include "content/public/browser/render_widget_host_view.h"
+ #include "content/public/browser/web_contents.h"
+@@ -25,7 +30,8 @@ content::RenderWidgetHost* ResolveInputRenderWidgetHost(
+     return nullptr;
+   }
+ 
+-  if (content::RenderFrameHost* focused_frame = web_contents->GetFocusedFrame()) {
++  if (content::RenderFrameHost* focused_frame =
++          web_contents->GetFocusedFrame()) {
+     if (content::RenderWidgetHost* widget_host =
+             focused_frame->GetRenderWidgetHost()) {
+       return widget_host;
+@@ -62,9 +68,21 @@ bool ApplyWebContentsBackgroundPolicy(content::WebContents* web_contents,
+   return true;
+ }
+ 
++Browser* GetLastActiveCbfEmbeddedBrowser() {
++  BrowserWindowInterface* last_active =
++      GetLastActiveBrowserWindowInterfaceWithAnyProfile();
++  if (!last_active) {
++    return nullptr;
++  }
++
++  Browser* browser = last_active->GetBrowserForMigrationOnly();
++  return IsCbfEmbeddedBrowser(browser) ? browser : nullptr;
++}
++
+ }  // namespace
+ 
+-CbfProfileNavigationController::CbfProfileNavigationController(CbfProfileServiceContext* context)
++CbfProfileNavigationController::CbfProfileNavigationController(
++    CbfProfileServiceContext* context)
+     : context_(context) {}
+ 
+ CbfProfileNavigationController::~CbfProfileNavigationController() = default;
+@@ -105,8 +123,7 @@ void CbfProfileNavigationController::GoForward(TabId tab_id) {
+   }
+ }
+ 
+-void CbfProfileNavigationController::Reload(TabId tab_id,
+-                                            bool ignore_cache) {
++void CbfProfileNavigationController::Reload(TabId tab_id, bool ignore_cache) {
+   content::WebContents* web_contents =
+       context_->tab_manager().GetWebContents(tab_id);
+   if (!web_contents) {
+@@ -119,23 +136,31 @@ void CbfProfileNavigationController::Reload(TabId tab_id,
+   web_contents->GetController().Reload(type, true);
+ }
+ 
+-void CbfProfileNavigationController::SetTabFocus(TabId tab_id,
+-                                                     bool focused) {
++void CbfProfileNavigationController::SetTabFocus(TabId tab_id, bool focused) {
+   content::WebContents* web_contents =
+       context_->tab_manager().GetWebContents(tab_id);
+   if (!web_contents) {
+     return;
+   }
++  Browser* host_browser = context_->tab_manager().GetBrowser(tab_id);
+ 
+   auto* widget_impl = content::RenderWidgetHostImpl::From(
+       ResolveInputRenderWidgetHost(web_contents));
+ 
+   if (focused) {
++    Browser* last_active_browser = GetLastActiveCbfEmbeddedBrowser();
++    if (last_active_browser && last_active_browser != host_browser &&
++        last_active_browser->window()) {
++      last_active_browser->window()->Deactivate();
++    }
+     if (widget_impl) {
+       widget_impl->SetPageFocus(true);
+     }
+     web_contents->Focus();
+     web_contents->RestoreFocus();
++    if (host_browser && host_browser->window()) {
++      host_browser->window()->Activate();
++    }
+     return;
+   }
+ 
+@@ -143,6 +168,9 @@ void CbfProfileNavigationController::SetTabFocus(TabId tab_id,
+   if (widget_impl) {
+     widget_impl->SetPageFocus(false);
+   }
++  if (host_browser && host_browser->window()) {
++    host_browser->window()->Deactivate();
++  }
+ }
+ 
+ void CbfProfileNavigationController::SetTabBackgroundPolicy(TabId tab_id,
+-- 
+2.50.1 (Apple Git-155)
+

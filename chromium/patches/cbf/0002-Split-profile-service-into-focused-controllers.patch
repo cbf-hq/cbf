@@ -1,7 +1,7 @@
 From 319d640eff8b38cf0b4e21888911d082cb506507 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 21 Feb 2026 17:31:42 +0900
-Subject: [PATCH 02/47] Split profile service into focused controllers
+Subject: [PATCH 02/48] Split profile service into focused controllers
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   21 +
