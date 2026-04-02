@@ -31,6 +31,7 @@ use crate::data::{
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
     ipc::{TabIpcConfig, TabIpcMessage},
     mouse::ChromeMouseEvent,
+    policy::ChromeBrowsingContextPolicy,
     prompt_ui::{PromptUiId, PromptUiResponse},
     visibility::ChromeTabVisibility,
     window_open::ChromeWindowOpenResponse,
@@ -76,6 +77,7 @@ pub enum ChromeCommand {
         request_id: u64,
         initial_url: Option<String>,
         profile_id: String,
+        policy: Option<ChromeBrowsingContextPolicy>,
     },
     ListProfiles,
     RespondCustomSchemeRequest {
@@ -351,10 +353,12 @@ impl From<BrowserCommand> for ChromeCommand {
                 request_id,
                 initial_url,
                 profile_id,
+                policy,
             } => Self::CreateTab {
                 request_id,
                 initial_url,
                 profile_id,
+                policy: policy.map(Into::into),
             },
             BrowserCommand::ListProfiles => Self::ListProfiles,
             BrowserCommand::RequestCloseBrowsingContext {
@@ -713,6 +717,7 @@ mod tests {
             background::BackgroundPolicy,
             edit::EditAction,
             ids::{BrowsingContextId, TransientBrowsingContextId},
+            policy::{BrowsingContextPolicy, CapabilityPolicy, IpcPolicy},
             visibility::BrowsingContextVisibility,
         },
     };
@@ -722,6 +727,7 @@ mod tests {
         background::ChromeBackgroundPolicy,
         find::{ChromeFindInPageOptions, ChromeStopFindAction},
         ids::{PopupId, TabId},
+        policy::{ChromeBrowsingContextPolicy, ChromeCapabilityPolicy, ChromeIpcPolicy},
         prompt_ui::{PromptUiId, PromptUiResponse},
         visibility::ChromeTabVisibility,
     };
@@ -982,6 +988,39 @@ mod tests {
                 popup_id,
                 policy: ChromeBackgroundPolicy::Opaque,
             } if popup_id == PopupId::new(26)
+        ));
+    }
+
+    #[test]
+    fn create_browsing_context_policy_converts_to_chrome_policy() {
+        let command = BrowserCommand::CreateBrowsingContext {
+            request_id: 91,
+            initial_url: Some("app://simpleapp/ui.html".to_string()),
+            profile_id: "default".to_string(),
+            policy: Some(BrowsingContextPolicy {
+                ipc: IpcPolicy::Allow {
+                    allowed_origins: vec!["app://simpleapp".to_string()],
+                },
+                extensions: CapabilityPolicy::Deny,
+            }),
+        };
+
+        let raw: ChromeCommand = command.into();
+
+        assert!(matches!(
+            raw,
+            ChromeCommand::CreateTab {
+                request_id,
+                initial_url,
+                profile_id,
+                policy: Some(ChromeBrowsingContextPolicy {
+                    ipc: ChromeIpcPolicy::Allow { allowed_origins },
+                    extensions: ChromeCapabilityPolicy::Deny,
+                }),
+            } if request_id == 91
+                && initial_url.as_deref() == Some("app://simpleapp/ui.html")
+                && profile_id == "default"
+                && allowed_origins == vec!["app://simpleapp".to_string()]
         ));
     }
 }

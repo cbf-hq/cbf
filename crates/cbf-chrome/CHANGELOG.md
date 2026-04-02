@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Chrome-transport browsing-context policy models in `cbf-chrome::data::policy` with conversions to and from browser-generic `cbf::data::policy`.
+- Chromium backend command transport wiring for create-time browsing-context policy so tab creation can initialize both browsing-context IPC allow-lists and extension capability state.
+- Browser-test-backed support for suppressing tab-scoped extension behavior on browsing contexts created with `extensions = Deny`, covering content scripts, extension tab lookup, action popup activation, and related helper attachment points.
+
+### Changed
+
+- `simpleapp` now configures main-page, toolbar, and overlay browsing contexts with explicit create-time capability policy instead of enabling toolbar and overlay IPC through follow-up commands after creation.
+
 ## [0.1.0-alpha.2] - 2026-03-27
 
 ### Added

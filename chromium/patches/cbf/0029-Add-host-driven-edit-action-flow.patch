@@ -1,7 +1,7 @@
 From b6754f5140571f125607c4dcd5baf888f2384fa0 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 16 Mar 2026 09:35:38 +0900
-Subject: [PATCH 29/48] Add host-driven edit action flow
+Subject: [PATCH 29/49] Add host-driven edit action flow
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.h        |  8 ++

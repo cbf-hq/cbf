@@ -186,6 +186,14 @@ pub type CbfTabOpenResult = ::std::os::raw::c_uint;
 pub const CbfTabVisibility_kCbfTabVisibilityVisible: CbfTabVisibility = 0;
 pub const CbfTabVisibility_kCbfTabVisibilityHidden: CbfTabVisibility = 1;
 pub type CbfTabVisibility = ::std::os::raw::c_uint;
+pub const CbfCapabilityPolicy_kCbfCapabilityPolicyAllow: CbfCapabilityPolicy = 0;
+pub const CbfCapabilityPolicy_kCbfCapabilityPolicyDeny: CbfCapabilityPolicy = 1;
+pub type CbfCapabilityPolicy = ::std::os::raw::c_uint;
+pub const CbfBrowsingContextIpcPolicy_kCbfBrowsingContextIpcPolicyDeny:
+    CbfBrowsingContextIpcPolicy = 0;
+pub const CbfBrowsingContextIpcPolicy_kCbfBrowsingContextIpcPolicyAllow:
+    CbfBrowsingContextIpcPolicy = 1;
+pub type CbfBrowsingContextIpcPolicy = ::std::os::raw::c_uint;
 pub const CbfSurfaceHandleKind_kSurfaceHandleNone: CbfSurfaceHandleKind = 0;
 pub const CbfSurfaceHandleKind_kSurfaceHandleMacCaContextId: CbfSurfaceHandleKind = 1;
 pub const CbfSurfaceHandleKind_kSurfaceHandleWindowsHwnd: CbfSurfaceHandleKind = 2;

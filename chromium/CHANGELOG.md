@@ -14,6 +14,15 @@ source-built use rather than a downloadable binary bundle.
 
 ## [Unreleased]
 
+### Added
+
+- Create-time browsing-context policy flow across the Chromium bridge, tab manager, and profile service so new browsing contexts can initialize IPC allow-lists and extension capability state when they are created.
+- Browser-test coverage for create-time browsing-context IPC initialization and extension suppression behavior on policy-controlled browsing contexts.
+
+### Changed
+
+- Chromium now stores browsing-context extension capability state per `WebContents` and uses that policy to suppress tab-scoped extension behavior for denied contexts, including helper attachment, tab lookup, script injection, and host-triggered action popup activation.
+
 ### Fixed
 
 - Extension popups that query the last-focused CBF embedded browser window now resolve the active page origin correctly instead of falling back to `about:` in site-specific UI such as Dark Reader's per-site dark mode toggle. Embedded browser windows now track logical activation through `SetTabFocus()` and participate in Chromium's last-active browser resolution path.

@@ -1,7 +1,7 @@
 From ebfbb99ffeb85a455b5beb3b87e81782365a1359 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Mar 2026 20:02:54 +0900
-Subject: [PATCH 43/48] Cancel pending JavaScript dialog callbacks
+Subject: [PATCH 43/49] Cancel pending JavaScript dialog callbacks
 
 ---
  .../cbf/cbf_java_script_dialog_manager.cc     | 90 ++++++++++++++++---

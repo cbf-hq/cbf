@@ -40,6 +40,7 @@ use crate::data::{
     input::{ChromeKeyEvent, ChromeMouseWheelEvent},
     ipc::{TabIpcConfig, TabIpcErrorCode, TabIpcMessage, TabIpcMessageType, TabIpcPayload},
     mouse::ChromeMouseEvent,
+    policy::{ChromeBrowsingContextPolicy, ChromeCapabilityPolicy, ChromeIpcPolicy},
     profile::ChromeProfileInfo,
     prompt_ui::{PromptUiId, PromptUiResponse},
     visibility::ChromeTabVisibility,
@@ -398,6 +399,7 @@ impl IpcClient {
         request_id: u64,
         initial_url: &str,
         profile_id: &str,
+        policy: Option<&ChromeBrowsingContextPolicy>,
     ) -> Result<(), BridgeError> {
         if self.inner.is_null() {
             return Err(BridgeError::ConnectionFailed);
@@ -405,12 +407,66 @@ impl IpcClient {
 
         let url = CString::new(initial_url).map_err(|_| BridgeError::InvalidInput)?;
         let profile = CString::new(profile_id).map_err(|_| BridgeError::InvalidInput)?;
+        let allowed_origins = match policy.map(|policy| &policy.ipc) {
+            Some(ChromeIpcPolicy::Allow { allowed_origins }) => Some(
+                allowed_origins
+                    .iter()
+                    .map(|origin| CString::new(origin.as_str()))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| BridgeError::InvalidInput)?,
+            ),
+            _ => None,
+        };
+
+        let allowed_origin_ptrs: Vec<*const c_char> = allowed_origins
+            .as_ref()
+            .map(|origins| origins.iter().map(|origin| origin.as_ptr()).collect())
+            .unwrap_or_default();
+        let allowed_origin_list = CbfCommandList {
+            items: if allowed_origin_ptrs.is_empty() {
+                ptr::null_mut()
+            } else {
+                allowed_origin_ptrs.as_ptr() as *mut *const c_char
+            },
+            len: allowed_origin_ptrs.len() as u32,
+        };
+
+        let (has_policy, ipc_policy_kind, extensions_policy) = match policy {
+            Some(policy) => (
+                true,
+                match policy.ipc {
+                    ChromeIpcPolicy::Deny => {
+                        CbfBrowsingContextIpcPolicy_kCbfBrowsingContextIpcPolicyDeny as u8
+                    }
+                    ChromeIpcPolicy::Allow { .. } => {
+                        CbfBrowsingContextIpcPolicy_kCbfBrowsingContextIpcPolicyAllow as u8
+                    }
+                },
+                match policy.extensions {
+                    ChromeCapabilityPolicy::Allow => {
+                        CbfCapabilityPolicy_kCbfCapabilityPolicyAllow as u8
+                    }
+                    ChromeCapabilityPolicy::Deny => {
+                        CbfCapabilityPolicy_kCbfCapabilityPolicyDeny as u8
+                    }
+                },
+            ),
+            None => (
+                false,
+                CbfBrowsingContextIpcPolicy_kCbfBrowsingContextIpcPolicyDeny as u8,
+                CbfCapabilityPolicy_kCbfCapabilityPolicyAllow as u8,
+            ),
+        };
 
         bridge_ok(bridge_call!(cbf_bridge_client_create_tab(
             self.inner,
             request_id,
             url.as_ptr(),
-            profile.as_ptr()
+            profile.as_ptr(),
+            has_policy,
+            ipc_policy_kind,
+            &allowed_origin_list,
+            extensions_policy
         )))
     }
 
