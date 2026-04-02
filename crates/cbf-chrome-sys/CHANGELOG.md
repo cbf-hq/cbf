@@ -20,16 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bridge event ABI extensions for page->host IPC notifications and corresponding Rust-side mapping support.
 - FFI support for Chromium tab visibility commands in the bridge client ABI.
 - FFI constants and bridge event fields for form-resubmission prompt transport:
-  - auxiliary/prompt-ui kind value for form resubmission
-  - repost reason enum values
-  - repost reason and repost target URL fields on `CbfBridgeEvent`.
+    - auxiliary/prompt-ui kind value for form resubmission
+    - repost reason enum values
+    - repost reason and repost target URL fields on `CbfBridgeEvent`.
 - Bridge ABI support for Chromium `FindInPage` / `StopFinding` commands and raw `FindReply` event transport, including match counts, active ordinal, final-update state, and selection rectangle fields.
-- Crate-local bindgen generation tooling for both `ffi_generated.rs` and `bridge_api_generated.rs`, so the checked-in FFI mirror and runtime-loaded bridge API can be regenerated directly from the Chromium bridge headers.
+- Crate-local bindgen generation tooling for both `ffi_data_generated.rs` and `ffi_bridge_generated.rs`, so the checked-in FFI mirror and runtime-loaded bridge API can be regenerated directly from the Chromium bridge headers.
 
 ### Changed
 
 - `cbf-chrome-sys` now resolves `libcbf_bridge` at runtime with `libloading` instead of relying on Cargo link-time bridge configuration.
-- `ffi_generated.rs` is now a complete bindgen mirror of `cbf_bridge_ffi.h` instead of a handwritten Rust-side ABI copy.
+- `ffi_generated.rs` is removed and new `ffi_data_generated.rs` and `ffi_bridge_generated.rs` are now a complete bindgen mirror of `cbf_bridge_ffi.h` instead of a handwritten Rust-side ABI copy.
 - `bridge_api_generated.rs` is now generated with bindgen dynamic loading from `cbf_bridge.h`, replacing the handwritten symbol table and bridge-call wrapper layer.
 - FFI generation ownership now lives under `crates/cbf-chrome-sys`, with the repo-level tool entrypoint acting as a thin wrapper around the crate-local generator.
 
