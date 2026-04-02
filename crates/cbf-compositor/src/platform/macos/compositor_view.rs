@@ -24,7 +24,8 @@ use cbf::{
         ids::BrowsingContextId,
         ime::{
             ConfirmCompositionBehavior, ImeCommitText, ImeComposition, ImeTextRange, ImeTextSpan,
-            ImeTextSpanType,
+            ImeTextSpanStyle, ImeTextSpanThickness, ImeTextSpanType,
+            ImeTextSpanUnderlineStyle,
         },
         key::{KeyEvent, KeyEventType},
         mouse::{MouseEvent, MouseEventType, MouseWheelEvent, PointerType},
@@ -49,17 +50,19 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
+    NSBackgroundColorAttributeName, NSColor, NSColorSpace, NSMarkedClauseSegmentAttributeName,
     NSApplication, NSAutoresizingMaskOptions, NSControlStateValueOff, NSControlStateValueOn,
     NSDragOperation, NSDraggingContext, NSDraggingDestination, NSDraggingInfo, NSDraggingItem,
     NSDraggingSession, NSDraggingSource, NSEvent, NSEventModifierFlags, NSEventType, NSImage,
     NSMenu, NSMenuItem, NSMenuItemBadge, NSPasteboardTypeFileURL, NSPasteboardTypeHTML,
     NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardTypeURL, NSPasteboardWriting,
-    NSResponder, NSTextInputClient, NSTrackingArea, NSTrackingAreaOptions, NSView,
+    NSResponder, NSTextInputClient, NSTrackingArea, NSTrackingAreaOptions, NSUnderlineColorAttributeName,
+    NSUnderlineStyle, NSUnderlineStyleAttributeName, NSView,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSArray, NSAttributedString, NSData, NSNotFound, NSObjectProtocol, NSPoint, NSRange,
-    NSRangePointer, NSRect, NSString, NSUInteger,
+    NSArray, NSAttributedString, NSAttributedStringKey, NSData, NSDictionary, NSNotFound,
+    NSObjectProtocol, NSPoint, NSRange, NSRangePointer, NSRect, NSNumber, NSString, NSUInteger,
 };
 use objc2_quartz_core::CATransaction;
 
@@ -438,15 +441,17 @@ define_class!(
             selected_range: NSRange,
             replacement_range: NSRange,
         ) {
-            let Some(text) = extract_insert_text(string) else {
+            let Some((text, spans)) = extract_marked_text(string) else {
                 return;
             };
             self.mark_ime_handled();
             self.ivars().ime_insert_expected.set(true);
             let marked_range = composition_range_for_text(&text);
             self.update_marked_state(true, marked_range, selected_range);
+            let spans = spans.unwrap_or_else(|| composition_span(&text));
             self.send_set_composition(
                 text,
+                spans,
                 nsrange_to_text_range(selected_range),
                 nsrange_to_text_range(replacement_range),
             );
@@ -497,7 +502,12 @@ define_class!(
 
         #[unsafe(method(validAttributesForMarkedText))]
         fn validAttributesForMarkedText(&self) -> *const AnyObject {
-            let array: Retained<NSArray<NSString>> = NSArray::new();
+            let array = NSArray::from_slice(&[
+                underline_style_attribute_name(),
+                underline_color_attribute_name(),
+                background_color_attribute_name(),
+                marked_clause_segment_attribute_name(),
+            ]);
             Retained::autorelease_return(array) as _
         }
 
@@ -1383,6 +1393,7 @@ impl CompositorViewMac {
     fn send_set_composition(
         &self,
         text: String,
+        spans: Vec<ImeTextSpan>,
         selection: Option<ImeTextRange>,
         replacement: Option<ImeTextRange>,
     ) {
@@ -1400,7 +1411,7 @@ impl CompositorViewMac {
                         selection_start,
                         selection_end,
                         replacement_range: replacement,
-                        spans: composition_span(&text),
+                        spans,
                     },
                 });
             }
@@ -1412,7 +1423,7 @@ impl CompositorViewMac {
                         selection_start,
                         selection_end,
                         replacement_range: replacement,
-                        spans: composition_span(&text),
+                        spans,
                     },
                 });
             }
@@ -2416,23 +2427,213 @@ fn synthesized_char_text(template: Option<&KeyEvent>) -> Option<String> {
         })
 }
 
-fn extract_insert_text(value: &AnyObject) -> Option<String> {
-    let mut text = if let Some(attributed) = value.downcast_ref::<NSAttributedString>() {
-        Some(attributed.string().to_string())
-    } else {
-        value
-            .downcast_ref::<NSString>()
-            .map(|ns_string| ns_string.to_string())
-    }?;
+fn extract_marked_text(value: &AnyObject) -> Option<(String, Option<Vec<ImeTextSpan>>)> {
+    if let Some(attributed) = value.downcast_ref::<NSAttributedString>() {
+        let raw_text = attributed.string().to_string();
+        let text = sanitize_insert_text(&raw_text);
+        if text.is_empty() {
+            return None;
+        }
 
+        let spans = if text == raw_text {
+            Some(composition_spans_from_attributed_text(attributed, &text))
+        } else {
+            None
+        };
+
+        return Some((text, spans));
+    }
+
+    let text = value
+        .downcast_ref::<NSString>()
+        .map(|ns_string| sanitize_insert_text(&ns_string.to_string()))?;
+    (!text.is_empty()).then_some((text, None))
+}
+
+fn extract_insert_text(value: &AnyObject) -> Option<String> {
+    extract_marked_text(value).map(|(text, _)| text)
+}
+
+fn sanitize_insert_text(text: &str) -> String {
     // Keep return/newline so Enter still emits a Char event, but drop other
     // control characters that should not be treated as text insertion.
-    text = text
-        .chars()
+    text.chars()
         .filter(|c| matches!(c, '\r' | '\n') || !c.is_control())
-        .collect::<String>();
+        .collect::<String>()
+}
 
-    (!text.is_empty()).then_some(text)
+fn composition_spans_from_attributed_text(
+    attributed: &NSAttributedString,
+    text: &str,
+) -> Vec<ImeTextSpan> {
+    let length = attributed.length();
+    if length == 0 {
+        return Vec::new();
+    }
+
+    let mut spans = Vec::new();
+    let full_range = NSRange::new(0, length);
+    let mut location = 0usize;
+    while location < length {
+        let mut effective_range = NSRange::new(location, 0);
+        let attributes = unsafe {
+            attributed.attributesAtIndex_longestEffectiveRange_inRange(
+                location,
+                &mut effective_range,
+                full_range,
+            )
+        };
+
+        let start = effective_range.location.min(length);
+        let end = effective_range.end().min(length).max(start);
+        push_composition_span(
+            &mut spans,
+            start as u32,
+            end as u32,
+            ime_style_from_attributes(&attributes),
+        );
+        location = end.max(location + 1);
+    }
+
+    if spans.is_empty() && !text.is_empty() {
+        composition_span(text)
+    } else {
+        spans
+    }
+}
+
+fn push_composition_span(
+    spans: &mut Vec<ImeTextSpan>,
+    start_offset: u32,
+    end_offset: u32,
+    style: Option<ImeTextSpanStyle>,
+) {
+    if start_offset >= end_offset {
+        return;
+    }
+
+    if let Some(previous) = spans.last_mut() {
+        if previous.end_offset == start_offset && previous.style == style {
+            previous.end_offset = end_offset;
+            return;
+        }
+    }
+
+    spans.push(ImeTextSpan {
+        r#type: ImeTextSpanType::Composition,
+        start_offset,
+        end_offset,
+        style,
+    });
+}
+
+fn ime_style_from_attributes(
+    attributes: &NSDictionary<NSAttributedStringKey, AnyObject>,
+) -> Option<ImeTextSpanStyle> {
+    let mut style = ImeTextSpanStyle::default();
+    let mut has_style = false;
+
+    if let Some(underline) = ns_underline_style_from_attributes(attributes) {
+        style.underline_style = map_underline_style(underline);
+        style.thickness = map_underline_thickness(underline);
+        has_style = true;
+    }
+
+    if let Some(color) = ns_color_attribute(attributes, underline_color_attribute_name()) {
+        style.underline_color = color;
+        has_style = true;
+    }
+
+    if let Some(color) = ns_color_attribute(attributes, background_color_attribute_name()) {
+        style.background_color = color;
+        has_style = true;
+    }
+
+    has_style.then_some(style)
+}
+
+fn ns_underline_style_from_attributes(
+    attributes: &NSDictionary<NSAttributedStringKey, AnyObject>,
+) -> Option<NSUnderlineStyle> {
+    let value = attributes.objectForKey(underline_style_attribute_name())?;
+    let number = value.downcast_ref::<NSNumber>()?;
+    let bits = number.as_isize();
+    (bits != 0).then_some(NSUnderlineStyle(bits))
+}
+
+fn map_underline_style(underline: NSUnderlineStyle) -> ImeTextSpanUnderlineStyle {
+    let pattern = underline.0 & 0xFF00;
+    if pattern == NSUnderlineStyle::PatternDot.0 {
+        return ImeTextSpanUnderlineStyle::Dot;
+    }
+    if matches!(
+        pattern,
+        value
+            if value == NSUnderlineStyle::PatternDash.0
+                || value == NSUnderlineStyle::PatternDashDot.0
+                || value == NSUnderlineStyle::PatternDashDotDot.0
+    ) {
+        return ImeTextSpanUnderlineStyle::Dash;
+    }
+    ImeTextSpanUnderlineStyle::Solid
+}
+
+fn map_underline_thickness(underline: NSUnderlineStyle) -> ImeTextSpanThickness {
+    let base_style = underline.0 & 0x0F;
+    if base_style == NSUnderlineStyle::Thick.0 || base_style == NSUnderlineStyle::Double.0 {
+        ImeTextSpanThickness::Thick
+    } else {
+        ImeTextSpanThickness::Thin
+    }
+}
+
+fn ns_color_attribute(
+    attributes: &NSDictionary<NSAttributedStringKey, AnyObject>,
+    key: &NSAttributedStringKey,
+) -> Option<u32> {
+    let value = attributes.objectForKey(key)?;
+    let color = value.downcast_ref::<NSColor>()?;
+    ns_color_to_u32(color)
+}
+
+fn ns_color_to_u32(color: &NSColor) -> Option<u32> {
+    let color_space = NSColorSpace::sRGBColorSpace();
+    let color = color.colorUsingColorSpace(&color_space)?;
+
+    let mut red = 0.0;
+    let mut green = 0.0;
+    let mut blue = 0.0;
+    let mut alpha = 0.0;
+    unsafe {
+        (&*color).getRed_green_blue_alpha(&mut red, &mut green, &mut blue, &mut alpha);
+    }
+
+    Some(
+        ((component_to_u8(alpha) as u32) << 24)
+            | ((component_to_u8(red) as u32) << 16)
+            | ((component_to_u8(green) as u32) << 8)
+            | component_to_u8(blue) as u32,
+    )
+}
+
+fn component_to_u8(value: f64) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn underline_style_attribute_name() -> &'static NSAttributedStringKey {
+    unsafe { NSUnderlineStyleAttributeName }
+}
+
+fn underline_color_attribute_name() -> &'static NSAttributedStringKey {
+    unsafe { NSUnderlineColorAttributeName }
+}
+
+fn background_color_attribute_name() -> &'static NSAttributedStringKey {
+    unsafe { NSBackgroundColorAttributeName }
+}
+
+fn marked_clause_segment_attribute_name() -> &'static NSAttributedStringKey {
+    unsafe { NSMarkedClauseSegmentAttributeName }
 }
 
 fn hover_transition(
@@ -2491,6 +2692,172 @@ fn should_ignore_accelerator_with_marked_text(event: &NSEvent) -> bool {
             | VKEY_PRIOR
             | VKEY_NEXT
     )
+}
+
+#[cfg(test)]
+mod ime_tests {
+    use super::{
+        background_color_attribute_name, composition_spans_from_attributed_text,
+        extract_marked_text, map_underline_style, map_underline_thickness,
+        underline_color_attribute_name, underline_style_attribute_name,
+    };
+    use cbf::data::ime::{ImeTextSpan, ImeTextSpanThickness, ImeTextSpanType, ImeTextSpanUnderlineStyle};
+    use objc2::runtime::AnyObject;
+    use objc2_app_kit::{NSColor, NSUnderlineStyle};
+    use objc2_foundation::{
+        ns_string, NSMutableAttributedString, NSMutableDictionary, NSNumber, NSString,
+        NSAttributedStringKey, NSDictionary,
+    };
+
+    #[test]
+    fn extract_marked_text_from_plain_string_uses_default_span_generation() {
+        let value: &AnyObject = ns_string!("abc").as_ref();
+        let (text, spans) = extract_marked_text(value).expect("plain string should extract");
+
+        assert_eq!(text, "abc");
+        assert!(spans.is_none());
+    }
+
+    #[test]
+    fn thin_underline_run_maps_to_single_span() {
+        let attributed = attributed_string_with_runs("abc", &[(0, 3, NSUnderlineStyle::Single, None)]);
+        let spans = composition_spans_from_attributed_text(&attributed, "abc");
+
+        assert_eq!(
+            spans,
+            vec![ImeTextSpan {
+                r#type: ImeTextSpanType::Composition,
+                start_offset: 0,
+                end_offset: 3,
+                style: Some(cbf::data::ime::ImeTextSpanStyle {
+                    thickness: ImeTextSpanThickness::Thin,
+                    underline_style: ImeTextSpanUnderlineStyle::Solid,
+                    ..Default::default()
+                }),
+            }]
+        );
+    }
+
+    #[test]
+    fn thick_clause_is_split_from_thin_neighbors() {
+        let attributed = attributed_string_with_runs(
+            "abcdef",
+            &[
+                (0, 2, NSUnderlineStyle::Single, None),
+                (2, 2, NSUnderlineStyle::Thick, None),
+                (4, 2, NSUnderlineStyle::Single, None),
+            ],
+        );
+        let spans = composition_spans_from_attributed_text(&attributed, "abcdef");
+
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].start_offset, 0);
+        assert_eq!(spans[0].end_offset, 2);
+        assert_eq!(
+            spans[0].style.as_ref().map(|style| style.thickness),
+            Some(ImeTextSpanThickness::Thin)
+        );
+        assert_eq!(spans[1].start_offset, 2);
+        assert_eq!(spans[1].end_offset, 4);
+        assert_eq!(
+            spans[1].style.as_ref().map(|style| style.thickness),
+            Some(ImeTextSpanThickness::Thick)
+        );
+        assert_eq!(spans[2].start_offset, 4);
+        assert_eq!(spans[2].end_offset, 6);
+    }
+
+    #[test]
+    fn dash_patterns_map_to_dash_style() {
+        assert_eq!(
+            map_underline_style(NSUnderlineStyle::Single | NSUnderlineStyle::PatternDashDot),
+            ImeTextSpanUnderlineStyle::Dash
+        );
+        assert_eq!(
+            map_underline_style(NSUnderlineStyle::Single | NSUnderlineStyle::PatternDot),
+            ImeTextSpanUnderlineStyle::Dot
+        );
+    }
+
+    #[test]
+    fn utf16_offsets_are_preserved_for_surrogate_pairs() {
+        let attributed = attributed_string_with_runs("a😀b", &[(0, 4, NSUnderlineStyle::Single, None)]);
+        let spans = composition_spans_from_attributed_text(&attributed, "a😀b");
+
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].start_offset, 0);
+        assert_eq!(spans[0].end_offset, 4);
+    }
+
+    #[test]
+    fn adjacent_runs_with_identical_style_are_merged() {
+        let attributed = attributed_string_with_runs(
+            "abcd",
+            &[
+                (0, 2, NSUnderlineStyle::Single, None),
+                (2, 2, NSUnderlineStyle::Single, None),
+            ],
+        );
+        let spans = composition_spans_from_attributed_text(&attributed, "abcd");
+
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].start_offset, 0);
+        assert_eq!(spans[0].end_offset, 4);
+    }
+
+    #[test]
+    fn underline_and_background_colors_are_mapped() {
+        let underline_color = NSColor::colorWithSRGBRed_green_blue_alpha(0.1, 0.2, 0.3, 1.0);
+        let background_color = NSColor::colorWithSRGBRed_green_blue_alpha(0.4, 0.5, 0.6, 0.5);
+        let attributed = attributed_string_with_runs(
+            "ab",
+            &[(
+                0,
+                2,
+                NSUnderlineStyle::Single,
+                Some((&underline_color, &background_color)),
+            )],
+        );
+        let spans = composition_spans_from_attributed_text(&attributed, "ab");
+
+        let style = spans[0].style.as_ref().expect("style should be present");
+        assert_ne!(style.underline_color, 0);
+        assert_ne!(style.background_color, 0);
+    }
+
+    #[test]
+    fn double_underline_maps_to_thick() {
+        assert_eq!(
+            map_underline_thickness(NSUnderlineStyle::Double),
+            ImeTextSpanThickness::Thick
+        );
+    }
+
+    fn attributed_string_with_runs(
+        text: &str,
+        runs: &[(usize, usize, NSUnderlineStyle, Option<(&NSColor, &NSColor)>)],
+    ) -> objc2::rc::Retained<NSMutableAttributedString> {
+        let string = NSString::from_str(text);
+        let attributed = NSMutableAttributedString::from_nsstring(&string);
+
+        for (location, length, underline, colors) in runs {
+            let attributes: objc2::rc::Retained<NSMutableDictionary<NSAttributedStringKey, AnyObject>> =
+                NSMutableDictionary::new();
+            attributes.insert(underline_style_attribute_name(), &*NSNumber::new_isize(underline.0));
+            if let Some((underline_color, background_color)) = colors {
+                attributes.insert(underline_color_attribute_name(), *underline_color);
+                attributes.insert(background_color_attribute_name(), *background_color);
+            }
+            unsafe {
+                attributed.setAttributes_range(
+                    Some(attributes.as_ref() as &NSDictionary<NSAttributedStringKey, AnyObject>),
+                    objc2_foundation::NSRange::new(*location, *length),
+                );
+            }
+        }
+
+        attributed
+    }
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserved macOS IME marked-text underline attributes from AppKit `NSAttributedString` runs when sending compositor composition updates, restoring visible composition underlines and thick active-clause highlighting during multi-clause conversion.
 - Aligned macOS `CompositorViewMac` text-input sequencing with Chromium so plain keyboard text inserted through AppKit during `keyDown:` is buffered until the key event finishes, restoring normal character entry immediately after `Backspace`.
 - Fixed macOS host-owned drag-and-drop operation masks to translate browser-generic drag operations into native `NSDragOperation` values before starting `NSDraggingSession`, so `Move` no longer degrades into AppKit's generic operation bit.
 - Fixed macOS host-owned drag completion to treat drops ending over the same browsing context as successful even when AppKit reports `NSDragOperationNone`, restoring DOM `drop` delivery for internal page drops.
