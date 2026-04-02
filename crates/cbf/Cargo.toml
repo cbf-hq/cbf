@@ -1,6 +1,6 @@
 [package]
 name = "cbf"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 edition.workspace = true
 authors.workspace = true
 description = "A framework for developing Chromium-based browsers."

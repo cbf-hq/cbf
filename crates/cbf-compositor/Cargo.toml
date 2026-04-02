@@ -1,6 +1,6 @@
 [package]
 name = "cbf-compositor"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 edition.workspace = true
 authors.workspace = true
 description = "Scene-based browser surface compositor for CBF applications."
@@ -17,8 +17,8 @@ chrome = ["dep:cbf-chrome"]
 winit = ["dep:winit"]
 
 [dependencies]
-cbf = { path = "../cbf", version = "0.1.0-alpha.2" }
-cbf-chrome = { path = "../cbf-chrome", version = "0.1.0-alpha.2", optional = true }
+cbf = { path = "../cbf", version = "0.1.0-alpha.3" }
+cbf-chrome = { path = "../cbf-chrome", version = "0.1.0-alpha.3", optional = true }
 raw-window-handle.workspace = true
 thiserror.workspace = true
 winit = { workspace = true, optional = true }
