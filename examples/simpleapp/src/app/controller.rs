@@ -12,7 +12,8 @@ use cbf::{
         dialog::{BeforeUnloadReason, DialogResponse, DialogType, JavaScriptDialogRequest},
         download::{DownloadId, DownloadOutcome, DownloadPromptActionHint, DownloadState},
         ids::{BrowsingContextId, TransientBrowsingContextId, WindowId as HostWindowId},
-        ipc::{IpcConfig, IpcErrorCode},
+        ipc::IpcErrorCode,
+        policy::{BrowsingContextPolicy, CapabilityPolicy, IpcPolicy},
         profile::ProfileInfo,
         transient_browsing_context::TransientBrowsingContextKind,
         window_open::{
@@ -432,6 +433,7 @@ impl AppController {
                             .unwrap_or_else(|| "about:blank".to_string()),
                     ),
                     profile_id.clone(),
+                    Some(main_page_browsing_context_policy()),
                 ) {
                     warn!("failed to create page browsing context for new window: {err}");
                 }
@@ -450,6 +452,7 @@ impl AppController {
                         toolbar_request_id,
                         Some(toolbar_ui_url().unwrap_or_else(|_| "about:blank".to_string())),
                         profile_id,
+                        Some(toolbar_browsing_context_policy()),
                     ) {
                         warn!("failed to create toolbar browsing context for new window: {err}");
                     }
@@ -865,34 +868,6 @@ impl AppController {
             } else {
                 warn!("failed to request shutdown: {err}");
             }
-        }
-    }
-
-    fn try_enable_toolbar_ipc(&self, toolbar_browsing_context_id: BrowsingContextId) {
-        let Some(allowed_origin) = toolbar_allowed_origin() else {
-            warn!("failed to derive toolbar allowed origin; skipping IPC enable");
-            return;
-        };
-        let command = BrowserCommand::EnableIpc {
-            browsing_context_id: toolbar_browsing_context_id,
-            config: IpcConfig {
-                allowed_origins: vec![allowed_origin],
-            },
-        };
-        if let Err(err) = self.browser_handle.send(command) {
-            warn!("failed to enable toolbar ipc: {err}");
-        }
-    }
-
-    fn try_enable_overlay_ipc(&self, overlay_browsing_context_id: BrowsingContextId) {
-        let command = BrowserCommand::EnableIpc {
-            browsing_context_id: overlay_browsing_context_id,
-            config: IpcConfig {
-                allowed_origins: vec![APP_ORIGIN.to_string()],
-            },
-        };
-        if let Err(err) = self.browser_handle.send(command) {
-            warn!("failed to enable overlay ipc: {err}");
         }
     }
 
@@ -1455,6 +1430,7 @@ impl AppController {
                 TOOLBAR_CREATE_REQUEST_ID,
                 Some(toolbar_ui_url().unwrap_or_else(|_| "about:blank".to_string())),
                 profile_id.clone(),
+                Some(toolbar_browsing_context_policy()),
             ) {
                 warn!("failed to create toolbar browsing context: {err}");
             }
@@ -1467,6 +1443,7 @@ impl AppController {
                             .unwrap_or_else(|_| "about:blank".to_string()),
                     ),
                     profile_id.clone(),
+                    Some(overlay_browsing_context_policy()),
                 )
             {
                 warn!("failed to create overlay browsing context: {err}");
@@ -1476,6 +1453,7 @@ impl AppController {
                 MAIN_PAGE_CREATE_REQUEST_ID,
                 Some(self.cli.url.clone()),
                 profile_id,
+                Some(main_page_browsing_context_policy()),
             ) {
                 warn!("failed to create primary browsing context: {err}");
             }
@@ -1504,7 +1482,6 @@ impl AppController {
                     Some(PRIMARY_HOST_WINDOW_ID)
                 } else if request_id == OVERLAY_CREATE_REQUEST_ID {
                     set_overlay_browsing_context_id(&self.shared, Some(browsing_context_id));
-                    self.try_enable_overlay_ipc(browsing_context_id);
                     Some(PRIMARY_HOST_WINDOW_ID)
                 } else if request_id == MAIN_PAGE_CREATE_REQUEST_ID {
                     set_primary_browsing_context_id(&self.shared, Some(browsing_context_id));
@@ -1547,22 +1524,20 @@ impl AppController {
                         browsing_context_id,
                         host_window_id,
                     );
-                    if created_toolbar {
-                        self.try_enable_toolbar_ipc(browsing_context_id);
-                        if let Some(page_browsing_context_id) =
+                    if created_toolbar
+                        && let Some(page_browsing_context_id) =
                             page_browsing_context_id_for_window(&self.shared, host_window_id)
-                        {
-                            self.ensure_find_state(page_browsing_context_id);
-                            self.publish_navigation_state_to_toolbar(
-                                browsing_context_id,
-                                page_browsing_context_id,
-                            );
-                            self.publish_find_state_to_toolbar(
-                                browsing_context_id,
-                                page_browsing_context_id,
-                                0,
-                            );
-                        }
+                    {
+                        self.ensure_find_state(page_browsing_context_id);
+                        self.publish_navigation_state_to_toolbar(
+                            browsing_context_id,
+                            page_browsing_context_id,
+                        );
+                        self.publish_find_state_to_toolbar(
+                            browsing_context_id,
+                            page_browsing_context_id,
+                            0,
+                        );
                     }
                     let mut actions = vec![CoreAction::SyncWindowScene {
                         window_id: host_window_id,
@@ -2475,6 +2450,36 @@ fn download_prompt_response_for_simpleapp(
 fn toolbar_allowed_origin() -> Option<String> {
     let _ = toolbar_ui_url().ok()?;
     Some(APP_ORIGIN.to_string())
+}
+
+fn main_page_browsing_context_policy() -> BrowsingContextPolicy {
+    BrowsingContextPolicy {
+        ipc: IpcPolicy::Deny,
+        extensions: CapabilityPolicy::Allow,
+    }
+}
+
+fn toolbar_browsing_context_policy() -> BrowsingContextPolicy {
+    let ipc = match toolbar_allowed_origin() {
+        Some(allowed_origin) => IpcPolicy::Allow {
+            allowed_origins: vec![allowed_origin],
+        },
+        None => IpcPolicy::Deny,
+    };
+
+    BrowsingContextPolicy {
+        ipc,
+        extensions: CapabilityPolicy::Deny,
+    }
+}
+
+fn overlay_browsing_context_policy() -> BrowsingContextPolicy {
+    BrowsingContextPolicy {
+        ipc: IpcPolicy::Allow {
+            allowed_origins: vec![APP_ORIGIN.to_string()],
+        },
+        extensions: CapabilityPolicy::Deny,
+    }
 }
 
 fn forward_compositor_command(

@@ -15,6 +15,7 @@ pub mod input;
 pub mod ipc;
 pub mod lifecycle;
 pub mod mouse;
+pub mod policy;
 pub mod profile;
 pub mod prompt_ui;
 pub mod surface;

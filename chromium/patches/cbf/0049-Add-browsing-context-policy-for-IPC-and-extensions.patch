@@ -1,0 +1,1094 @@
+From 292b101920dd347740ff669ed0501fab0c9e9092 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Thu, 2 Apr 2026 19:01:26 +0900
+Subject: [PATCH 49/49] Add browsing context policy for IPC and extensions
+
+---
+ chrome/browser/cbf/BUILD.gn                   |   2 +
+ chrome/browser/cbf/bridge/cbf_bridge.h        |   6 +-
+ chrome/browser/cbf/bridge/cbf_bridge_client.h |   6 +-
+ chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  10 +
+ .../browser/cbf/bridge/cbf_bridge_web_page.cc |  56 ++++--
+ .../cbf/cbf_browsing_context_policy.cc        | 113 +++++++++++
+ .../browser/cbf/cbf_browsing_context_policy.h |  77 ++++++++
+ chrome/browser/cbf/cbf_profile_service.cc     |  36 +++-
+ chrome/browser/cbf/cbf_profile_service.h      |   5 +-
+ .../cbf/cbf_profile_service_browsertest.cc    | 187 +++++++++++++++++-
+ .../browser/cbf/cbf_settings_browsertest.cc   |   2 +-
+ chrome/browser/cbf/cbf_tab_manager.cc         |   5 +-
+ chrome/browser/cbf/cbf_tab_manager.h          |   5 +-
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |  24 ++-
+ ...profile_devtools_controller_browsertest.cc |   2 +-
+ .../profile/cbf_profile_page_controller.cc    |   6 +-
+ .../cbf/profile/cbf_profile_page_controller.h |   5 +-
+ .../extensions/chrome_extension_frame_host.cc |   6 +
+ .../browser/extensions/extension_tab_util.cc  |  10 +
+ chrome/browser/ui/tab_helpers.cc              |  19 +-
+ .../universal_web_contents_observers.cc       |   5 +-
+ .../renderer/extension_injection_host.cc      |   8 +
+ 22 files changed, 562 insertions(+), 33 deletions(-)
+ create mode 100644 chrome/browser/cbf/cbf_browsing_context_policy.cc
+ create mode 100644 chrome/browser/cbf/cbf_browsing_context_policy.h
+
+diff --git a/chrome/browser/cbf/BUILD.gn b/chrome/browser/cbf/BUILD.gn
+index 1e322cce7e635..b1c5b2edd97e6 100644
+--- a/chrome/browser/cbf/BUILD.gn
++++ b/chrome/browser/cbf/BUILD.gn
+@@ -7,6 +7,8 @@ import("//mojo/public/tools/bindings/mojom.gni")
+ 
+ source_set("cbf") {
+   sources = [
++    "cbf_browsing_context_policy.cc",
++    "cbf_browsing_context_policy.h",
+     "cbf_download_manager_delegate.cc",
+     "cbf_download_manager_delegate.h",
+     "cbf_ca_context_id_observer.cc",
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index f173223c053aa..dd8c555d4f3d7 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -45,7 +45,11 @@ CBF_BRIDGE_EXPORT bool cbf_bridge_client_create_tab(
+     CbfBridgeClientHandle* client,
+     uint64_t request_id,
+     const char* initial_url,
+-    const char* profile_id);
++    const char* profile_id,
++    bool has_policy,
++    uint8_t ipc_policy_kind,
++    const CbfCommandList* allowed_origins,
++    uint8_t extensions_policy);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_request_close_tab(
+     CbfBridgeClientHandle* client,
+     uint64_t tab_id);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client.h b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+index 08827bdb27bc3..0358c581ee833 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client.h
+@@ -36,7 +36,11 @@ class CbfBridgeClient {
+       const std::vector<uint8_t>& body);
+   bool CreateTab(uint64_t request_id,
+                  const std::string& initial_url,
+-                 const std::string& profile_id);
++                 const std::string& profile_id,
++                 bool has_policy,
++                 uint8_t ipc_policy_kind,
++                 const CbfCommandList* allowed_origins,
++                 uint8_t extensions_policy);
+   bool SetTabSize(uint64_t tab_id, uint32_t width, uint32_t height);
+   bool SetTabBackgroundPolicy(uint64_t tab_id, bool transparent);
+   bool SetTabFocus(uint64_t tab_id, bool focused);
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+index a53cbd19b443c..989aa193efa87 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_ffi.h
+@@ -203,6 +203,16 @@ enum CbfTabVisibility {
+   kCbfTabVisibilityHidden = 1,
+ };
+ 
++enum CbfCapabilityPolicy {
++  kCbfCapabilityPolicyAllow = 0,
++  kCbfCapabilityPolicyDeny = 1,
++};
++
++enum CbfBrowsingContextIpcPolicy {
++  kCbfBrowsingContextIpcPolicyDeny = 0,
++  kCbfBrowsingContextIpcPolicyAllow = 1,
++};
++
+ enum CbfSurfaceHandleKind {
+   kSurfaceHandleNone = 0,
+   kSurfaceHandleMacCaContextId = 1,
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+index e38b263f6ca37..af500fee864b2 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_web_page.cc
+@@ -11,9 +11,13 @@
+ namespace cbf_bridge::internal {
+ 
+ bool CbfBridgeClient::CreateTab(const uint64_t request_id,
+-                                    const std::string& initial_url,
+-                                    const std::string& profile_id) {
+-  if (!impl_ || profile_id.empty()) {
++                                const std::string& initial_url,
++                                const std::string& profile_id,
++                                bool has_policy,
++                                uint8_t ipc_policy_kind,
++                                const CbfCommandList* allowed_origins,
++                                uint8_t extensions_policy) {
++  if (!impl_ || profile_id.empty() || !allowed_origins) {
+     return false;
+   }
+   auto task_runner = GetMojoTaskRunner();
+@@ -24,11 +28,21 @@ bool CbfBridgeClient::CreateTab(const uint64_t request_id,
+   if (!impl->browser_remote.is_bound()) {
+     return false;
+   }
++  std::vector<std::string> origins;
++  if (allowed_origins->items && allowed_origins->len > 0) {
++    auto items = UNSAFE_BUFFERS(
++        base::span(allowed_origins->items, allowed_origins->len));
++    origins.reserve(items.size());
++    for (const char* item : items) {
++      origins.emplace_back(item ? item : "");
++    }
++  }
+   task_runner->PostTask(
+       FROM_HERE,
+       base::BindOnce(
+-           [](CbfBridgeClientImpl* impl, uint64_t request_id, std::string url,
+-              std::string profile) {
++          [](CbfBridgeClientImpl* impl, uint64_t request_id, std::string url,
++             std::string profile, bool has_policy, uint8_t ipc_policy_kind,
++             std::vector<std::string> origins, uint8_t extensions_policy) {
+             if (!impl->browser_remote.is_bound()) {
+               return;
+             }
+@@ -51,9 +65,22 @@ bool CbfBridgeClient::CreateTab(const uint64_t request_id,
+                   observer_remote.InitWithNewPipeAndPassReceiver());
+               connection.remote->SetObserver(std::move(observer_remote));
+             }
++            cbf::mojom::CbfBrowsingContextPolicyPtr policy;
++            if (has_policy) {
++              policy = cbf::mojom::CbfBrowsingContextPolicy::New();
++              policy->ipc = cbf::mojom::CbfBrowsingContextIpcPolicy::New();
++              policy->ipc->kind =
++                  ipc_policy_kind == kCbfBrowsingContextIpcPolicyAllow
++                      ? cbf::mojom::CbfBrowsingContextIpcPolicyKind::kAllow
++                      : cbf::mojom::CbfBrowsingContextIpcPolicyKind::kDeny;
++              policy->ipc->allowed_origins = std::move(origins);
++              policy->extensions =
++                  extensions_policy == kCbfCapabilityPolicyDeny
++                      ? cbf::mojom::CbfCapabilityPolicy::kDeny
++                      : cbf::mojom::CbfCapabilityPolicy::kAllow;
++            }
+             connection.remote->CreateTab(
+-                std::move(url),
+-                request_id,
++                std::move(url), request_id, std::move(policy),
+                 base::BindOnce(
+                     [](CbfBridgeClientImpl* impl, std::string profile_id,
+                        uint64_t tab_id) {
+@@ -62,7 +89,8 @@ bool CbfBridgeClient::CreateTab(const uint64_t request_id,
+                     },
+                     impl, profile));
+           },
+-          impl, request_id, initial_url, profile_id));
++          impl, request_id, initial_url, profile_id, has_policy,
++          ipc_policy_kind, std::move(origins), extensions_policy));
+   return true;
+ }
+ 
+@@ -1298,12 +1326,18 @@ bool CbfBridgeClient::RespondTabOpen(uint64_t request_id,
+ extern "C" bool cbf_bridge_client_create_tab(CbfBridgeClientHandle* client,
+                                              uint64_t request_id,
+                                              const char* initial_url,
+-                                             const char* profile_id) {
+-  if (!client || !initial_url || !profile_id || profile_id[0] == '\0') {
++                                             const char* profile_id,
++                                             bool has_policy,
++                                             uint8_t ipc_policy_kind,
++                                             const CbfCommandList* allowed_origins,
++                                             uint8_t extensions_policy) {
++  if (!client || !initial_url || !profile_id || profile_id[0] == '\0' ||
++      !allowed_origins) {
+     return false;
+   }
+   return reinterpret_cast<cbf_bridge::internal::CbfBridgeClient*>(client)
+-      ->CreateTab(request_id, initial_url, profile_id);
++      ->CreateTab(request_id, initial_url, profile_id, has_policy,
++                  ipc_policy_kind, allowed_origins, extensions_policy);
+ }
+ 
+ extern "C" bool cbf_bridge_client_request_close_tab(
+diff --git a/chrome/browser/cbf/cbf_browsing_context_policy.cc b/chrome/browser/cbf/cbf_browsing_context_policy.cc
+new file mode 100644
+index 0000000000000..83ff06d224e4c
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_browsing_context_policy.cc
+@@ -0,0 +1,113 @@
++#include "chrome/browser/cbf/cbf_browsing_context_policy.h"
++
++#include <memory>
++#include <utility>
++
++#include "base/no_destructor.h"
++#include "base/supports_user_data.h"
++#include "content/public/browser/web_contents.h"
++
++namespace cbf {
++namespace {
++
++class BrowsingContextPolicyData : public base::SupportsUserData::Data {
++ public:
++  explicit BrowsingContextPolicyData(CbfBrowsingContextPolicy policy);
++  BrowsingContextPolicyData(const BrowsingContextPolicyData&) = delete;
++  BrowsingContextPolicyData& operator=(const BrowsingContextPolicyData&) =
++      delete;
++  ~BrowsingContextPolicyData() override;
++
++  CbfBrowsingContextPolicy policy;
++};
++
++std::optional<CbfBrowsingContextPolicy>& PendingPolicyStorage() {
++  static base::NoDestructor<std::optional<CbfBrowsingContextPolicy>>
++      pending_policy;
++  return *pending_policy;
++}
++
++const int kBrowsingContextPolicyUserDataKey = 0;
++
++}  // namespace
++
++CbfIpcPolicy::CbfIpcPolicy() = default;
++CbfIpcPolicy::CbfIpcPolicy(const CbfIpcPolicy&) = default;
++CbfIpcPolicy::CbfIpcPolicy(CbfIpcPolicy&&) = default;
++CbfIpcPolicy& CbfIpcPolicy::operator=(const CbfIpcPolicy&) = default;
++CbfIpcPolicy& CbfIpcPolicy::operator=(CbfIpcPolicy&&) = default;
++CbfIpcPolicy::~CbfIpcPolicy() = default;
++
++CbfBrowsingContextPolicy::CbfBrowsingContextPolicy() = default;
++CbfBrowsingContextPolicy::CbfBrowsingContextPolicy(
++    const CbfBrowsingContextPolicy&) = default;
++CbfBrowsingContextPolicy::CbfBrowsingContextPolicy(
++    CbfBrowsingContextPolicy&&) = default;
++CbfBrowsingContextPolicy& CbfBrowsingContextPolicy::operator=(
++    const CbfBrowsingContextPolicy&) = default;
++CbfBrowsingContextPolicy& CbfBrowsingContextPolicy::operator=(
++    CbfBrowsingContextPolicy&&) = default;
++CbfBrowsingContextPolicy::~CbfBrowsingContextPolicy() = default;
++
++CbfBrowsingContextPolicy LegacyBrowsingContextPolicy() {
++  return {};
++}
++
++ScopedPendingBrowsingContextPolicy::ScopedPendingBrowsingContextPolicy(
++    std::optional<CbfBrowsingContextPolicy> policy)
++    : previous_(std::move(PendingPolicyStorage())) {
++  PendingPolicyStorage() = std::move(policy);
++}
++
++ScopedPendingBrowsingContextPolicy::~ScopedPendingBrowsingContextPolicy() {
++  PendingPolicyStorage() = std::move(previous_);
++}
++
++void SetBrowsingContextPolicyForWebContents(
++    content::WebContents* web_contents,
++    const CbfBrowsingContextPolicy& policy) {
++  if (!web_contents) {
++    return;
++  }
++  web_contents->SetUserData(
++      &kBrowsingContextPolicyUserDataKey,
++      std::make_unique<BrowsingContextPolicyData>(policy));
++}
++
++void AttachPendingBrowsingContextPolicyIfAny(content::WebContents* web_contents) {
++  const std::optional<CbfBrowsingContextPolicy>& pending = PendingPolicyStorage();
++  if (!pending.has_value()) {
++    return;
++  }
++  SetBrowsingContextPolicyForWebContents(web_contents, *pending);
++}
++
++const CbfBrowsingContextPolicy* GetBrowsingContextPolicyForWebContents(
++    content::WebContents* web_contents) {
++  if (!web_contents) {
++    return nullptr;
++  }
++  auto* data = static_cast<BrowsingContextPolicyData*>(
++      web_contents->GetUserData(&kBrowsingContextPolicyUserDataKey));
++  return data ? &data->policy : nullptr;
++}
++
++CbfBrowsingContextPolicy GetEffectiveBrowsingContextPolicyForWebContents(
++    content::WebContents* web_contents) {
++  const CbfBrowsingContextPolicy* policy =
++      GetBrowsingContextPolicyForWebContents(web_contents);
++  return policy ? *policy : LegacyBrowsingContextPolicy();
++}
++
++bool AreExtensionsDisabledForWebContents(content::WebContents* web_contents) {
++  return GetEffectiveBrowsingContextPolicyForWebContents(web_contents)
++             .extensions == CbfCapabilityPolicy::kDeny;
++}
++
++BrowsingContextPolicyData::BrowsingContextPolicyData(
++    CbfBrowsingContextPolicy policy)
++    : policy(std::move(policy)) {}
++
++BrowsingContextPolicyData::~BrowsingContextPolicyData() = default;
++
++}  // namespace cbf
+diff --git a/chrome/browser/cbf/cbf_browsing_context_policy.h b/chrome/browser/cbf/cbf_browsing_context_policy.h
+new file mode 100644
+index 0000000000000..32043619d0cf8
+--- /dev/null
++++ b/chrome/browser/cbf/cbf_browsing_context_policy.h
+@@ -0,0 +1,77 @@
++#ifndef CHROME_BROWSER_CBF_CBF_BROWSING_CONTEXT_POLICY_H_
++#define CHROME_BROWSER_CBF_CBF_BROWSING_CONTEXT_POLICY_H_
++
++#include <optional>
++#include <string>
++#include <vector>
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++namespace cbf {
++
++enum class CbfCapabilityPolicy {
++  kAllow = 0,
++  kDeny = 1,
++};
++
++struct CbfIpcPolicy {
++  enum class Kind {
++    kDeny = 0,
++    kAllow = 1,
++  };
++
++  CbfIpcPolicy();
++  CbfIpcPolicy(const CbfIpcPolicy&);
++  CbfIpcPolicy(CbfIpcPolicy&&);
++  CbfIpcPolicy& operator=(const CbfIpcPolicy&);
++  CbfIpcPolicy& operator=(CbfIpcPolicy&&);
++  ~CbfIpcPolicy();
++
++  Kind kind = Kind::kDeny;
++  std::vector<std::string> allowed_origins;
++};
++
++struct CbfBrowsingContextPolicy {
++  CbfBrowsingContextPolicy();
++  CbfBrowsingContextPolicy(const CbfBrowsingContextPolicy&);
++  CbfBrowsingContextPolicy(CbfBrowsingContextPolicy&&);
++  CbfBrowsingContextPolicy& operator=(const CbfBrowsingContextPolicy&);
++  CbfBrowsingContextPolicy& operator=(CbfBrowsingContextPolicy&&);
++  ~CbfBrowsingContextPolicy();
++
++  CbfIpcPolicy ipc;
++  CbfCapabilityPolicy extensions = CbfCapabilityPolicy::kAllow;
++};
++
++CbfBrowsingContextPolicy LegacyBrowsingContextPolicy();
++
++class ScopedPendingBrowsingContextPolicy {
++ public:
++  explicit ScopedPendingBrowsingContextPolicy(
++      std::optional<CbfBrowsingContextPolicy> policy);
++  ScopedPendingBrowsingContextPolicy(
++      const ScopedPendingBrowsingContextPolicy&) = delete;
++  ScopedPendingBrowsingContextPolicy& operator=(
++      const ScopedPendingBrowsingContextPolicy&) = delete;
++  ~ScopedPendingBrowsingContextPolicy();
++
++ private:
++  std::optional<CbfBrowsingContextPolicy> previous_;
++};
++
++void SetBrowsingContextPolicyForWebContents(
++    content::WebContents* web_contents,
++    const CbfBrowsingContextPolicy& policy);
++void AttachPendingBrowsingContextPolicyIfAny(
++    content::WebContents* web_contents);
++const CbfBrowsingContextPolicy* GetBrowsingContextPolicyForWebContents(
++    content::WebContents* web_contents);
++CbfBrowsingContextPolicy GetEffectiveBrowsingContextPolicyForWebContents(
++    content::WebContents* web_contents);
++bool AreExtensionsDisabledForWebContents(content::WebContents* web_contents);
++
++}  // namespace cbf
++
++#endif  // CHROME_BROWSER_CBF_CBF_BROWSING_CONTEXT_POLICY_H_
+diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
+index e161d0ede0842..5b81bec8ad354 100644
+--- a/chrome/browser/cbf/cbf_profile_service.cc
++++ b/chrome/browser/cbf/cbf_profile_service.cc
+@@ -28,6 +28,7 @@
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
+ #include "chrome/browser/browser_process.h"
++#include "chrome/browser/cbf/cbf_browsing_context_policy.h"
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+ #include "chrome/browser/cbf/cbf_download_manager_delegate.h"
+ #include "chrome/browser/cbf/cbf_extension_uninstall_dialog.h"
+@@ -134,6 +135,25 @@ content::StopFindAction ToBlinkStopFindAction(mojom::CbfStopFindAction action) {
+   }
+ }
+ 
++std::optional<CbfBrowsingContextPolicy> ToBrowsingContextPolicy(
++    cbf::mojom::CbfBrowsingContextPolicyPtr policy) {
++  if (!policy) {
++    return std::nullopt;
++  }
++
++  CbfBrowsingContextPolicy converted;
++  converted.ipc.kind =
++      policy->ipc->kind == cbf::mojom::CbfBrowsingContextIpcPolicyKind::kAllow
++          ? CbfIpcPolicy::Kind::kAllow
++          : CbfIpcPolicy::Kind::kDeny;
++  converted.ipc.allowed_origins = std::move(policy->ipc->allowed_origins);
++  converted.extensions =
++      policy->extensions == cbf::mojom::CbfCapabilityPolicy::kDeny
++          ? CbfCapabilityPolicy::kDeny
++          : CbfCapabilityPolicy::kAllow;
++  return converted;
++}
++
+ void RemoveProfileServiceRegistryEntry(Profile* profile,
+                                        CbfProfileService* service) {
+   if (!profile) {
+@@ -1063,10 +1083,21 @@ void CbfProfileService::SetObserver(
+ 
+ void CbfProfileService::CreateTab(const std::string& initial_url,
+                                   uint64_t request_id,
++                                  mojom::CbfBrowsingContextPolicyPtr policy,
+                                   CreateTabCallback callback) {
+-  const TabId tab_id = page_controller_->CreateTab(initial_url);
++  std::optional<CbfBrowsingContextPolicy> effective_policy =
++      ToBrowsingContextPolicy(std::move(policy));
++  const TabId tab_id =
++      page_controller_->CreateTab(initial_url, effective_policy);
+   ime_controller_->RegisterWebContents(tab_id,
+                                        tab_manager_.GetWebContents(tab_id));
++  if (tab_id != kInvalidTabId && effective_policy.has_value()) {
++    if (effective_policy->ipc.kind == CbfIpcPolicy::Kind::kAllow) {
++      EnableTabIpc(tab_id, effective_policy->ipc.allowed_origins);
++    } else {
++      DisableTabIpc(tab_id);
++    }
++  }
+   if (observer_ && tab_id != kInvalidTabId) {
+     observer_->OnTabCreated(tab_id, request_id);
+   }
+@@ -1631,6 +1662,9 @@ void CbfProfileService::ActivateExtensionAction(
+   if (!web_contents || !profile_) {
+     return;
+   }
++  if (AreExtensionsDisabledForWebContents(web_contents)) {
++    return;
++  }
+ 
+   BrowserWindowInterface* browser_window_interface =
+       webui::GetBrowserWindowInterface(web_contents);
+diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
+index 6a0e7d6345c1d..34a9818227cae 100644
+--- a/chrome/browser/cbf/cbf_profile_service.h
++++ b/chrome/browser/cbf/cbf_profile_service.h
+@@ -92,8 +92,9 @@ class CbfProfileService : public mojom::CbfProfileService,
+   void SetObserver(
+       mojo::PendingRemote<mojom::CbfProfileObserver> observer) override;
+   void CreateTab(const std::string& initial_url,
+-                     uint64_t request_id,
+-                     CreateTabCallback callback) override;
++                 uint64_t request_id,
++                 mojom::CbfBrowsingContextPolicyPtr policy,
++                 CreateTabCallback callback) override;
+   void RequestCloseTab(TabId tab_id) override;
+   void SetTabSize(const TabId tab_id,
+                       std::uint32_t width,
+diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+index 421a75783ff43..1e3a21ee73a70 100644
+--- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
++++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
+@@ -321,11 +321,12 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     InProcessBrowserTest::TearDownOnMainThread();
+   }
+ 
+-  TabId CreatePage(const std::string& url = "about:blank") {
++  TabId CreatePage(const std::string& url = "about:blank",
++                   mojom::CbfBrowsingContextPolicyPtr policy = nullptr) {
+     TabId created_id = kInvalidTabId;
+     base::RunLoop run_loop;
+     profile_service_->CreateTab(
+-        url, 1,
++        url, 1, std::move(policy),
+         base::BindOnce(
+             [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
+               *out_id = tab_id;
+@@ -336,6 +337,18 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     return created_id;
+   }
+ 
++  mojom::CbfBrowsingContextPolicyPtr CreateBrowsingContextPolicy(
++      mojom::CbfBrowsingContextIpcPolicyKind ipc_kind,
++      std::vector<std::string> allowed_origins,
++      mojom::CbfCapabilityPolicy extensions) {
++    auto policy = mojom::CbfBrowsingContextPolicy::New();
++    policy->ipc = mojom::CbfBrowsingContextIpcPolicy::New();
++    policy->ipc->kind = ipc_kind;
++    policy->ipc->allowed_origins = std::move(allowed_origins);
++    policy->extensions = extensions;
++    return policy;
++  }
++
+   Browser* GetHostBrowserForTab(TabId tab_id) {
+     content::WebContents* web_contents =
+         profile_service_->GetWebContentsForTesting(tab_id);
+@@ -698,6 +711,36 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+     return LoadActionExtension(name, /*with_default_popup=*/false);
+   }
+ 
++  scoped_refptr<const extensions::Extension> LoadContentScriptExtension(
++      const std::string& name,
++      const std::string& script_body) {
++    base::ScopedAllowBlockingForTesting allow_blocking;
++    auto extension_dir = std::make_unique<base::ScopedTempDir>();
++    CHECK(extension_dir->CreateUniqueTempDir());
++    CHECK(base::WriteFile(
++        extension_dir->GetPath().AppendASCII("manifest.json"),
++        base::StringPrintf(
++            R"({
++                 "manifest_version": 3,
++                 "name": "%s",
++                 "version": "1.0",
++                 "host_permissions": ["<all_urls>"],
++                 "content_scripts": [{
++                   "matches": ["<all_urls>"],
++                   "js": ["content.js"],
++                   "run_at": "document_end"
++                 }]
++               })",
++            name.c_str())));
++    CHECK(base::WriteFile(extension_dir->GetPath().AppendASCII("content.js"),
++                          script_body));
++
++    extensions::ChromeTestExtensionLoader loader(browser()->profile());
++    auto extension = loader.LoadExtension(extension_dir->GetPath());
++    extension_dirs_.push_back(std::move(extension_dir));
++    return extension;
++  }
++
+   raw_ptr<CbfBrowserService> browser_service_ = nullptr;
+   std::unique_ptr<TestBrowserObserver> browser_observer_;
+   mojo::Remote<mojom::CbfProfileService> profile_service_remote_;
+@@ -977,6 +1020,39 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   EXPECT_EQ(event.payload_text, "hello from page");
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       CreateTabPolicyInitializesIpcAllowList) {
++  EnsureEmbeddedServerStarted();
++  const GURL page_url =
++      embedded_test_server()->GetURL("127.0.0.1", "/title1.html");
++
++  const TabId tab_id = CreatePage(
++      page_url.spec(),
++      CreateBrowsingContextPolicy(
++          mojom::CbfBrowsingContextIpcPolicyKind::kAllow,
++          {url::Origin::Create(page_url).Serialize()},
++          mojom::CbfCapabilityPolicy::kAllow));
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  AllowMainFrameJavaScriptInjection(tab_id);
++  base::RunLoop().RunUntilIdle();
++
++  ASSERT_TRUE(ExecJs(web_contents, R"(
++    window.cbf.invoke('host.echo', 'hello from policy').catch(() => {});
++    true;
++  )"));
++
++  observer_.WaitForTabIpcMessageCount(1);
++  ASSERT_EQ(observer_.tab_ipc_message_events().size(), 1u);
++  EXPECT_EQ(observer_.tab_ipc_message_events().front().payload_text,
++            "hello from policy");
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        TabIpcInvokeRejectsWhenOriginDoesNotMatchAllowList) {
+   EnsureEmbeddedServerStarted();
+@@ -1056,6 +1132,34 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+             EvalJs(web_contents, "window.__cbfHostEvent;"));
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       CreateTabWithoutPolicyKeepsIpcDisabledByDefault) {
++  EnsureEmbeddedServerStarted();
++  const GURL page_url =
++      embedded_test_server()->GetURL("127.0.0.1", "/title1.html");
++
++  const TabId tab_id = CreatePage(page_url.spec());
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++
++  AllowMainFrameJavaScriptInjection(tab_id);
++
++  EXPECT_EQ("IPC_DISABLED", EvalJs(web_contents, R"(
++              (async () => {
++                try {
++                  await window.cbf.invoke('host.default', 'payload');
++                  return 'OK';
++                } catch (e) {
++                  return (e && e.code) ? e.code : 'UNKNOWN';
++                }
++              })();
++            )"));
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        TabIpcInvokeRejectsWhenIpcDisabled) {
+   EnsureEmbeddedServerStarted();
+@@ -1089,6 +1193,42 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+             )"));
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       CreateTabPolicyDisablesContentScripts) {
++  EnsureEmbeddedServerStarted();
++  auto extension = LoadContentScriptExtension(
++      "Content Script Extension",
++      "document.documentElement.dataset.cbfInjected = 'yes';");
++  ASSERT_TRUE(extension);
++
++  const GURL page_url =
++      embedded_test_server()->GetURL("127.0.0.1", "/title1.html");
++
++  const TabId allowed_tab_id = CreatePage(page_url.spec());
++  ASSERT_NE(allowed_tab_id, kInvalidTabId);
++  WaitForLoad(allowed_tab_id);
++
++  const TabId denied_tab_id = CreatePage(
++      page_url.spec(),
++      CreateBrowsingContextPolicy(
++          mojom::CbfBrowsingContextIpcPolicyKind::kDeny, {},
++          mojom::CbfCapabilityPolicy::kDeny));
++  ASSERT_NE(denied_tab_id, kInvalidTabId);
++  WaitForLoad(denied_tab_id);
++
++  content::WebContents* allowed_contents =
++      profile_service_->GetWebContentsForTesting(allowed_tab_id);
++  content::WebContents* denied_contents =
++      profile_service_->GetWebContentsForTesting(denied_tab_id);
++  ASSERT_NE(allowed_contents, nullptr);
++  ASSERT_NE(denied_contents, nullptr);
++
++  EXPECT_EQ("yes", EvalJs(allowed_contents,
++                          "document.documentElement.dataset.cbfInjected || ''"));
++  EXPECT_EQ("", EvalJs(denied_contents,
++                       "document.documentElement.dataset.cbfInjected || ''"));
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        ActivateExtensionActionIgnoresExtensionWithoutPopup) {
+   auto extension = LoadActionExtensionWithoutPopup("Action Without Popup");
+@@ -1106,6 +1246,47 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   EXPECT_TRUE(observer_.extension_popup_closed_events().empty());
+ }
+ 
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       ActivateExtensionActionRespectsDenyPolicy) {
++  auto extension = LoadActionPopupExtension("Popup Denied Extension");
++  ASSERT_TRUE(extension);
++
++  const TabId tab_id = CreatePage(
++      "about:blank",
++      CreateBrowsingContextPolicy(
++          mojom::CbfBrowsingContextIpcPolicyKind::kDeny, {},
++          mojom::CbfCapabilityPolicy::kDeny));
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  profile_service_->ActivateExtensionAction(tab_id, extension->id());
++  base::RunLoop().RunUntilIdle();
++
++  EXPECT_TRUE(observer_.extension_popup_opened_events().empty());
++  EXPECT_TRUE(observer_.extension_popup_surface_events().empty());
++  EXPECT_TRUE(observer_.extension_popup_closed_events().empty());
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       ActivateExtensionActionAllowsExplicitAllowPolicy) {
++  auto extension = LoadActionPopupExtension("Popup Allowed Extension");
++  ASSERT_TRUE(extension);
++
++  const TabId tab_id = CreatePage(
++      "about:blank",
++      CreateBrowsingContextPolicy(
++          mojom::CbfBrowsingContextIpcPolicyKind::kDeny, {},
++          mojom::CbfCapabilityPolicy::kAllow));
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  profile_service_->ActivateExtensionAction(tab_id, extension->id());
++  observer_.WaitForExtensionPopupOpenedCount(1);
++  observer_.WaitForExtensionPopupSurfaceCount(1);
++
++  EXPECT_EQ(observer_.extension_popup_opened_events().back().tab_id, tab_id);
++}
++
+ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+                        ActivateExtensionActionIgnoresUnknownExtension) {
+   const TabId tab_id = CreatePage("about:blank");
+@@ -2239,7 +2420,7 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+   TabId created_id = kInvalidTabId;
+   base::RunLoop run_loop;
+   profile_service_->CreateTab(
+-      "about:blank", 1,
++      "about:blank", 1, nullptr,
+       base::BindOnce(
+           [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
+             *out_id = tab_id;
+diff --git a/chrome/browser/cbf/cbf_settings_browsertest.cc b/chrome/browser/cbf/cbf_settings_browsertest.cc
+index 20ed2518c858f..fd59bcfcc9f00 100644
+--- a/chrome/browser/cbf/cbf_settings_browsertest.cc
++++ b/chrome/browser/cbf/cbf_settings_browsertest.cc
+@@ -46,7 +46,7 @@ class CbfSettingsBrowserTest : public InProcessBrowserTest {
+     TabId created_id = kInvalidTabId;
+     base::RunLoop run_loop;
+     profile_service_->CreateTab(
+-        url, 1,
++        url, 1, nullptr,
+         base::BindOnce(
+             [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
+               *out_id = tab_id;
+diff --git a/chrome/browser/cbf/cbf_tab_manager.cc b/chrome/browser/cbf/cbf_tab_manager.cc
+index 74aeeb88c278f..ee3e8a5a58817 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.cc
++++ b/chrome/browser/cbf/cbf_tab_manager.cc
+@@ -6,6 +6,7 @@
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+ #include "base/logging.h"
++#include "chrome/browser/cbf/cbf_browsing_context_policy.h"
+ #include "chrome/browser/cbf/cbf_ca_context_id_observer.h"
+ #include "chrome/browser/cbf/cbf_embedded_browser_window.h"
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+@@ -86,7 +87,8 @@ CbfTabManager::~CbfTabManager() {
+   tabs_.clear();
+ }
+ 
+-TabId CbfTabManager::CreateTab(const GURL& initial_url) {
++TabId CbfTabManager::CreateTab(const GURL& initial_url,
++                               std::optional<CbfBrowsingContextPolicy> policy) {
+   if (!profile_) {
+     return kInvalidTabId;
+   }
+@@ -98,6 +100,7 @@ TabId CbfTabManager::CreateTab(const GURL& initial_url) {
+   }
+ 
+   content::WebContents::CreateParams params(profile_);
++  ScopedPendingBrowsingContextPolicy scoped_policy(std::move(policy));
+   std::unique_ptr<content::WebContents> web_contents =
+       content::WebContents::Create(params);
+   browser->tab_strip_model()->AppendWebContents(std::move(web_contents),
+diff --git a/chrome/browser/cbf/cbf_tab_manager.h b/chrome/browser/cbf/cbf_tab_manager.h
+index d3a3e2f628b39..39faf6c889e0e 100644
+--- a/chrome/browser/cbf/cbf_tab_manager.h
++++ b/chrome/browser/cbf/cbf_tab_manager.h
+@@ -4,6 +4,7 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <memory>
++#include <optional>
+ #include <vector>
+ 
+ #include "base/containers/flat_map.h"
+@@ -11,6 +12,7 @@
+ #include "base/functional/callback_forward.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
++#include "chrome/browser/cbf/cbf_browsing_context_policy.h"
+ #include "ui/gfx/geometry/size.h"
+ #include "url/gurl.h"
+ 
+@@ -39,7 +41,8 @@ class CbfTabManager {
+   CbfTabManager& operator=(const CbfTabManager&) = delete;
+   ~CbfTabManager();
+ 
+-  TabId CreateTab(const GURL& initial_url);
++  TabId CreateTab(const GURL& initial_url,
++                  std::optional<CbfBrowsingContextPolicy> policy = std::nullopt);
+   Browser* GetBrowser(TabId tab_id) const;
+   content::WebContents* GetWebContents(TabId tab_id) const;
+   TabId GetTabIdForWebContents(content::WebContents* web_contents) const;
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index b47cc1757fcb8..07627d519f45f 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -89,6 +89,26 @@ enum CbfAuxiliaryWindowCloseReason {
+   kSystemDismissed,
+ };
+ 
++enum CbfCapabilityPolicy {
++  kAllow,
++  kDeny,
++};
++
++enum CbfBrowsingContextIpcPolicyKind {
++  kDeny,
++  kAllow,
++};
++
++struct CbfBrowsingContextIpcPolicy {
++  CbfBrowsingContextIpcPolicyKind kind;
++  array<string> allowed_origins;
++};
++
++struct CbfBrowsingContextPolicy {
++  CbfBrowsingContextIpcPolicy ipc;
++  CbfCapabilityPolicy extensions;
++};
++
+ enum CbfPromptUiKind {
+   kUnknown,
+   kPermissionPrompt,
+@@ -852,7 +872,9 @@ interface CbfProfileObserver {
+ 
+ interface CbfProfileService {
+   SetObserver(pending_remote<CbfProfileObserver> observer);
+-  CreateTab(string initial_url, uint64 request_id) => (uint64 tab_id);
++  CreateTab(string initial_url,
++            uint64 request_id,
++            CbfBrowsingContextPolicy? policy) => (uint64 tab_id);
+   RequestCloseTab(uint64 tab_id);
+   SetTabSize(uint64 tab_id, uint32 width, uint32 height) => ();
+   SetTabBackgroundPolicy(uint64 tab_id, bool transparent);
+diff --git a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+index bdae92086a687..3b60b8c51d06a 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_devtools_controller_browsertest.cc
+@@ -42,7 +42,7 @@ class CbfProfileDevToolsControllerBrowserTest : public InProcessBrowserTest {
+     TabId created_id = kInvalidTabId;
+     base::RunLoop run_loop;
+     profile_service_->CreateTab(
+-        "about:blank", 1,
++        "about:blank", 1, nullptr,
+         base::BindOnce(
+             [](TabId* out_id, base::RunLoop* run_loop, TabId tab_id) {
+               *out_id = tab_id;
+diff --git a/chrome/browser/cbf/profile/cbf_profile_page_controller.cc b/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
+index e1d1a78947c0f..97bd320b618b1 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
++++ b/chrome/browser/cbf/profile/cbf_profile_page_controller.cc
+@@ -12,12 +12,14 @@ CbfProfilePageController::CbfProfilePageController(
+ 
+ CbfProfilePageController::~CbfProfilePageController() = default;
+ 
+-TabId CbfProfilePageController::CreateTab(const std::string& initial_url) {
++TabId CbfProfilePageController::CreateTab(
++    const std::string& initial_url,
++    std::optional<CbfBrowsingContextPolicy> policy) {
+   const GURL url(initial_url);
+   if (IsSettingsUrlBlocked(url)) {
+     return kInvalidTabId;
+   }
+-  return context_->tab_manager().CreateTab(url);
++  return context_->tab_manager().CreateTab(url, std::move(policy));
+ }
+ 
+ void CbfProfilePageController::RequestCloseTab(TabId tab_id) {
+diff --git a/chrome/browser/cbf/profile/cbf_profile_page_controller.h b/chrome/browser/cbf/profile/cbf_profile_page_controller.h
+index c46bcd864e626..631a0bd020546 100644
+--- a/chrome/browser/cbf/profile/cbf_profile_page_controller.h
++++ b/chrome/browser/cbf/profile/cbf_profile_page_controller.h
+@@ -3,10 +3,12 @@
+ 
+ #include <cstddef>
+ #include <cstdint>
++#include <optional>
+ #include <string>
+ #include <vector>
+ 
+ #include "base/memory/raw_ptr.h"
++#include "chrome/browser/cbf/cbf_browsing_context_policy.h"
+ #include "chrome/browser/cbf/cbf_tab_manager.h"
+ 
+ namespace content {
+@@ -25,7 +27,8 @@ class CbfProfilePageController {
+   CbfProfilePageController& operator=(const CbfProfilePageController&) = delete;
+   ~CbfProfilePageController();
+ 
+-  TabId CreateTab(const std::string& initial_url);
++  TabId CreateTab(const std::string& initial_url,
++                  std::optional<CbfBrowsingContextPolicy> policy = std::nullopt);
+   void RequestCloseTab(TabId tab_id);
+   void DispatchBeforeUnloadForShutdown();
+   std::vector<TabId> GetDirtyTabIds() const;
+diff --git a/chrome/browser/extensions/chrome_extension_frame_host.cc b/chrome/browser/extensions/chrome_extension_frame_host.cc
+index 8c7d74ec6c452..c61cc4341749d 100644
+--- a/chrome/browser/extensions/chrome_extension_frame_host.cc
++++ b/chrome/browser/extensions/chrome_extension_frame_host.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "chrome/browser/extensions/chrome_extension_frame_host.h"
+ 
++#include "chrome/browser/cbf/cbf_browsing_context_policy.h"
+ #include "chrome/browser/extensions/activity_log/activity_log.h"
+ #include "chrome/browser/extensions/error_console/error_console.h"
+ #include "chrome/browser/extensions/extension_action_runner.h"
+@@ -38,6 +39,11 @@ void ChromeExtensionFrameHost::RequestScriptInjectionPermission(
+     mojom::InjectionType script_type,
+     mojom::RunLocation run_location,
+     RequestScriptInjectionPermissionCallback callback) {
++  if (cbf::AreExtensionsDisabledForWebContents(web_contents_)) {
++    std::move(callback).Run(false);
++    return;
++  }
++
+   if (!crx_file::id_util::IdIsValid(extension_id)) {
+     content::RenderProcessHost* render_process =
+         receivers_.GetCurrentTargetFrame()->GetProcess();
+diff --git a/chrome/browser/extensions/extension_tab_util.cc b/chrome/browser/extensions/extension_tab_util.cc
+index 40cf5ace8cb3a..4a832ec5ddb94 100644
+--- a/chrome/browser/extensions/extension_tab_util.cc
++++ b/chrome/browser/extensions/extension_tab_util.cc
+@@ -20,6 +20,7 @@
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/stringprintf.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/cbf/cbf_browsing_context_policy.h"
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ #include "chrome/browser/cbf/cbf_service.h"
+ #include "chrome/browser/extensions/browser_extension_window_controller.h"
+@@ -676,6 +677,9 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
+       WebContents* target_contents = window->GetWebContentsAt(i);
+       if (sessions::SessionTabHelper::IdForTab(target_contents).id() ==
+           tab_id) {
++        if (cbf::AreExtensionsDisabledForWebContents(target_contents)) {
++          return false;
++        }
+         if (out_window) {
+           *out_window = window;
+         }
+@@ -708,6 +712,9 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
+       if (sessions::SessionTabHelper::IdForTab(contents).id() != tab_id) {
+         continue;
+       }
++      if (cbf::AreExtensionsDisabledForWebContents(contents)) {
++        return false;
++      }
+       if (out_contents) {
+         *out_contents = contents;
+       }
+@@ -758,6 +765,9 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
+     });
+ 
+     if (found_prerender_contents && out_contents) {
++      if (cbf::AreExtensionsDisabledForWebContents(found_prerender_contents)) {
++        return false;
++      }
+       *out_contents = found_prerender_contents;
+       return true;
+     }
+diff --git a/chrome/browser/ui/tab_helpers.cc b/chrome/browser/ui/tab_helpers.cc
+index 15c008ca49d68..453dacd7c6bfd 100644
+--- a/chrome/browser/ui/tab_helpers.cc
++++ b/chrome/browser/ui/tab_helpers.cc
+@@ -15,6 +15,7 @@
+ #include "base/time/default_tick_clock.h"
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
++#include "chrome/browser/cbf/cbf_browsing_context_policy.h"
+ #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+ #include "chrome/browser/breadcrumbs/breadcrumb_manager_tab_helper.h"
+ #include "chrome/browser/browser_process.h"
+@@ -724,6 +725,9 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
+   FontPrewarmerTabHelper::CreateForWebContents(web_contents);
+ #endif
+ 
++  const bool cbf_extensions_disabled =
++      cbf::AreExtensionsDisabledForWebContents(web_contents);
++
+   // --- Section 3: Feature tab helpers behind BUILDFLAGs ---
+   // NOT for "if enabled"; put those in section 1.
+ 
+@@ -740,7 +744,8 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
+   // case where this can happen is when the user opens undocked developer tools.
+   // For all developer tools web contents, the view type is set to
+   // `kDeveloperTools` by the `DevToolsWindow` before tab helpers are attached.
+-  if (extensions::GetViewType(web_contents) ==
++  if (!cbf_extensions_disabled &&
++      extensions::GetViewType(web_contents) ==
+       extensions::mojom::ViewType::kInvalid) {
+     extensions::SetViewType(web_contents,
+                             extensions::mojom::ViewType::kTabContents);
+@@ -748,16 +753,20 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
+ #endif
+ 
+ #if BUILDFLAG(ENABLE_EXTENSIONS)
+-  extensions::AppTabHelper::CreateForWebContents(web_contents);
++  if (!cbf_extensions_disabled) {
++    extensions::AppTabHelper::CreateForWebContents(web_contents);
++  }
+   web_app::WindowManagementContentSettingObserver::CreateForWebContents(
+       web_contents);
+ #endif
+ 
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+   // These helpers are used on Win/Mac/Linux and also desktop Android.
+-  extensions::NavigationExtensionEnabler::CreateForWebContents(web_contents);
+-  extensions::WebNavigationTabObserver::CreateForWebContents(web_contents);
+-  extensions::TabHelper::CreateForWebContents(web_contents);
++  if (!cbf_extensions_disabled) {
++    extensions::NavigationExtensionEnabler::CreateForWebContents(web_contents);
++    extensions::WebNavigationTabObserver::CreateForWebContents(web_contents);
++    extensions::TabHelper::CreateForWebContents(web_contents);
++  }
+ #endif
+ 
+ #if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+diff --git a/chrome/browser/universal_web_contents_observers.cc b/chrome/browser/universal_web_contents_observers.cc
+index 70c84066d5da9..599ff5d9d23f2 100644
+--- a/chrome/browser/universal_web_contents_observers.cc
++++ b/chrome/browser/universal_web_contents_observers.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "chrome/browser/universal_web_contents_observers.h"
+ 
++#include "chrome/browser/cbf/cbf_browsing_context_policy.h"
+ #include "components/performance_manager/embedder/performance_manager_registry.h"
+ #include "content/public/browser/web_contents.h"
+ #include "extensions/buildflags/buildflags.h"
+@@ -25,8 +26,10 @@ void AttachUniversalWebContentsObservers(content::WebContents* web_contents) {
+   // and not every WebContents has (or needs) every tab helper.
+ 
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
++  cbf::AttachPendingBrowsingContextPolicyIfAny(web_contents);
+   if (!extensions::ChromeContentBrowserClientExtensionsPart::
+-          AreExtensionsDisabledForProfile(web_contents->GetBrowserContext())) {
++          AreExtensionsDisabledForProfile(web_contents->GetBrowserContext()) &&
++      !cbf::AreExtensionsDisabledForWebContents(web_contents)) {
+     extensions::ExtensionsBrowserClient::Get()
+         ->CreateExtensionWebContentsObserver(web_contents);
+   }
+diff --git a/extensions/renderer/extension_injection_host.cc b/extensions/renderer/extension_injection_host.cc
+index befc2574b44cf..63b4a38f7116b 100644
+--- a/extensions/renderer/extension_injection_host.cc
++++ b/extensions/renderer/extension_injection_host.cc
+@@ -9,7 +9,9 @@
+ #include "extensions/common/extension_id.h"
+ #include "extensions/common/manifest_handlers/csp_info.h"
+ #include "extensions/common/mojom/host_id.mojom.h"
++#include "extensions/common/mojom/view_type.mojom.h"
+ #include "extensions/renderer/extension_web_view_helper.h"
++#include "extensions/renderer/extension_frame_helper.h"
+ #include "extensions/renderer/renderer_extension_registry.h"
+ #include "pdf/buildflags.h"
+ #include "third_party/blink/public/web/web_local_frame.h"
+@@ -58,6 +60,12 @@ PermissionsData::PageAccess ExtensionInjectionHost::CanExecuteOnFrame(
+     int tab_id,
+     bool is_declarative) const {
+   blink::WebLocalFrame* web_local_frame = render_frame->GetWebFrame();
++  ExtensionFrameHelper* frame_helper = ExtensionFrameHelper::Get(render_frame);
++
++  if (frame_helper && frame_helper->tab_id() == -1 &&
++      frame_helper->view_type() == mojom::ViewType::kInvalid) {
++    return PermissionsData::PageAccess::kDenied;
++  }
+ 
+ #if BUILDFLAG(ENABLE_PDF)
+   // Block executing scripts in the PDF content frame. The parent frame should
+-- 
+2.50.1 (Apple Git-155)
+

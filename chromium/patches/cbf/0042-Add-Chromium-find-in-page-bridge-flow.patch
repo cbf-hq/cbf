@@ -1,7 +1,7 @@
 From c7535bafe8a43754b008e6e3f5e85eea0c81db65 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Mar 2026 15:38:35 +0900
-Subject: [PATCH 42/48] Add Chromium find-in-page bridge flow
+Subject: [PATCH 42/49] Add Chromium find-in-page bridge flow
 
 Wire cbf::mojom::CbfProfileService::FindInPage and StopFinding through
 CbfBridgeClient into content::WebContents::Find/StopFinding.

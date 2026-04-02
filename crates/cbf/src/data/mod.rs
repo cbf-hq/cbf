@@ -18,6 +18,7 @@ pub mod ipc;
 pub mod key;
 pub mod mouse;
 pub mod permission;
+pub mod policy;
 pub mod profile;
 pub mod transient_browsing_context;
 pub mod visibility;

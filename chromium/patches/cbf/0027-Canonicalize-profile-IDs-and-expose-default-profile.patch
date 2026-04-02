@@ -1,7 +1,7 @@
 From dd393552f4292823650879d9e16fe28aedc6bbbe Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 15 Mar 2026 15:04:23 +0900
-Subject: [PATCH 27/48] Canonicalize profile IDs and expose default profile
+Subject: [PATCH 27/49] Canonicalize profile IDs and expose default profile
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge_ffi.h    |  1 +

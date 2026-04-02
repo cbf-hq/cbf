@@ -16,6 +16,7 @@ use crate::data::{
     ipc::{BrowsingContextIpcMessage, IpcConfig},
     key::KeyEvent,
     mouse::{MouseEvent, MouseWheelEvent},
+    policy::BrowsingContextPolicy,
     transient_browsing_context::{TransientImeCommitText, TransientImeComposition},
     visibility::BrowsingContextVisibility,
     window_open::WindowOpenResponse,
@@ -69,6 +70,7 @@ pub enum BrowserCommand {
         request_id: u64,
         initial_url: Option<String>,
         profile_id: String,
+        policy: Option<BrowsingContextPolicy>,
     },
 
     /// Fetch the list of available profiles from the backend.
@@ -567,6 +569,7 @@ mod tests {
         edit::EditAction,
         ids::{BrowsingContextId, TransientBrowsingContextId},
         ipc::IpcConfig,
+        policy::{BrowsingContextPolicy, CapabilityPolicy, IpcPolicy},
         visibility::BrowsingContextVisibility,
     };
 
@@ -588,6 +591,27 @@ mod tests {
             request_id: 42,
             initial_url: None,
             profile_id: "profile-default".to_string(),
+            policy: None,
+        };
+
+        assert_eq!(
+            BrowserOperation::from_command(&command),
+            BrowserOperation::CreateBrowsingContext
+        );
+    }
+
+    #[test]
+    fn create_browsing_context_can_carry_policy() {
+        let command = BrowserCommand::CreateBrowsingContext {
+            request_id: 7,
+            initial_url: Some("app://simpleapp/ui.html".to_string()),
+            profile_id: "profile-default".to_string(),
+            policy: Some(BrowsingContextPolicy {
+                ipc: IpcPolicy::Allow {
+                    allowed_origins: vec!["app://simpleapp".to_string()],
+                },
+                extensions: CapabilityPolicy::Deny,
+            }),
         };
 
         assert_eq!(

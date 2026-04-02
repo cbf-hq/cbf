@@ -1,7 +1,7 @@
 From 700b9cee66392f7f91d486f7909150061beb964c Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sat, 21 Feb 2026 17:32:17 +0900
-Subject: [PATCH 03/48] Add DevTools bridge commands and event mapping
+Subject: [PATCH 03/49] Add DevTools bridge commands and event mapping
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.h        |  8 ++

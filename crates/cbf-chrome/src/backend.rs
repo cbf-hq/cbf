@@ -979,13 +979,14 @@ impl ChromiumBackend {
                 request_id,
                 initial_url,
                 profile_id,
+                policy,
             } => {
                 let url = initial_url
                     .clone()
                     .unwrap_or_else(|| "about:blank".to_string());
 
                 client
-                    .create_tab(*request_id, &url, profile_id)
+                    .create_tab(*request_id, &url, profile_id, policy.as_ref())
                     .map(|_| (None, Vec::new()))
             }
             ChromeCommand::SetTabSize {

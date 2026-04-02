@@ -14,6 +14,7 @@ use crate::{
         ime::{ConfirmCompositionBehavior, ImeCommitText, ImeComposition},
         key::KeyEvent,
         mouse::{MouseEvent, MouseWheelEvent},
+        policy::BrowsingContextPolicy,
         transient_browsing_context::{TransientImeCommitText, TransientImeComposition},
         visibility::BrowsingContextVisibility,
         window_open::WindowOpenResponse,
@@ -247,11 +248,13 @@ impl<B: Backend> BrowserHandle<B> {
         request_id: u64,
         initial_url: Option<String>,
         profile_id: impl Into<String>,
+        policy: Option<BrowsingContextPolicy>,
     ) -> Result<(), Error> {
         self.send(BrowserCommand::CreateBrowsingContext {
             request_id,
             initial_url,
             profile_id: profile_id.into(),
+            policy,
         })
     }
 
@@ -895,10 +898,96 @@ impl<B: Backend> Drop for BrowserSession<B> {
 
 #[cfg(test)]
 mod tests {
-    use async_channel::unbounded;
+    use async_channel::{bounded, unbounded};
 
-    use super::{Backend, CommandEnvelope, CommandSender, RawCommandSenderExt};
-    use crate::{command::BrowserCommand, error::Error, event::BrowserEvent};
+    use super::{
+        Backend, BrowserHandle, CommandEnvelope, CommandSender, RawCommandSenderExt,
+    };
+    use crate::{
+        command::BrowserCommand,
+        data::policy::{BrowsingContextPolicy, CapabilityPolicy, IpcPolicy},
+        delegate::BackendDelegate,
+        error::Error,
+        event::BrowserEvent,
+    };
+
+    struct TestBackend;
+
+    impl Backend for TestBackend {
+        type RawCommand = BrowserCommand;
+        type RawEvent = ();
+        type RawDelegate = ();
+
+        fn to_raw_command(command: BrowserCommand) -> Self::RawCommand {
+            command
+        }
+
+        fn to_generic_event(_: &Self::RawEvent) -> Option<BrowserEvent> {
+            None
+        }
+
+        fn connect<D: BackendDelegate>(
+            self,
+            _: D,
+            _: Option<Self::RawDelegate>,
+        ) -> Result<(CommandSender<Self>, super::EventStream<Self>), Error> {
+            unreachable!("not used in these tests")
+        }
+    }
+
+    fn test_handle() -> (
+        BrowserHandle<TestBackend>,
+        async_channel::Receiver<CommandEnvelope<TestBackend>>,
+    ) {
+        let (tx, rx) = bounded(1);
+        (BrowserHandle::new(CommandSender::from_raw_sender(tx)), rx)
+    }
+
+    #[test]
+    fn create_browsing_context_uses_legacy_none_policy() {
+        let (handle, rx) = test_handle();
+
+        handle
+            .create_browsing_context(11, Some("about:blank".to_string()), "default", None)
+            .expect("send succeeds");
+
+        let envelope = rx.recv_blocking().expect("command received");
+        let Some(BrowserCommand::CreateBrowsingContext { policy, .. }) = envelope.as_generic()
+        else {
+            panic!("expected create browsing context command");
+        };
+
+        assert_eq!(policy, &None);
+    }
+
+    #[test]
+    fn create_browsing_context_sends_policy() {
+        let (handle, rx) = test_handle();
+        let policy = BrowsingContextPolicy {
+            ipc: IpcPolicy::Allow {
+                allowed_origins: vec!["app://simpleapp".to_string()],
+            },
+            extensions: CapabilityPolicy::Deny,
+        };
+
+        handle
+            .create_browsing_context(
+                12,
+                Some("app://simpleapp/ui.html".to_string()),
+                "default",
+                Some(policy.clone()),
+            )
+            .expect("send succeeds");
+
+        let envelope = rx.recv_blocking().expect("command received");
+        let Some(BrowserCommand::CreateBrowsingContext { policy: actual, .. }) =
+            envelope.as_generic()
+        else {
+            panic!("expected create browsing context command");
+        };
+
+        assert_eq!(actual, &Some(policy));
+    }
 
     struct MockBackend;
 

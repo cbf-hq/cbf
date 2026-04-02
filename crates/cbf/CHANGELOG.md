@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Browser-generic browsing-context capability policy models in `cbf::data::policy`, including `BrowsingContextPolicy`, `CapabilityPolicy`, and `IpcPolicy`.
+- Create-time browsing-context policy support on `BrowserCommand::CreateBrowsingContext`, allowing hosts to initialize IPC allow-lists and extension capability state when creating a browsing context.
+
+### Changed
+
+- `BrowserHandle::create_browsing_context` now accepts an optional `BrowsingContextPolicy` instead of requiring a separate `create_browsing_context_with_policy` helper.
+
 ## [0.1.0-alpha.2] - 2026-03-27
 
 ### Added

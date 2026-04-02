@@ -1,7 +1,7 @@
 From 5f740d2085ebcfc34f724ef34e9e822defdd9eac Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 9 Mar 2026 12:05:51 +0900
-Subject: [PATCH 21/48] Expose extension icons
+Subject: [PATCH 21/49] Expose extension icons
 
 ---
  .../browser/cbf/bridge/cbf_bridge_events.cc   |  34 ++++++

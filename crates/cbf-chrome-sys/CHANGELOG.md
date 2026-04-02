@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- FFI and generated binding support for create-time browsing-context policy transport, including IPC allow-list initialization data and browsing-context extension capability state in the bridge client ABI.
+
+### Changed
+
+- Regenerated `ffi_data_generated.rs` and `ffi_bridge_generated.rs` to mirror the updated Chromium bridge headers for browsing-context policy transport.
+
 ## [146.1.0-alpha.2] - 2026-03-27
 
 ### Added

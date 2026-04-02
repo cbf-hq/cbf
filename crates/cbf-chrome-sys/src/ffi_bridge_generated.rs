@@ -271,6 +271,10 @@ pub struct cbf_bridge {
         request_id: u64,
         initial_url: *const ::std::os::raw::c_char,
         profile_id: *const ::std::os::raw::c_char,
+        has_policy: bool,
+        ipc_policy_kind: u8,
+        allowed_origins: *const CbfCommandList,
+        extensions_policy: u8,
     ) -> bool,
     pub cbf_bridge_client_request_close_tab:
         unsafe extern "C" fn(client: *mut CbfBridgeClientHandle, tab_id: u64) -> bool,
@@ -1279,8 +1283,21 @@ impl cbf_bridge {
         request_id: u64,
         initial_url: *const ::std::os::raw::c_char,
         profile_id: *const ::std::os::raw::c_char,
+        has_policy: bool,
+        ipc_policy_kind: u8,
+        allowed_origins: *const CbfCommandList,
+        extensions_policy: u8,
     ) -> bool {
-        (self.cbf_bridge_client_create_tab)(client, request_id, initial_url, profile_id)
+        (self.cbf_bridge_client_create_tab)(
+            client,
+            request_id,
+            initial_url,
+            profile_id,
+            has_policy,
+            ipc_policy_kind,
+            allowed_origins,
+            extensions_policy,
+        )
     }
     pub unsafe fn cbf_bridge_client_request_close_tab(
         &self,
