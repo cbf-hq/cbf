@@ -48,19 +48,21 @@ use crate::{
             CoreAction, DEVTOOLS_HOST_WINDOW_ID, DownloadStatus, JavaScriptDialogTarget,
             MAIN_PAGE_CREATE_REQUEST_ID, OVERLAY_CREATE_REQUEST_ID, PRIMARY_HOST_WINDOW_ID,
             PendingWindowBrowsingContextCreate, PendingWindowBrowsingContextRole,
-            SharedStateHandle, TOOLBAR_CREATE_REQUEST_ID, TransientPopupState, allocate_request_id,
-            bind_browsing_context_to_window, browsing_context_ids_for_window,
-            compositor_window_id_for_host_window, devtools_browsing_context_id, has_bound_windows,
-            overlay_browsing_context_id, page_browsing_context_id_for_toolbar_browsing_context,
+            SharedStateHandle, TOOLBAR_CREATE_REQUEST_ID, TransientPopupState, WindowCloseState,
+            allocate_request_id, bind_browsing_context_to_window, browsing_context_ids_for_window,
+            clear_window_close_state, compositor_window_id_for_host_window,
+            devtools_browsing_context_id, has_bound_windows, overlay_browsing_context_id,
+            page_browsing_context_id_for_toolbar_browsing_context,
             page_browsing_context_id_for_window, primary_browsing_context_id,
             primary_host_window_id, register_pending_window_browsing_context_create,
             set_devtools_browsing_context_id, set_overlay_browsing_context_id,
             set_primary_browsing_context_id, set_toolbar_browsing_context_id,
-            set_window_page_browsing_context, set_window_toolbar_browsing_context,
-            take_pending_window_browsing_context_create, take_pending_window_open_request,
-            toolbar_browsing_context_id, toolbar_browsing_context_id_for_window,
-            transient_browsing_context_id_for_window, unbind_browsing_context,
-            unbind_transient_browsing_context, window_id_for_browsing_context,
+            set_window_close_state, set_window_page_browsing_context,
+            set_window_toolbar_browsing_context, take_pending_window_browsing_context_create,
+            take_pending_window_open_request, toolbar_browsing_context_id,
+            toolbar_browsing_context_id_for_window, transient_browsing_context_id_for_window,
+            unbind_browsing_context, unbind_transient_browsing_context,
+            window_close_state_for_window, window_id_for_browsing_context,
             window_id_for_page_browsing_context, window_id_for_toolbar_browsing_context,
             window_id_for_transient_browsing_context,
         },
@@ -142,6 +144,47 @@ fn navigation_state_with_favicon(
     toolbar_protocol::NavigationState {
         favicon_url: favicon_url.map(ToOwned::to_owned),
         ..state.clone()
+    }
+}
+
+fn should_ignore_window_close_request(state: WindowCloseState) -> bool {
+    !matches!(state, WindowCloseState::Idle)
+}
+
+fn awaiting_window_close_for_page(
+    state: WindowCloseState,
+    page_browsing_context_id: BrowsingContextId,
+) -> bool {
+    matches!(
+        state,
+        WindowCloseState::AwaitingPageClose {
+            page_browsing_context_id: candidate,
+        } if candidate == page_browsing_context_id
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowCloseRequestDecision {
+    Ignore,
+    CloseHostWindow,
+    RequestPageClose {
+        page_browsing_context_id: BrowsingContextId,
+    },
+}
+
+fn decide_window_close_request(
+    state: WindowCloseState,
+    page_browsing_context_id: Option<BrowsingContextId>,
+) -> WindowCloseRequestDecision {
+    if should_ignore_window_close_request(state) {
+        return WindowCloseRequestDecision::Ignore;
+    }
+
+    match page_browsing_context_id {
+        Some(page_browsing_context_id) => WindowCloseRequestDecision::RequestPageClose {
+            page_browsing_context_id,
+        },
+        None => WindowCloseRequestDecision::CloseHostWindow,
     }
 }
 
@@ -1605,6 +1648,16 @@ impl AppController {
             } => {
                 if r#type == DialogType::BeforeUnload {
                     let response = show_beforeunload_dialog(&message, beforeunload_reason.as_ref());
+                    if matches!(response, DialogResponse::Cancel)
+                        && let Some(window_id) =
+                            window_id_for_page_browsing_context(&self.shared, browsing_context_id)
+                        && awaiting_window_close_for_page(
+                            window_close_state_for_window(&self.shared, window_id),
+                            browsing_context_id,
+                        )
+                    {
+                        clear_window_close_state(&self.shared, window_id);
+                    }
                     if let Err(err) = respond_javascript_dialog_for_browsing_context(
                         self.browser_handle.clone(),
                         browsing_context_id,
@@ -1882,14 +1935,13 @@ impl AppController {
         let is_overlay = Some(browsing_context_id) == overlay_browsing_context_id(&self.shared);
         let is_primary = Some(browsing_context_id) == primary_browsing_context_id(&self.shared);
         let is_devtools = Some(browsing_context_id) == devtools_browsing_context_id(&self.shared);
-        let secondary_toolbar_window_id =
-            window_id_for_toolbar_browsing_context(&self.shared, browsing_context_id)
-                .filter(|window_id| *window_id != PRIMARY_HOST_WINDOW_ID);
-        let secondary_page_window_id =
-            window_id_for_page_browsing_context(&self.shared, browsing_context_id)
-                .filter(|window_id| *window_id != PRIMARY_HOST_WINDOW_ID);
+        let page_window_id = window_id_for_page_browsing_context(&self.shared, browsing_context_id);
+        let toolbar_window_id =
+            window_id_for_toolbar_browsing_context(&self.shared, browsing_context_id);
 
         let window_id = unbind_browsing_context(&self.shared, browsing_context_id);
+        let close_state =
+            window_id.map(|window_id| window_close_state_for_window(&self.shared, window_id));
 
         if is_toolbar {
             set_toolbar_browsing_context_id(&self.shared, None);
@@ -1898,24 +1950,28 @@ impl AppController {
         if is_overlay {
             set_overlay_browsing_context_id(&self.shared, None);
         }
+        if let Some(window_id) = toolbar_window_id {
+            set_window_toolbar_browsing_context(&self.shared, window_id, None);
+        }
+        if let Some(window_id) = page_window_id {
+            set_window_page_browsing_context(&self.shared, window_id, None);
+        }
         if is_primary {
             set_primary_browsing_context_id(&self.shared, None);
-            set_window_page_browsing_context(&self.shared, PRIMARY_HOST_WINDOW_ID, None);
+        }
+        if is_devtools {
+            set_devtools_browsing_context_id(&self.shared, None);
+        }
 
-            if let Some(toolbar_id) = toolbar_browsing_context_id(&self.shared) {
-                _ = self
-                    .browser_handle
-                    .request_close_browsing_context(toolbar_id);
+        let mut actions = Vec::new();
+        if let Some(window_id) = page_window_id {
+            if awaiting_window_close_for_page(
+                close_state.unwrap_or(WindowCloseState::Idle),
+                browsing_context_id,
+            ) {
+                set_window_close_state(&self.shared, window_id, WindowCloseState::Finalizing);
             }
-        }
-        if let Some(window_id) = secondary_toolbar_window_id {
-            set_window_toolbar_browsing_context(&self.shared, window_id, None);
-            if let Some(page_id) = page_browsing_context_id_for_window(&self.shared, window_id) {
-                _ = self.browser_handle.request_close_browsing_context(page_id);
-            }
-        }
-        if let Some(window_id) = secondary_page_window_id {
-            set_window_page_browsing_context(&self.shared, window_id, None);
+
             if let Some(toolbar_id) =
                 toolbar_browsing_context_id_for_window(&self.shared, window_id)
             {
@@ -1923,24 +1979,23 @@ impl AppController {
                     .browser_handle
                     .request_close_browsing_context(toolbar_id);
             }
-        }
-        if is_devtools {
-            set_devtools_browsing_context_id(&self.shared, None);
-        }
-
-        let mut actions = Vec::new();
-        if let Some(window_id) = window_id {
-            let remaining = browsing_context_ids_for_window(&self.shared, window_id);
-
-            if remaining.is_empty()
-                || is_primary
-                || is_devtools
-                || secondary_toolbar_window_id.is_some()
-                || secondary_page_window_id.is_some()
+            if window_id == PRIMARY_HOST_WINDOW_ID
+                && let Some(overlay_id) = overlay_browsing_context_id(&self.shared)
             {
+                _ = self
+                    .browser_handle
+                    .request_close_browsing_context(overlay_id);
+            }
+
+            self.window_base_titles.remove(&window_id);
+            actions.push(CoreAction::CloseHostWindow { window_id });
+        } else if is_devtools {
+            if let Some(window_id) = window_id {
                 self.window_base_titles.remove(&window_id);
                 actions.push(CoreAction::CloseHostWindow { window_id });
-            } else {
+            }
+        } else if let Some(window_id) = window_id {
+            if !matches!(close_state, Some(WindowCloseState::Finalizing)) {
                 actions.push(CoreAction::SyncWindowScene { window_id });
             }
         }
@@ -2013,13 +2068,31 @@ impl AppController {
             return Vec::new();
         }
 
-        let browsing_context_ids = browsing_context_ids_for_window(&self.shared, window_id);
-        for browsing_context_id in browsing_context_ids {
-            if let Err(err) = self
-                .browser_handle
-                .request_close_browsing_context(browsing_context_id)
-            {
-                warn!("failed to request close for browsing context: {err}");
+        match decide_window_close_request(
+            window_close_state_for_window(&self.shared, window_id),
+            page_browsing_context_id_for_window(&self.shared, window_id),
+        ) {
+            WindowCloseRequestDecision::Ignore => return Vec::new(),
+            WindowCloseRequestDecision::CloseHostWindow => {
+                return vec![CoreAction::CloseHostWindow { window_id }];
+            }
+            WindowCloseRequestDecision::RequestPageClose {
+                page_browsing_context_id,
+            } => {
+                set_window_close_state(
+                    &self.shared,
+                    window_id,
+                    WindowCloseState::AwaitingPageClose {
+                        page_browsing_context_id,
+                    },
+                );
+                if let Err(err) = self
+                    .browser_handle
+                    .request_close_browsing_context(page_browsing_context_id)
+                {
+                    clear_window_close_state(&self.shared, window_id);
+                    warn!("failed to request close for browsing context: {err}");
+                }
             }
         }
         Vec::new()
@@ -2185,8 +2258,13 @@ impl AppController {
 
 #[cfg(test)]
 mod tests {
-    use super::navigation_state_with_favicon;
+    use super::{
+        WindowCloseRequestDecision, awaiting_window_close_for_page, decide_window_close_request,
+        navigation_state_with_favicon,
+    };
+    use crate::app::state::WindowCloseState;
     use crate::ipc::toolbar::protocol::NavigationState;
+    use cbf::data::ids::BrowsingContextId;
 
     #[test]
     fn navigation_state_with_favicon_overrides_favicon_field() {
@@ -2225,6 +2303,57 @@ mod tests {
         assert_eq!(merged.favicon_url, None);
         assert_eq!(merged.url, state.url);
         assert_eq!(merged.is_loading, state.is_loading);
+    }
+
+    #[test]
+    fn window_close_requests_only_page_when_idle() {
+        let page = BrowsingContextId::new(10);
+
+        let decision = decide_window_close_request(WindowCloseState::Idle, Some(page));
+
+        assert_eq!(
+            decision,
+            WindowCloseRequestDecision::RequestPageClose {
+                page_browsing_context_id: page,
+            }
+        );
+    }
+
+    #[test]
+    fn window_close_request_is_ignored_while_pending() {
+        let page = BrowsingContextId::new(20);
+
+        let decision = decide_window_close_request(
+            WindowCloseState::AwaitingPageClose {
+                page_browsing_context_id: page,
+            },
+            Some(page),
+        );
+
+        assert_eq!(decision, WindowCloseRequestDecision::Ignore);
+    }
+
+    #[test]
+    fn window_close_request_closes_host_window_when_page_missing() {
+        let decision = decide_window_close_request(WindowCloseState::Idle, None);
+
+        assert_eq!(decision, WindowCloseRequestDecision::CloseHostWindow);
+    }
+
+    #[test]
+    fn awaiting_window_close_matches_only_target_page() {
+        let state = WindowCloseState::AwaitingPageClose {
+            page_browsing_context_id: BrowsingContextId::new(30),
+        };
+
+        assert!(awaiting_window_close_for_page(
+            state,
+            BrowsingContextId::new(30)
+        ));
+        assert!(!awaiting_window_close_for_page(
+            state,
+            BrowsingContextId::new(31)
+        ));
     }
 }
 

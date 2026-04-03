@@ -31,6 +31,15 @@ pub(crate) struct PendingWindowBrowsingContextCreate {
     pub(crate) role: PendingWindowBrowsingContextRole,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowCloseState {
+    Idle,
+    AwaitingPageClose {
+        page_browsing_context_id: BrowsingContextId,
+    },
+    Finalizing,
+}
+
 pub(crate) struct SharedState {
     pub(crate) primary_browsing_context_id: Option<BrowsingContextId>,
     pub(crate) toolbar_browsing_context_id: Option<BrowsingContextId>,
@@ -48,6 +57,7 @@ pub(crate) struct SharedState {
     pub(crate) next_request_id: u64,
     pub(crate) transient_to_window: HashMap<TransientBrowsingContextId, HostWindowId>,
     pub(crate) window_to_transient: HashMap<HostWindowId, TransientBrowsingContextId>,
+    pub(crate) window_close_states: HashMap<HostWindowId, WindowCloseState>,
 }
 
 impl Default for SharedState {
@@ -68,6 +78,7 @@ impl Default for SharedState {
             next_request_id: 10_000,
             transient_to_window: HashMap::new(),
             window_to_transient: HashMap::new(),
+            window_close_states: HashMap::new(),
         }
     }
 }
@@ -247,6 +258,40 @@ pub(crate) fn browsing_context_ids_for_window(
 pub(crate) fn has_bound_windows(shared: &SharedStateHandle) -> bool {
     let guard = shared.lock().expect("shared state lock poisoned");
     !guard.window_to_browsing_contexts.is_empty() || !guard.window_to_transient.is_empty()
+}
+
+pub(crate) fn set_window_close_state(
+    shared: &SharedStateHandle,
+    window_id: HostWindowId,
+    state: WindowCloseState,
+) {
+    let mut guard = shared.lock().expect("shared state lock poisoned");
+    if state == WindowCloseState::Idle {
+        guard.window_close_states.remove(&window_id);
+    } else {
+        guard.window_close_states.insert(window_id, state);
+    }
+}
+
+pub(crate) fn clear_window_close_state(shared: &SharedStateHandle, window_id: HostWindowId) {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .window_close_states
+        .remove(&window_id);
+}
+
+pub(crate) fn window_close_state_for_window(
+    shared: &SharedStateHandle,
+    window_id: HostWindowId,
+) -> WindowCloseState {
+    shared
+        .lock()
+        .expect("shared state lock poisoned")
+        .window_close_states
+        .get(&window_id)
+        .copied()
+        .unwrap_or(WindowCloseState::Idle)
 }
 
 pub(crate) fn bind_transient_to_window(
@@ -566,5 +611,43 @@ mod tests {
 
         let resolved = page_browsing_context_id_for_toolbar_browsing_context(&shared, toolbar);
         assert_eq!(resolved, None);
+    }
+
+    #[test]
+    fn window_close_state_defaults_to_idle() {
+        let shared = make_shared();
+        let window_id = HostWindowId::new(50);
+
+        assert_eq!(
+            window_close_state_for_window(&shared, window_id),
+            WindowCloseState::Idle
+        );
+    }
+
+    #[test]
+    fn set_window_close_state_removes_idle_entries() {
+        let shared = make_shared();
+        let window_id = HostWindowId::new(60);
+        let page = BrowsingContextId::new(61);
+
+        set_window_close_state(
+            &shared,
+            window_id,
+            WindowCloseState::AwaitingPageClose {
+                page_browsing_context_id: page,
+            },
+        );
+        assert_eq!(
+            window_close_state_for_window(&shared, window_id),
+            WindowCloseState::AwaitingPageClose {
+                page_browsing_context_id: page,
+            }
+        );
+
+        set_window_close_state(&shared, window_id, WindowCloseState::Idle);
+        assert_eq!(
+            window_close_state_for_window(&shared, window_id),
+            WindowCloseState::Idle
+        );
     }
 }

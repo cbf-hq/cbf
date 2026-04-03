@@ -16,8 +16,8 @@ use crate::{
         controller::AppController,
         state::{
             DEVTOOLS_HOST_WINDOW_ID, PRIMARY_HOST_WINDOW_ID, SharedStateHandle,
-            bind_transient_to_window, set_compositor_window_id_for_host_window,
-            set_primary_host_window_id,
+            bind_transient_to_window, clear_window_close_state,
+            set_compositor_window_id_for_host_window, set_primary_host_window_id,
         },
     },
     platform::macos::window_visibility::WindowVisibilityObserver,
@@ -188,6 +188,7 @@ impl WindowRegistry {
         controller: &mut AppController,
         host_window_id: HostWindowId,
     ) {
+        clear_window_close_state(&self.shared, host_window_id);
         let Some(winit_id) = self.winit_id_by_host_window.remove(&host_window_id) else {
             return;
         };
