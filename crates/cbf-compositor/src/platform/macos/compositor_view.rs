@@ -24,8 +24,7 @@ use cbf::{
         ids::BrowsingContextId,
         ime::{
             ConfirmCompositionBehavior, ImeCommitText, ImeComposition, ImeTextRange, ImeTextSpan,
-            ImeTextSpanStyle, ImeTextSpanThickness, ImeTextSpanType,
-            ImeTextSpanUnderlineStyle,
+            ImeTextSpanStyle, ImeTextSpanThickness, ImeTextSpanType, ImeTextSpanUnderlineStyle,
         },
         key::{KeyEvent, KeyEventType},
         mouse::{MouseEvent, MouseEventType, MouseWheelEvent, PointerType},
@@ -50,19 +49,20 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSBackgroundColorAttributeName, NSColor, NSColorSpace, NSMarkedClauseSegmentAttributeName,
-    NSApplication, NSAutoresizingMaskOptions, NSControlStateValueOff, NSControlStateValueOn,
-    NSDragOperation, NSDraggingContext, NSDraggingDestination, NSDraggingInfo, NSDraggingItem,
-    NSDraggingSession, NSDraggingSource, NSEvent, NSEventModifierFlags, NSEventType, NSImage,
-    NSMenu, NSMenuItem, NSMenuItemBadge, NSPasteboardTypeFileURL, NSPasteboardTypeHTML,
-    NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardTypeURL, NSPasteboardWriting,
-    NSResponder, NSTextInputClient, NSTrackingArea, NSTrackingAreaOptions, NSUnderlineColorAttributeName,
-    NSUnderlineStyle, NSUnderlineStyleAttributeName, NSView,
+    NSApplication, NSAutoresizingMaskOptions, NSBackgroundColorAttributeName, NSColor,
+    NSColorSpace, NSControlStateValueOff, NSControlStateValueOn, NSDragOperation,
+    NSDraggingContext, NSDraggingDestination, NSDraggingInfo, NSDraggingItem, NSDraggingSession,
+    NSDraggingSource, NSEvent, NSEventModifierFlags, NSEventType, NSImage,
+    NSMarkedClauseSegmentAttributeName, NSMenu, NSMenuItem, NSMenuItemBadge,
+    NSPasteboardTypeFileURL, NSPasteboardTypeHTML, NSPasteboardTypeRTF, NSPasteboardTypeString,
+    NSPasteboardTypeURL, NSPasteboardWriting, NSResponder, NSTextInputClient, NSTrackingArea,
+    NSTrackingAreaOptions, NSUnderlineColorAttributeName, NSUnderlineStyle,
+    NSUnderlineStyleAttributeName, NSView,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSArray, NSAttributedString, NSAttributedStringKey, NSData, NSDictionary, NSNotFound,
-    NSObjectProtocol, NSPoint, NSRange, NSRangePointer, NSRect, NSNumber, NSString, NSUInteger,
+    NSArray, NSAttributedString, NSAttributedStringKey, NSData, NSDictionary, NSNotFound, NSNumber,
+    NSObjectProtocol, NSPoint, NSRange, NSRangePointer, NSRect, NSString, NSUInteger,
 };
 use objc2_quartz_core::CATransaction;
 
@@ -401,7 +401,9 @@ define_class!(
             };
 
             if self.ivars().is_handling_key_down.get() && replacement_range.location == NSNotFound as usize {
-                if self.ivars().ime_insert_expected.get() {
+                if self.ivars().ime_insert_expected.get() || self.ivars().has_marked_text.get() {
+                    // Some IME commit paths finish composition by calling
+                    // insertText: without a paired unmarkText callback.
                     self.mark_ime_handled();
                     self.ivars().ime_insert_expected.set(false);
                     self.update_marked_state(false, ns_not_found_range(), ns_not_found_range());
@@ -2701,12 +2703,14 @@ mod ime_tests {
         extract_marked_text, map_underline_style, map_underline_thickness,
         underline_color_attribute_name, underline_style_attribute_name,
     };
-    use cbf::data::ime::{ImeTextSpan, ImeTextSpanThickness, ImeTextSpanType, ImeTextSpanUnderlineStyle};
+    use cbf::data::ime::{
+        ImeTextSpan, ImeTextSpanThickness, ImeTextSpanType, ImeTextSpanUnderlineStyle,
+    };
     use objc2::runtime::AnyObject;
     use objc2_app_kit::{NSColor, NSUnderlineStyle};
     use objc2_foundation::{
-        ns_string, NSMutableAttributedString, NSMutableDictionary, NSNumber, NSString,
-        NSAttributedStringKey, NSDictionary,
+        NSAttributedStringKey, NSDictionary, NSMutableAttributedString, NSMutableDictionary,
+        NSNumber, NSString, ns_string,
     };
 
     #[test]
@@ -2720,7 +2724,8 @@ mod ime_tests {
 
     #[test]
     fn thin_underline_run_maps_to_single_span() {
-        let attributed = attributed_string_with_runs("abc", &[(0, 3, NSUnderlineStyle::Single, None)]);
+        let attributed =
+            attributed_string_with_runs("abc", &[(0, 3, NSUnderlineStyle::Single, None)]);
         let spans = composition_spans_from_attributed_text(&attributed, "abc");
 
         assert_eq!(
@@ -2781,7 +2786,8 @@ mod ime_tests {
 
     #[test]
     fn utf16_offsets_are_preserved_for_surrogate_pairs() {
-        let attributed = attributed_string_with_runs("a😀b", &[(0, 4, NSUnderlineStyle::Single, None)]);
+        let attributed =
+            attributed_string_with_runs("a😀b", &[(0, 4, NSUnderlineStyle::Single, None)]);
         let spans = composition_spans_from_attributed_text(&attributed, "a😀b");
 
         assert_eq!(spans.len(), 1);
@@ -2841,9 +2847,13 @@ mod ime_tests {
         let attributed = NSMutableAttributedString::from_nsstring(&string);
 
         for (location, length, underline, colors) in runs {
-            let attributes: objc2::rc::Retained<NSMutableDictionary<NSAttributedStringKey, AnyObject>> =
-                NSMutableDictionary::new();
-            attributes.insert(underline_style_attribute_name(), &*NSNumber::new_isize(underline.0));
+            let attributes: objc2::rc::Retained<
+                NSMutableDictionary<NSAttributedStringKey, AnyObject>,
+            > = NSMutableDictionary::new();
+            attributes.insert(
+                underline_style_attribute_name(),
+                &*NSNumber::new_isize(underline.0),
+            );
             if let Some((underline_color, background_color)) = colors {
                 attributes.insert(underline_color_attribute_name(), *underline_color);
                 attributes.insert(background_color_attribute_name(), *background_color);
