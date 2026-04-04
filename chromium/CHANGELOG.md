@@ -12,6 +12,18 @@ Runtime tags recorded here may exist even when no prebuilt runtime artifacts are
 published yet. In that case, the entry records the intended runtime baseline for
 source-built use rather than a downloadable binary bundle.
 
+## [Unreleased]
+
+### Changed
+
+- Refactored the Chromium-side shutdown flow so `request_shutdown` performs a non-destructive dirty-tab snapshot and emits `ShutdownBlocked` before any managed browsing context begins closing.
+- Shutdown proceeding now uses the confirmed CBF close path after host approval, with clean tabs closing immediately and dirty tabs resuming through auto-confirmed `beforeunload` handling only after `ShutdownProceeding`.
+
+### Fixed
+
+- Prevented clean browsing contexts and host UI surfaces from disappearing as soon as shutdown became blocked by dirty pages.
+- Added Chromium unit and browser-test coverage for blocked, cancelled, confirmed, and clean-only shutdown flows, including the regression where clean tabs remained visible while shutdown confirmation was pending.
+
 ## [cbf-chrome-runtime-v146.0.0-alpha.3+chromium-146.0.7680.153-r1] - 2026-04-02
 
 ### Added

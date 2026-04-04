@@ -1,7 +1,7 @@
 From 5bb2fe45f96dc6b687ca68cb95ae35fd44f3c228 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Mar 2026 12:35:18 +0900
-Subject: [PATCH 41/49] Fix macOS production bundle startup
+Subject: [PATCH 41/50] Fix macOS production bundle startup
 
 ---
  chrome/app/chrome_main_mac.mm           | 33 ++++++++++++++++++++++---

@@ -1,7 +1,7 @@
 From a009c61c846079aaab89e54d08f93fbc9c3e17df Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 24 Mar 2026 10:49:23 +0900
-Subject: [PATCH 39/49] Add host-driven external drag destination flow
+Subject: [PATCH 39/50] Add host-driven external drag destination flow
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   1 +

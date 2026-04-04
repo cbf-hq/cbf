@@ -1,7 +1,7 @@
 From 3ff1f330f87a453bae9c08e0d24d2d091274968f Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 17 Mar 2026 10:13:52 +0900
-Subject: [PATCH 31/49] Add browsing context visibility flow
+Subject: [PATCH 31/50] Add browsing context visibility flow
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge_client.h |  1 +

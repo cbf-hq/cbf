@@ -1,7 +1,7 @@
 From 25f2ef6cf4b9e5a7c59092bfa15a19bbaa33f85c Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Mar 2026 20:34:35 +0900
-Subject: [PATCH 44/49] Remove legacy bridge FFI aliases
+Subject: [PATCH 44/50] Remove legacy bridge FFI aliases
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.h        | 21 ------
