@@ -252,7 +252,7 @@ impl AppController {
         if let Err(err) = self.request_shutdown_once() {
             warn!("failed to start app termination shutdown flow: {err}");
             self.pending_app_termination_sequence = None;
-            
+
             return vec![CoreAction::ReplyApplicationTermination {
                 sequence,
                 should_terminate: false,
@@ -635,6 +635,9 @@ impl AppController {
                 Vec::new()
             }
             BrowserEvent::ShutdownCancelled { request_id } => {
+                if request_id == self.shutdown_request_id {
+                    self.shutdown_requested = false;
+                }
                 if request_id == self.shutdown_request_id
                     && let Some(sequence) = self.pending_app_termination_sequence.take()
                 {
@@ -2499,8 +2502,7 @@ fn show_shutdown_blocked_dialog(dirty_browsing_context_ids: &[BrowsingContextId]
         0 | 1 => "1 page has unsaved changes.".to_string(),
         _ => format!("{count} pages have unsaved changes."),
     };
-    let message =
-        format!("{subject}\n\nQuit the application and discard those changes?");
+    let message = format!("{subject}\n\nQuit the application and discard those changes?");
 
     let result = MessageDialog::new()
         .set_level(MessageLevel::Warning)
