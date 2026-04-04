@@ -1,4 +1,5 @@
 mod menu;
+mod termination;
 mod window_registry;
 mod window_visibility;
 
@@ -13,9 +14,14 @@ use winit::{
 };
 
 pub(crate) use self::window_registry::WindowRegistry;
+use self::termination::AppTerminationBridge;
 
 use crate::{
-    app::{controller::respond_javascript_dialog_for_target, events::UserEvent, state::CoreAction},
+    app::{
+        controller::respond_javascript_dialog_for_target,
+        events::UserEvent,
+        state::CoreAction,
+    },
     browser::startup::{RunningApp, launch_backend},
     cli::{Cli, parse_cli},
 };
@@ -31,6 +37,7 @@ struct AppRunner {
     proxy: EventLoopProxy<UserEvent>,
     state: AppRunnerState,
     menu: Option<menu::MacMenu>,
+    termination_bridge: AppTerminationBridge,
     // JavaScript dialogs are driven by AppKit sheet callbacks, so user
     // interaction naturally produces another winit turn. Polling this local
     // executor from `about_to_wait` is therefore enough to resume and finish
@@ -71,14 +78,32 @@ impl ApplicationHandler<UserEvent> for AppRunner {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
-        let Some(running) = self.running_mut() else {
-            return;
-        };
-
         let actions = match event {
-            UserEvent::Browser(event) => running.controller.handle_browser_event(event),
-            UserEvent::Chrome(event) => running.controller.handle_chrome_event(event),
-            UserEvent::Menu(command) => running.controller.handle_menu_command(command),
+            UserEvent::AppTerminationRequested { sequence } => match self.running_mut() {
+                Some(running) => running.controller.handle_app_termination_requested(sequence),
+                None => vec![CoreAction::ReplyApplicationTermination {
+                    sequence,
+                    should_terminate: true,
+                }],
+            },
+            UserEvent::Browser(event) => {
+                let Some(running) = self.running_mut() else {
+                    return;
+                };
+                running.controller.handle_browser_event(event)
+            }
+            UserEvent::Chrome(event) => {
+                let Some(running) = self.running_mut() else {
+                    return;
+                };
+                running.controller.handle_chrome_event(event)
+            }
+            UserEvent::Menu(command) => {
+                let Some(running) = self.running_mut() else {
+                    return;
+                };
+                running.controller.handle_menu_command(command)
+            }
         };
 
         self.apply_core_actions(event_loop, actions);
@@ -117,7 +142,7 @@ impl ApplicationHandler<UserEvent> for AppRunner {
         if running.browser.shutdown_state()
             == cbf_chrome::process::ChromiumRuntimeShutdownState::Idle
         {
-            running.controller.request_shutdown_once();
+            let _ = running.controller.request_shutdown_once();
             _ = running
                 .browser
                 .shutdown(cbf_chrome::process::ShutdownMode::Force);
@@ -269,6 +294,12 @@ impl AppRunner {
                         menu.replace_extensions(&extensions);
                     }
                 }
+                CoreAction::ReplyApplicationTermination {
+                    sequence,
+                    should_terminate,
+                } => {
+                    self.termination_bridge.reply(sequence, should_terminate);
+                }
                 CoreAction::PresentJavaScriptDialog {
                     target,
                     request_id,
@@ -329,6 +360,13 @@ pub(crate) fn run() {
         }
     };
     let proxy = event_loop.create_proxy();
+    let termination_bridge = match AppTerminationBridge::install(proxy.clone()) {
+        Ok(bridge) => bridge,
+        Err(err) => {
+            error!("failed to install app termination bridge: {err}");
+            return;
+        }
+    };
     let menu = menu::MacMenu::new(proxy.clone()).ok();
 
     let mut runner = AppRunner {
@@ -336,6 +374,7 @@ pub(crate) fn run() {
         proxy,
         state: AppRunnerState::Launching,
         menu,
+        termination_bridge,
         executor: LocalExecutor::new(),
     };
 

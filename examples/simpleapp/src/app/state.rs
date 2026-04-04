@@ -143,6 +143,10 @@ pub(crate) enum CoreAction {
     ReplaceExtensionsMenu {
         extensions: Vec<ExtensionInfo>,
     },
+    ReplyApplicationTermination {
+        sequence: u64,
+        should_terminate: bool,
+    },
     PresentJavaScriptDialog {
         target: JavaScriptDialogTarget,
         request_id: u64,

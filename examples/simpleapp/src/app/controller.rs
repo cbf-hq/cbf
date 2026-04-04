@@ -196,6 +196,8 @@ pub(crate) struct AppController {
     shared: SharedStateHandle,
     startup_requested: bool,
     shutdown_requested: bool,
+    shutdown_request_id: u64,
+    pending_app_termination_sequence: Option<u64>,
     window_base_titles: HashMap<HostWindowId, String>,
     downloads: HashMap<DownloadId, DownloadStatus>,
     transient_popups: HashMap<TransientBrowsingContextId, TransientPopupState>,
@@ -224,6 +226,8 @@ impl AppController {
             shared,
             startup_requested: false,
             shutdown_requested: false,
+            shutdown_request_id: 1,
+            pending_app_termination_sequence: None,
             window_base_titles: HashMap::new(),
             downloads: HashMap::new(),
             transient_popups: HashMap::new(),
@@ -240,6 +244,22 @@ impl AppController {
 
     pub(crate) fn browser_handle(&self) -> BrowserHandle<ChromiumBackend> {
         self.browser_handle.clone()
+    }
+
+    pub(crate) fn handle_app_termination_requested(&mut self, sequence: u64) -> Vec<CoreAction> {
+        self.pending_app_termination_sequence = Some(sequence);
+
+        if let Err(err) = self.request_shutdown_once() {
+            warn!("failed to start app termination shutdown flow: {err}");
+            self.pending_app_termination_sequence = None;
+            
+            return vec![CoreAction::ReplyApplicationTermination {
+                sequence,
+                should_terminate: false,
+            }];
+        }
+
+        Vec::new()
     }
 
     pub(crate) fn host_window_id_for_dialog_target(
@@ -593,15 +613,39 @@ impl AppController {
                 );
                 self.refresh_primary_window_title()
             }
-            BrowserEvent::ShutdownBlocked { request_id, .. } => {
-                if let Err(err) = self.browser_handle.confirm_shutdown(request_id, true) {
+            BrowserEvent::ShutdownBlocked {
+                request_id,
+                dirty_browsing_context_ids,
+            } => {
+                let proceed = show_shutdown_blocked_dialog(&dirty_browsing_context_ids);
+                if let Err(err) = self.browser_handle.confirm_shutdown(request_id, proceed) {
                     warn!("failed to confirm shutdown: {err}");
                 }
                 Vec::new()
             }
-            BrowserEvent::ShutdownProceeding { .. }
-            | BrowserEvent::ShutdownCancelled { .. }
-            | BrowserEvent::BrowsingContextOpenResolved { .. }
+            BrowserEvent::ShutdownProceeding { request_id } => {
+                if request_id == self.shutdown_request_id
+                    && let Some(sequence) = self.pending_app_termination_sequence.take()
+                {
+                    return vec![CoreAction::ReplyApplicationTermination {
+                        sequence,
+                        should_terminate: true,
+                    }];
+                }
+                Vec::new()
+            }
+            BrowserEvent::ShutdownCancelled { request_id } => {
+                if request_id == self.shutdown_request_id
+                    && let Some(sequence) = self.pending_app_termination_sequence.take()
+                {
+                    return vec![CoreAction::ReplyApplicationTermination {
+                        sequence,
+                        should_terminate: false,
+                    }];
+                }
+                Vec::new()
+            }
+            BrowserEvent::BrowsingContextOpenResolved { .. }
             | BrowserEvent::WindowOpened { .. }
             | BrowserEvent::WindowClosed { .. }
             | BrowserEvent::AuxiliaryWindowResolved { .. }
@@ -898,20 +942,29 @@ impl AppController {
         }
     }
 
-    pub(crate) fn request_shutdown_once(&mut self) {
+    pub(crate) fn request_shutdown_once(&mut self) -> Result<(), cbf::error::Error> {
         if self.shutdown_requested {
-            return;
+            return Ok(());
         }
+
         self.shutdown_requested = true;
-        if let Err(err) = self.browser_handle.request_shutdown(1) {
+        if let Err(err) = self
+            .browser_handle
+            .request_shutdown(self.shutdown_request_id)
+        {
             if matches!(err, cbf::error::Error::Disconnected)
                 && self.shutdown_state.shutdown_state() != ChromiumRuntimeShutdownState::Idle
             {
                 debug!("shutdown request skipped because backend is already disconnecting: {err}");
-            } else {
-                warn!("failed to request shutdown: {err}");
+                return Ok(());
             }
+
+            self.shutdown_requested = false;
+            warn!("failed to request shutdown: {err}");
+            return Err(err);
         }
+
+        Ok(())
     }
 
     fn post_toolbar_ipc_message(
@@ -2002,7 +2055,7 @@ impl AppController {
         actions.extend(self.refresh_primary_window_title());
 
         if !has_bound_windows(&self.shared) {
-            self.request_shutdown_once();
+            let _ = self.request_shutdown_once();
             actions.push(CoreAction::ExitEventLoop);
         }
         actions
@@ -2438,6 +2491,25 @@ fn beforeunload_reason_description(reason: &BeforeUnloadReason) -> &'static str 
         BeforeUnloadReason::WindowClose => "Closing the window may discard unsaved changes.",
         BeforeUnloadReason::Unknown => "The page requested confirmation before closing.",
     }
+}
+
+fn show_shutdown_blocked_dialog(dirty_browsing_context_ids: &[BrowsingContextId]) -> bool {
+    let count = dirty_browsing_context_ids.len();
+    let subject = match count {
+        0 | 1 => "1 page has unsaved changes.".to_string(),
+        _ => format!("{count} pages have unsaved changes."),
+    };
+    let message =
+        format!("{subject}\n\nQuit the application and discard those changes?");
+
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Warning)
+        .set_title("Quit Application?")
+        .set_description(&message)
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+
+    matches!(result, MessageDialogResult::Yes)
 }
 
 fn show_permission_prompt_dialog(permission: &PermissionPromptType) -> bool {

@@ -14,4 +14,5 @@ pub(crate) enum UserEvent {
     Browser(BrowserEvent),
     Chrome(ChromeEvent),
     Menu(MenuCommand),
+    AppTerminationRequested { sequence: u64 },
 }
