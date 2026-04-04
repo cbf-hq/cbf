@@ -5,6 +5,13 @@ All notable changes to `cbf-chrome` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Refined bridge error reporting so startup failures distinguish invalid bridge state, invalid IPC channel arguments, inherited IPC connection failure, and bridge-session authentication failure instead of collapsing those paths into `ConnectionFailed`.
+- Bridge command failures now report `OperationFailed { operation }`, preserving the Rust-side operation name in backend diagnostics instead of using the generic IPC connection failure message for all bridge call failures.
+
 ## [0.1.0-alpha.3] - 2026-04-02
 
 ### Added

@@ -27,9 +27,21 @@ pub enum BridgeError {
     /// Failed to load the runtime bridge library or one of its required symbols.
     #[error("failed to load the runtime bridge library")]
     BridgeLoadFailed,
+    /// Bridge state was invalid for the requested operation.
+    #[error("invalid bridge state")]
+    InvalidState,
+    /// Bridge returned an invalid IPC channel argument during channel setup.
+    #[error("bridge returned an invalid IPC channel argument")]
+    InvalidChannelArgument,
     /// Failed to connect to the IPC channel.
     #[error("failed to connect to the IPC channel")]
     ConnectionFailed,
+    /// Failed to authenticate the Chromium bridge session.
+    #[error("failed to authenticate bridge session")]
+    AuthenticationFailed,
+    /// A bridge operation failed.
+    #[error("bridge operation failed: {operation}")]
+    OperationFailed { operation: &'static str },
     /// Input data was invalid for the FFI layer.
     #[error("invalid input for the FFI layer")]
     InvalidInput,

@@ -76,6 +76,10 @@ impl CommandExecutionError {
                 kind: match source {
                     IpcError::BridgeLoadFailed => ApiErrorKind::CommandDispatchFailed,
                     IpcError::ConnectionFailed => ApiErrorKind::CommandDispatchFailed,
+                    IpcError::AuthenticationFailed => ApiErrorKind::CommandDispatchFailed,
+                    IpcError::InvalidState => ApiErrorKind::CommandDispatchFailed,
+                    IpcError::InvalidChannelArgument => ApiErrorKind::CommandDispatchFailed,
+                    IpcError::OperationFailed { .. } => ApiErrorKind::CommandDispatchFailed,
                     IpcError::InvalidInput => ApiErrorKind::InvalidInput,
                     IpcError::InvalidEvent => ApiErrorKind::ProtocolMismatch,
                 },
@@ -94,9 +98,13 @@ impl CommandExecutionError {
 fn backend_error_event(source: IpcError) -> BackendErrorInfo {
     let kind = match source {
         IpcError::BridgeLoadFailed => ApiErrorKind::EventProcessingFailed,
+        IpcError::ConnectionFailed => ApiErrorKind::EventProcessingFailed,
+        IpcError::AuthenticationFailed => ApiErrorKind::EventProcessingFailed,
+        IpcError::InvalidState => ApiErrorKind::EventProcessingFailed,
+        IpcError::InvalidChannelArgument => ApiErrorKind::EventProcessingFailed,
+        IpcError::OperationFailed { .. } => ApiErrorKind::EventProcessingFailed,
         IpcError::InvalidEvent => ApiErrorKind::ProtocolMismatch,
         IpcError::InvalidInput => ApiErrorKind::InvalidInput,
-        IpcError::ConnectionFailed => ApiErrorKind::EventProcessingFailed,
     };
 
     BackendErrorInfo {
@@ -1313,16 +1321,17 @@ mod tests {
         backend_event_loop::{BackendEventLoop, BackendWake},
         browser::{Backend, EventStream, RawOpaqueEventExt},
         delegate::{BackendDelegate, DelegateContext, NoopDelegate},
+        error::ApiErrorKind,
         event::BackendStopReason,
     };
 
     use super::{
         BackendInputWaiter, ChromeCommand, ChromeEvent, ChromiumBackend, ChromiumBackendEventLoop,
-        ChromiumBackendOptions, DeadlineStatus, EventWaitResult, IpcClient, ShutdownState,
-        WakeStateInner, classify_deadline, classify_ready_wake, classify_timeout_wake,
-        stop_reason_from_wake_state, update_shutdown_state,
+        ChromiumBackendOptions, CommandExecutionError, DeadlineStatus, EventWaitResult, IpcClient,
+        ShutdownState, WakeStateInner, backend_error_event, classify_deadline, classify_ready_wake,
+        classify_timeout_wake, stop_reason_from_wake_state, update_shutdown_state,
     };
-    use crate::bridge::IpcEvent;
+    use crate::bridge::{BridgeError, IpcEvent};
 
     struct StubWaiter {
         rx: std::sync::mpsc::Receiver<Result<EventWaitResult, super::IpcError>>,
@@ -1603,6 +1612,57 @@ mod tests {
         );
 
         assert_eq!(shutdown_state, ShutdownState::Idle);
+    }
+
+    #[test]
+    fn command_execution_errors_keep_new_bridge_variants_in_dispatch_bucket() {
+        for source in [
+            BridgeError::BridgeLoadFailed,
+            BridgeError::ConnectionFailed,
+            BridgeError::AuthenticationFailed,
+            BridgeError::InvalidState,
+            BridgeError::InvalidChannelArgument,
+            BridgeError::OperationFailed {
+                operation: "navigate",
+            },
+        ] {
+            let info = CommandExecutionError::from_ipc_call(None, source.clone())
+                .into_backend_error_info();
+            assert_eq!(info.kind, ApiErrorKind::CommandDispatchFailed);
+            assert!(info.detail.is_some());
+        }
+    }
+
+    #[test]
+    fn operation_failures_keep_operation_name_in_backend_error_detail() {
+        let info = CommandExecutionError::from_ipc_call(
+            None,
+            BridgeError::OperationFailed {
+                operation: "navigate",
+            },
+        )
+        .into_backend_error_info();
+
+        assert_eq!(info.kind, ApiErrorKind::CommandDispatchFailed);
+        assert_eq!(
+            info.detail.as_deref(),
+            Some("OperationFailed { operation: \"navigate\" }")
+        );
+    }
+
+    #[test]
+    fn backend_error_event_keeps_protocol_mismatch_limited_to_invalid_event() {
+        assert_eq!(
+            backend_error_event(BridgeError::InvalidEvent).kind,
+            ApiErrorKind::ProtocolMismatch
+        );
+        assert_eq!(
+            backend_error_event(BridgeError::OperationFailed {
+                operation: "navigate",
+            })
+            .kind,
+            ApiErrorKind::EventProcessingFailed
+        );
     }
 
     #[derive(Clone)]
