@@ -1,7 +1,7 @@
 From 4e6f70b56004a66f26344aa2476eda03d03d76f5 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 16 Mar 2026 09:57:36 +0900
-Subject: [PATCH 30/50] Hide browser app from Dock without helper confusion
+Subject: [PATCH 30/51] Hide browser app from Dock without helper confusion
 
 ---
  base/apple/foundation_util.h                  |  8 ++++

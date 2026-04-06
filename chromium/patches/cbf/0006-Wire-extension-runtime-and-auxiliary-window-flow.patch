@@ -1,7 +1,7 @@
 From 7b0e23bf1f2984c995751bd342c8b2a0f329440a Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Feb 2026 10:14:42 +0900
-Subject: [PATCH 06/50] Wire extension runtime and auxiliary window flow
+Subject: [PATCH 06/51] Wire extension runtime and auxiliary window flow
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.h        |  21 +-

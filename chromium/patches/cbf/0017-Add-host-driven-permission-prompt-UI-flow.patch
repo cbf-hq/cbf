@@ -1,7 +1,7 @@
 From 1f501c194732aee40601c7666d1415f97990bf72 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 5 Mar 2026 19:24:44 +0900
-Subject: [PATCH 17/50] Add host-driven permission prompt UI flow
+Subject: [PATCH 17/51] Add host-driven permission prompt UI flow
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   4 +

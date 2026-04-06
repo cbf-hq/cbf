@@ -249,7 +249,13 @@ pub struct cbf_bridge {
         out_switch_arg: *mut ::std::os::raw::c_char,
         out_arg_len: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int,
+    pub cbf_bridge_prepare_channel_and_lock: unsafe extern "C" fn(
+        out_switch_arg: *mut ::std::os::raw::c_char,
+        out_arg_len: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int,
     pub cbf_bridge_pass_child_pid: unsafe extern "C" fn(child_pid: i64),
+    pub cbf_bridge_pass_child_pid_and_unlock: unsafe extern "C" fn(child_pid: i64),
+    pub cbf_bridge_abort_channel_launch: unsafe extern "C" fn(),
     pub cbf_bridge_client_connect_inherited:
         unsafe extern "C" fn(client: *mut CbfBridgeClientHandle) -> bool,
     pub cbf_bridge_client_authenticate: unsafe extern "C" fn(
@@ -549,8 +555,17 @@ impl cbf_bridge {
         let cbf_bridge_prepare_channel = __library
             .get(b"cbf_bridge_prepare_channel\0")
             .map(|sym| *sym)?;
+        let cbf_bridge_prepare_channel_and_lock = __library
+            .get(b"cbf_bridge_prepare_channel_and_lock\0")
+            .map(|sym| *sym)?;
         let cbf_bridge_pass_child_pid = __library
             .get(b"cbf_bridge_pass_child_pid\0")
+            .map(|sym| *sym)?;
+        let cbf_bridge_pass_child_pid_and_unlock = __library
+            .get(b"cbf_bridge_pass_child_pid_and_unlock\0")
+            .map(|sym| *sym)?;
+        let cbf_bridge_abort_channel_launch = __library
+            .get(b"cbf_bridge_abort_channel_launch\0")
             .map(|sym| *sym)?;
         let cbf_bridge_client_connect_inherited = __library
             .get(b"cbf_bridge_client_connect_inherited\0")
@@ -700,7 +715,10 @@ impl cbf_bridge {
             cbf_bridge_client_destroy,
             cbf_bridge_init,
             cbf_bridge_prepare_channel,
+            cbf_bridge_prepare_channel_and_lock,
             cbf_bridge_pass_child_pid,
+            cbf_bridge_pass_child_pid_and_unlock,
+            cbf_bridge_abort_channel_launch,
             cbf_bridge_client_connect_inherited,
             cbf_bridge_client_authenticate,
             cbf_bridge_client_poll_event,
@@ -1241,8 +1259,21 @@ impl cbf_bridge {
     ) -> ::std::os::raw::c_int {
         (self.cbf_bridge_prepare_channel)(out_switch_arg, out_arg_len)
     }
+    pub unsafe fn cbf_bridge_prepare_channel_and_lock(
+        &self,
+        out_switch_arg: *mut ::std::os::raw::c_char,
+        out_arg_len: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int {
+        (self.cbf_bridge_prepare_channel_and_lock)(out_switch_arg, out_arg_len)
+    }
     pub unsafe fn cbf_bridge_pass_child_pid(&self, child_pid: i64) {
         (self.cbf_bridge_pass_child_pid)(child_pid)
+    }
+    pub unsafe fn cbf_bridge_pass_child_pid_and_unlock(&self, child_pid: i64) {
+        (self.cbf_bridge_pass_child_pid_and_unlock)(child_pid)
+    }
+    pub unsafe fn cbf_bridge_abort_channel_launch(&self) {
+        (self.cbf_bridge_abort_channel_launch)()
     }
     pub unsafe fn cbf_bridge_client_connect_inherited(
         &self,

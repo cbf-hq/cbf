@@ -103,19 +103,20 @@ impl IpcClient {
         Ok(())
     }
 
-    /// Prepare the Mojo channel before spawning the Chromium process.
+    /// Prepare the Mojo channel before spawning the Chromium process and, on
+    /// macOS, hold the rendezvous lock until the child pid is registered.
     ///
     /// Returns `(remote_fd, switch_arg)` where:
     /// - `remote_fd` is the file descriptor of the remote channel endpoint that
     ///   must be inherited by the child process (Unix only; -1 on other platforms).
     /// - `switch_arg` is the command-line switch that Chromium needs to recover
     ///   the endpoint (e.g. `--cbf-ipc-handle=...`).
-    pub fn prepare_channel() -> Result<(i32, String), BridgeError> {
+    pub fn prepare_channel_and_lock() -> Result<(i32, String), BridgeError> {
         let mut buf = [0u8; 512];
 
         let fd = {
             bridge_call!(cbf_bridge_init());
-            bridge_call!(cbf_bridge_prepare_channel(
+            bridge_call!(cbf_bridge_prepare_channel_and_lock(
                 buf.as_mut_ptr() as *mut std::os::raw::c_char,
                 buf.len() as i32,
             ))
@@ -131,19 +132,28 @@ impl IpcClient {
     /// Must be called after spawning the Chromium process and before
     /// `connect_inherited`. On macOS this registers the Mach port with the
     /// rendezvous server; on other platforms it completes channel bookkeeping.
-    pub fn pass_child_pid(pid: u32) {
-        if let Err(err) =
-            bridge_api().map(|bridge| unsafe { bridge.cbf_bridge_pass_child_pid(pid as i64) })
-        {
+    pub fn pass_child_pid_and_unlock(pid: u32) {
+        if let Err(err) = bridge_api().map(|bridge| unsafe {
+            bridge.cbf_bridge_pass_child_pid_and_unlock(pid as i64)
+        }) {
             warn!(error = ?err, "failed to pass child pid to bridge");
+        }
+    }
+
+    /// Abort a prepared child launch and release any rendezvous lock.
+    pub fn abort_channel_launch() {
+        if let Err(err) = bridge_api().map(|bridge| unsafe {
+            bridge.cbf_bridge_abort_channel_launch()
+        }) {
+            warn!(error = ?err, "failed to abort bridge child launch");
         }
     }
 
     /// Wrap a pre-created bridge client handle and complete the Mojo connection.
     ///
     /// `inner` must have been created by `cbf_bridge_client_create()` and the
-    /// channel must have been prepared with `prepare_channel()` before calling
-    /// this function (after the child process has been spawned).
+    /// channel must have been prepared with `prepare_channel_and_lock()` before
+    /// calling this function (after the child process has been spawned).
     ///
     /// # Safety
     ///

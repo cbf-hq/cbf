@@ -1,7 +1,7 @@
 From 50acda28fc706b7f6fb569739b26427055a8e938 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 5 Apr 2026 08:12:38 +0900
-Subject: [PATCH 50/50] Keep shutdown blocking non-destructive
+Subject: [PATCH 50/51] Keep shutdown blocking non-destructive
 
 ---
  chrome/browser/cbf/cbf_browser_service.cc     | 263 +++++++++---------

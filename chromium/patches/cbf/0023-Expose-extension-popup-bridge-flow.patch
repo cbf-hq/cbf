@@ -1,7 +1,7 @@
 From dfd7436c61e0f6c80d66241607ab24fcbc6ecd93 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 10 Mar 2026 15:49:25 +0900
-Subject: [PATCH 23/50] Expose extension popup bridge flow
+Subject: [PATCH 23/51] Expose extension popup bridge flow
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.h        |  53 ++

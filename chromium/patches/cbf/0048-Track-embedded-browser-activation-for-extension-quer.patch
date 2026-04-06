@@ -1,7 +1,7 @@
 From 839788e93c957a586f93f2867eacec4c6db93fca Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 2 Apr 2026 11:34:19 +0900
-Subject: [PATCH 48/50] Track embedded browser activation for extension queries
+Subject: [PATCH 48/51] Track embedded browser activation for extension queries
 
 ---
  .../cbf/cbf_embedded_browser_window.cc        | 61 +++++++++-----

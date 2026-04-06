@@ -5,6 +5,16 @@ All notable changes to `cbf-chrome-sys` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Bridge FFI support for the macOS Mach rendezvous child-launch contract, including explicit `prepare_channel_and_lock`, `pass_child_pid_and_unlock`, and `abort_channel_launch` entry points so hosts can keep the rendezvous lock held across spawn and abort safely on launch failures.
+
+### Changed
+
+- Regenerated `ffi_bridge_generated.rs` to expose the new bridge APIs used by `cbf-chrome` for lock-scoped child launch on macOS.
+
 ## [146.1.0-alpha.3] - 2026-04-02
 
 ### Added

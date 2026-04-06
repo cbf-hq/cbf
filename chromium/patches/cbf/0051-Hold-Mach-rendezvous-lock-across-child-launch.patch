@@ -1,0 +1,209 @@
+From 2bcdfd8930dd3dbd6136036bb9ef8eed20b345e4 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Mon, 6 Apr 2026 12:15:51 +0900
+Subject: [PATCH 51/51] Hold Mach rendezvous lock across child launch
+
+---
+ chrome/browser/cbf/bridge/cbf_bridge.cc       | 25 ++++++++--
+ chrome/browser/cbf/bridge/cbf_bridge.h        |  5 ++
+ .../browser/cbf/bridge/cbf_bridge_support.cc  | 46 +++++++++++++++++++
+ .../browser/cbf/bridge/cbf_bridge_support.h   | 13 ++++++
+ 4 files changed, 85 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.cc b/chrome/browser/cbf/bridge/cbf_bridge.cc
+index 74b506f6e1d59..c5e4b89ba6fde 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge.cc
+@@ -38,15 +38,21 @@ extern "C" void cbf_bridge_init(void) {
+ 
+ extern "C" int cbf_bridge_prepare_channel(char* out_switch_arg,
+                                           int out_arg_len) {
++  return cbf_bridge_prepare_channel_and_lock(out_switch_arg, out_arg_len);
++}
++
++extern "C" int cbf_bridge_prepare_channel_and_lock(char* out_switch_arg,
++                                                   int out_arg_len) {
+   auto& state = cbf_bridge::internal::GetPendingChannel();
++  state.ResetForNewLaunch();
+ 
+   std::string endpoint_value;
+   state.channel.PrepareToPassRemoteEndpoint(&state.handle_info, &endpoint_value);
+ 
+ #if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
+-  // Ensure the Mach rendezvous server is created before the child spawns so
+-  // it is accepting connections by the time the child tries to connect.
+-  base::MachPortRendezvousServerMac::GetInstance();
++  // Hold the rendezvous server lock across child launch so the child cannot
++  // race attempting port acquisition before the parent registers its pid.
++  state.LockMachPortRendezvousServer();
+ #endif
+ 
+   const std::string full_switch =
+@@ -70,16 +76,22 @@ extern "C" int cbf_bridge_prepare_channel(char* out_switch_arg,
+ }
+ 
+ extern "C" void cbf_bridge_pass_child_pid(int64_t child_pid) {
++  cbf_bridge_pass_child_pid_and_unlock(child_pid);
++}
++
++extern "C" void cbf_bridge_pass_child_pid_and_unlock(
++    int64_t child_pid) NO_THREAD_SAFETY_ANALYSIS {
+   auto& state = cbf_bridge::internal::GetPendingChannel();
+ 
+ #if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
+   if (child_pid > 0 && !state.handle_info.empty()) {
+     auto* server = base::MachPortRendezvousServerMac::GetInstance();
+-    base::AutoLock lock(server->GetLock());
++    DCHECK(state.HasMachPortRendezvousServerLock());
+     server->RegisterPortsForPid(static_cast<pid_t>(child_pid),
+                                 state.handle_info);
+     state.handle_info.clear();
+   }
++  state.UnlockMachPortRendezvousServer();
+ #else
+   (void)child_pid;
+ #endif
+@@ -87,6 +99,11 @@ extern "C" void cbf_bridge_pass_child_pid(int64_t child_pid) {
+   state.channel.RemoteProcessLaunchAttempted();
+ }
+ 
++extern "C" void cbf_bridge_abort_channel_launch(void) {
++  auto& state = cbf_bridge::internal::GetPendingChannel();
++  state.AbortLaunch();
++}
++
+ extern "C" bool cbf_bridge_client_connect_inherited(
+     CbfBridgeClientHandle* client) {
+   if (!client) {
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
+index dd8c555d4f3d7..93183b28cb71c 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge.h
+@@ -23,7 +23,12 @@ CBF_BRIDGE_EXPORT void cbf_bridge_client_destroy(CbfBridgeClientHandle* client);
+ CBF_BRIDGE_EXPORT void cbf_bridge_init(void);
+ CBF_BRIDGE_EXPORT int cbf_bridge_prepare_channel(char* out_switch_arg,
+                                                  int out_arg_len);
++CBF_BRIDGE_EXPORT int cbf_bridge_prepare_channel_and_lock(
++    char* out_switch_arg,
++    int out_arg_len);
+ CBF_BRIDGE_EXPORT void cbf_bridge_pass_child_pid(int64_t child_pid);
++CBF_BRIDGE_EXPORT void cbf_bridge_pass_child_pid_and_unlock(int64_t child_pid);
++CBF_BRIDGE_EXPORT void cbf_bridge_abort_channel_launch(void);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_connect_inherited(
+     CbfBridgeClientHandle* client);
+ CBF_BRIDGE_EXPORT bool cbf_bridge_client_authenticate(
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_support.cc b/chrome/browser/cbf/bridge/cbf_bridge_support.cc
+index cc18229443470..9800443c11aaa 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_support.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_support.cc
+@@ -3,6 +3,7 @@
+ #include <mutex>
+ #include <utility>
+ 
++#include "build/build_config.h"
+ #include "base/compiler_specific.h"
+ #include "base/message_loop/message_pump_type.h"
+ #include "base/no_destructor.h"
+@@ -12,6 +13,10 @@
+ #include "mojo/core/embedder/embedder.h"
+ #include "mojo/core/embedder/scoped_ipc_support.h"
+ 
++#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
++#include "base/apple/mach_port_rendezvous_mac.h"
++#endif
++
+ namespace cbf_bridge::internal {
+ 
+ char* CopyCString(const std::string& value) {
+@@ -54,6 +59,47 @@ scoped_refptr<base::SingleThreadTaskRunner> GetMojoTaskRunner() {
+ PendingChannel::PendingChannel() = default;
+ PendingChannel::~PendingChannel() = default;
+ 
++void PendingChannel::ResetForNewLaunch() {
++  AbortLaunch();
++  channel = mojo::PlatformChannel();
++}
++
++void PendingChannel::LockMachPortRendezvousServer() {
++#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
++  if (mach_port_rendezvous_server_lock) {
++    return;
++  }
++
++  auto* server = base::MachPortRendezvousServerMac::GetInstance();
++  mach_port_rendezvous_server_lock = &server->GetLock();
++  mach_port_rendezvous_server_lock->Acquire();
++#endif
++}
++
++void PendingChannel::UnlockMachPortRendezvousServer() {
++#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
++  if (mach_port_rendezvous_server_lock) {
++    mach_port_rendezvous_server_lock->Release();
++    mach_port_rendezvous_server_lock = nullptr;
++  }
++#endif
++}
++
++bool PendingChannel::HasMachPortRendezvousServerLock() const {
++#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
++  return mach_port_rendezvous_server_lock != nullptr;
++#else
++  return false;
++#endif
++}
++
++void PendingChannel::AbortLaunch() {
++  UnlockMachPortRendezvousServer();
++  handle_info.clear();
++  channel.RemoteProcessLaunchAttempted();
++  ready = false;
++}
++
+ PendingChannel& GetPendingChannel() {
+   static base::NoDestructor<PendingChannel> instance;
+   return *instance;
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_support.h b/chrome/browser/cbf/bridge/cbf_bridge_support.h
+index fc24684009226..a6445c5c959d2 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_support.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_support.h
+@@ -4,6 +4,7 @@
+ #include <string>
+ 
+ #include "base/memory/ref_counted.h"
++#include "base/memory/raw_ptr.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/threading/thread.h"
+ #include "mojo/buildflags.h"
+@@ -11,6 +12,7 @@
+ 
+ #if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
+ #include "base/apple/mach_port_rendezvous.h"
++#include "base/synchronization/lock.h"
+ #endif
+ 
+ namespace cbf_bridge::internal {
+@@ -26,9 +28,20 @@ struct PendingChannel {
+   PendingChannel();
+   ~PendingChannel();
+ 
++  void ResetForNewLaunch();
++  void LockMachPortRendezvousServer() NO_THREAD_SAFETY_ANALYSIS;
++  void UnlockMachPortRendezvousServer() NO_THREAD_SAFETY_ANALYSIS;
++  bool HasMachPortRendezvousServerLock() const;
++  void AbortLaunch();
++
+   mojo::PlatformChannel channel;
+   mojo::PlatformChannel::HandlePassingInfo handle_info;
+   bool ready = false;
++
++#if BUILDFLAG(MOJO_USE_APPLE_CHANNEL)
++  raw_ptr<base::Lock, DanglingUntriaged> mach_port_rendezvous_server_lock =
++      nullptr;
++#endif
+ };
+ 
+ PendingChannel& GetPendingChannel();
+-- 
+2.50.1 (Apple Git-155)
+

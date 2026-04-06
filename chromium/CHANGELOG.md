@@ -23,6 +23,8 @@ source-built use rather than a downloadable binary bundle.
 
 - Prevented clean browsing contexts and host UI surfaces from disappearing as soon as shutdown became blocked by dirty pages.
 - Added Chromium unit and browser-test coverage for blocked, cancelled, confirmed, and clean-only shutdown flows, including the regression where clean tabs remained visible while shutdown confirmation was pending.
+- Reduced an intermittent browser-process startup crash that surfaced as `failed to authenticate chromium bridge session` in embedded hosts by deferring PartitionAlloc task-controlled purge enablement until after thread-cache startup completed.
+- Fixed the macOS child-launch IPC bootstrap to hold Chromium's Mach rendezvous lock until the spawned child pid is registered, preventing inherited Mojo port acquisition from racing ahead of parent-side port publication during bridge startup.
 
 ## [cbf-chrome-runtime-v146.0.0-alpha.3+chromium-146.0.7680.153-r1] - 2026-04-02
 

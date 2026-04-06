@@ -716,14 +716,18 @@ pub fn start_chromium(
         return Err(StartChromiumError::BridgeClientCreateReturnedNull);
     }
 
-    let (remote_fd, switch_arg) = IpcClient::prepare_channel().map_err(|error| {
+    let (remote_fd, switch_arg) = IpcClient::prepare_channel_and_lock().map_err(|error| {
         cleanup_bridge_destroy(inner);
         StartChromiumError::PrepareChannel(error)
     })?;
 
     // Generate a per-session token.
     let mut token_bytes = [0u8; 32];
-    getrandom::fill(&mut token_bytes).map_err(StartChromiumError::TokenGeneration)?;
+    if let Err(error) = getrandom::fill(&mut token_bytes) {
+        IpcClient::abort_channel_launch();
+        cleanup_bridge_destroy(inner);
+        return Err(StartChromiumError::TokenGeneration(error));
+    }
     let session_token: String = token_bytes.iter().map(|b| format!("{b:02x}")).collect();
 
     let mut command = Command::new(&executable_path);
@@ -777,11 +781,19 @@ pub fn start_chromium(
 
     command.args(&extra_args);
 
-    let child = command.spawn().map_err(StartChromiumError::ProcessSpawn)?;
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            IpcClient::abort_channel_launch();
+            cleanup_bridge_destroy(inner);
+            return Err(StartChromiumError::ProcessSpawn(error));
+        }
+    };
+    let child_pid = child.id();
 
     // Notify the bridge of the child PID: on macOS this registers the Mach
     // port with the rendezvous server; on other platforms it is bookkeeping.
-    IpcClient::pass_child_pid(child.id());
+    IpcClient::pass_child_pid_and_unlock(child_pid);
 
     // Close the parent's copy of the remote fd after spawning.
     #[cfg(unix)]
@@ -793,13 +805,15 @@ pub fn start_chromium(
     }
 
     // Complete the Mojo handshake: send the OutgoingInvitation and bind the remote.
-    let client = unsafe { IpcClient::connect_inherited(inner) }
-        .map_err(StartChromiumError::ConnectInherited)?;
+    let client = match unsafe { IpcClient::connect_inherited(inner) } {
+        Ok(client) => client,
+        Err(error) => return Err(StartChromiumError::ConnectInherited(error)),
+    };
 
     // Authenticate and set up the browser observer.
-    client
-        .authenticate(&session_token)
-        .map_err(StartChromiumError::Authenticate)?;
+    if let Err(error) = client.authenticate(&session_token) {
+        return Err(StartChromiumError::Authenticate(error));
+    }
 
     let backend = ChromiumBackend::new(backend, client);
     let (session, events) = BrowserSession::connect(backend, delegate, None)

@@ -1,7 +1,7 @@
 From d43de765f45e4b4752284c6bd2774109f64a21ef Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 15 Mar 2026 18:15:37 +0900
-Subject: [PATCH 28/50] Add host-driven extension uninstall prompt
+Subject: [PATCH 28/51] Add host-driven extension uninstall prompt
 
 ---
  chrome/browser/cbf/BUILD.gn                   |   2 +

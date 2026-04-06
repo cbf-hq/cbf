@@ -1,7 +1,7 @@
 From 0758ce8e366bd42779309aad9e7da4515718db10 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 27 Mar 2026 14:53:58 +0900
-Subject: [PATCH 47/50] Block chrome://settings by default
+Subject: [PATCH 47/51] Block chrome://settings by default
 
 ---
  .../cbf/cbf_profile_service_browsertest.cc    |  81 ++++++-
