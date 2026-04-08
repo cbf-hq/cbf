@@ -12,7 +12,7 @@ Runtime tags recorded here may exist even when no prebuilt runtime artifacts are
 published yet. In that case, the entry records the intended runtime baseline for
 source-built use rather than a downloadable binary bundle.
 
-## [Unreleased]
+## [cbf-chrome-runtime-v146.0.0-alpha.4+chromium-146.0.7680.153-r1] - 2026-04-08
 
 ### Changed
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.6] - 2026-04-09
+
 ### Fixed
 
 - Fixed macOS IME commit handling to clear compositor marked-text state even when AppKit confirms composition through `insertText:` without a paired `unmarkText`, so pressing `Enter` after IME confirmation triggers page actions like Google Search instead of inserting a newline.
@@ -65,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marked as an alpha-target crate; compositor behavior and platform integration remain under active development and may still contain security bugs.
 
+[0.1.0-alpha.6]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.5...cbf-compositor-v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.3...cbf-compositor-v0.1.0-alpha.5
 [0.1.0-alpha.3]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.2...cbf-compositor-v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.1...cbf-compositor-v0.1.0-alpha.2

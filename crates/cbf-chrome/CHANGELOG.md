@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-04-09
+
 ### Changed
 
 - Refined bridge error reporting so startup failures distinguish invalid bridge state, invalid IPC channel arguments, inherited IPC connection failure, and bridge-session authentication failure instead of collapsing those paths into `ConnectionFailed`.
@@ -95,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marked as an alpha release; runtime behavior and backend integration are still under active development and may still contain security bugs.
 
+[0.1.0-alpha.4]: https://github.com/cbf-hq/cbf/compare/cbf-chrome-v0.1.0-alpha.3...cbf-chrome-v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-v0.1.0-alpha.1

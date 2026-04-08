@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [146.1.0-alpha.4] - 2026-04-09
+
 ### Added
 
 - Bridge FFI support for the macOS Mach rendezvous child-launch contract, including explicit `prepare_channel_and_lock`, `pass_child_pid_and_unlock`, and `abort_channel_launch` entry points so hosts can keep the rendezvous lock held across spawn and abort safely on launch failures.
@@ -63,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marked as an alpha release; ABI details and boundary behavior are still under active development and may still contain security bugs.
 
+[146.1.0-alpha.4]: https://github.com/cbf-hq/cbf/compare/cbf-chrome-sys-v146.1.0-alpha.3...cbf-chrome-sys-v146.1.0-alpha.4
 [146.1.0-alpha.3]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-sys-v146.1.0-alpha.3
 [146.1.0-alpha.2]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-sys-v146.1.0-alpha.2
 [146.1.0-alpha.1]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-sys-v146.1.0-alpha.1
