@@ -1,7 +1,7 @@
 From f1a9c16475943112aba85dd5c52e41dc7e9a8b79 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Feb 2026 09:47:06 +0900
-Subject: [PATCH 01/51] Add CBF bridge baseline
+Subject: [PATCH 01/52] Add CBF bridge baseline
 
 ---
  chrome/browser/BUILD.gn                       |    2 +

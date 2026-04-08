@@ -1,7 +1,7 @@
 From d73c80d29e05342b447283dbf5d7c59d3e341f89 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 23 Mar 2026 10:26:03 +0900
-Subject: [PATCH 38/51] Add host-driven custom scheme responder
+Subject: [PATCH 38/52] Add host-driven custom scheme responder
 
 ---
  chrome/browser/browser_process_impl.cc        |   5 +

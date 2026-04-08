@@ -1,0 +1,91 @@
+From 27c06ed0cf4452eaf966477e866f3326cd02b459 Mon Sep 17 00:00:00 2001
+From: Takagi Tasuku <tasuren@outlook.jp>
+Date: Wed, 8 Apr 2026 18:11:52 +0900
+Subject: [PATCH 52/52] Delay task-controlled purge until thread caches are
+ enabled
+
+simpleapp intermittently surfaced startup auth failures because the Chromium browser process could trap on PerfettoTrace before CBF service startup. Crash dumps pointed at PA_CHECK(ThreadCache::IsValid(tcache)) in ScopedSchedulerLoopQuarantineDisallowScanlessPurge while task-controlled purge was already globally enabled.
+
+Record the feature decision during ReconfigureAfterFeatureListInit() but defer EnableSchedulerLoopQuarantineTaskControlledPurge() until ReconfigureAfterTaskRunnerInit(), after EnableThreadCacheIfSupported() has run. This keeps the existing feature gating while avoiding the startup window where TaskAnnotator can touch quarantine state before thread-cache setup is ready.
+---
+ base/allocator/partition_alloc_support.cc | 23 ++++++++++++++++++++---
+ base/allocator/partition_alloc_support.h  |  2 ++
+ 2 files changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/base/allocator/partition_alloc_support.cc b/base/allocator/partition_alloc_support.cc
+index 703b12a125a07..cc56fde8741ce 100644
+--- a/base/allocator/partition_alloc_support.cc
++++ b/base/allocator/partition_alloc_support.cc
+@@ -1158,15 +1158,19 @@ void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
+               process_type,
+               SchedulerLoopQuarantineBranchType::kAdvancedMemorySafetyChecks);
+ 
+-  if (base::FeatureList::IsEnabled(
++  const bool should_enable_scheduler_loop_quarantine_task_controlled_purge =
++      base::FeatureList::IsEnabled(
+           base::features::
+               kPartitionAllocSchedulerLoopQuarantineTaskControlledPurge) &&
+       ShouldEnableFeatureOnProcess(
+           base::features::
+               kPartitionAllocSchedulerLoopQuarantineTaskControlledPurgeEnabledProcessesParam
+                   .Get(),
+-          process_type)) {
+-    base::EnableSchedulerLoopQuarantineTaskControlledPurge();
++          process_type);
++  {
++    base::AutoLock scoped_lock(lock_);
++    should_enable_scheduler_loop_quarantine_task_controlled_purge_ =
++        should_enable_scheduler_loop_quarantine_task_controlled_purge;
+   }
+ 
+   const bool eventually_zero_freed_memory = base::FeatureList::IsEnabled(
+@@ -1347,6 +1351,10 @@ void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
+ 
+ void PartitionAllocSupport::ReconfigureAfterTaskRunnerInit(
+     std::string_view process_type) {
++#if PA_CONFIG(THREAD_CACHE_SUPPORTED) && \
++    PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
++  bool should_enable_scheduler_loop_quarantine_task_controlled_purge = false;
++#endif
+   {
+     base::AutoLock scoped_lock(lock_);
+ 
+@@ -1361,6 +1369,11 @@ void PartitionAllocSupport::ReconfigureAfterTaskRunnerInit(
+     DCHECK(called_after_feature_list_init_);
+ 
+     called_after_thread_pool_init_ = true;
++#if PA_CONFIG(THREAD_CACHE_SUPPORTED) && \
++    PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
++    should_enable_scheduler_loop_quarantine_task_controlled_purge =
++        should_enable_scheduler_loop_quarantine_task_controlled_purge_;
++#endif
+   }
+ 
+ #if PA_CONFIG(THREAD_CACHE_SUPPORTED) && \
+@@ -1399,6 +1412,10 @@ void PartitionAllocSupport::ReconfigureAfterTaskRunnerInit(
+ 
+     ::partition_alloc::ThreadCache::SetLargestCachedSize(largest_cached_size_);
+   }
++
++  if (should_enable_scheduler_loop_quarantine_task_controlled_purge) {
++    base::EnableSchedulerLoopQuarantineTaskControlledPurge();
++  }
+ #endif  // PA_CONFIG(THREAD_CACHE_SUPPORTED) &&
+         // PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+ 
+diff --git a/base/allocator/partition_alloc_support.h b/base/allocator/partition_alloc_support.h
+index 30f361c6a8c95..59d84d6bddb89 100644
+--- a/base/allocator/partition_alloc_support.h
++++ b/base/allocator/partition_alloc_support.h
+@@ -146,6 +146,8 @@ class BASE_EXPORT PartitionAllocSupport {
+ 
+ #if PA_CONFIG(THREAD_CACHE_SUPPORTED) && \
+     PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
++  bool should_enable_scheduler_loop_quarantine_task_controlled_purge_
++      GUARDED_BY(lock_) = false;
+   size_t largest_cached_size_ =
+       ::partition_alloc::kThreadCacheDefaultSizeThreshold;
+ #endif
+-- 
+2.50.1 (Apple Git-155)
+

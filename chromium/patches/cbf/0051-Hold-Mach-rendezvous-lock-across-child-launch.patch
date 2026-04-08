@@ -1,7 +1,7 @@
-From 2bcdfd8930dd3dbd6136036bb9ef8eed20b345e4 Mon Sep 17 00:00:00 2001
+From 78a8f9792bed6373c45d99132e7938c2b4e2321a Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 6 Apr 2026 12:15:51 +0900
-Subject: [PATCH 51/51] Hold Mach rendezvous lock across child launch
+Subject: [PATCH 51/52] Hold Mach rendezvous lock across child launch
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.cc       | 25 ++++++++--
