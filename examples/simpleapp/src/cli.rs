@@ -41,6 +41,9 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub(crate) log_file: Option<PathBuf>,
 
+    #[arg(long, value_name = "LEVEL", help = "Set Chromium VLOG verbosity level")]
+    pub(crate) v: Option<i32>,
+
     #[arg(long)]
     pub(crate) unsafe_enable_startup_default_window: bool,
 
@@ -92,8 +95,8 @@ pub(crate) fn chromium_options_from_cli(cli: &Cli) -> Result<StartChromiumOption
                 .log_file
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
+            v: cli.v,
             unsafe_enable_startup_default_window: cli.unsafe_enable_startup_default_window,
-            v: None,
             vmodule: None,
             extra_args: cli.chromium_args.clone(),
         },
@@ -107,4 +110,30 @@ fn default_user_data_dir() -> Option<PathBuf> {
 
 fn parse_runtime_selection(value: &str) -> Result<RuntimeSelection, String> {
     value.parse()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chromium_options_from_cli_threads_v_flag_into_process_options() {
+        let cli = Cli {
+            url: "https://example.com".to_owned(),
+            test_overlay_surface: false,
+            passthrough_only_overlay_region: false,
+            chromium_executable: Some(PathBuf::from("/tmp/Chromium.app/Contents/MacOS/Chromium")),
+            user_data_dir: Some(PathBuf::from("/tmp/simpleapp-user-data")),
+            download_dir: None,
+            runtime: RuntimeSelection::Chrome,
+            enable_logging_stderr: false,
+            log_file: None,
+            v: Some(1),
+            unsafe_enable_startup_default_window: false,
+            chromium_args: vec![],
+        };
+
+        let options = chromium_options_from_cli(&cli).expect("options");
+        assert_eq!(options.process.v, Some(1));
+    }
 }
