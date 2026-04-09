@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.5] - 2026-04-09
+
+### Changed
+
+- Shutdown blocking now follows Chromium's runtime close probing instead of precomputing dirty pages before shutdown starts.
+- `BrowserEvent::ShutdownBlocked` now carries a single `dirty_browsing_context_id`, and the same shutdown request may block multiple times sequentially as each browsing context requests confirmation.
+- `simpleapp` now follows the sequential shutdown-block contract and resets its pending shutdown request correctly after cancellation.
+
 ## [0.1.0-alpha.4] - 2026-04-09
 
 ### Changed
@@ -97,6 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marked as an alpha release; runtime behavior and backend integration are still under active development and may still contain security bugs.
 
+[0.1.0-alpha.5]: https://github.com/cbf-hq/cbf/compare/cbf-chrome-v0.1.0-alpha.4...cbf-chrome-v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/cbf-hq/cbf/compare/cbf-chrome-v0.1.0-alpha.3...cbf-chrome-v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/cbf-hq/cbf/releases/tag/cbf-chrome-v0.1.0-alpha.2
