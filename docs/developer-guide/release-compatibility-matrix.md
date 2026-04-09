@@ -45,7 +45,7 @@ policy or replace Cargo dependency constraints.
 | 2026-03 alpha.2 | released | 2026-03-27 | 0.1.0-alpha.2 | 0.1.0-alpha.2 | 146.1.0-alpha.2 | 0.1.0-alpha.2 | 0.1.0-alpha.1 / 0.1.0-alpha.2 / 0.1.0-alpha.3 | 146.0.7680.153 | `cbf-chrome-runtime-v146.0.0-alpha.2+chromium-146.0.7680.153-r1` | First public `cbf-compositor` release |
 | 2026-04 alpha.3 | released | 2026-04-03 | 0.1.0-alpha.3 | 0.1.0-alpha.3 | 146.1.0-alpha.3 | 0.1.0-alpha.2 | 0.1.0-alpha.5 | 146.0.7680.153 | `cbf-chrome-runtime-v146.0.0-alpha.3+chromium-146.0.7680.153-r1` | |
 | 2026-04 alpha.4 | released | 2026-04-09 | 0.1.0-alpha.3 | 0.1.0-alpha.4 | 146.1.0-alpha.4 | 0.1.0-alpha.2 | 0.1.0-alpha.6 | 146.0.7680.153 | not released | |
-| 2026-04 alpha.5 | released | 2026-04-09 | 0.1.0-alpha.4 | 0.1.0-alpha.5 | 146.1.0-alpha.4 | 0.1.0-alpha.2 | 0.1.0-alpha.6 | 146.0.7680.153 | `cbf-chrome-runtime-v146.0.0-alpha.4+chromium-146.0.7680.153-r1` | |
+| 2026-04 alpha.5 | released | 2026-04-09 | 0.1.0-alpha.4 | 0.1.0-alpha.5 | 146.1.0-alpha.4 | 0.1.0-alpha.2 | 0.1.0-alpha.7 | 146.0.7680.153 | `cbf-chrome-runtime-v146.0.0-alpha.4+chromium-146.0.7680.153-r1` | `cbf-compositor` is a compatibility-only dependency update |
 
 ## 4. Interpretation Notes
 

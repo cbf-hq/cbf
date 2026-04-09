@@ -5,6 +5,12 @@ All notable changes to `cbf-compositor` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-alpha.7] - 2026-04-09
+
+### Changed
+
+- Updated `cbf` and `cbf-chrome` dependency requirements to `0.1.0-alpha.4` and `0.1.0-alpha.5` respectively so `cbf-compositor` remains aligned with the sequential `ShutdownBlocked` shutdown API release.
+
 ## [Unreleased]
 
 ## [0.1.0-alpha.6] - 2026-04-09
@@ -67,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Marked as an alpha-target crate; compositor behavior and platform integration remain under active development and may still contain security bugs.
 
+[0.1.0-alpha.7]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.6...cbf-compositor-v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.5...cbf-compositor-v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.3...cbf-compositor-v0.1.0-alpha.5
 [0.1.0-alpha.3]: https://github.com/cbf-hq/cbf/compare/cbf-compositor-v0.1.0-alpha.2...cbf-compositor-v0.1.0-alpha.3
