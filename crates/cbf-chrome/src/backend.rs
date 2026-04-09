@@ -1331,7 +1331,10 @@ mod tests {
         ShutdownState, WakeStateInner, backend_error_event, classify_deadline, classify_ready_wake,
         classify_timeout_wake, stop_reason_from_wake_state, update_shutdown_state,
     };
-    use crate::bridge::{BridgeError, IpcEvent};
+    use crate::{
+        bridge::{BridgeError, IpcEvent},
+        data::ids::TabId,
+    };
 
     struct StubWaiter {
         rx: std::sync::mpsc::Receiver<Result<EventWaitResult, super::IpcError>>,
@@ -1607,7 +1610,7 @@ mod tests {
             &mut shutdown_state,
             &IpcEvent::ShutdownBlocked {
                 request_id: 5,
-                dirty_browsing_context_ids: Vec::new(),
+                dirty_browsing_context_id: TabId::new(2),
             },
         );
 

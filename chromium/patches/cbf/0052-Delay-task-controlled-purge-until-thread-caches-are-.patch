@@ -1,4 +1,4 @@
-From 27c06ed0cf4452eaf966477e866f3326cd02b459 Mon Sep 17 00:00:00 2001
+From 0c3b06d2c88fe1fe188b946579e954c56b5404f0 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 8 Apr 2026 18:11:52 +0900
 Subject: [PATCH 52/52] Delay task-controlled purge until thread caches are

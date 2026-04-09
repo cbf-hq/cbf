@@ -179,7 +179,7 @@ pub(super) fn parse_event(event: CbfBridgeEvent) -> Result<IpcEvent, BridgeError
         }
         CbfEventKind_kEventShutdownBlocked => Ok(IpcEvent::ShutdownBlocked {
             request_id: event.request_id,
-            dirty_browsing_context_ids: parse_browsing_context_ids(event.dirty_tab_ids),
+            dirty_browsing_context_id: TabId::new(event.tab_id),
         }),
         CbfEventKind_kEventShutdownProceeding => Ok(IpcEvent::ShutdownProceeding {
             request_id: event.request_id,
@@ -670,15 +670,6 @@ fn parse_ime_bounds(update: CbfImeBoundsUpdate) -> ChromeImeBoundsUpdate {
         composition,
         selection,
     }
-}
-
-fn parse_browsing_context_ids(list: CbfTabIdList) -> Vec<TabId> {
-    if list.len == 0 || list.items.is_null() {
-        return Vec::new();
-    }
-
-    let ids = unsafe { std::slice::from_raw_parts(list.items, list.len as usize) };
-    ids.iter().copied().map(TabId::new).collect()
 }
 
 fn parse_context_menu(menu: CbfContextMenu) -> ChromeContextMenu {
@@ -1744,23 +1735,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_event_shutdown_blocked_maps_dirty_tab_ids() {
-        let dirty_ids = [2_u64, 3_u64];
+    fn parse_event_shutdown_blocked_maps_dirty_tab_id() {
         let mut event = make_event(CbfEventKind_kEventShutdownBlocked);
         event.request_id = 9;
-        event.dirty_tab_ids = CbfTabIdList {
-            items: dirty_ids.as_ptr(),
-            len: dirty_ids.len() as u32,
-        };
+        event.tab_id = 2;
 
         let parsed = parse_event(event).expect("shutdown blocked should parse");
         assert!(matches!(
             parsed,
             IpcEvent::ShutdownBlocked {
                 request_id,
-                dirty_browsing_context_ids
-            } if request_id == 9
-                && dirty_browsing_context_ids == vec![TabId::new(2), TabId::new(3)]
+                dirty_browsing_context_id
+            } if request_id == 9 && dirty_browsing_context_id == TabId::new(2)
         ));
     }
 

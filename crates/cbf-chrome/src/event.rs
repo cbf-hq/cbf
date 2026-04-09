@@ -531,14 +531,11 @@ pub fn map_ipc_event_to_generic(event: &IpcEvent) -> Option<BrowserEvent> {
         }),
         IpcEvent::ShutdownBlocked {
             request_id,
-            dirty_browsing_context_ids,
+            dirty_browsing_context_id,
         } => Some(BrowserEvent::ShutdownBlocked {
             request_id: *request_id,
-            dirty_browsing_context_ids: dirty_browsing_context_ids
-                .iter()
-                .copied()
-                .map(|id| id.to_browsing_context_id())
-                .collect(),
+            dirty_browsing_context_id: dirty_browsing_context_id
+                .to_browsing_context_id(),
         }),
         IpcEvent::ShutdownProceeding { request_id } => Some(BrowserEvent::ShutdownProceeding {
             request_id: *request_id,
@@ -937,10 +934,10 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_blocked_maps_dirty_tab_ids_into_browsing_context_ids() {
+    fn shutdown_blocked_maps_dirty_tab_id_into_browsing_context_id() {
         let event = IpcEvent::ShutdownBlocked {
             request_id: 9,
-            dirty_browsing_context_ids: vec![TabId::new(2), TabId::new(3)],
+            dirty_browsing_context_id: TabId::new(2),
         };
 
         let mapped = map_ipc_event_to_generic(&event).unwrap();
@@ -948,9 +945,8 @@ mod tests {
             mapped,
             BrowserEvent::ShutdownBlocked {
                 request_id: 9,
-                dirty_browsing_context_ids
-            } if dirty_browsing_context_ids
-                == vec![BrowsingContextId::new(2), BrowsingContextId::new(3)]
+                dirty_browsing_context_id
+            } if dirty_browsing_context_id == BrowsingContextId::new(2)
         ));
     }
 

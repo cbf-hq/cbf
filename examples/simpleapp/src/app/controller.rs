@@ -615,9 +615,9 @@ impl AppController {
             }
             BrowserEvent::ShutdownBlocked {
                 request_id,
-                dirty_browsing_context_ids,
+                dirty_browsing_context_id,
             } => {
-                let proceed = show_shutdown_blocked_dialog(&dirty_browsing_context_ids);
+                let proceed = show_shutdown_blocked_dialog(dirty_browsing_context_id);
                 if let Err(err) = self.browser_handle.confirm_shutdown(request_id, proceed) {
                     warn!("failed to confirm shutdown: {err}");
                 }
@@ -2496,18 +2496,14 @@ fn beforeunload_reason_description(reason: &BeforeUnloadReason) -> &'static str 
     }
 }
 
-fn show_shutdown_blocked_dialog(dirty_browsing_context_ids: &[BrowsingContextId]) -> bool {
-    let count = dirty_browsing_context_ids.len();
-    let subject = match count {
-        0 | 1 => "1 page has unsaved changes.".to_string(),
-        _ => format!("{count} pages have unsaved changes."),
-    };
-    let message = format!("{subject}\n\nQuit the application and discard those changes?");
+fn show_shutdown_blocked_dialog(_dirty_browsing_context_id: BrowsingContextId) -> bool {
+    let message =
+        "This page has unsaved changes.\n\nQuit the application and discard those changes?";
 
     let result = MessageDialog::new()
         .set_level(MessageLevel::Warning)
         .set_title("Quit Application?")
-        .set_description(&message)
+        .set_description(message)
         .set_buttons(MessageButtons::YesNo)
         .show();
 

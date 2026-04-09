@@ -1,43 +1,129 @@
-From 0c189e4d7767531c228343706625a00ab4204af5 Mon Sep 17 00:00:00 2001
+From cd342d5fc45e1d128c121969ebb00032cf9af10d Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 5 Apr 2026 08:12:38 +0900
 Subject: [PATCH 50/52] Keep shutdown blocking non-destructive
 
 ---
- chrome/browser/cbf/cbf_browser_service.cc     | 263 +++++++++---------
- chrome/browser/cbf/cbf_browser_service.h      |  31 ++-
- .../cbf/cbf_browser_service_unittest.cc       | 154 +++++-----
+ .../cbf/bridge/cbf_bridge_client_impl.cc      |   4 +-
+ .../cbf/bridge/cbf_bridge_client_impl.h       |   3 +-
+ .../browser/cbf/bridge/cbf_bridge_events.cc   |  12 -
+ chrome/browser/cbf/cbf_browser_service.cc     | 416 +++++++++++-------
+ chrome/browser/cbf/cbf_browser_service.h      |  52 ++-
+ .../cbf/cbf_browser_service_unittest.cc       | 161 +++----
  .../cbf/cbf_java_script_dialog_manager.cc     |  11 +-
- chrome/browser/cbf/cbf_profile_service.cc     |  50 ++++
- chrome/browser/cbf/cbf_profile_service.h      |   5 +
- .../cbf/cbf_profile_service_browsertest.cc    | 236 +++++++++++++++-
+ chrome/browser/cbf/cbf_profile_service.cc     |  58 ++-
+ chrome/browser/cbf/cbf_profile_service.h      |   8 +-
+ .../cbf/cbf_profile_service_browsertest.cc    | 309 ++++++++++++-
  chrome/browser/cbf/cbf_tab_manager.cc         |  30 +-
+ .../browser/cbf/cbf_web_contents_delegate.cc  |  11 +
+ chrome/browser/cbf/mojom/cbf_browser.mojom    |   2 +-
  .../cbf/profile/cbf_profile_ime_controller.cc |  23 +-
  .../cbf/profile/cbf_profile_ime_controller.h  |   4 +
  .../cbf/test/cbf_test_profile_observer.cc     |  26 +-
  .../cbf/test/cbf_test_profile_observer.h      |  14 +
- 12 files changed, 622 insertions(+), 225 deletions(-)
+ chrome/browser/ui/browser.cc                  |   7 +
+ chrome/browser/ui/browser.h                   |   7 +
+ 19 files changed, 850 insertions(+), 308 deletions(-)
 
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+index 1ecc32b6ca673..4f3d090bd7f12 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
+@@ -74,11 +74,11 @@ CbfBridgeClientImpl::BrowserObserver::~BrowserObserver() = default;
+
+ void CbfBridgeClientImpl::BrowserObserver::OnShutdownBlocked(
+     uint64_t request_id,
+-    const std::vector<uint64_t>& dirty_tab_ids) {
++    uint64_t dirty_tab_id) {
+   CbfBridgeEventData event;
+   event.kind = kEventShutdownBlocked;
+   event.request_id = request_id;
+-  event.dirty_tab_ids = dirty_tab_ids;
++  event.tab_id = dirty_tab_id;
+   std::lock_guard<std::mutex> lock(impl_->events_mutex);
+   impl_->events.push(std::move(event));
+ }
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+index f4e01db359c07..ad66b713f60d7 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
++++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.h
+@@ -59,8 +59,7 @@ struct CbfBridgeClientImpl {
+     explicit BrowserObserver(CbfBridgeClientImpl* impl);
+     ~BrowserObserver() override;
+
+-    void OnShutdownBlocked(uint64_t request_id,
+-                           const std::vector<uint64_t>& dirty_tab_ids) override;
++    void OnShutdownBlocked(uint64_t request_id, uint64_t dirty_tab_id) override;
+     void OnShutdownProceeding(uint64_t request_id) override;
+     void OnShutdownCancelled(uint64_t request_id) override;
+     void OnCustomSchemeRequest(
+diff --git a/chrome/browser/cbf/bridge/cbf_bridge_events.cc b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+index 775f8524baa69..f898e3cf0e9cd 100644
+--- a/chrome/browser/cbf/bridge/cbf_bridge_events.cc
++++ b/chrome/browser/cbf/bridge/cbf_bridge_events.cc
+@@ -437,18 +437,6 @@ bool CbfBridgeClient::PollEvent(CbfBridgeEvent* out_event) {
+           ToCbfRect(selection.first_selection_rect);
+     }
+   }
+-  if (event.kind == kEventShutdownBlocked) {
+-    const size_t list_len = event.dirty_tab_ids.size();
+-    if (list_len > 0) {
+-      uint64_t* ids = new uint64_t[list_len];
+-      auto out_ids = UNSAFE_BUFFERS(base::span(ids, list_len));
+-      for (size_t i = 0; i < out_ids.size(); ++i) {
+-        out_ids[i] = event.dirty_tab_ids[i];
+-      }
+-      out_event->dirty_tab_ids.items = ids;
+-      out_event->dirty_tab_ids.len = static_cast<uint32_t>(list_len);
+-    }
+-  }
+   if (event.kind == kEventContextMenuRequested ||
+       event.kind == kEventExtensionPopupContextMenuRequested) {
+     FillContextMenu(event.context_menu, &out_event->context_menu);
 diff --git a/chrome/browser/cbf/cbf_browser_service.cc b/chrome/browser/cbf/cbf_browser_service.cc
-index 7239eb9072bef..4d24bebe6db3d 100644
+index 7239eb9072bef..c4aadeb05dd74 100644
 --- a/chrome/browser/cbf/cbf_browser_service.cc
 +++ b/chrome/browser/cbf/cbf_browser_service.cc
-@@ -151,31 +151,31 @@ void CbfBrowserService::RequestShutdown(uint64_t request_id) {
+@@ -1,5 +1,6 @@
+ #include "chrome/browser/cbf/cbf_browser_service.h"
+
++#include <set>
+ #include <utility>
+ #include <vector>
+
+@@ -14,6 +15,8 @@
+ #include "chrome/browser/profiles/profile_attributes_entry.h"
+ #include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "chrome/browser/profiles/profile_manager.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_window.h"
+ #include "url/gurl.h"
+
+ namespace cbf {
+@@ -143,40 +146,15 @@ void CbfBrowserService::RequestShutdown(uint64_t request_id) {
+   if (!authenticated_) {
+     return;
    }
+-  if (shutdown_state_ == ShutdownState::kProceeding || shutdown_in_progress_) {
+-    if (observer_) {
+-      observer_->OnShutdownProceeding(request_id);
+-    }
+-    return;
+-  }
    if (shutdown_state_ != ShutdownState::kIdle) {
-     if (shutdown_state_ == ShutdownState::kBlocked && observer_) {
+-    if (shutdown_state_ == ShutdownState::kBlocked && observer_) {
 -      std::vector<uint64_t> blocked_ids(beforeunload_dialog_pages_.begin(),
 -                                        beforeunload_dialog_pages_.end());
-+      shutdown_request_id_ = request_id;
-+      std::vector<uint64_t> blocked_ids(blocked_dirty_tab_ids_.begin(),
-+                                        blocked_dirty_tab_ids_.end());
-       observer_->OnShutdownBlocked(request_id, blocked_ids);
+-      observer_->OnShutdownBlocked(request_id, blocked_ids);
++    if (shutdown_state_ == ShutdownState::kBlocked && observer_ &&
++        IsCurrentShutdownRequest(request_id) && blocked_shutdown_target_) {
++      observer_->OnShutdownBlocked(request_id, blocked_shutdown_target_->tab_id);
      }
      return;
    }
- 
+
 -  shutdown_state_ = ShutdownState::kWaitingBeforeUnload;
-   shutdown_request_id_ = request_id;
+-  shutdown_request_id_ = request_id;
 -  pending_beforeunload_pages_.clear();
 -  beforeunload_dialog_pages_.clear();
 -
@@ -48,43 +134,64 @@ index 7239eb9072bef..4d24bebe6db3d 100644
 -  }
 -
 -  if (pending_beforeunload_pages_.empty()) {
-+  blocked_dirty_tab_ids_ = CollectDirtyTabIds();
-+  if (blocked_dirty_tab_ids_.empty()) {
-     StartShutdown(request_id);
-     return;
-   }
- 
+-    StartShutdown(request_id);
+-    return;
+-  }
+-
 -  for (const auto& entry : profile_services_) {
 -    entry.second->DispatchBeforeUnloadForShutdown();
-+  shutdown_state_ = ShutdownState::kBlocked;
-+  shutdown_in_progress_ = false;
-+  shutdown_exit_requested_ = false;
-+  shutdown_dirty_tab_ids_.clear();
-+  shutdown_targets_.clear();
-+
-+  if (observer_) {
-+    std::vector<uint64_t> blocked_ids(blocked_dirty_tab_ids_.begin(),
-+                                      blocked_dirty_tab_ids_.end());
-+    observer_->OnShutdownBlocked(request_id, blocked_ids);
-   }
+-  }
++  BeginShutdownCheck(request_id);
  }
- 
-@@ -193,10 +193,7 @@ void CbfBrowserService::ConfirmShutdown(uint64_t request_id, bool proceed) {
+
+ void CbfBrowserService::ConfirmShutdown(uint64_t request_id, bool proceed) {
+@@ -184,19 +162,34 @@ void CbfBrowserService::ConfirmShutdown(uint64_t request_id, bool proceed) {
      return;
    }
- 
+   if (shutdown_state_ != ShutdownState::kBlocked ||
+-      !shutdown_request_id_.has_value() ||
+-      shutdown_request_id_.value() != request_id) {
++      !IsCurrentShutdownRequest(request_id)) {
+     return;
+   }
+-  if (!proceed) {
+-    CancelShutdown(request_id);
++
++  CbfProfileService* profile_service = nullptr;
++  uint64_t beforeunload_request_id = 0;
++  if (!ResolveBlockedBeforeUnloadRequest(&profile_service,
++                                         &beforeunload_request_id)) {
++    blocked_shutdown_target_.reset();
++    blocked_beforeunload_request_id_.reset();
++    if (!proceed) {
++      CancelShutdown(request_id);
++      return;
++    }
++
++    shutdown_state_ = ShutdownState::kCheckingCloseability;
++    if (active_shutdown_target_) {
++      ++current_shutdown_index_;
++      active_shutdown_target_.reset();
++    }
++    ProbeNextShutdownTarget();
+     return;
+   }
+
 -  for (const auto& entry : profile_services_) {
 -    entry.second->ResolveBeforeUnloadForShutdown(true);
 -  }
 -  ScheduleStartShutdown(request_id);
-+  StartShutdown(request_id);
++  shutdown_state_ = ShutdownState::kCheckingCloseability;
++  blocked_shutdown_target_.reset();
++  blocked_beforeunload_request_id_.reset();
++  profile_service->ConfirmBeforeUnload(beforeunload_request_id, proceed);
  }
- 
+
  void CbfBrowserService::ForceShutdown() {
-@@ -211,34 +208,16 @@ void CbfBrowserService::SetStartShutdownCallbackForTesting(
+@@ -211,34 +204,18 @@ void CbfBrowserService::SetStartShutdownCallbackForTesting(
    on_start_shutdown_for_testing_ = std::move(callback);
  }
- 
+
 -void CbfBrowserService::SetShutdownWaitingForBeforeUnloadForTesting(
 -    uint64_t request_id,
 -    std::set<TabId> pending_tab_ids) {
@@ -96,14 +203,15 @@ index 7239eb9072bef..4d24bebe6db3d 100644
 -  shutdown_start_task_pending_ = false;
 -}
 -
- void CbfBrowserService::SetShutdownBlockedForTesting(
-     uint64_t request_id,
-     std::set<TabId> dialog_tab_ids) {
+-void CbfBrowserService::SetShutdownBlockedForTesting(
+-    uint64_t request_id,
+-    std::set<TabId> dialog_tab_ids) {
++void CbfBrowserService::SetShutdownBlockedForTesting(uint64_t request_id,
++                                                     TabId dirty_tab_id) {
    shutdown_state_ = ShutdownState::kBlocked;
    shutdown_request_id_ = request_id;
 -  pending_beforeunload_pages_.clear();
 -  beforeunload_dialog_pages_ = std::move(dialog_tab_ids);
-+  blocked_dirty_tab_ids_.assign(dialog_tab_ids.begin(), dialog_tab_ids.end());
    shutdown_in_progress_ = false;
 -  shutdown_start_task_pending_ = false;
 -}
@@ -115,30 +223,28 @@ index 7239eb9072bef..4d24bebe6db3d 100644
 -void CbfBrowserService::ScheduleStartShutdownForTesting(uint64_t request_id) {
 -  ScheduleStartShutdown(request_id);
 +  shutdown_exit_requested_ = false;
-+  shutdown_dirty_tab_ids_.clear();
 +  shutdown_targets_.clear();
++  shutdown_targets_.push_back({std::string("testing"), dirty_tab_id});
++  current_shutdown_index_ = 0;
++  active_shutdown_target_ = shutdown_targets_.front();
++  blocked_shutdown_target_ = shutdown_targets_.front();
++  blocked_beforeunload_request_id_ = 1u;
  }
- 
+
  void CbfBrowserService::CancelShutdownForTesting(uint64_t request_id) {
-@@ -250,47 +229,29 @@ void CbfBrowserService::SetHostDisconnectCallbackForTesting(
+@@ -250,88 +227,26 @@ void CbfBrowserService::SetHostDisconnectCallbackForTesting(
    on_host_disconnect_for_testing_ = std::move(callback);
  }
- 
-+void CbfBrowserService::SetAttemptExitCallbackForTesting(
-+    base::RepeatingClosure callback) {
-+  on_attempt_exit_for_testing_ = std::move(callback);
-+}
-+
- void CbfBrowserService::NotifyTabClosed() {
-   if (!shutdown_in_progress_) {
-     return;
-   }
-   if (!HasOpenWebPages()) {
+
+-void CbfBrowserService::NotifyTabClosed() {
+-  if (!shutdown_in_progress_) {
+-    return;
+-  }
+-  if (!HasOpenWebPages()) {
 -    chrome::AttemptExit();
-+    AttemptExitAfterShutdown();
-   }
- }
- 
+-  }
+-}
+-
 -void CbfBrowserService::ScheduleStartShutdown(uint64_t request_id) {
 -  if (shutdown_in_progress_ || shutdown_start_task_pending_) {
 -    return;
@@ -162,151 +268,277 @@ index 7239eb9072bef..4d24bebe6db3d 100644
 -  }
 -
 -  StartShutdown(request_id);
--}
--
- void CbfBrowserService::StartShutdown(uint64_t request_id) {
++void CbfBrowserService::SetAttemptExitCallbackForTesting(
++    base::RepeatingClosure callback) {
++  on_attempt_exit_for_testing_ = std::move(callback);
+ }
+
+-void CbfBrowserService::StartShutdown(uint64_t request_id) {
 -  shutdown_start_task_pending_ = false;
-   shutdown_state_ = ShutdownState::kProceeding;
-   shutdown_in_progress_ = true;
+-  shutdown_state_ = ShutdownState::kProceeding;
+-  shutdown_in_progress_ = true;
 -  shutdown_request_id_.reset();
 -  pending_beforeunload_pages_.clear();
 -  beforeunload_dialog_pages_.clear();
-+  shutdown_exit_requested_ = false;
-+  shutdown_request_id_ = request_id;
-+  shutdown_dirty_tab_ids_ =
-+      std::set<TabId>(blocked_dirty_tab_ids_.begin(), blocked_dirty_tab_ids_.end());
-+  blocked_dirty_tab_ids_.clear();
-+  shutdown_targets_ = CollectShutdownTargets();
- 
-   for (const auto& entry : profile_services_) {
-     entry.second->SetShutdownDialogAutoConfirm(true);
-@@ -305,33 +266,34 @@ void CbfBrowserService::StartShutdown(uint64_t request_id) {
+-
+-  for (const auto& entry : profile_services_) {
+-    entry.second->SetShutdownDialogAutoConfirm(true);
+-  }
+-
+-  if (observer_) {
+-    observer_->OnShutdownProceeding(request_id);
+-  }
+-
+-  if (on_start_shutdown_for_testing_) {
+-    on_start_shutdown_for_testing_.Run(request_id);
++void CbfBrowserService::NotifyTabClosed() {
++  if (!shutdown_in_progress_) {
      return;
    }
- 
+-
 -  for (const auto& entry : profile_services_) {
 -    entry.second->CloseAllTabs();
 -  }
 -
--  if (!HasOpenWebPages()) {
+   if (!HasOpenWebPages()) {
 -    chrome::AttemptExit();
--  }
-+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-+      FROM_HERE, base::BindOnce(&CbfBrowserService::CloseConfirmedShutdownTargets,
-+                                weak_factory_.GetWeakPtr()));
- }
- 
- void CbfBrowserService::CancelShutdown(uint64_t request_id) {
-   for (const auto& entry : profile_services_) {
--    entry.second->ResolveBeforeUnloadForShutdown(false);
-     entry.second->SetShutdownDialogAutoConfirm(false);
++    AttemptExitAfterShutdown();
    }
+ }
+
+-void CbfBrowserService::CancelShutdown(uint64_t request_id) {
+-  for (const auto& entry : profile_services_) {
+-    entry.second->ResolveBeforeUnloadForShutdown(false);
+-    entry.second->SetShutdownDialogAutoConfirm(false);
+-  }
 -  shutdown_start_task_pending_ = false;
-+  shutdown_dirty_tab_ids_.clear();
-+  shutdown_targets_.clear();
-   shutdown_state_ = ShutdownState::kIdle;
-   shutdown_request_id_.reset();
+-  shutdown_state_ = ShutdownState::kIdle;
+-  shutdown_request_id_.reset();
 -  pending_beforeunload_pages_.clear();
 -  beforeunload_dialog_pages_.clear();
-+  blocked_dirty_tab_ids_.clear();
-+  shutdown_in_progress_ = false;
-+  shutdown_exit_requested_ = false;
-   if (observer_) {
-     observer_->OnShutdownCancelled(request_id);
-   }
+-  if (observer_) {
+-    observer_->OnShutdownCancelled(request_id);
+-  }
++bool CbfBrowserService::IsShutdownRequested() const {
++  return shutdown_state_ != ShutdownState::kIdle;
  }
- 
- bool CbfBrowserService::IsShutdownRequested() const {
+
+-bool CbfBrowserService::IsShutdownRequested() const {
 -  return shutdown_state_ == ShutdownState::kWaitingBeforeUnload ||
 -         shutdown_state_ == ShutdownState::kBlocked;
-+  return shutdown_state_ == ShutdownState::kBlocked ||
-+         shutdown_state_ == ShutdownState::kProceeding;
-+}
-+
 +bool CbfBrowserService::IsShutdownProceeding() const {
 +  return shutdown_state_ == ShutdownState::kProceeding;
  }
- 
+
  bool CbfBrowserService::IsManagedWebContents(
-@@ -353,22 +315,19 @@ bool CbfBrowserService::IsManagedWebContents(
+@@ -352,23 +267,27 @@ bool CbfBrowserService::IsManagedWebContents(
+   return false;
  }
- 
- void CbfBrowserService::NotifyBeforeUnloadDialogRequested(TabId tab_id) {
+
+-void CbfBrowserService::NotifyBeforeUnloadDialogRequested(TabId tab_id) {
 -  if (shutdown_state_ != ShutdownState::kWaitingBeforeUnload &&
 -      shutdown_state_ != ShutdownState::kBlocked) {
 -    return;
--  }
++bool CbfBrowserService::HandleShutdownBeforeUnloadDialogRequested(
++    const std::string& profile_id,
++    TabId tab_id,
++    uint64_t request_id) {
++  if (shutdown_state_ != ShutdownState::kCheckingCloseability ||
++      !shutdown_request_id_.has_value() || !active_shutdown_target_) {
++    return false;
+   }
 -  beforeunload_dialog_pages_.insert(tab_id);
 -  MarkBeforeUnloadDispatchComplete(tab_id);
-+  (void)tab_id;
- }
- 
- void CbfBrowserService::NotifyBeforeUnloadFired(TabId tab_id, bool proceed) {
+-}
+
+-void CbfBrowserService::NotifyBeforeUnloadFired(TabId tab_id, bool proceed) {
 -  if (shutdown_state_ == ShutdownState::kWaitingBeforeUnload) {
 -    MarkBeforeUnloadDispatchComplete(tab_id);
-+  if (!shutdown_in_progress_ || shutdown_state_ != ShutdownState::kProceeding ||
-+      !shutdown_dirty_tab_ids_.contains(tab_id)) {
-     return;
+-    return;
++  const ShutdownTarget dialog_target{profile_id, tab_id};
++  if (!ShutdownTargetsMatch(*active_shutdown_target_, dialog_target)) {
++    return false;
    }
 -  if (shutdown_state_ == ShutdownState::kBlocked && !proceed) {
-+  if (!proceed) {
-+    AbortProceedingShutdown();
-     return;
+-    return;
++
++  shutdown_state_ = ShutdownState::kBlocked;
++  blocked_shutdown_target_ = dialog_target;
++  blocked_beforeunload_request_id_ = request_id;
++  if (observer_) {
++    observer_->OnShutdownBlocked(shutdown_request_id_.value(), tab_id);
    }
-+  shutdown_dirty_tab_ids_.erase(tab_id);
++  return true;
  }
- 
+
  CbfProfileService* CbfBrowserService::GetProfileServiceForProfile(
-@@ -462,37 +421,6 @@ void CbfBrowserService::DispatchCustomSchemeRequest(
+@@ -462,37 +381,198 @@ void CbfBrowserService::DispatchCustomSchemeRequest(
    observer_->OnCustomSchemeRequest(std::move(request));
  }
- 
+
 -void CbfBrowserService::MarkBeforeUnloadDispatchComplete(TabId tab_id) {
 -  const auto it = pending_beforeunload_pages_.find(tab_id);
 -  if (it == pending_beforeunload_pages_.end()) {
--    return;
--  }
++bool CbfBrowserService::ShutdownTargetsMatch(const ShutdownTarget& lhs,
++                                             const ShutdownTarget& rhs) {
++  return lhs.profile_id == rhs.profile_id && lhs.tab_id == rhs.tab_id;
++}
++
++bool CbfBrowserService::IsCurrentShutdownRequest(uint64_t request_id) const {
++  return shutdown_request_id_.has_value() &&
++         shutdown_request_id_.value() == request_id;
++}
++
++void CbfBrowserService::BeginShutdownCheck(uint64_t request_id) {
++  shutdown_request_id_ = request_id;
++  shutdown_state_ = ShutdownState::kCheckingCloseability;
++  shutdown_in_progress_ = false;
++  shutdown_exit_requested_ = false;
++  shutdown_targets_ = CollectShutdownTargets();
++  current_shutdown_index_ = 0;
++  active_shutdown_target_.reset();
++  blocked_shutdown_target_.reset();
++  blocked_beforeunload_request_id_.reset();
++
++  if (shutdown_targets_.empty()) {
++    BeginShutdownProceeding(request_id);
+     return;
+   }
 -  pending_beforeunload_pages_.erase(it);
 -  MaybeFinalizeShutdownRequest();
--}
--
++
++  ProbeNextShutdownTarget();
+ }
+
 -void CbfBrowserService::MaybeFinalizeShutdownRequest() {
 -  if (shutdown_state_ != ShutdownState::kWaitingBeforeUnload ||
 -      !pending_beforeunload_pages_.empty()) {
--    return;
--  }
++void CbfBrowserService::ProbeNextShutdownTarget() {
++  if (shutdown_state_ != ShutdownState::kCheckingCloseability ||
++      !shutdown_request_id_.has_value()) {
+     return;
+   }
 -  if (!shutdown_request_id_.has_value()) {
--    return;
--  }
--
++
++  while (current_shutdown_index_ < shutdown_targets_.size()) {
++    const ShutdownTarget target = shutdown_targets_[current_shutdown_index_];
++    Browser* browser = ResolveBrowserForShutdownTarget(target);
++    if (!browser) {
++      ++current_shutdown_index_;
++      continue;
++    }
++
++    active_shutdown_target_ = target;
++    if (browser->TryToCloseWindow(
++            false,
++            base::BindRepeating(
++                &CbfBrowserService::OnShutdownTargetCloseConfirmed,
++                weak_factory_.GetWeakPtr(), target))) {
++      return;
++    }
++
++    ++current_shutdown_index_;
++    active_shutdown_target_.reset();
++  }
++
++  BeginShutdownProceeding(shutdown_request_id_.value());
++}
++
++void CbfBrowserService::OnShutdownTargetCloseConfirmed(ShutdownTarget target,
++                                                       bool proceed) {
++  if (!shutdown_request_id_.has_value() || !active_shutdown_target_ ||
++      !ShutdownTargetsMatch(*active_shutdown_target_, target)) {
+     return;
+   }
+
 -  if (beforeunload_dialog_pages_.empty()) {
 -    ScheduleStartShutdown(shutdown_request_id_.value());
--    return;
--  }
--
++  active_shutdown_target_.reset();
++  if (!proceed) {
++    CancelShutdown(shutdown_request_id_.value());
+     return;
+   }
+
 -  shutdown_state_ = ShutdownState::kBlocked;
--  if (observer_) {
++  ++current_shutdown_index_;
++  ProbeNextShutdownTarget();
++}
++
++void CbfBrowserService::BeginShutdownProceeding(uint64_t request_id) {
++  shutdown_state_ = ShutdownState::kProceeding;
++  shutdown_in_progress_ = true;
++  shutdown_exit_requested_ = false;
++  active_shutdown_target_.reset();
++  blocked_shutdown_target_.reset();
++  blocked_beforeunload_request_id_.reset();
++
++  if (observer_) {
++    observer_->OnShutdownProceeding(request_id);
++  }
++
++  if (on_start_shutdown_for_testing_) {
++    on_start_shutdown_for_testing_.Run(request_id);
++    return;
++  }
++
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&CbfBrowserService::FinishShutdownClosePhase,
++                     weak_factory_.GetWeakPtr()));
++}
++
++void CbfBrowserService::FinishShutdownClosePhase() {
++  if (!shutdown_in_progress_ || shutdown_state_ != ShutdownState::kProceeding) {
++    return;
++  }
++
++  for (const ShutdownTarget& target : shutdown_targets_) {
++    auto service_it = profile_services_.find(target.profile_id);
++    if (service_it == profile_services_.end()) {
++      continue;
++    }
++
++    content::WebContents* web_contents =
++        service_it->second->GetWebContentsForTab(target.tab_id);
++    if (!web_contents) {
++      continue;
++    }
++    service_it->second->CloseWebContents(web_contents);
++  }
++
++  if (!HasOpenWebPages()) {
++    AttemptExitAfterShutdown();
++  }
++}
++
++void CbfBrowserService::CancelShutdown(uint64_t request_id) {
++  ResetShutdownBrowsers();
++  shutdown_targets_.clear();
++  current_shutdown_index_ = 0;
++  active_shutdown_target_.reset();
++  blocked_shutdown_target_.reset();
++  blocked_beforeunload_request_id_.reset();
++  shutdown_state_ = ShutdownState::kIdle;
++  shutdown_request_id_.reset();
++  shutdown_in_progress_ = false;
++  shutdown_exit_requested_ = false;
+   if (observer_) {
 -    std::vector<uint64_t> blocked_ids(beforeunload_dialog_pages_.begin(),
 -                                      beforeunload_dialog_pages_.end());
 -    observer_->OnShutdownBlocked(shutdown_request_id_.value(), blocked_ids);
--  }
--}
--
- void CbfBrowserService::OnHostDisconnected() {
-   if (!authenticated_) {
-     return;
-@@ -526,6 +454,93 @@ bool CbfBrowserService::HasOpenWebPages() const {
-   return false;
++    observer_->OnShutdownCancelled(request_id);
+   }
  }
- 
-+std::vector<TabId> CbfBrowserService::CollectDirtyTabIds() const {
-+  std::vector<TabId> dirty_tab_ids;
-+  for (const auto& entry : profile_services_) {
-+    const std::vector<TabId> profile_dirty_ids = entry.second->GetDirtyTabIds();
-+    dirty_tab_ids.insert(dirty_tab_ids.end(), profile_dirty_ids.begin(),
-+                         profile_dirty_ids.end());
+
++void CbfBrowserService::ResetShutdownBrowsers() {
++  std::set<Browser*> reset_browsers;
++  for (const ShutdownTarget& target : shutdown_targets_) {
++    Browser* browser = ResolveBrowserForShutdownTarget(target);
++    if (!browser || !reset_browsers.insert(browser).second) {
++      continue;
++    }
++    browser->ResetTryToCloseWindow();
 +  }
-+  return dirty_tab_ids;
 +}
 +
 +std::vector<CbfBrowserService::ShutdownTarget>
@@ -321,59 +553,43 @@ index 7239eb9072bef..4d24bebe6db3d 100644
 +  return targets;
 +}
 +
-+void CbfBrowserService::CloseConfirmedShutdownTargets() {
-+  if (!shutdown_in_progress_ || shutdown_state_ != ShutdownState::kProceeding) {
-+    return;
++Browser* CbfBrowserService::ResolveBrowserForShutdownTarget(
++    const ShutdownTarget& target) const {
++  auto service_it = profile_services_.find(target.profile_id);
++  if (service_it == profile_services_.end()) {
++    return nullptr;
 +  }
-+
-+  for (const ShutdownTarget& target : shutdown_targets_) {
-+    auto service_it = profile_services_.find(target.profile_id);
-+    if (service_it == profile_services_.end()) {
-+      continue;
-+    }
-+
-+    if (shutdown_dirty_tab_ids_.contains(target.tab_id)) {
-+      service_it->second->RequestCloseTab(target.tab_id);
-+      continue;
-+    }
-+
-+    content::WebContents* web_contents =
-+        service_it->second->GetWebContentsForTab(target.tab_id);
-+    if (!web_contents) {
-+      continue;
-+    }
-+
-+    service_it->second->CloseWebContents(web_contents);
-+  }
-+
-+  if (!HasOpenWebPages()) {
-+    AttemptExitAfterShutdown();
-+  }
++  return service_it->second->GetBrowserForTab(target.tab_id);
 +}
 +
-+void CbfBrowserService::AbortProceedingShutdown() {
-+  if (!shutdown_in_progress_ || shutdown_state_ != ShutdownState::kProceeding) {
-+    return;
++bool CbfBrowserService::ResolveBlockedBeforeUnloadRequest(
++    CbfProfileService** out_service,
++    uint64_t* out_request_id) {
++  if (!blocked_shutdown_target_ || !blocked_beforeunload_request_id_) {
++    return false;
 +  }
 +
-+  const std::optional<uint64_t> request_id = shutdown_request_id_;
-+  for (const auto& entry : profile_services_) {
-+    entry.second->SetShutdownDialogAutoConfirm(false);
++  auto service_it = profile_services_.find(blocked_shutdown_target_->profile_id);
++  if (service_it == profile_services_.end()) {
++    return false;
 +  }
 +
-+  shutdown_dirty_tab_ids_.clear();
-+  shutdown_targets_.clear();
-+  blocked_dirty_tab_ids_.clear();
-+  shutdown_in_progress_ = false;
-+  shutdown_exit_requested_ = false;
-+  shutdown_state_ = ShutdownState::kIdle;
-+  shutdown_request_id_.reset();
-+
-+  if (observer_ && request_id.has_value()) {
-+    observer_->OnShutdownCancelled(request_id.value());
++  if (out_service) {
++    *out_service = service_it->second.get();
 +  }
++  if (out_request_id) {
++    *out_request_id = blocked_beforeunload_request_id_.value();
++  }
++  return true;
 +}
 +
+ void CbfBrowserService::OnHostDisconnected() {
+   if (!authenticated_) {
+     return;
+@@ -526,6 +606,18 @@ bool CbfBrowserService::HasOpenWebPages() const {
+   return false;
+ }
+
 +void CbfBrowserService::AttemptExitAfterShutdown() {
 +  if (shutdown_exit_requested_) {
 +    return;
@@ -390,25 +606,36 @@ index 7239eb9072bef..4d24bebe6db3d 100644
    profile_paths_.clear();
    ProfileManager* profile_manager =
 diff --git a/chrome/browser/cbf/cbf_browser_service.h b/chrome/browser/cbf/cbf_browser_service.h
-index f109f2fbf081c..9ca4c62ee32c7 100644
+index f109f2fbf081c..4f2662810cf61 100644
 --- a/chrome/browser/cbf/cbf_browser_service.h
 +++ b/chrome/browser/cbf/cbf_browser_service.h
 @@ -1,6 +1,7 @@
  #ifndef CHROME_BROWSER_CBF_CBF_BROWSER_SERVICE_H_
  #define CHROME_BROWSER_CBF_CBF_BROWSER_SERVICE_H_
- 
+
 +#include <cstddef>
  #include <cstdint>
  #include <optional>
  #include <set>
-@@ -54,19 +55,15 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+@@ -18,6 +19,7 @@
+ #include "mojo/public/cpp/bindings/remote.h"
+
+ class Profile;
++class Browser;
+ namespace content {
+ class WebContents;
+ }  // namespace content
+@@ -54,19 +56,16 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
    void ForceShutdown() override;
    void NotifyTabClosed();
    bool IsShutdownRequested() const;
 +  bool IsShutdownProceeding() const;
    bool IsManagedWebContents(content::WebContents* web_contents) const;
-   void NotifyBeforeUnloadDialogRequested(TabId tab_id);
-   void NotifyBeforeUnloadFired(TabId tab_id, bool proceed);
+-  void NotifyBeforeUnloadDialogRequested(TabId tab_id);
+-  void NotifyBeforeUnloadFired(TabId tab_id, bool proceed);
++  bool HandleShutdownBeforeUnloadDialogRequested(const std::string& profile_id,
++                                                 TabId tab_id,
++                                                 uint64_t request_id);
    CbfProfileService* GetProfileServiceForProfile(::Profile* profile);
    void SetStartShutdownCallbackForTesting(
        base::RepeatingCallback<void(uint64_t)> callback);
@@ -416,18 +643,19 @@ index f109f2fbf081c..9ca4c62ee32c7 100644
 -      uint64_t request_id,
 -      std::set<TabId> pending_tab_ids);
    void SetShutdownBlockedForTesting(uint64_t request_id,
-                                     std::set<TabId> dialog_tab_ids);
+-                                    std::set<TabId> dialog_tab_ids);
 -  bool IsShutdownStartTaskPendingForTesting() const;
 -  void ScheduleStartShutdownForTesting(uint64_t request_id);
++                                    TabId dirty_tab_id);
    void CancelShutdownForTesting(uint64_t request_id);
    bool HasCustomSchemeHandler(const GURL& url) const;
    bool HasCustomSchemeHandlerForScheme(const std::string& scheme) const;
-@@ -77,21 +74,27 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+@@ -77,21 +76,36 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
        const std::string& method,
        base::OnceCallback<void(mojom::CbfCustomSchemeResponsePtr)> callback);
    void SetHostDisconnectCallbackForTesting(base::RepeatingClosure callback);
 +  void SetAttemptExitCallbackForTesting(base::RepeatingClosure callback);
- 
+
   private:
 +  struct ShutdownTarget {
 +    std::string profile_id;
@@ -437,55 +665,67 @@ index f109f2fbf081c..9ca4c62ee32c7 100644
    enum class ShutdownState {
      kIdle,
 -    kWaitingBeforeUnload,
++    kCheckingCloseability,
      kBlocked,
      kProceeding,
    };
- 
+
 -  void ScheduleStartShutdown(uint64_t request_id);
 -  void RunScheduledStartShutdown(uint64_t request_id);
-   void StartShutdown(uint64_t request_id);
+-  void StartShutdown(uint64_t request_id);
++  static bool ShutdownTargetsMatch(const ShutdownTarget& lhs,
++                                   const ShutdownTarget& rhs);
++  bool IsCurrentShutdownRequest(uint64_t request_id) const;
++  void BeginShutdownCheck(uint64_t request_id);
++  void ProbeNextShutdownTarget();
++  void OnShutdownTargetCloseConfirmed(ShutdownTarget target, bool proceed);
++  void BeginShutdownProceeding(uint64_t request_id);
++  void FinishShutdownClosePhase();
    void CancelShutdown(uint64_t request_id);
 -  void MarkBeforeUnloadDispatchComplete(TabId tab_id);
 -  void MaybeFinalizeShutdownRequest();
-+  void CloseConfirmedShutdownTargets();
-+  void AbortProceedingShutdown();
-+  std::vector<TabId> CollectDirtyTabIds() const;
++  void ResetShutdownBrowsers();
 +  std::vector<ShutdownTarget> CollectShutdownTargets() const;
++  Browser* ResolveBrowserForShutdownTarget(const ShutdownTarget& target) const;
++  bool ResolveBlockedBeforeUnloadRequest(CbfProfileService** out_service,
++                                         uint64_t* out_request_id);
 +  void AttemptExitAfterShutdown();
    bool HasOpenWebPages() const;
    void RebuildProfileCache();
    ::Profile* ResolveProfile(const std::string& profile_id,
-@@ -105,10 +108,11 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+@@ -105,10 +119,13 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
    base::flat_map<std::string, base::FilePath> profile_paths_;
    std::optional<uint64_t> shutdown_request_id_;
    ShutdownState shutdown_state_ = ShutdownState::kIdle;
 -  std::set<TabId> pending_beforeunload_pages_;
 -  std::set<TabId> beforeunload_dialog_pages_;
-+  std::vector<TabId> blocked_dirty_tab_ids_;
-+  std::set<TabId> shutdown_dirty_tab_ids_;
    bool shutdown_in_progress_ = false;
 -  bool shutdown_start_task_pending_ = false;
 +  bool shutdown_exit_requested_ = false;
 +  std::vector<ShutdownTarget> shutdown_targets_;
++  size_t current_shutdown_index_ = 0;
++  std::optional<ShutdownTarget> active_shutdown_target_;
++  std::optional<ShutdownTarget> blocked_shutdown_target_;
++  std::optional<uint64_t> blocked_beforeunload_request_id_;
    base::flat_map<std::string, std::unique_ptr<CbfProfileService>>
        profile_services_;
    std::set<std::pair<std::string, std::string>> custom_scheme_handlers_;
-@@ -120,6 +124,7 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
+@@ -120,6 +137,7 @@ class CbfBrowserService final : public mojom::CbfBrowserService {
    mojo::Remote<mojom::CbfBrowserObserver> observer_;
    base::RepeatingCallback<void(uint64_t)> on_start_shutdown_for_testing_;
    base::RepeatingClosure on_host_disconnect_for_testing_;
 +  base::RepeatingClosure on_attempt_exit_for_testing_;
    base::WeakPtrFactory<CbfBrowserService> weak_factory_{this};
  };
- 
+
 diff --git a/chrome/browser/cbf/cbf_browser_service_unittest.cc b/chrome/browser/cbf/cbf_browser_service_unittest.cc
-index 4692975988288..fe41b0147f7e2 100644
+index 4692975988288..1018d57f5ab11 100644
 --- a/chrome/browser/cbf/cbf_browser_service_unittest.cc
 +++ b/chrome/browser/cbf/cbf_browser_service_unittest.cc
-@@ -18,6 +18,39 @@ class CbfBrowserServiceTest : public testing::Test {
- 
+@@ -18,6 +18,38 @@ class CbfBrowserServiceTest : public testing::Test {
+
  namespace {
- 
+
 +class TestBrowserObserver final : public mojom::CbfBrowserObserver {
 + public:
 +  mojo::PendingRemote<mojom::CbfBrowserObserver> BindNewPipeAndPassRemote() {
@@ -493,10 +733,9 @@ index 4692975988288..fe41b0147f7e2 100644
 +    return receiver_.BindNewPipeAndPassRemote();
 +  }
 +
-+  void OnShutdownBlocked(uint64_t request_id,
-+                         const std::vector<uint64_t>& dirty_tab_ids) override {
++  void OnShutdownBlocked(uint64_t request_id, uint64_t dirty_tab_id) override {
 +    blocked_request_ids.push_back(request_id);
-+    blocked_dirty_tab_ids.push_back(dirty_tab_ids);
++    blocked_tab_ids.push_back(dirty_tab_id);
 +  }
 +
 +  void OnShutdownProceeding(uint64_t request_id) override {
@@ -511,7 +750,7 @@ index 4692975988288..fe41b0147f7e2 100644
 +      mojom::CbfCustomSchemeRequestPtr request) override {}
 +
 +  std::vector<uint64_t> blocked_request_ids;
-+  std::vector<std::vector<uint64_t>> blocked_dirty_tab_ids;
++  std::vector<uint64_t> blocked_tab_ids;
 +  std::vector<uint64_t> proceeding_request_ids;
 +  std::vector<uint64_t> cancelled_request_ids;
 +
@@ -521,10 +760,10 @@ index 4692975988288..fe41b0147f7e2 100644
 +
  TEST_F(CbfBrowserServiceTest, RejectsMismatchedTokenAndRemainsUnauthenticated) {
    CbfBrowserService service("expected-token");
- 
-@@ -115,8 +148,10 @@ TEST_F(CbfBrowserServiceTest, UnauthenticatedGetProfilesReturnsEmptyList) {
+
+@@ -115,8 +147,10 @@ TEST_F(CbfBrowserServiceTest, UnauthenticatedGetProfilesReturnsEmptyList) {
  }
- 
+
  TEST_F(CbfBrowserServiceTest,
 -       ShutdownWithoutManagedTabsStartsImmediatelyAndNotRequested) {
 +       ShutdownWithoutManagedTabsStartsImmediatelyAndEmitsProceeding) {
@@ -534,40 +773,43 @@ index 4692975988288..fe41b0147f7e2 100644
    std::optional<uint64_t> started_request_id;
    service.SetStartShutdownCallbackForTesting(base::BindRepeating(
        [](std::optional<uint64_t>* out_request_id, uint64_t request_id) {
-@@ -125,21 +160,27 @@ TEST_F(CbfBrowserServiceTest,
+@@ -125,21 +159,26 @@ TEST_F(CbfBrowserServiceTest,
        &started_request_id));
- 
+
    service.RequestShutdown(/*request_id=*/1u);
 +  task_environment_.RunUntilIdle();
- 
+
    ASSERT_TRUE(started_request_id.has_value());
    EXPECT_EQ(started_request_id.value(), 1u);
 -  EXPECT_FALSE(service.IsShutdownRequested());
 +  EXPECT_TRUE(service.IsShutdownRequested());
 +  EXPECT_EQ(observer.proceeding_request_ids, std::vector<uint64_t>({1u}));
  }
- 
+
  TEST_F(CbfBrowserServiceTest,
-        LateBeforeUnloadSignalsAfterProceedingAreIgnoredSafely) {
+-       LateBeforeUnloadSignalsAfterProceedingAreIgnoredSafely) {
 -  CbfBrowserService service("expected-token");
++       LateShutdownDialogSignalsAfterProceedingAreIgnoredSafely) {
 +  CbfBrowserService service(std::string{});
 +  service.SetStartShutdownCallbackForTesting(base::BindRepeating(
 +      [](uint64_t) {}));
-+
+
+-  service.NotifyBeforeUnloadDialogRequested(/*tab_id=*/42u);
+-  service.NotifyBeforeUnloadFired(/*tab_id=*/42u, /*proceed=*/false);
+-  service.NotifyBeforeUnloadFired(/*tab_id=*/42u, /*proceed=*/true);
 +  service.RequestShutdown(/*request_id=*/1u);
- 
-   service.NotifyBeforeUnloadDialogRequested(/*tab_id=*/42u);
-   service.NotifyBeforeUnloadFired(/*tab_id=*/42u, /*proceed=*/false);
-   service.NotifyBeforeUnloadFired(/*tab_id=*/42u, /*proceed=*/true);
- 
+
 -  EXPECT_FALSE(service.IsShutdownRequested());
++  EXPECT_FALSE(service.HandleShutdownBeforeUnloadDialogRequested(
++      "testing-profile", /*tab_id=*/42u, /*request_id=*/1u));
++
 +  EXPECT_TRUE(service.IsShutdownRequested());
  }
- 
+
  TEST_F(CbfBrowserServiceTest, MismatchedConfirmShutdownIsSafeNoOp) {
-@@ -151,104 +192,79 @@ TEST_F(CbfBrowserServiceTest, MismatchedConfirmShutdownIsSafeNoOp) {
+@@ -151,104 +190,76 @@ TEST_F(CbfBrowserServiceTest, MismatchedConfirmShutdownIsSafeNoOp) {
  }
- 
+
  TEST_F(CbfBrowserServiceTest, RepeatedRequestShutdownAfterProceedingIsSafe) {
 -  CbfBrowserService service("expected-token");
 +  CbfBrowserService service(std::string{});
@@ -575,19 +817,19 @@ index 4692975988288..fe41b0147f7e2 100644
 +  service.SetObserver(observer.BindNewPipeAndPassRemote());
 +  service.SetStartShutdownCallbackForTesting(base::BindRepeating(
 +      [](uint64_t) {}));
- 
+
    service.RequestShutdown(/*request_id=*/1u);
    service.RequestShutdown(/*request_id=*/2u);
 +  task_environment_.RunUntilIdle();
- 
+
 -  EXPECT_FALSE(service.IsShutdownRequested());
 +  EXPECT_TRUE(service.IsShutdownRequested());
-+  EXPECT_EQ(observer.proceeding_request_ids, std::vector<uint64_t>({1u, 2u}));
++  EXPECT_EQ(observer.proceeding_request_ids, std::vector<uint64_t>({1u}));
  }
- 
+
  TEST_F(CbfBrowserServiceTest,
 -       FinalBeforeUnloadCompletionSchedulesShutdownForNextTask) {
-+       BlockedShutdownRequestReemitsSnapshotWithoutStartingShutdown) {
++       BlockedShutdownRequestReemitsCurrentBlockWithoutStartingShutdown) {
    CbfBrowserService service(std::string{});
 -  std::vector<uint64_t> started_request_ids;
 -  service.SetShutdownWaitingForBeforeUnloadForTesting(
@@ -608,30 +850,27 @@ index 4692975988288..fe41b0147f7e2 100644
 -  EXPECT_TRUE(service.IsShutdownStartTaskPendingForTesting());
 -  EXPECT_TRUE(started_request_ids.empty());
 +      &started_request_id));
-+  service.SetShutdownBlockedForTesting(/*request_id=*/7u, std::set<TabId>{42u});
- 
-+  service.RequestShutdown(/*request_id=*/9u);
++  service.SetShutdownBlockedForTesting(/*request_id=*/7u, /*dirty_tab_id=*/42u);
+
++  service.RequestShutdown(/*request_id=*/7u);
    task_environment_.RunUntilIdle();
- 
+
 -  EXPECT_EQ(started_request_ids, std::vector<uint64_t>({7u}));
 -  EXPECT_FALSE(service.IsShutdownStartTaskPendingForTesting());
 -  EXPECT_FALSE(service.IsShutdownRequested());
 +  EXPECT_FALSE(started_request_id.has_value());
 +  EXPECT_TRUE(service.IsShutdownRequested());
-+  ASSERT_EQ(observer.blocked_request_ids, std::vector<uint64_t>({9u}));
-+  ASSERT_EQ(observer.blocked_dirty_tab_ids.size(), 1u);
-+  EXPECT_EQ(observer.blocked_dirty_tab_ids.front(), std::vector<uint64_t>({42u}));
++  ASSERT_EQ(observer.blocked_request_ids, std::vector<uint64_t>({7u}));
++  EXPECT_EQ(observer.blocked_tab_ids, std::vector<uint64_t>({42u}));
  }
- 
+
  TEST_F(CbfBrowserServiceTest,
 -       ConfirmShutdownSchedulesShutdownForNextTask) {
 +       ConfirmShutdownFalseCancelsBlockedShutdown) {
    CbfBrowserService service(std::string{});
 -  std::vector<uint64_t> started_request_ids;
-+  TestBrowserObserver observer;
-+  service.SetObserver(observer.BindNewPipeAndPassRemote());
-   service.SetShutdownBlockedForTesting(/*request_id=*/9u,
-                                        std::set<TabId>{42u});
+-  service.SetShutdownBlockedForTesting(/*request_id=*/9u,
+-                                       std::set<TabId>{42u});
 -  service.SetStartShutdownCallbackForTesting(base::BindRepeating(
 -      [](std::vector<uint64_t>* out_request_ids, uint64_t request_id) {
 -        out_request_ids->push_back(request_id);
@@ -642,16 +881,19 @@ index 4692975988288..fe41b0147f7e2 100644
 -
 -  EXPECT_TRUE(service.IsShutdownStartTaskPendingForTesting());
 -  EXPECT_TRUE(started_request_ids.empty());
- 
++  TestBrowserObserver observer;
++  service.SetObserver(observer.BindNewPipeAndPassRemote());
++  service.SetShutdownBlockedForTesting(/*request_id=*/9u, /*dirty_tab_id=*/42u);
+
 +  service.ConfirmShutdown(/*request_id=*/9u, /*proceed=*/false);
    task_environment_.RunUntilIdle();
- 
+
 -  EXPECT_EQ(started_request_ids, std::vector<uint64_t>({9u}));
 -  EXPECT_FALSE(service.IsShutdownStartTaskPendingForTesting());
    EXPECT_FALSE(service.IsShutdownRequested());
 +  EXPECT_EQ(observer.cancelled_request_ids, std::vector<uint64_t>({9u}));
  }
- 
+
  TEST_F(CbfBrowserServiceTest,
 -       DuplicateShutdownSchedulingRunsStartOnlyOnce) {
 +       ConfirmShutdownTrueStartsImmediatelyWithoutReblocking) {
@@ -669,14 +911,16 @@ index 4692975988288..fe41b0147f7e2 100644
 +        *out_request_id = request_id;
        },
 -      &started_request_ids));
--
--  service.ConfirmShutdown(/*request_id=*/11u, /*proceed=*/true);
++      &started_request_id));
++  service.SetShutdownBlockedForTesting(/*request_id=*/11u, /*dirty_tab_id=*/42u);
+
+   service.ConfirmShutdown(/*request_id=*/11u, /*proceed=*/true);
 -  service.ScheduleStartShutdownForTesting(/*request_id=*/11u);
 -
 -  EXPECT_TRUE(service.IsShutdownStartTaskPendingForTesting());
 -
--  task_environment_.RunUntilIdle();
--
+   task_environment_.RunUntilIdle();
+
 -  EXPECT_EQ(started_request_ids, std::vector<uint64_t>({11u}));
 -  EXPECT_FALSE(service.IsShutdownStartTaskPendingForTesting());
 -}
@@ -685,9 +929,7 @@ index 4692975988288..fe41b0147f7e2 100644
 -  CbfBrowserService service(std::string{});
 -  std::vector<uint64_t> started_request_ids;
 -  service.SetShutdownBlockedForTesting(/*request_id=*/13u,
-+      &started_request_id));
-+  service.SetShutdownBlockedForTesting(/*request_id=*/11u,
-                                        std::set<TabId>{42u});
+-                                       std::set<TabId>{42u});
 -  service.SetStartShutdownCallbackForTesting(base::BindRepeating(
 -      [](std::vector<uint64_t>* out_request_ids, uint64_t request_id) {
 -        out_request_ids->push_back(request_id);
@@ -696,10 +938,9 @@ index 4692975988288..fe41b0147f7e2 100644
 -
 -  service.ConfirmShutdown(/*request_id=*/13u, /*proceed=*/true);
 -  service.CancelShutdownForTesting(/*request_id=*/13u);
- 
-+  service.ConfirmShutdown(/*request_id=*/11u, /*proceed=*/true);
-   task_environment_.RunUntilIdle();
- 
+-
+-  task_environment_.RunUntilIdle();
+-
 -  EXPECT_TRUE(started_request_ids.empty());
 -  EXPECT_FALSE(service.IsShutdownStartTaskPendingForTesting());
 -  EXPECT_FALSE(service.IsShutdownRequested());
@@ -708,7 +949,7 @@ index 4692975988288..fe41b0147f7e2 100644
 +  EXPECT_TRUE(service.IsShutdownRequested());
 +  EXPECT_EQ(observer.proceeding_request_ids, std::vector<uint64_t>({11u}));
  }
- 
+
  }  // namespace
 diff --git a/chrome/browser/cbf/cbf_java_script_dialog_manager.cc b/chrome/browser/cbf/cbf_java_script_dialog_manager.cc
 index 48f7f4bb5c1bf..f7c1a1682c81f 100644
@@ -733,13 +974,13 @@ index 48f7f4bb5c1bf..f7c1a1682c81f 100644
    }
    if (!profile_service_ || !web_contents) {
 diff --git a/chrome/browser/cbf/cbf_profile_service.cc b/chrome/browser/cbf/cbf_profile_service.cc
-index 5b81bec8ad354..0a77663fd3421 100644
+index 5b81bec8ad354..b4c8c31554b45 100644
 --- a/chrome/browser/cbf/cbf_profile_service.cc
 +++ b/chrome/browser/cbf/cbf_profile_service.cc
 @@ -2177,6 +2177,10 @@ bool CbfProfileService::IsShutdownRequested() const {
    return browser_service_ && browser_service_->IsShutdownRequested();
  }
- 
+
 +bool CbfProfileService::IsShutdownProceeding() const {
 +  return browser_service_ && browser_service_->IsShutdownProceeding();
 +}
@@ -747,10 +988,14 @@ index 5b81bec8ad354..0a77663fd3421 100644
  void CbfProfileService::DispatchBeforeUnloadForShutdown() {
    page_controller_->DispatchBeforeUnloadForShutdown();
  }
-@@ -2197,6 +2201,11 @@ size_t CbfProfileService::GetTabCount() const {
+@@ -2197,6 +2201,15 @@ size_t CbfProfileService::GetTabCount() const {
    return page_controller_->GetTabCount();
  }
- 
+
++Browser* CbfProfileService::GetBrowserForTab(TabId tab_id) const {
++  return tab_manager_.GetBrowser(tab_id);
++}
++
 +content::WebContents* CbfProfileService::GetWebContentsForTab(
 +    TabId tab_id) const {
 +  return tab_manager_.GetWebContents(tab_id);
@@ -759,10 +1004,10 @@ index 5b81bec8ad354..0a77663fd3421 100644
  void CbfProfileService::CloseAllTabs() {
    page_controller_->CloseAllTabs();
  }
-@@ -2294,6 +2303,24 @@ void CbfProfileService::NotifyNewTabRequested(content::WebContents* source,
+@@ -2294,6 +2307,24 @@ void CbfProfileService::NotifyNewTabRequested(content::WebContents* source,
                                      user_gesture);
  }
- 
+
 +void CbfProfileService::PrepareTabForClose(TabId tab_id) {
 +  if (tab_id == kInvalidTabId) {
 +    return;
@@ -784,36 +1029,67 @@ index 5b81bec8ad354..0a77663fd3421 100644
  void CbfProfileService::NotifyTabClosed(TabId tab_id) {
    if (tab_id != kInvalidTabId) {
      std::vector<uint64_t> popup_ids_to_close;
-@@ -2376,6 +2403,28 @@ void CbfProfileService::OnBeforeUnloadFired(content::WebContents* web_contents,
- 
-   browser_service_->NotifyBeforeUnloadFired(tab_id, proceed);
- 
-+  if (browser_service_->IsShutdownProceeding()) {
-+    if (!proceed) {
-+      return;
-+    }
-+
-+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-+        FROM_HERE, base::BindOnce(
-+                       [](base::WeakPtr<CbfProfileService> self, TabId tab_id) {
-+                         if (!self) {
-+                           return;
-+                         }
-+                         content::WebContents* target =
-+                             self->tab_manager_.GetWebContents(tab_id);
-+                         if (!target) {
-+                           return;
-+                         }
-+                         self->CloseWebContents(target);
-+                       },
-+                       weak_factory_.GetWeakPtr(), tab_id));
-+    return;
-+  }
-+
+@@ -2325,18 +2356,6 @@ void CbfProfileService::NotifyTabClosed(TabId tab_id) {
+   observer_->OnTabClosed(tab_id);
+ }
+
+-void CbfProfileService::OnBeforeUnloadDialogRequested(
+-    content::WebContents* web_contents) {
+-  if (!browser_service_ || !web_contents) {
+-    return;
+-  }
+-  const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+-  if (tab_id == kInvalidTabId) {
+-    return;
+-  }
+-  browser_service_->NotifyBeforeUnloadDialogRequested(tab_id);
+-}
+-
+ void CbfProfileService::NotifyJavaScriptDialogRequested(
+     content::WebContents* web_contents,
+     uint64_t request_id,
+@@ -2363,7 +2382,7 @@ void CbfProfileService::NotifyJavaScriptDialogRequested(
+
+ void CbfProfileService::OnBeforeUnloadFired(content::WebContents* web_contents,
+                                             bool proceed) {
+-  if (!browser_service_ || !web_contents) {
++  if (!web_contents) {
+     return;
+   }
+   const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+@@ -2374,8 +2393,6 @@ void CbfProfileService::OnBeforeUnloadFired(content::WebContents* web_contents,
+   const bool is_close_request =
+       popup_controller_->ConsumeCloseTabBeforeUnloadReason(web_contents);
+
+-  browser_service_->NotifyBeforeUnloadFired(tab_id, proceed);
+-
    if (proceed && is_close_request) {
      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
          FROM_HERE, base::BindOnce(
-@@ -3007,6 +3056,7 @@ void CbfProfileService::CloseExtensionPopupById(uint64_t popup_id) {
+@@ -2398,13 +2415,21 @@ void CbfProfileService::NotifyBeforeUnloadDialogRequested(
+     content::WebContents* web_contents,
+     uint64_t request_id,
+     mojom::CbfBeforeUnloadReason reason) {
+-  if (!observer_ || !web_contents) {
++  if (!web_contents) {
+     return;
+   }
+   const TabId tab_id = tab_manager_.GetTabIdForWebContents(web_contents);
+   if (tab_id == kInvalidTabId) {
+     return;
+   }
++  if (browser_service_ &&
++      browser_service_->HandleShutdownBeforeUnloadDialogRequested(
++          GetCanonicalProfileId(profile_), tab_id, request_id)) {
++    return;
++  }
++  if (!observer_) {
++    return;
++  }
+   observer_->OnBeforeUnloadDialogRequested(tab_id, request_id, reason);
+ }
+
+@@ -3007,6 +3032,7 @@ void CbfProfileService::CloseExtensionPopupById(uint64_t popup_id) {
      return;
    }
    const TabId tab_id = it->second ? it->second->tab_id() : kInvalidTabId;
@@ -822,10 +1098,18 @@ index 5b81bec8ad354..0a77663fd3421 100644
      it->second->CloseFromService();
    }
 diff --git a/chrome/browser/cbf/cbf_profile_service.h b/chrome/browser/cbf/cbf_profile_service.h
-index 34a9818227cae..c393390958476 100644
+index 34a9818227cae..7241d78e482ed 100644
 --- a/chrome/browser/cbf/cbf_profile_service.h
 +++ b/chrome/browser/cbf/cbf_profile_service.h
-@@ -79,6 +79,8 @@ class CbfProfileService : public mojom::CbfProfileService,
+@@ -45,6 +45,7 @@
+
+ class Profile;
+ class GURL;
++class Browser;
+ namespace url {
+ class Origin;
+ }
+@@ -79,6 +80,8 @@ class CbfProfileService : public mojom::CbfProfileService,
                            public WebContentsCollection::Observer,
                            public download::AllDownloadEventNotifier::Observer {
   public:
@@ -834,9 +1118,9 @@ index 34a9818227cae..c393390958476 100644
    CbfProfileService(::Profile* profile, CbfBrowserService* browser_service);
    CbfProfileService(const CbfProfileService&) = delete;
    CbfProfileService& operator=(const CbfProfileService&) = delete;
-@@ -225,12 +227,14 @@ class CbfProfileService : public mojom::CbfProfileService,
+@@ -225,12 +228,15 @@ class CbfProfileService : public mojom::CbfProfileService,
        bool report_abuse);
- 
+
    bool IsShutdownRequested() const;
 +  bool IsShutdownProceeding() const;
    void SetShutdownDialogAutoConfirm(bool enabled);
@@ -845,52 +1129,57 @@ index 34a9818227cae..c393390958476 100644
    std::vector<TabId> GetDirtyTabIds() const;
    std::vector<TabId> GetAllTabIds() const;
    size_t GetTabCount() const;
++  Browser* GetBrowserForTab(TabId tab_id) const;
 +  content::WebContents* GetWebContentsForTab(TabId tab_id) const;
    void CloseAllTabs();
    void CloseWebContents(content::WebContents* web_contents);
    content::WebContentsDelegate* GetWebContentsDelegate();
-@@ -255,6 +259,7 @@ class CbfProfileService : public mojom::CbfProfileService,
+@@ -255,9 +261,9 @@ class CbfProfileService : public mojom::CbfProfileService,
                                   const GURL& target_url,
                                   WindowOpenDisposition disposition,
                                   bool user_gesture);
 +  void PrepareTabForClose(TabId tab_id);
    void NotifyTabClosed(TabId tab_id);
- 
-   void OnBeforeUnloadDialogRequested(content::WebContents* web_contents);
+
+-  void OnBeforeUnloadDialogRequested(content::WebContents* web_contents);
+   void OnBeforeUnloadFired(content::WebContents* web_contents, bool proceed);
+   void NotifyJavaScriptDialogRequested(
+       content::WebContents* web_contents,
 diff --git a/chrome/browser/cbf/cbf_profile_service_browsertest.cc b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
-index 1e3a21ee73a70..fd4b3dfebcd11 100644
+index 1e3a21ee73a70..0b54557130594 100644
 --- a/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 +++ b/chrome/browser/cbf/cbf_profile_service_browsertest.cc
 @@ -1,6 +1,7 @@
  #include "chrome/browser/cbf/cbf_profile_service.h"
- 
+
  #include <algorithm>
 +#include <functional>
  #include <map>
  #include <memory>
  #include <optional>
 @@ -111,6 +112,11 @@ const FindReplyEvent* FindNthFinalFindReplySince(
- 
+
  class TestBrowserObserver final : public mojom::CbfBrowserObserver {
   public:
 +  struct ShutdownBlockedEvent {
 +    uint64_t request_id = 0;
-+    std::vector<uint64_t> dirty_tab_ids;
++    uint64_t dirty_tab_id = 0;
 +  };
 +
    explicit TestBrowserObserver(CbfBrowserService* browser_service)
        : browser_service_(browser_service) {}
- 
-@@ -128,9 +134,19 @@ class TestBrowserObserver final : public mojom::CbfBrowserObserver {
+
+@@ -127,10 +133,19 @@ class TestBrowserObserver final : public mojom::CbfBrowserObserver {
+
    void ClearResponses() { responses_.clear(); }
- 
-   void OnShutdownBlocked(uint64_t request_id,
+
+-  void OnShutdownBlocked(uint64_t request_id,
 -                         const std::vector<uint64_t>& dirty_tab_ids) override {}
 -  void OnShutdownProceeding(uint64_t request_id) override {}
 -  void OnShutdownCancelled(uint64_t request_id) override {}
-+                         const std::vector<uint64_t>& dirty_tab_ids) override {
++  void OnShutdownBlocked(uint64_t request_id, uint64_t dirty_tab_id) override {
 +    shutdown_blocked_events_.push_back(
-+        {.request_id = request_id, .dirty_tab_ids = dirty_tab_ids});
++        {.request_id = request_id, .dirty_tab_id = dirty_tab_id});
 +    MaybeQuitWaitLoop();
 +  }
 +  void OnShutdownProceeding(uint64_t request_id) override {
@@ -901,13 +1190,13 @@ index 1e3a21ee73a70..fd4b3dfebcd11 100644
 +    shutdown_cancelled_request_ids_.push_back(request_id);
 +    MaybeQuitWaitLoop();
 +  }
- 
+
    void OnCustomSchemeRequest(
        mojom::CbfCustomSchemeRequestPtr request) override {
-@@ -155,7 +171,55 @@ class TestBrowserObserver final : public mojom::CbfBrowserObserver {
+@@ -155,7 +170,55 @@ class TestBrowserObserver final : public mojom::CbfBrowserObserver {
      browser_service_->RespondCustomSchemeRequest(std::move(response));
    }
- 
+
 +  const std::vector<ShutdownBlockedEvent>& shutdown_blocked_events() const {
 +    return shutdown_blocked_events_;
 +  }
@@ -960,8 +1249,8 @@ index 1e3a21ee73a70..fd4b3dfebcd11 100644
    struct StaticResponse {
      std::string mime_type;
      std::string body;
-@@ -163,6 +227,11 @@ class TestBrowserObserver final : public mojom::CbfBrowserObserver {
- 
+@@ -163,6 +226,11 @@ class TestBrowserObserver final : public mojom::CbfBrowserObserver {
+
    raw_ptr<CbfBrowserService> browser_service_;
    std::map<std::string, StaticResponse> responses_;
 +  std::vector<ShutdownBlockedEvent> shutdown_blocked_events_;
@@ -971,11 +1260,11 @@ index 1e3a21ee73a70..fd4b3dfebcd11 100644
 +  raw_ptr<base::RunLoop> wait_loop_ = nullptr;
    mojo::Receiver<mojom::CbfBrowserObserver> receiver_{this};
  };
- 
-@@ -382,6 +451,19 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
+
+@@ -382,6 +450,19 @@ class CbfProfileServiceBrowserTest : public InProcessBrowserTest {
      ASSERT_TRUE(content::WaitForLoadStop(web_contents));
    }
- 
+
 +  void MarkTabDirtyForBeforeUnload(TabId tab_id) {
 +    content::WebContents* web_contents =
 +        profile_service_->GetWebContentsForTesting(tab_id);
@@ -992,10 +1281,10 @@ index 1e3a21ee73a70..fd4b3dfebcd11 100644
    void AllowMainFrameJavaScriptInjection(TabId tab_id) {
      content::WebContents* web_contents =
          profile_service_->GetWebContentsForTesting(tab_id);
-@@ -3030,6 +3112,154 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
+@@ -3030,6 +3111,226 @@ IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
    EXPECT_EQ(observer_.find_reply_events().size(), baseline_count);
  }
- 
+
 +IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
 +                       ShutdownRequestWithDirtyTabBlocksWithoutClosingCleanTabs) {
 +  const TabId dirty_tab_id = CreatePage("about:blank");
@@ -1014,8 +1303,8 @@ index 1e3a21ee73a70..fd4b3dfebcd11 100644
 +
 +  ASSERT_EQ(browser_observer_->shutdown_blocked_events().size(), 1u);
 +  EXPECT_EQ(browser_observer_->shutdown_blocked_events().front().request_id, 1u);
-+  EXPECT_EQ(browser_observer_->shutdown_blocked_events().front().dirty_tab_ids,
-+            std::vector<uint64_t>({dirty_tab_id}));
++  EXPECT_EQ(browser_observer_->shutdown_blocked_events().front().dirty_tab_id,
++            dirty_tab_id);
 +  EXPECT_NE(profile_service_->GetWebContentsForTesting(dirty_tab_id), nullptr);
 +  EXPECT_NE(profile_service_->GetWebContentsForTesting(clean_tab_id), nullptr);
 +  EXPECT_EQ(observer_.web_page_closed_events().size(), baseline_closed_count);
@@ -1073,12 +1362,55 @@ index 1e3a21ee73a70..fd4b3dfebcd11 100644
 +  }));
 +  ASSERT_TRUE(base::test::RunUntil(
 +      [&attempt_exit_count] { return attempt_exit_count == 1; }));
++  observer_.WaitForWebPageClosedCount(baseline_closed_count + 2u);
 +
 +  EXPECT_EQ(observer_.before_unload_dialog_events().size(),
 +            baseline_beforeunload_count);
 +  EXPECT_EQ(observer_.web_page_closed_events().size(),
 +            baseline_closed_count + 2u);
 +  EXPECT_EQ(attempt_exit_count, 1);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       SequentialBlockedShutdownRequiresPerTabConfirmation) {
++  int attempt_exit_count = 0;
++  browser_service_->SetAttemptExitCallbackForTesting(base::BindRepeating(
++      [](int* count) { ++*count; }, &attempt_exit_count));
++
++  const TabId first_dirty_tab_id = CreatePage("about:blank");
++  const TabId second_dirty_tab_id = CreatePage("about:blank");
++  ASSERT_NE(first_dirty_tab_id, kInvalidTabId);
++  ASSERT_NE(second_dirty_tab_id, kInvalidTabId);
++  WaitForLoad(first_dirty_tab_id);
++  WaitForLoad(second_dirty_tab_id);
++  MarkTabDirtyForBeforeUnload(first_dirty_tab_id);
++  MarkTabDirtyForBeforeUnload(second_dirty_tab_id);
++
++  browser_service_->RequestShutdown(/*request_id=*/5u);
++  browser_observer_->WaitForShutdownBlockedCount(1u);
++  ASSERT_EQ(browser_observer_->shutdown_blocked_events().size(), 1u);
++  EXPECT_EQ(browser_observer_->shutdown_blocked_events()[0].request_id, 5u);
++  EXPECT_EQ(browser_observer_->shutdown_blocked_events()[0].dirty_tab_id,
++            first_dirty_tab_id);
++
++  browser_service_->ConfirmShutdown(/*request_id=*/5u, /*proceed=*/true);
++  browser_observer_->WaitForShutdownBlockedCount(2u);
++  ASSERT_EQ(browser_observer_->shutdown_blocked_events().size(), 2u);
++  EXPECT_EQ(browser_observer_->shutdown_blocked_events()[1].request_id, 5u);
++  EXPECT_EQ(browser_observer_->shutdown_blocked_events()[1].dirty_tab_id,
++            second_dirty_tab_id);
++
++  browser_service_->ConfirmShutdown(/*request_id=*/5u, /*proceed=*/true);
++  browser_observer_->WaitForShutdownProceedingCount(1u);
++  ASSERT_TRUE(base::test::RunUntil([this, first_dirty_tab_id, second_dirty_tab_id] {
++    return profile_service_->GetWebContentsForTesting(first_dirty_tab_id) ==
++               nullptr &&
++           profile_service_->GetWebContentsForTesting(second_dirty_tab_id) ==
++               nullptr;
++  }));
++  ASSERT_TRUE(base::test::RunUntil(
++      [&attempt_exit_count] { return attempt_exit_count == 1; }));
++  observer_.WaitForWebPageClosedCount(2u);
 +}
 +
 +IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
@@ -1100,11 +1432,39 @@ index 1e3a21ee73a70..fd4b3dfebcd11 100644
 +  }));
 +  ASSERT_TRUE(base::test::RunUntil(
 +      [&attempt_exit_count] { return attempt_exit_count == 1; }));
++  observer_.WaitForWebPageClosedCount(baseline_closed_count + 1u);
 +
 +  EXPECT_TRUE(browser_observer_->shutdown_blocked_events().empty());
 +  EXPECT_EQ(observer_.web_page_closed_events().size(),
 +            baseline_closed_count + 1u);
 +  EXPECT_EQ(attempt_exit_count, 1);
++}
++
++IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
++                       HarmlessBeforeUnloadListenerDoesNotBlockShutdown) {
++  int attempt_exit_count = 0;
++  browser_service_->SetAttemptExitCallbackForTesting(base::BindRepeating(
++      [](int* count) { ++*count; }, &attempt_exit_count));
++
++  const TabId tab_id = CreatePage("about:blank");
++  ASSERT_NE(tab_id, kInvalidTabId);
++  WaitForLoad(tab_id);
++
++  content::WebContents* web_contents =
++      profile_service_->GetWebContentsForTesting(tab_id);
++  ASSERT_NE(web_contents, nullptr);
++  ASSERT_TRUE(ExecJs(
++      web_contents, "window.addEventListener('beforeunload', () => {});"));
++
++  browser_service_->RequestShutdown(/*request_id=*/6u);
++  browser_observer_->WaitForShutdownProceedingCount(1u);
++  ASSERT_TRUE(base::test::RunUntil(
++      [this, tab_id] { return profile_service_->GetWebContentsForTesting(tab_id) == nullptr; }));
++  ASSERT_TRUE(base::test::RunUntil(
++      [&attempt_exit_count] { return attempt_exit_count == 1; }));
++  observer_.WaitForWebPageClosedCount(1u);
++
++  EXPECT_TRUE(browser_observer_->shutdown_blocked_events().empty());
 +}
 +
 +IN_PROC_BROWSER_TEST_F(CbfProfileServiceBrowserTest,
@@ -1135,6 +1495,7 @@ index 1e3a21ee73a70..fd4b3dfebcd11 100644
 +  }));
 +  ASSERT_TRUE(base::test::RunUntil(
 +      [&attempt_exit_count] { return attempt_exit_count == 1; }));
++  observer_.WaitForWebPageClosedCount(baseline_closed_count + 1u);
 +
 +  EXPECT_TRUE(browser_observer_->shutdown_blocked_events().empty());
 +  EXPECT_EQ(observer_.before_unload_dialog_events().size(),
@@ -1158,10 +1519,10 @@ index ee3e8a5a58817..7a53571709f1a 100644
 +#include "third_party/blink/public/mojom/frame/sudden_termination_disabler_type.mojom.h"
  #include "ui/base/page_transition_types.h"
  #include "ui/gfx/geometry/rect.h"
- 
+
  namespace cbf {
  namespace {
- 
+
 -bool NeedToFireBeforeUnloadOrUnload(content::WebContents* web_contents) {
 +bool HasBeforeUnloadHandler(content::WebContents* web_contents) {
    if (!web_contents) {
@@ -1189,7 +1550,7 @@ index ee3e8a5a58817..7a53571709f1a 100644
 +  });
 +  return has_beforeunload_handler;
  }
- 
+
  }  // namespace
 @@ -190,7 +210,7 @@ std::vector<TabId> CbfTabManager::GetDirtyTabIds() const {
    ids.reserve(tab_ids.size());
@@ -1203,7 +1564,7 @@ index ee3e8a5a58817..7a53571709f1a 100644
 @@ -263,6 +283,10 @@ void CbfTabManager::CloseTab(TabId tab_id) {
      web_contents = ResolveWebContentsForTab(tab_id);
    }
- 
+
 +  if (profile_service_ && tab_id != kInvalidTabId) {
 +    profile_service_->PrepareTabForClose(tab_id);
 +  }
@@ -1211,6 +1572,50 @@ index ee3e8a5a58817..7a53571709f1a 100644
    if (web_contents) {
      web_contents->SetDelegate(nullptr);
    }
+diff --git a/chrome/browser/cbf/cbf_web_contents_delegate.cc b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+index 0efa2cdce912b..3f8e60e804023 100644
+--- a/chrome/browser/cbf/cbf_web_contents_delegate.cc
++++ b/chrome/browser/cbf/cbf_web_contents_delegate.cc
+@@ -8,6 +8,7 @@
+ #include "chrome/browser/cbf/cbf_profile_service.h"
+ #include "chrome/browser/cbf/cbf_settings_policy.h"
+ #include "chrome/browser/cbf/cbf_switches.h"
++#include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_navigator.h"
+ #include "chrome/browser/ui/browser_navigator_params.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+@@ -41,8 +42,18 @@ void CbfWebContentsDelegate::CloseContents(content::WebContents* source) {
+ void CbfWebContentsDelegate::BeforeUnloadFired(content::WebContents* tab,
+                                                bool proceed,
+                                                bool* proceed_to_fire_unload) {
++  Browser* browser = nullptr;
+   if (profile_service_ && tab) {
+     profile_service_->OnBeforeUnloadFired(tab, proceed);
++    const TabId tab_id = profile_service_->GetTabIdForWebContents(tab);
++    if (tab_id != kInvalidTabId) {
++      browser = profile_service_->GetBrowserForTab(tab_id);
++    }
++  }
++  if (browser) {
++    browser->ForwardBeforeUnloadFiredForManagedWebContents(
++        tab, proceed, proceed_to_fire_unload);
++    return;
+   }
+   if (proceed_to_fire_unload) {
+     *proceed_to_fire_unload = proceed;
+diff --git a/chrome/browser/cbf/mojom/cbf_browser.mojom b/chrome/browser/cbf/mojom/cbf_browser.mojom
+index 07627d519f45f..bc233230412c9 100644
+--- a/chrome/browser/cbf/mojom/cbf_browser.mojom
++++ b/chrome/browser/cbf/mojom/cbf_browser.mojom
+@@ -791,7 +791,7 @@ struct CbfChoiceMenu {
+ };
+
+ interface CbfBrowserObserver {
+-  OnShutdownBlocked(uint64 request_id, array<uint64> dirty_tab_ids);
++  OnShutdownBlocked(uint64 request_id, uint64 dirty_tab_id);
+   OnShutdownProceeding(uint64 request_id);
+   OnShutdownCancelled(uint64 request_id);
+   OnCustomSchemeRequest(CbfCustomSchemeRequest request);
 diff --git a/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc b/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc
 index 2d4e5afda5f56..962cefd7e6ae0 100644
 --- a/chrome/browser/cbf/profile/cbf_profile_ime_controller.cc
@@ -1218,7 +1623,7 @@ index 2d4e5afda5f56..962cefd7e6ae0 100644
 @@ -80,28 +80,43 @@ void CbfProfileImeController::RegisterExtensionPopupWebContents(
    };
  }
- 
+
 -void CbfProfileImeController::OnTabClosed(TabId tab_id) {
 +void CbfProfileImeController::PrepareTabForClose(TabId tab_id) {
    for (auto it = text_input_map_.begin(); it != text_input_map_.end();) {
@@ -1231,7 +1636,7 @@ index 2d4e5afda5f56..962cefd7e6ae0 100644
      it = text_input_map_.erase(it);
    }
  }
- 
+
 -void CbfProfileImeController::OnExtensionPopupClosed(uint64_t popup_id) {
 +void CbfProfileImeController::PrepareExtensionPopupForClose(uint64_t popup_id) {
    for (auto it = text_input_map_.begin(); it != text_input_map_.end();) {
@@ -1244,7 +1649,7 @@ index 2d4e5afda5f56..962cefd7e6ae0 100644
      it = text_input_map_.erase(it);
    }
  }
- 
+
 +void CbfProfileImeController::OnTabClosed(TabId tab_id) {
 +  PrepareTabForClose(tab_id);
 +}
@@ -1275,10 +1680,10 @@ index 2967152f359a2..ade29215b882c 100644
 +  void PrepareExtensionPopupForClose(uint64_t popup_id);
    void OnTabClosed(TabId tab_id);
    void OnExtensionPopupClosed(uint64_t popup_id);
- 
+
 @@ -48,6 +50,8 @@ class CbfProfileImeController final
        mojom::CbfConfirmCompositionBehavior behavior);
- 
+
   private:
 +  void RemoveTrackedTextInputManager(
 +      content::TextInputManager* text_input_manager);
@@ -1292,7 +1697,7 @@ index bbcffb93a7a52..fbac6df49a3bb 100644
 @@ -482,6 +482,19 @@ void CbfTestProfileObserver::WaitForExtensionPopupCloseRequestedCount(
    quit_wait_loop_.Reset();
  }
- 
+
 +void CbfTestProfileObserver::WaitForBeforeUnloadDialogCount(
 +    size_t expected_count) {
 +  ResetWaitTargets();
@@ -1319,7 +1724,7 @@ index bbcffb93a7a52..fbac6df49a3bb 100644
 +      {.tab_id = tab_id, .request_id = request_id, .reason = reason});
 +  MaybeQuitWaitLoop();
 +}
- 
+
  void CbfTestProfileObserver::OnJavaScriptDialogRequested(
      uint64_t tab_id,
 @@ -1145,6 +1162,12 @@ void CbfTestProfileObserver::MaybeQuitWaitLoop() {
@@ -1350,7 +1755,7 @@ index e15b12598d1d5..34320d8c721ec 100644
 @@ -300,6 +300,13 @@ class CbfTestProfileObserver final : public cbf::mojom::CbfProfileObserver {
          cbf::mojom::CbfBeforeUnloadReason::kUnknown;
    };
- 
+
 +  struct BeforeUnloadDialogEvent {
 +    uint64_t tab_id = 0;
 +    uint64_t request_id = 0;
@@ -1396,6 +1801,42 @@ index e15b12598d1d5..34320d8c721ec 100644
    size_t wait_javascript_dialog_count_ = 0;
    size_t wait_choice_menu_count_ = 0;
    size_t wait_extension_popup_choice_menu_count_ = 0;
--- 
+diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
+index 2131162947106..cdd03f7f6a49b 100644
+--- a/chrome/browser/ui/browser.cc
++++ b/chrome/browser/ui/browser.cc
+@@ -1035,6 +1035,13 @@ bool Browser::IsAttemptingToCloseBrowser() const {
+   return unload_controller_.is_attempting_to_close_browser();
+ }
+
++void Browser::ForwardBeforeUnloadFiredForManagedWebContents(
++    content::WebContents* source,
++    bool proceed,
++    bool* proceed_to_fire_unload) {
++  BeforeUnloadFired(source, proceed, proceed_to_fire_unload);
++}
++
+ bool Browser::ShouldRunUnloadListenerBeforeClosing(
+     content::WebContents* web_contents) {
+   return !force_skip_warning_user_on_close_ &&
+diff --git a/chrome/browser/ui/browser.h b/chrome/browser/ui/browser.h
+index c085102385f6a..eb4b593145eb5 100644
+--- a/chrome/browser/ui/browser.h
++++ b/chrome/browser/ui/browser.h
+@@ -581,6 +581,13 @@ class Browser : public TabStripModelObserver,
+   // Figure out if there are tabs that have beforeunload handlers.
+   bool TabsNeedBeforeUnloadFired() const;
+
++  // Forwards beforeunload completion from CBF-managed WebContents delegates
++  // into Browser's regular unload controller state machine.
++  void ForwardBeforeUnloadFiredForManagedWebContents(
++      content::WebContents* source,
++      bool proceed,
++      bool* proceed_to_fire_unload);
++
+   // Browser closing consists of the following phases:
+   //
+   // 1. If the browser has WebContents with before unload handlers, then the
+--
 2.50.1 (Apple Git-155)
 

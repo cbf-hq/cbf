@@ -301,12 +301,12 @@ pub enum IpcEvent {
         browsing_context_id: TabId,
         operation: DragOperation,
     },
-    /// Shutdown is blocked by dirty pages.
+    /// Shutdown is blocked by a browsing context that requested confirmation.
     ///
     /// Maps to `BrowserEvent::ShutdownBlocked`.
     ShutdownBlocked {
         request_id: u64,
-        dirty_browsing_context_ids: Vec<TabId>,
+        dirty_browsing_context_id: TabId,
     },
     /// Shutdown has started.
     ///

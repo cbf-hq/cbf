@@ -180,10 +180,10 @@ pub enum BrowserEvent {
         target_path: Option<String>,
     },
 
-    /// Shutdown is blocked by dirty pages that require confirmation.
+    /// Shutdown was blocked by a browsing context that requested confirmation.
     ShutdownBlocked {
         request_id: u64,
-        dirty_browsing_context_ids: Vec<BrowsingContextId>,
+        dirty_browsing_context_id: BrowsingContextId,
     },
 
     /// Shutdown has started and is proceeding.
