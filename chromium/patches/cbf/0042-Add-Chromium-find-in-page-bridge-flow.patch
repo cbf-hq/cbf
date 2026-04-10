@@ -1,4 +1,4 @@
-From c7535bafe8a43754b008e6e3f5e85eea0c81db65 Mon Sep 17 00:00:00 2001
+From e9dd7d227f7ddb74150cfc41c8d0c2ecfd76b094 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Mar 2026 15:38:35 +0900
 Subject: [PATCH 42/52] Add Chromium find-in-page bridge flow

@@ -1,4 +1,4 @@
-From 3ff1f330f87a453bae9c08e0d24d2d091274968f Mon Sep 17 00:00:00 2001
+From 2b9dd22f0e538786c39feb568f179b2ae37765cd Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Tue, 17 Mar 2026 10:13:52 +0900
 Subject: [PATCH 31/52] Add browsing context visibility flow

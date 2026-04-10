@@ -1,4 +1,4 @@
-From d1a0468ce6c7c98886b2fd4eb69fb3ef24a53a38 Mon Sep 17 00:00:00 2001
+From ede6347bd39f74a22e1afe820956d866d5c397a5 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 19 Mar 2026 20:22:59 +0900
 Subject: [PATCH 34/52] Terminate browser on host disconnect

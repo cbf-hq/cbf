@@ -1,4 +1,4 @@
-From 25f2ef6cf4b9e5a7c59092bfa15a19bbaa33f85c Mon Sep 17 00:00:00 2001
+From 4c2731275daf9081f9a000f8af6fa1498414193a Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Mar 2026 20:34:35 +0900
 Subject: [PATCH 44/52] Remove legacy bridge FFI aliases

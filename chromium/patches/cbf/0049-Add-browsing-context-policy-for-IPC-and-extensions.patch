@@ -1,4 +1,4 @@
-From 292b101920dd347740ff669ed0501fab0c9e9092 Mon Sep 17 00:00:00 2001
+From 6d885d64b318c6781ebfbf9aae74d2ca01fece6b Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 2 Apr 2026 19:01:26 +0900
 Subject: [PATCH 49/52] Add browsing context policy for IPC and extensions

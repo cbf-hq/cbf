@@ -1,4 +1,4 @@
-From 84ef53c5ae66e9be513a10155d02fd9f33620cb8 Mon Sep 17 00:00:00 2001
+From 567cb6ffe75bb914cfcac7b80c2201824cff8754 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Wed, 18 Mar 2026 22:00:35 +0900
 Subject: [PATCH 32/52] Add browsing context background policy flow
