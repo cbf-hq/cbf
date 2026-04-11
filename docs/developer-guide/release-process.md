@@ -114,7 +114,7 @@ task release:check
 Explicit tag:
 
 ```bash
-task release:check TAG=cbf-chrome-runtime-v146.0.0-alpha.4+chromium-146.0.7680.153-r1
+task release:check TAG=cbf-chrome-runtime-v146.0.0-alpha.5+chromium-146.0.7680.153-r1
 ```
 
 Build release artifacts:

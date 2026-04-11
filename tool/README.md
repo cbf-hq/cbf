@@ -63,7 +63,7 @@ Use the canonical runtime bundle tag format documented in
 `docs/developer-guide/versioning-and-release-metadata.md`, for example:
 
 ```text
-cbf-chrome-runtime-v146.0.0-alpha.4+chromium-146.0.7680.153-r1
+cbf-chrome-runtime-v146.0.0-alpha.5+chromium-146.0.7680.153-r1
 ```
 
 These commands are normally orchestrated from the repository root via
