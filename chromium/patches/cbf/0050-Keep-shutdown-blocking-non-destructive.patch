@@ -1,4 +1,4 @@
-From 4df93f12becc58fcc6555e00e0819aef4166556b Mon Sep 17 00:00:00 2001
+From ebd4f63001b960cf77b6ff63440d34a8e641eb82 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Sun, 5 Apr 2026 08:12:38 +0900
 Subject: [PATCH 50/52] Keep shutdown blocking non-destructive
@@ -26,10 +26,10 @@ Subject: [PATCH 50/52] Keep shutdown blocking non-destructive
  19 files changed, 850 insertions(+), 308 deletions(-)
 
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
-index 1ecc32b6ca673..4f3d090bd7f12 100644
+index f9083afcf14cc..04f82d675d5e4 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
-@@ -74,11 +74,11 @@ CbfBridgeClientImpl::BrowserObserver::~BrowserObserver() = default;
+@@ -92,11 +92,11 @@ CbfBridgeClientImpl::BrowserObserver::~BrowserObserver() = default;
  
  void CbfBridgeClientImpl::BrowserObserver::OnShutdownBlocked(
      uint64_t request_id,

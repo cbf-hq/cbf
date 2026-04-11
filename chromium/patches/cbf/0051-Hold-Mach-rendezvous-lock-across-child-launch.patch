@@ -1,4 +1,4 @@
-From d1e39734b78813780b05bafe1dbe21f64b86dc76 Mon Sep 17 00:00:00 2001
+From 2aeb60bb665599ded5baaa3f23aaa6a847d5803e Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Mon, 6 Apr 2026 12:15:51 +0900
 Subject: [PATCH 51/52] Hold Mach rendezvous lock across child launch

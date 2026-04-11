@@ -1,4 +1,4 @@
-From 94dec6cbdab4601e7db660d03a870f1d4f3e198f Mon Sep 17 00:00:00 2001
+From c7d45d089e4ae8575cd93b4e86a60d792d229b64 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 27 Mar 2026 11:56:09 +0900
 Subject: [PATCH 45/52] Align bridge headers with generated bindings

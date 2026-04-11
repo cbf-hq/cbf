@@ -1,4 +1,4 @@
-From 2c9d305e714487b95f728c02f3139a0748602ac2 Mon Sep 17 00:00:00 2001
+From 8743c40b28e5a00e0d3e98e1432da97109c73d92 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Fri, 27 Mar 2026 14:53:58 +0900
 Subject: [PATCH 47/52] Block chrome://settings by default

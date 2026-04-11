@@ -1,16 +1,16 @@
-From 4c2731275daf9081f9a000f8af6fa1498414193a Mon Sep 17 00:00:00 2001
+From f8560aa0bd44b4b542037735ecb1a8f982974f43 Mon Sep 17 00:00:00 2001
 From: Takagi Tasuku <tasuren@outlook.jp>
 Date: Thu, 26 Mar 2026 20:34:35 +0900
 Subject: [PATCH 44/52] Remove legacy bridge FFI aliases
 
 ---
  chrome/browser/cbf/bridge/cbf_bridge.h        | 21 ------
- .../cbf/bridge/cbf_bridge_client_impl.cc      | 26 +++----
+ .../cbf/bridge/cbf_bridge_client_impl.cc      | 44 +++++++----
  .../cbf/bridge/cbf_bridge_event_wait_state.h  |  9 +--
  .../browser/cbf/bridge/cbf_bridge_events.cc   | 75 +++++--------------
  chrome/browser/cbf/bridge/cbf_bridge_ffi.h    | 69 +++++++----------
  .../browser/cbf/bridge/cbf_bridge_web_page.cc | 69 ++++-------------
- 6 files changed, 76 insertions(+), 193 deletions(-)
+ 6 files changed, 94 insertions(+), 193 deletions(-)
 
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge.h b/chrome/browser/cbf/bridge/cbf_bridge.h
 index b8651b0715146..2acd0447f72b7 100644
@@ -67,10 +67,35 @@ index b8651b0715146..2acd0447f72b7 100644
      CbfBridgeClientHandle* client,
      uint64_t tab_id,
 diff --git a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
-index 7a17854ccf2ef..1ecc32b6ca673 100644
+index 7a17854ccf2ef..f9083afcf14cc 100644
 --- a/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
 +++ b/chrome/browser/cbf/bridge/cbf_bridge_client_impl.cc
-@@ -739,14 +739,14 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowOpenRequested(
+@@ -3,6 +3,24 @@
+ #include "base/functional/bind.h"
+ 
+ namespace cbf_bridge::internal {
++namespace {
++
++uint8_t ToPromptUiKind(cbf::mojom::CbfAuxiliaryWindowKind kind) {
++  switch (kind) {
++    case cbf::mojom::CbfAuxiliaryWindowKind::kExtensionInstallPrompt:
++      return kCbfPromptUiKindExtensionInstallPrompt;
++    case cbf::mojom::CbfAuxiliaryWindowKind::kExtensionUninstallPrompt:
++      return kCbfPromptUiKindExtensionUninstallPrompt;
++    case cbf::mojom::CbfAuxiliaryWindowKind::kPrintPreviewDialog:
++      return kCbfPromptUiKindPrintPreviewDialog;
++    case cbf::mojom::CbfAuxiliaryWindowKind::kFormResubmissionPrompt:
++      return kCbfPromptUiKindFormResubmissionPrompt;
++    case cbf::mojom::CbfAuxiliaryWindowKind::kUnknown:
++      return kCbfPromptUiKindUnknown;
++  }
++}
++
++}  // namespace
+ 
+ CbfBridgeClientImpl::EventQueueAccessor::EventQueueAccessor(
+     CbfBridgeEventWaitState* state)
+@@ -739,14 +757,14 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowOpenRequested(
      return;
    }
    CbfBridgeEventData event;
@@ -83,11 +108,11 @@ index 7a17854ccf2ef..1ecc32b6ca673 100644
    }
    event.request_id = request->request_id;
 -  event.auxiliary_window_kind = static_cast<uint8_t>(request->kind);
-+  event.prompt_ui_kind = static_cast<uint8_t>(request->kind);
++  event.prompt_ui_kind = ToPromptUiKind(request->kind);
    event.extension_id = request->extension_id;
    event.extension_name = request->extension_name;
    event.triggering_extension_name = request->triggering_extension_name;
-@@ -762,14 +762,14 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowResolved(
+@@ -762,14 +780,14 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowResolved(
      return;
    }
    CbfBridgeEventData event;
@@ -100,11 +125,11 @@ index 7a17854ccf2ef..1ecc32b6ca673 100644
    }
    event.request_id = resolution->request_id;
 -  event.auxiliary_window_kind = static_cast<uint8_t>(resolution->kind);
-+  event.prompt_ui_kind = static_cast<uint8_t>(resolution->kind);
++  event.prompt_ui_kind = ToPromptUiKind(resolution->kind);
    event.extension_id = resolution->extension_id;
    event.extension_install_prompt_result =
        static_cast<uint8_t>(resolution->result);
-@@ -964,16 +964,16 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowOpened(
+@@ -964,16 +982,16 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowOpened(
      const std::string& title,
      bool modal) {
    CbfBridgeEventData event;
@@ -120,13 +145,13 @@ index 7a17854ccf2ef..1ecc32b6ca673 100644
 -  event.auxiliary_window_title = title;
 -  event.auxiliary_window_modal = modal;
 +  event.prompt_ui_id = window_id;
-+  event.prompt_ui_kind = static_cast<uint8_t>(kind);
++  event.prompt_ui_kind = ToPromptUiKind(kind);
 +  event.prompt_ui_title = title;
 +  event.prompt_ui_modal = modal;
    std::lock_guard<std::mutex> lock(impl_->events_mutex);
    impl_->events.push(std::move(event));
  }
-@@ -984,15 +984,15 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowClosed(
+@@ -984,15 +1002,15 @@ void CbfBridgeClientImpl::Observer::OnAuxiliaryWindowClosed(
      cbf::mojom::CbfAuxiliaryWindowKind kind,
      cbf::mojom::CbfAuxiliaryWindowCloseReason reason) {
    CbfBridgeEventData event;
@@ -141,7 +166,7 @@ index 7a17854ccf2ef..1ecc32b6ca673 100644
 -  event.auxiliary_window_kind = static_cast<uint8_t>(kind);
 -  event.auxiliary_window_close_reason = static_cast<uint8_t>(reason);
 +  event.prompt_ui_id = window_id;
-+  event.prompt_ui_kind = static_cast<uint8_t>(kind);
++  event.prompt_ui_kind = ToPromptUiKind(kind);
 +  event.prompt_ui_close_reason = static_cast<uint8_t>(reason);
    std::lock_guard<std::mutex> lock(impl_->events_mutex);
    impl_->events.push(std::move(event));

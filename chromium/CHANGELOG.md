@@ -17,6 +17,7 @@ source-built use rather than a downloadable binary bundle.
 ### Fixed
 
 - Prevented a SEGV crash when uninstalling an extension by safely handling the absence of AppTabHelper in the CBF environment.
+- Fixed host-driven extension installs from the Chrome Web Store stalling after approval by mapping Chromium auxiliary window kinds to the correct prompt UI kind across the CBF bridge.
 
 ## [cbf-chrome-runtime-v146.0.0-alpha.4+chromium-146.0.7680.153-r1] - 2026-04-08
 
