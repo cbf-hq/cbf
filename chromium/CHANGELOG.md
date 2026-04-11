@@ -14,6 +14,8 @@ source-built use rather than a downloadable binary bundle.
 
 ## [Unreleased]
 
+## [cbf-chrome-runtime-v146.0.0-alpha.5+chromium-146.0.7680.153-r1] - 2026-04-11
+
 ### Fixed
 
 - Prevented a SEGV crash when uninstalling an extension by safely handling the absence of AppTabHelper in the CBF environment.
@@ -76,11 +78,11 @@ source-built use rather than a downloadable binary bundle.
 - Form-resubmission prompt metadata transport (reason and target URL) across Chromium Mojo observer events and bridge FFI events.
 - Browser-test coverage for POST reload resubmission prompt request/deny flow in `CbfProfileServiceBrowserTest`.
 - Browsing-context IPC v1 bridge flow across Chromium browser/renderer boundary, including:
-  - context-scoped IPC enable/disable control
-  - page->host invoke delivery through dedicated Mojo path
-  - host->page notification delivery with text/binary envelope support
-  - origin allow-list enforcement via `allowed_origins` and deny-all default when empty
-  - browser-test coverage for allow/deny, navigation re-evaluation, and lifecycle failure paths
+    - context-scoped IPC enable/disable control
+    - page->host invoke delivery through dedicated Mojo path
+    - host->page notification delivery with text/binary envelope support
+    - origin allow-list enforcement via `allowed_origins` and deny-all default when empty
+    - browser-test coverage for allow/deny, navigation re-evaluation, and lifecycle failure paths
 - Same-document `NavigationStateChanged` emission coverage for SPA-style history updates (`pushState`/`replaceState`/same-document back-forward traversal) with dedicated browser-test assertions.
 - Chromium find-in-page bridge flow for tabs, including bridge commands for `FindInPage` and `StopFinding`, `FindReply` observer/event transport, and host-visible match-count / active-match / selection-rect updates.
 - Browser-test coverage for find-in-page search, next/previous follow-up navigation, stop-finding behavior, and empty-query no-op handling in `CbfProfileServiceBrowserTest`.
@@ -111,10 +113,10 @@ source-built use rather than a downloadable binary bundle.
 - Established the initial Chromium-side runtime baseline for runtime version
   `146.0.0-alpha.1`.
 - Recorded the Chromium milestone 146 runtime state corresponding to:
-  - runtime version `146.0.0-alpha.1`
-  - `cbf` `0.1.0-alpha.1`
-  - `cbf-chrome` `0.1.0-alpha.1`
-  - `cbf-chrome-sys` `146.1.0-alpha.1`
+    - runtime version `146.0.0-alpha.1`
+    - `cbf` `0.1.0-alpha.1`
+    - `cbf-chrome` `0.1.0-alpha.1`
+    - `cbf-chrome-sys` `146.1.0-alpha.1`
 
 ### Changed
 
