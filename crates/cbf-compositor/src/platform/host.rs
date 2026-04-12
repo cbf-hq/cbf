@@ -7,8 +7,12 @@ use cbf::data::{
 use cbf_chrome::data::choice_menu::ChromeChoiceMenu;
 
 use crate::{
+    core::AttachWindowOptions,
     error::CompositorError,
-    model::{CompositionItemId, HitTestPolicy, HitTestRegionSnapshot, Rect, SurfaceTarget},
+    model::{
+        CompositionItemId, CompositorWindowId, HitTestPolicy, HitTestRegionSnapshot, Rect,
+        SurfaceTarget,
+    },
     window::WindowHost,
 };
 
@@ -81,6 +85,8 @@ pub(crate) trait PlatformWindowHost {
 
 pub(crate) fn attach_window_host<W, E>(
     window: &W,
+    window_id: CompositorWindowId,
+    options: AttachWindowOptions,
     emit: E,
 ) -> Result<Box<dyn PlatformWindowHost>, CompositorError>
 where
@@ -89,12 +95,14 @@ where
 {
     #[cfg(all(target_os = "macos", feature = "chrome"))]
     {
-        crate::platform::macos::attach_macos_window_host(window, emit)
+        crate::platform::macos::attach_macos_window_host(window, window_id, options, emit)
     }
 
     #[cfg(not(all(target_os = "macos", feature = "chrome")))]
     {
         _ = window;
+        _ = window_id;
+        _ = options;
         _ = emit;
         crate::platform::unsupported::attach_unsupported_window_host()
     }

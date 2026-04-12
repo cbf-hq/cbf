@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use cbf::{
     browser::BrowserHandle,
@@ -34,7 +37,10 @@ use cbf_chrome::{
 };
 use cbf_compositor::{
     WindowHost,
-    core::{AttachWindowOptions, CompositionCommand, Compositor},
+    core::{
+        AttachWindowOptions, CompositionCommand, Compositor, EventRoutingDecision,
+        RoutedEventContext, RoutedEventKind,
+    },
     model::{CompositorWindowId, SurfaceTarget},
 };
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
@@ -48,18 +54,20 @@ use crate::{
             CoreAction, DEVTOOLS_HOST_WINDOW_ID, DownloadStatus, JavaScriptDialogTarget,
             MAIN_PAGE_CREATE_REQUEST_ID, OVERLAY_CREATE_REQUEST_ID, PRIMARY_HOST_WINDOW_ID,
             PendingWindowBrowsingContextCreate, PendingWindowBrowsingContextRole,
-            SharedStateHandle, TOOLBAR_CREATE_REQUEST_ID, TransientPopupState, WindowCloseState,
-            allocate_request_id, bind_browsing_context_to_window, browsing_context_ids_for_window,
+            SharedStateHandle, TEST_POPUP_CREATE_REQUEST_ID, TOOLBAR_CREATE_REQUEST_ID,
+            TransientPopupState, WindowCloseState, allocate_request_id,
+            bind_browsing_context_to_window, browsing_context_ids_for_window,
             clear_window_close_state, compositor_window_id_for_host_window,
             devtools_browsing_context_id, has_bound_windows, overlay_browsing_context_id,
             page_browsing_context_id_for_toolbar_browsing_context,
             page_browsing_context_id_for_window, primary_browsing_context_id,
             primary_host_window_id, register_pending_window_browsing_context_create,
             set_devtools_browsing_context_id, set_overlay_browsing_context_id,
-            set_primary_browsing_context_id, set_toolbar_browsing_context_id,
-            set_window_close_state, set_window_page_browsing_context,
-            set_window_toolbar_browsing_context, take_pending_window_browsing_context_create,
-            take_pending_window_open_request, toolbar_browsing_context_id,
+            set_primary_browsing_context_id, set_test_popup_browsing_context_id,
+            set_toolbar_browsing_context_id, set_window_close_state,
+            set_window_page_browsing_context, set_window_toolbar_browsing_context,
+            take_pending_window_browsing_context_create, take_pending_window_open_request,
+            test_popup_browsing_context_id, toolbar_browsing_context_id,
             toolbar_browsing_context_id_for_window, transient_browsing_context_id_for_window,
             unbind_browsing_context, unbind_transient_browsing_context,
             window_close_state_for_window, window_id_for_browsing_context,
@@ -76,7 +84,7 @@ use crate::{
     },
     scene::composition,
     scene::embedded_assets::{APP_ORIGIN, respond_to_request},
-    scene::ui_url::{overlay_test_ui_url, toolbar_ui_url},
+    scene::ui_url::{overlay_test_ui_url, test_popup_ui_url, toolbar_ui_url},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -279,17 +287,31 @@ impl AppController {
         }
     }
 
-    pub(crate) fn attach_window<W>(&mut self, window: W) -> Result<CompositorWindowId, String>
+    pub(crate) fn attach_window<W>(
+        &mut self,
+        host_window_id: HostWindowId,
+        window: W,
+    ) -> Result<CompositorWindowId, String>
     where
         W: WindowHost + 'static,
     {
         let handle = self.browser_handle.clone();
+        let router_handle = handle.clone();
+        let shared = Arc::clone(&self.shared);
         self.compositor
-            .attach_window(window, AttachWindowOptions, move |command| {
-                if let Err(err) = handle.send(command) {
-                    warn!("failed to forward compositor command: {err}");
-                }
-            })
+            .attach_window(
+                window,
+                AttachWindowOptions {
+                    event_router: Some(Arc::new(move |event| {
+                        route_host_event(&shared, router_handle.clone(), host_window_id, event)
+                    })),
+                },
+                move |command| {
+                    if let Err(err) = handle.send(command) {
+                        warn!("failed to forward compositor command: {err}");
+                    }
+                },
+            )
             .map_err(|err| format!("failed to attach compositor window: {err}"))
     }
 
@@ -801,6 +823,7 @@ impl AppController {
                 .or_else(|| toolbar_browsing_context_id(&self.shared));
             let page_id = page_browsing_context_id_for_window(&self.shared, host_window_id)
                 .or_else(|| primary_browsing_context_id(&self.shared));
+            let test_popup_id = test_popup_browsing_context_id(&self.shared);
             if let Some(overlay_id) = overlay_id {
                 self.resize_browsing_context(overlay_id, width, height);
             }
@@ -810,11 +833,19 @@ impl AppController {
             if let Some(page_id) = page_id {
                 self.resize_browsing_context(page_id, width, height.saturating_sub(56));
             }
+            if let Some(test_popup_id) = test_popup_id {
+                self.resize_browsing_context(test_popup_id, 360, 240);
+            }
             self.compositor.apply(
                 CompositionCommand::SetWindowComposition {
                     window_id: compositor_window_id,
                     composition: composition::main_window_composition(
-                        overlay_id, toolbar_id, page_id, width, height,
+                        overlay_id,
+                        toolbar_id,
+                        page_id,
+                        test_popup_id,
+                        width,
+                        height,
                     ),
                 },
                 |command| forward_compositor_command(&browser_handle, command),
@@ -901,7 +932,7 @@ impl AppController {
                     CompositionCommand::SetWindowComposition {
                         window_id: compositor_window_id,
                         composition: composition::main_window_composition(
-                            None, toolbar_id, page_id, width, height,
+                            None, toolbar_id, page_id, None, width, height,
                         ),
                     },
                     |command| forward_compositor_command(&browser_handle, command),
@@ -942,6 +973,23 @@ impl AppController {
             .set_active_item(composition::page_item_id(page_browsing_context_id))
         {
             warn!("failed to focus page surface for window {host_window_id}: {err}");
+        }
+    }
+
+    fn focus_test_popup_surface(&mut self, host_window_id: HostWindowId) {
+        if host_window_id != PRIMARY_HOST_WINDOW_ID {
+            return;
+        }
+
+        let Some(popup_browsing_context_id) = test_popup_browsing_context_id(&self.shared) else {
+            return;
+        };
+
+        if let Err(err) = self
+            .compositor
+            .set_active_item(composition::test_popup_item_id(popup_browsing_context_id))
+        {
+            warn!("failed to focus test popup surface for window {host_window_id}: {err}");
         }
     }
 
@@ -1548,6 +1596,17 @@ impl AppController {
                 warn!("failed to create overlay browsing context: {err}");
             }
 
+            if self.cli.test_popup
+                && let Err(err) = self.browser_handle.create_browsing_context(
+                    TEST_POPUP_CREATE_REQUEST_ID,
+                    Some(test_popup_ui_url().unwrap_or_else(|_| "about:blank".to_string())),
+                    profile_id.clone(),
+                    Some(test_popup_browsing_context_policy()),
+                )
+            {
+                warn!("failed to create test popup browsing context: {err}");
+            }
+
             if let Err(err) = self.browser_handle.create_browsing_context(
                 MAIN_PAGE_CREATE_REQUEST_ID,
                 Some(self.cli.url.clone()),
@@ -1570,6 +1629,7 @@ impl AppController {
             BrowsingContextEvent::Created { request_id } => {
                 let mut created_toolbar = false;
                 let mut should_focus_page_surface = false;
+                let mut should_focus_test_popup_surface = false;
                 let host_window_id = if request_id == TOOLBAR_CREATE_REQUEST_ID {
                     set_toolbar_browsing_context_id(&self.shared, Some(browsing_context_id));
                     set_window_toolbar_browsing_context(
@@ -1582,6 +1642,10 @@ impl AppController {
                 } else if request_id == OVERLAY_CREATE_REQUEST_ID {
                     set_overlay_browsing_context_id(&self.shared, Some(browsing_context_id));
                     Some(PRIMARY_HOST_WINDOW_ID)
+                } else if request_id == TEST_POPUP_CREATE_REQUEST_ID {
+                    set_test_popup_browsing_context_id(&self.shared, Some(browsing_context_id));
+                    should_focus_test_popup_surface = true;
+                    Some(PRIMARY_HOST_WINDOW_ID)
                 } else if request_id == MAIN_PAGE_CREATE_REQUEST_ID {
                     set_primary_browsing_context_id(&self.shared, Some(browsing_context_id));
                     set_window_page_browsing_context(
@@ -1589,7 +1653,7 @@ impl AppController {
                         PRIMARY_HOST_WINDOW_ID,
                         Some(browsing_context_id),
                     );
-                    should_focus_page_surface = true;
+                    should_focus_page_surface = !self.cli.test_popup;
                     Some(PRIMARY_HOST_WINDOW_ID)
                 } else if let Some(pending) =
                     take_pending_window_browsing_context_create(&self.shared, request_id)
@@ -1646,6 +1710,9 @@ impl AppController {
                             window_id: host_window_id,
                         });
                     }
+                    if should_focus_test_popup_surface {
+                        self.focus_test_popup_surface(host_window_id);
+                    }
                     actions
                 } else {
                     Vec::new()
@@ -1656,6 +1723,7 @@ impl AppController {
                     || window_id_for_toolbar_browsing_context(&self.shared, browsing_context_id)
                         .is_some()
                     || Some(browsing_context_id) == overlay_browsing_context_id(&self.shared)
+                    || Some(browsing_context_id) == test_popup_browsing_context_id(&self.shared)
                 {
                     return Vec::new();
                 }
@@ -1989,6 +2057,8 @@ impl AppController {
     ) -> Vec<CoreAction> {
         let is_toolbar = Some(browsing_context_id) == toolbar_browsing_context_id(&self.shared);
         let is_overlay = Some(browsing_context_id) == overlay_browsing_context_id(&self.shared);
+        let is_test_popup =
+            Some(browsing_context_id) == test_popup_browsing_context_id(&self.shared);
         let is_primary = Some(browsing_context_id) == primary_browsing_context_id(&self.shared);
         let is_devtools = Some(browsing_context_id) == devtools_browsing_context_id(&self.shared);
         let page_window_id = window_id_for_page_browsing_context(&self.shared, browsing_context_id);
@@ -2005,6 +2075,9 @@ impl AppController {
         }
         if is_overlay {
             set_overlay_browsing_context_id(&self.shared, None);
+        }
+        if is_test_popup {
+            set_test_popup_browsing_context_id(&self.shared, None);
         }
         if let Some(window_id) = toolbar_window_id {
             set_window_toolbar_browsing_context(&self.shared, window_id, None);
@@ -2041,6 +2114,13 @@ impl AppController {
                 _ = self
                     .browser_handle
                     .request_close_browsing_context(overlay_id);
+            }
+            if window_id == PRIMARY_HOST_WINDOW_ID
+                && let Some(test_popup_id) = test_popup_browsing_context_id(&self.shared)
+            {
+                _ = self
+                    .browser_handle
+                    .request_close_browsing_context(test_popup_id);
             }
 
             self.window_base_titles.remove(&window_id);
@@ -2316,11 +2396,15 @@ impl AppController {
 mod tests {
     use super::{
         WindowCloseRequestDecision, awaiting_window_close_for_page, decide_window_close_request,
-        navigation_state_with_favicon,
+        navigation_state_with_favicon, should_dismiss_test_popup_on_event,
     };
     use crate::app::state::WindowCloseState;
     use crate::ipc::toolbar::protocol::NavigationState;
     use cbf::data::ids::BrowsingContextId;
+    use cbf_compositor::{
+        core::{RoutedEventContext, RoutedEventKind},
+        model::{CompositorWindowId, SurfaceTarget},
+    };
 
     #[test]
     fn navigation_state_with_favicon_overrides_favicon_field() {
@@ -2410,6 +2494,32 @@ mod tests {
             state,
             BrowsingContextId::new(31)
         ));
+    }
+
+    #[test]
+    fn test_popup_dismisses_on_pointer_down_outside_active_popup() {
+        let popup_target = SurfaceTarget::BrowsingContext(BrowsingContextId::new(40));
+        let event = RoutedEventContext {
+            window_id: CompositorWindowId::new(1),
+            kind: RoutedEventKind::PointerDown,
+            target: Some(SurfaceTarget::BrowsingContext(BrowsingContextId::new(41))),
+            active_target: Some(popup_target),
+        };
+
+        assert!(should_dismiss_test_popup_on_event(popup_target, &event));
+    }
+
+    #[test]
+    fn test_popup_stays_open_for_pointer_down_inside_popup() {
+        let popup_target = SurfaceTarget::BrowsingContext(BrowsingContextId::new(50));
+        let event = RoutedEventContext {
+            window_id: CompositorWindowId::new(1),
+            kind: RoutedEventKind::PointerDown,
+            target: Some(popup_target),
+            active_target: Some(popup_target),
+        };
+
+        assert!(!should_dismiss_test_popup_on_event(popup_target, &event));
     }
 }
 
@@ -2679,6 +2789,48 @@ fn overlay_browsing_context_policy() -> BrowsingContextPolicy {
         },
         extensions: CapabilityPolicy::Deny,
     }
+}
+
+fn test_popup_browsing_context_policy() -> BrowsingContextPolicy {
+    BrowsingContextPolicy {
+        ipc: IpcPolicy::Deny,
+        extensions: CapabilityPolicy::Deny,
+    }
+}
+
+fn should_dismiss_test_popup_on_event(
+    popup_target: SurfaceTarget,
+    event: &RoutedEventContext,
+) -> bool {
+    event.kind == RoutedEventKind::PointerDown
+        && event.active_target == Some(popup_target)
+        && event.target != Some(popup_target)
+}
+
+fn route_host_event(
+    shared: &SharedStateHandle,
+    browser_handle: BrowserHandle<ChromiumBackend>,
+    host_window_id: HostWindowId,
+    event: &RoutedEventContext,
+) -> EventRoutingDecision {
+    if host_window_id != PRIMARY_HOST_WINDOW_ID || event.kind != RoutedEventKind::PointerDown {
+        return EventRoutingDecision::Dispatch;
+    }
+
+    let Some(popup_browsing_context_id) = test_popup_browsing_context_id(shared) else {
+        return EventRoutingDecision::Dispatch;
+    };
+    let popup_target = SurfaceTarget::BrowsingContext(popup_browsing_context_id);
+
+    if should_dismiss_test_popup_on_event(popup_target, event) {
+        if let Err(err) = browser_handle.request_close_browsing_context(popup_browsing_context_id) {
+            warn!("failed to close test popup browsing context: {err}");
+            return EventRoutingDecision::Dispatch;
+        }
+        return EventRoutingDecision::Consume;
+    }
+
+    EventRoutingDecision::Dispatch
 }
 
 fn forward_compositor_command(

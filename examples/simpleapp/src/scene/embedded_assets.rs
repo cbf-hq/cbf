@@ -24,6 +24,7 @@ const DEFAULT_CONTENT_SECURITY_POLICY: &str = concat!(
 #[include = "ui.html"]
 #[include = "overlay.html"]
 #[include = "overlay-hit-test.js"]
+#[include = "popup.html"]
 struct EmbeddedAssets;
 
 pub(crate) fn respond_to_request(
@@ -137,6 +138,15 @@ mod tests {
             response.access_control_allow_origin.as_deref(),
             Some(APP_ORIGIN)
         );
+        assert!(!response.body.is_empty());
+    }
+
+    #[test]
+    fn embedded_popup_request_returns_html_response() {
+        let response = respond_to_request(&request("/popup.html"));
+
+        assert_eq!(response.result, ChromeCustomSchemeResponseResult::Ok);
+        assert_eq!(response.mime_type, "text/html; charset=utf-8");
         assert!(!response.body.is_empty());
     }
 

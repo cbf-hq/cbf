@@ -267,7 +267,7 @@ impl WindowRegistry {
             .create_window(attrs)
             .map_err(|err| format!("failed to create window: {err}"))?;
         let window = Arc::new(window);
-        let compositor_window_id = controller.attach_window(Arc::clone(&window))?;
+        let compositor_window_id = controller.attach_window(host_window_id, Arc::clone(&window))?;
         let visibility_observer = if matches!(role, WindowRole::Popup) {
             None
         } else {

@@ -4,22 +4,35 @@ use cbf_compositor::model::{
     WindowCompositionSpec,
 };
 
-use crate::scene::layout::{full_window_rect, main_page_rect, main_toolbar_rect};
+use crate::scene::layout::{full_window_rect, main_page_rect, main_toolbar_rect, test_popup_rect};
 
 const PAGE_ITEM_NAMESPACE: u64 = 1_000_000_000;
 const TRANSIENT_ITEM_NAMESPACE: u64 = 2_000_000_000;
 const TOOLBAR_ITEM_NAMESPACE: u64 = 3_000_000_000;
 const OVERLAY_ITEM_NAMESPACE: u64 = 4_000_000_000;
 const DEVTOOLS_ITEM_NAMESPACE: u64 = 5_000_000_000;
+const TEST_POPUP_ITEM_NAMESPACE: u64 = 6_000_000_000;
 
 pub(crate) fn main_window_composition(
     overlay_id: Option<BrowsingContextId>,
     toolbar_id: Option<BrowsingContextId>,
     page_id: Option<BrowsingContextId>,
+    test_popup_id: Option<BrowsingContextId>,
     width: u32,
     height: u32,
 ) -> WindowCompositionSpec {
     let mut items = Vec::new();
+
+    if let Some(test_popup_id) = test_popup_id {
+        items.push(CompositionItemSpec {
+            item_id: test_popup_item_id(test_popup_id),
+            target: SurfaceTarget::BrowsingContext(test_popup_id),
+            bounds: test_popup_rect(width, height),
+            visible: true,
+            hit_test: HitTestPolicy::Bounds,
+            background: BackgroundPolicy::Transparent,
+        });
+    }
 
     if let Some(overlay_id) = overlay_id {
         items.push(CompositionItemSpec {
@@ -128,4 +141,10 @@ pub(crate) const fn overlay_item_id(browsing_context_id: BrowsingContextId) -> C
 
 const fn devtools_item_id(browsing_context_id: BrowsingContextId) -> CompositionItemId {
     CompositionItemId::new(DEVTOOLS_ITEM_NAMESPACE + browsing_context_id.get())
+}
+
+pub(crate) const fn test_popup_item_id(
+    browsing_context_id: BrowsingContextId,
+) -> CompositionItemId {
+    CompositionItemId::new(TEST_POPUP_ITEM_NAMESPACE + browsing_context_id.get())
 }

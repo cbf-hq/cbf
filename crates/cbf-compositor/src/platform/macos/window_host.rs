@@ -15,11 +15,14 @@ use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use raw_window_handle::RawWindowHandle;
 
 use crate::{
+    core::AttachWindowOptions,
     error::CompositorError,
-    model::{CompositionItemId, SurfaceTarget},
+    model::{CompositionItemId, CompositorWindowId, SurfaceTarget},
     platform::{
         host::{PlatformInputState, PlatformSceneItem, PlatformWindowHost},
-        macos::compositor_view::{CommandCallback, CompositorViewMac, SharedInputState},
+        macos::compositor_view::{
+            CommandCallback, CompositorViewMac, EventRouterCallback, SharedInputState,
+        },
     },
     window::WindowHost,
 };
@@ -29,6 +32,7 @@ pub(crate) struct MacPlatformWindowHost {
     #[allow(dead_code)]
     input_state: SharedInputState,
     _command_callback: CommandCallback,
+    _event_router: Option<EventRouterCallback>,
 }
 
 impl PlatformWindowHost for MacPlatformWindowHost {
@@ -85,6 +89,8 @@ impl PlatformWindowHost for MacPlatformWindowHost {
 
 pub(crate) fn attach_macos_window_host<W, E>(
     window: &W,
+    window_id: CompositorWindowId,
+    options: AttachWindowOptions,
     emit: E,
 ) -> Result<Box<dyn PlatformWindowHost>, CompositorError>
 where
@@ -104,6 +110,9 @@ where
     let mtm = MainThreadMarker::new().ok_or(CompositorError::PlatformUnsupported)?;
     let input_state: SharedInputState = Rc::new(RefCell::new(PlatformInputState::default()));
     let command_callback: CommandCallback = Rc::new(RefCell::new(Box::new(emit)));
+    let event_router = options
+        .event_router
+        .map(|router| Rc::new(router) as EventRouterCallback);
 
     let scale_factor = window.scale_factor().max(1.0);
     let (width, height) = window.inner_size();
@@ -116,13 +125,16 @@ where
         mtm,
         content_view,
         frame,
+        window_id,
         Rc::clone(&input_state),
         Rc::clone(&command_callback),
+        event_router.clone(),
     );
 
     Ok(Box::new(MacPlatformWindowHost {
         view,
         input_state,
         _command_callback: command_callback,
+        _event_router: event_router,
     }))
 }

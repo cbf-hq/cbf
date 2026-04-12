@@ -16,6 +16,10 @@ pub(crate) fn overlay_test_ui_url(passthrough_only_overlay_region: bool) -> Resu
     ))
 }
 
+pub(crate) fn test_popup_ui_url() -> Result<String, String> {
+    custom_scheme_url("popup.html")
+}
+
 fn custom_scheme_url(file_name: &str) -> Result<String, String> {
     Ok(format!("{APP_SCHEME}://{APP_HOST}/{file_name}"))
 }

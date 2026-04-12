@@ -1,4 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    sync::Arc,
+};
 
 use cbf::{
     command::BrowserCommand,
@@ -38,9 +42,50 @@ pub struct Compositor {
     surface_state: SurfaceState,
 }
 
+/// Host callback used to accept or consume a routed input event before dispatch.
+pub type EventRouter = Arc<dyn Fn(&RoutedEventContext) -> EventRoutingDecision + Send + Sync>;
+
 /// Options for attaching a host window to the compositor.
-#[derive(Debug, Clone, Default)]
-pub struct AttachWindowOptions;
+#[derive(Clone, Default)]
+pub struct AttachWindowOptions {
+    pub event_router: Option<EventRouter>,
+}
+
+impl fmt::Debug for AttachWindowOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AttachWindowOptions")
+            .field(
+                "event_router",
+                &self.event_router.as_ref().map(|_| "<callback>"),
+            )
+            .finish()
+    }
+}
+
+/// Host decision applied after compositor hit-testing and before backend dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventRoutingDecision {
+    Dispatch,
+    Consume,
+}
+
+/// Routed event kinds supported by the host event router.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutedEventKind {
+    PointerDown,
+    PointerUp,
+    Wheel,
+    KeyDown,
+}
+
+/// Context describing one compositor-routed input event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoutedEventContext {
+    pub window_id: CompositorWindowId,
+    pub kind: RoutedEventKind,
+    pub target: Option<SurfaceTarget>,
+    pub active_target: Option<SurfaceTarget>,
+}
 
 struct AttachedWindow {
     _host: Box<dyn WindowHost>,
@@ -80,7 +125,7 @@ impl Compositor {
     {
         let window_id = CompositorWindowId::new(self.next_window_id);
         self.next_window_id = self.next_window_id.saturating_add(1);
-        let platform_host = attach_window_host(&window, emit)?;
+        let platform_host = attach_window_host(&window, window_id, options.clone(), emit)?;
 
         self.composition_state.ensure_window(window_id);
         self.windows.insert(
@@ -587,7 +632,7 @@ impl Compositor {
             window_id,
             AttachedWindow {
                 _host: Box::new(crate::core::compositor::tests::TestWindowHost),
-                _options: AttachWindowOptions,
+                _options: AttachWindowOptions::default(),
                 platform_host,
             },
         );
@@ -716,6 +761,29 @@ mod tests {
             background: BackgroundPolicy::Transparent,
             ..item(item_id, target)
         }
+    }
+
+    #[test]
+    fn attach_window_options_defaults_to_no_event_router() {
+        let options = AttachWindowOptions::default();
+
+        assert!(options.event_router.is_none());
+    }
+
+    #[test]
+    fn routed_event_context_can_represent_transient_target() {
+        let transient_target = SurfaceTarget::TransientBrowsingContext(
+            cbf::data::ids::TransientBrowsingContextId::new(7),
+        );
+        let context = RoutedEventContext {
+            window_id: CompositorWindowId::new(3),
+            kind: RoutedEventKind::PointerDown,
+            target: Some(transient_target),
+            active_target: Some(transient_target),
+        };
+
+        assert_eq!(context.target, Some(transient_target));
+        assert_eq!(context.active_target, Some(transient_target));
     }
 
     #[test]

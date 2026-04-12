@@ -20,6 +20,9 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub(crate) test_overlay_surface: bool,
 
+    #[arg(long)]
+    pub(crate) test_popup: bool,
+
     #[arg(long, requires = "test_overlay_surface")]
     pub(crate) passthrough_only_overlay_region: bool,
 
@@ -121,6 +124,7 @@ mod tests {
         let cli = Cli {
             url: "https://example.com".to_owned(),
             test_overlay_surface: false,
+            test_popup: false,
             passthrough_only_overlay_region: false,
             chromium_executable: Some(PathBuf::from("/tmp/Chromium.app/Contents/MacOS/Chromium")),
             user_data_dir: Some(PathBuf::from("/tmp/simpleapp-user-data")),
@@ -135,5 +139,12 @@ mod tests {
 
         let options = chromium_options_from_cli(&cli).expect("options");
         assert_eq!(options.process.v, Some(1));
+    }
+
+    #[test]
+    fn parse_cli_defaults_test_popup_to_false() {
+        let cli = Cli::parse_from(["simpleapp"]);
+
+        assert!(!cli.test_popup);
     }
 }

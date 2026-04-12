@@ -67,8 +67,9 @@ use objc2_foundation::{
 use objc2_quartz_core::CATransaction;
 
 use crate::{
+    core::{EventRoutingDecision, RoutedEventContext, RoutedEventKind},
     error::CompositorError,
-    model::{CompositionItemId, SurfaceTarget},
+    model::{CompositionItemId, CompositorWindowId, SurfaceTarget},
     platform::{
         host::{PlatformInputState, PlatformSceneItem, PlatformSurfaceHandle},
         macos::{
@@ -80,6 +81,8 @@ use crate::{
 };
 
 pub(crate) type CommandCallback = Rc<RefCell<Box<dyn FnMut(BrowserCommand)>>>;
+pub(crate) type EventRouterCallback =
+    Rc<std::sync::Arc<dyn Fn(&RoutedEventContext) -> EventRoutingDecision + Send + Sync>>;
 pub(crate) type SharedInputState = Rc<RefCell<PlatformInputState>>;
 
 const NO_MENU_ID: u64 = 0;
@@ -88,7 +91,9 @@ const NO_CHOICE_MENU_REQUEST_ID: u64 = 0;
 const NO_CHOICE_MENU_ACTION: i32 = i32::MIN;
 
 pub(crate) struct CompositorViewMacIvars {
+    window_id: CompositorWindowId,
     command_callback: CommandCallback,
+    event_router: Option<EventRouterCallback>,
     input_state: SharedInputState,
     // Runtime scene state keyed by compositor item id. The order vector below
     // stores the current front-to-back stacking order for hit-testing and
@@ -379,8 +384,21 @@ define_class!(
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
             let Some((item_id, target)) = self.mouse_target(event, false) else {
+                _ = self.route_event(
+                    RoutedEventKind::Wheel,
+                    None,
+                    self.active_target().map(|(_, target)| target),
+                );
                 return;
             };
+            if self.route_event(
+                RoutedEventKind::Wheel,
+                Some(target),
+                self.active_target().map(|(_, active_target)| active_target),
+            ) == EventRoutingDecision::Consume
+            {
+                return;
+            }
 
             let mut wheel_event = self.convert_mouse_wheel_event(event);
             self.translate_wheel_event(item_id, &mut wheel_event);
@@ -757,11 +775,15 @@ impl CompositorViewMac {
         mtm: MainThreadMarker,
         host_view: &NSView,
         frame: CGRect,
+        window_id: CompositorWindowId,
         input_state: SharedInputState,
         command_callback: CommandCallback,
+        event_router: Option<EventRouterCallback>,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(CompositorViewMacIvars {
+            window_id,
             command_callback,
+            event_router,
             input_state,
             slots: RefCell::new(HashMap::new()),
             order: RefCell::new(Vec::new()),
@@ -1212,6 +1234,25 @@ impl CompositorViewMac {
         self.item_target(active_item_id)
     }
 
+    fn route_event(
+        &self,
+        kind: RoutedEventKind,
+        target: Option<SurfaceTarget>,
+        active_target: Option<SurfaceTarget>,
+    ) -> EventRoutingDecision {
+        let Some(event_router) = self.ivars().event_router.as_ref() else {
+            return EventRoutingDecision::Dispatch;
+        };
+
+        let context = RoutedEventContext {
+            window_id: self.ivars().window_id,
+            kind,
+            target,
+            active_target,
+        };
+        event_router(&context)
+    }
+
     fn item_target(
         &self,
         item_id: CompositionItemId,
@@ -1512,6 +1553,11 @@ impl CompositorViewMac {
         let Some((_, target)) = self.active_target() else {
             return;
         };
+        if self.route_event(RoutedEventKind::KeyDown, Some(target), Some(target))
+            == EventRoutingDecision::Consume
+        {
+            return;
+        }
         let key_event = self.convert_key_event(event);
         let commands = std::mem::take(&mut *self.ivars().edit_commands.borrow_mut());
         self.send_key_event(target, key_event, commands);
@@ -1531,9 +1577,28 @@ impl CompositorViewMac {
         }
 
         let mouse_down = event_type == MouseEventType::Down;
-        let Some((item_id, target)) = self.mouse_target(event, mouse_down) else {
+        let target = self.mouse_target(event, false);
+        let active_target = self.active_target().map(|(_, target)| target);
+        let Some((item_id, target)) = target else {
+            if mouse_down {
+                _ = self.route_event(RoutedEventKind::PointerDown, None, active_target);
+            } else if event_type == MouseEventType::Up {
+                _ = self.route_event(RoutedEventKind::PointerUp, None, active_target);
+            }
             return;
         };
+
+        let decision = if mouse_down {
+            self.route_event(RoutedEventKind::PointerDown, Some(target), active_target)
+        } else if event_type == MouseEventType::Up {
+            self.route_event(RoutedEventKind::PointerUp, Some(target), active_target)
+        } else {
+            EventRoutingDecision::Dispatch
+        };
+
+        if mouse_down && decision == EventRoutingDecision::Consume {
+            return;
+        }
 
         if mouse_down {
             self.focus_item(item_id, target);
@@ -1545,6 +1610,9 @@ impl CompositorViewMac {
             let mut input_state = self.ivars().input_state.borrow_mut();
             if input_state.pointer_capture_item_id == Some(item_id) {
                 input_state.pointer_capture_item_id = None;
+            }
+            if decision == EventRoutingDecision::Consume {
+                return;
             }
         }
 

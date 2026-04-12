@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added host-controlled pre-dispatch event routing through `AttachWindowOptions::event_router`, including the public `EventRouter`, `EventRoutingDecision`, `RoutedEventContext`, and `RoutedEventKind` APIs so hosts can consume compositor-resolved pointer, wheel, and key events before backend delivery.
+
+### Changed
+
+- macOS `CompositorViewMac` now consults the host event router after hit-testing and before dispatching `PointerDown`, `PointerUp`, `Wheel`, and `KeyDown`, allowing same-window overlays and popup surfaces to implement outside-click dismiss and similar host-side routing policy without modifying browser event models.
+
 ## [0.1.0-alpha.6] - 2026-04-09
 
 ### Fixed

@@ -7,4 +7,7 @@ mod commands;
 mod compositor;
 
 pub use commands::CompositionCommand;
-pub use compositor::{AttachWindowOptions, Compositor};
+pub use compositor::{
+    AttachWindowOptions, Compositor, EventRouter, EventRoutingDecision, RoutedEventContext,
+    RoutedEventKind,
+};
